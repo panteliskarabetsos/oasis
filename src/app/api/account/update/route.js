@@ -1,79 +1,116 @@
-import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/auth';
-import prisma from '@/lib/prisma';
-import bcrypt from 'bcryptjs';
+// src/app/api/account/update/route.js
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
+
+const ok = (data, status = 200) => NextResponse.json(data, { status });
+const bad = (msg, status = 400) =>
+  NextResponse.json({ message: msg }, { status });
 
 export async function POST(req) {
-  const session = await getServerSession({ req, ...authOptions });
+  const supa = await createSupabaseServer();
+  if (!supa) return bad("Server not configured", 500);
 
-  if (!session || !session.user?.email) {
-    return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+  const {
+    data: { user },
+    error: authErr,
+  } = await supa.auth.getUser();
+  if (authErr || !user) return bad("Unauthorized", 401);
+
+  const admin = createSupabaseAdmin();
+  if (!admin) return bad("Server not configured", 500);
+
+  const { name, email, phone, password, dateOfBirth } = await req
+    .json()
+    .catch(() => ({}));
+
+  // 1) Require current password to confirm any change
+  if (!password || typeof password !== "string") {
+    return bad("Current password is required to confirm changes.", 401);
   }
 
-  const { name, email, phone, password, dateOfBirth } = await req.json();
+  // 2) Verify the provided password matches current account (stateless client: no cookies mutated)
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) return bad("Server not configured", 500);
+
+  const stateless = createClient(url, anon, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+
+  const { error: pwErr } = await stateless.auth.signInWithPassword({
+    email: user.email,
+    password, // verify only; we will not change it
+  });
+
+  if (pwErr) {
+    // Wrong password -> block updates
+    return bad("Incorrect password. Changes were not saved.", 401);
+  }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
+    // 3) Load profile row
+    const { data: profile, error: profErr } = await admin
+      .from("User")
+      .select("id, email, name, phone, dateOfBirth, auth_user_id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
 
-    if (!user) {
-      return NextResponse.json({ message: 'User not found' }, { status: 404 });
+    if (profErr) {
+      console.error("[account/update] profile fetch error", profErr);
+      return bad("Failed to load profile", 500);
+    }
+    if (!profile) return bad("User not found", 404);
+
+    // 4) Build updates for public."User"
+    const updates = {};
+    if (typeof name === "string") updates.name = name;
+    if (typeof phone === "string") updates.phone = phone;
+    if (typeof email === "string") updates.email = email; // keep profile email mirrored if you store it
+    if (dateOfBirth) {
+      // If column is DATE, consider slicing to YYYY-MM-DD; otherwise ISO is fine
+      const d = new Date(dateOfBirth);
+      updates.dateOfBirth = d.toISOString();
     }
 
-    const updates = {
-      name,
-      email,
-      phone,
-      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
-    };
-
-    if (password) {
-      // Validate strength
-      const isStrongPassword = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
-      if (!isStrongPassword.test(password)) {
-        return NextResponse.json(
-          { message: 'Password must be at least 8 characters and include letters and numbers.' },
-          { status: 400 }
-        );
+    // 5) If email changed, update in Auth as well (this may trigger confirmation)
+    if (email && email !== user.email) {
+      const { error: emailErr } = await supa.auth.updateUser({ email });
+      if (emailErr) {
+        console.error("[account/update] email update error", emailErr);
+        return bad(emailErr.message || "Failed to update email", 400);
       }
-
-      // Handle password change limits
-      const now = new Date();
-      const THIRTY_DAYS_AGO = new Date(now);
-      THIRTY_DAYS_AGO.setDate(now.getDate() - 30);
-
-      let history = user.passwordChangeHistory || [];
-
-      // Filter only the last 30 days history
-      history = history.filter((timestamp) => {
-        const date = new Date(timestamp);
-        return date > THIRTY_DAYS_AGO;
-      });
-
-      if (history.length >= 2) {
-        return NextResponse.json(
-          { message: 'You can only update your password 2 times per 30 days.' },
-          { status: 403 }
-        );
-      }
-
-      // Hash the new password
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      updates.password = hashedPassword;
-      updates.passwordChangeHistory = [...history, now.toISOString()]; // Update history
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { email: session.user.email },
-      data: updates,
-    });
+    // 6) Persist DB changes (if any)
+    if (Object.keys(updates).length > 0) {
+      const { data: updatedUser, error: updErr } = await admin
+        .from("User")
+        .update(updates)
+        .eq("auth_user_id", user.id)
+        .select()
+        .maybeSingle();
 
-    return NextResponse.json({ message: 'Account updated successfully', user: updatedUser });
-  } catch (error) {
-    console.error('Update error:', error);
-    return NextResponse.json({ message: 'Failed to update account' }, { status: 500 });
+      if (updErr) {
+        console.error("[account/update] profile update error", updErr);
+        return bad("Failed to update account", 500);
+      }
+
+      return ok({ message: "Account updated successfully", user: updatedUser });
+    }
+
+    // Nothing changed (but password verified)
+    return ok({ message: "No changes detected." });
+  } catch (e) {
+    console.error("[account/update] unexpected error", e);
+    return bad("Failed to update account", 500);
   }
 }

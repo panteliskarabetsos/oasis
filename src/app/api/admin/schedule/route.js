@@ -3,190 +3,175 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
+
+const bad = (msg, status = 400) =>
+  NextResponse.json({ error: msg }, { status });
+const ok = (data, status = 200) => NextResponse.json(data, { status });
 
 async function requireAdmin() {
-  const supabase = createSupabaseServer();
-
-  if (!supabase) {
-    console.error("[admin/schedule] Supabase env missing");
-    return {
-      error: true,
-      response: NextResponse.json(
-        {
-          error:
-            "Server misconfiguration. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-        },
-        { status: 500 }
-      ),
-    };
-  }
-
-  // Prefer getSession (works the same for this purpose)
-  if (!supabase.auth || !supabase.auth.getSession) {
-    console.error("[admin/schedule] Supabase client not initialized correctly");
-    return {
-      error: true,
-      response: NextResponse.json(
-        { error: "Auth not available on Supabase client." },
-        { status: 500 }
-      ),
-    };
+  const supa = await createSupabaseServer().catch(() => null);
+  if (!supa?.auth?.getSession) {
+    console.error("[admin/schedule] Supabase server client unavailable");
+    return bad(
+      "Server misconfiguration. Check NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      500
+    );
   }
 
   const {
     data: { session },
     error,
-  } = await supabase.auth.getSession();
+  } = await supa.auth.getSession();
 
-  if (error || !session?.user) {
-    return {
-      error: true,
-      response: NextResponse.json(
-        { error: "Unauthorized – No active session" },
-        { status: 401 }
-      ),
-    };
-  }
+  if (error || !session?.user)
+    return bad("Unauthorized – No active session", 401);
 
   const user = session.user;
-  const role = user.app_metadata?.role || user.user_metadata?.role || "user";
+  const metaRole = user.app_metadata?.role || user.user_metadata?.role;
 
-  if (role !== "admin") {
-    return {
-      error: true,
-      response: NextResponse.json(
-        { error: "Unauthorized – Admin access required" },
-        { status: 403 }
-      ),
-    };
+  if (metaRole === "admin") return { user, admin: createSupabaseAdmin() };
+
+  // Fallback to DB role check (public."User" with auth_user_id)
+  const admin = createSupabaseAdmin();
+  if (!admin) return bad("Server not configured", 500);
+
+  const { data: dbUser, error: dbErr } = await admin
+    .from("User")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  if (dbErr) {
+    console.error("[admin/schedule] role lookup error", dbErr);
+    return bad("Server error", 500);
   }
+  if (dbUser?.role === "admin") return { user, admin };
 
-  return { error: false, user };
+  return bad("Unauthorized – Admin access required", 403);
 }
 
-// GET: Get all slots for a given experience
+// GET: all slots for a given experience
 export async function GET(req) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.response;
+  const gate = await requireAdmin();
+  if ("body" in gate) return gate; // it’s a NextResponse error
 
+  const { admin } = gate;
   const { searchParams } = new URL(req.url);
   const experienceId = Number(searchParams.get("experienceId"));
 
-  if (!experienceId) {
-    return NextResponse.json(
-      { error: "Experience ID required" },
-      { status: 400 }
-    );
-  }
+  if (!experienceId) return bad("Experience ID required");
 
-  try {
-    const slots = await prisma.scheduleSlot.findMany({
-      where: { experienceId },
-      orderBy: { date: "asc" },
-    });
-    return NextResponse.json(slots);
-  } catch (error) {
+  const { data, error } = await admin
+    .from("ScheduleSlot")
+    .select("id,experienceId,date,totalSlots,bookedSlots,isCancelled")
+    .eq("experienceId", experienceId)
+    .order("date", { ascending: true });
+
+  if (error) {
     console.error("GET /admin/schedule error:", error);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return bad("Server error", 500);
   }
+  return ok(data ?? []);
 }
 
-// POST: Create a new schedule slot
+// POST: create a slot
 export async function POST(req) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.response;
+  const gate = await requireAdmin();
+  if ("body" in gate) return gate;
 
-  const { experienceId, date, totalSlots } = await req.json();
+  const { admin } = gate;
+  const body = await req.json().catch(() => null);
+  if (!body) return bad("Invalid JSON");
 
-  if (!experienceId || !date || totalSlots == null) {
-    return NextResponse.json(
-      { error: "Missing required fields" },
-      { status: 400 }
+  const { experienceId, date, totalSlots } = body;
+  if (!experienceId || !date || totalSlots == null)
+    return bad("Missing required fields");
+
+  const payload = {
+    experienceId: Number(experienceId),
+    date: new Date(date).toISOString(), // ensure ISO string
+    totalSlots: Number(totalSlots),
+    bookedSlots: 0,
+  };
+
+  const { data, error } = await admin
+    .from("ScheduleSlot")
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("POST /admin/schedule error:", error);
+    return bad("Server error", 500);
+  }
+  return ok(data, 201);
+}
+
+// PUT: update totalSlots (not bookedSlots)
+export async function PUT(req) {
+  const gate = await requireAdmin();
+  if ("body" in gate) return gate;
+
+  const { admin } = gate;
+  const body = await req.json().catch(() => null);
+  if (!body) return bad("Invalid JSON");
+
+  const { id, totalSlots } = body;
+  if (!id || totalSlots == null) return bad("Missing required fields");
+  if (typeof totalSlots !== "number" || totalSlots < 0)
+    return bad("Invalid totalSlots");
+
+  // Fetch current to compare bookedSlots
+  const { data: existing, error: getErr } = await admin
+    .from("ScheduleSlot")
+    .select("id,bookedSlots")
+    .eq("id", Number(id))
+    .single();
+
+  if (getErr) {
+    if (getErr.code === "PGRST116") return bad("Slot not found", 404); // PostgREST not found
+    console.error("PUT /admin/schedule fetch error:", getErr);
+    return bad("Server error", 500);
+  }
+
+  if ((existing?.bookedSlots ?? 0) > totalSlots) {
+    return bad(
+      `Cannot set total slots below currently booked (${existing.bookedSlots}).`,
+      400
     );
   }
 
-  try {
-    const newSlot = await prisma.scheduleSlot.create({
-      data: {
-        experienceId: Number(experienceId),
-        date: new Date(date),
-        totalSlots: Number(totalSlots),
-        bookedSlots: 0,
-      },
-    });
-    return NextResponse.json(newSlot, { status: 201 });
-  } catch (error) {
-    console.error("POST /admin/schedule error:", error);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  const { data, error: updErr } = await admin
+    .from("ScheduleSlot")
+    .update({ totalSlots })
+    .eq("id", Number(id))
+    .select()
+    .single();
+
+  if (updErr) {
+    console.error("PUT /admin/schedule update error:", updErr);
+    return bad("Server error", 500);
   }
+  return ok(data);
 }
 
-// PUT: Update totalSlots
-export async function PUT(req) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.response;
-
-  try {
-    const { id, totalSlots } = await req.json();
-
-    if (!id || totalSlots == null) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
-    if (typeof totalSlots !== "number" || totalSlots < 0) {
-      return NextResponse.json(
-        { error: "Invalid totalSlots" },
-        { status: 400 }
-      );
-    }
-
-    const existing = await prisma.scheduleSlot.findUnique({
-      where: { id: Number(id) },
-    });
-    if (!existing) {
-      return NextResponse.json({ error: "Slot not found" }, { status: 404 });
-    }
-    if (existing.bookedSlots > totalSlots) {
-      return NextResponse.json(
-        {
-          error: `Cannot set total slots below currently booked (${existing.bookedSlots}).`,
-        },
-        { status: 400 }
-      );
-    }
-
-    const updatedSlot = await prisma.scheduleSlot.update({
-      where: { id: Number(id) },
-      data: { totalSlots },
-    });
-    return NextResponse.json(updatedSlot);
-  } catch (error) {
-    console.error("PUT /admin/schedule error:", error);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
-  }
-}
-
-// DELETE: Remove a slot
+// DELETE: remove a slot
 export async function DELETE(req) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.response;
+  const gate = await requireAdmin();
+  if ("body" in gate) return gate;
 
+  const { admin } = gate;
   const { searchParams } = new URL(req.url);
   const id = Number(searchParams.get("id"));
+  if (!id) return bad("Missing ID");
 
-  if (!id) {
-    return NextResponse.json({ error: "Missing ID" }, { status: 400 });
-  }
+  const { error } = await admin.from("ScheduleSlot").delete().eq("id", id);
 
-  try {
-    await prisma.scheduleSlot.delete({ where: { id } });
-    return NextResponse.json({ message: "Deleted slot successfully" });
-  } catch (error) {
+  if (error) {
     console.error("DELETE /admin/schedule error:", error);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return bad("Server error", 500);
   }
+  return ok({ message: "Deleted slot successfully" });
 }
