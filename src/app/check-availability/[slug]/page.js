@@ -1,6 +1,6 @@
 // src/app/check-availability/[slug]/page.js
 "use client";
-
+import { enGB } from "date-fns/locale";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { format, isSameDay, parseISO, isAfter } from "date-fns";
@@ -47,6 +47,33 @@ export default function CheckAvailabilityPage() {
   });
 
   const slotsContainerRef = useRef(null);
+  const countsByYMD = useMemo(() => {
+    // remaining capacity per calendar day (not per time)
+    const m = new Map();
+    for (const s of availableSlots) {
+      const d = parseISO(s.date);
+      const ymd = d.toISOString().slice(0, 10);
+      const remaining = Math.max(0, (s.totalSlots ?? 0) - (s.bookedSlots ?? 0));
+      m.set(ymd, (m.get(ymd) || 0) + remaining);
+    }
+    return m;
+  }, [availableSlots]);
+
+  const availableSet = useMemo(
+    () => new Set(Array.from(countsByYMD.keys())),
+    [countsByYMD]
+  );
+
+  const fewLeftDates = useMemo(() => {
+    // mark days with <= 3 total remaining as "few"
+    const list = [];
+    countsByYMD.forEach((remaining, ymd) => {
+      if (remaining > 0 && remaining <= 3) {
+        list.push(new Date(ymd)); // Y-M-D → local midnight; good enough for modifiers
+      }
+    });
+    return list;
+  }, [countsByYMD]);
 
   // Fetch global settings (public GET)
   useEffect(() => {
@@ -186,6 +213,19 @@ export default function CheckAvailabilityPage() {
     const full = [first, last].filter(Boolean).join(" ").trim();
     return full || "Explorer";
   }, [dbProfile, user]);
+  // Bucket remaining capacity per day → style days by intensity
+  const availabilityBuckets = useMemo(() => {
+    const plenty = [],
+      some = [],
+      few = [];
+    // requires countsByYMD (ymd -> remaining) from your previous setup
+    countsByYMD.forEach((remaining, ymd) => {
+      if (remaining >= 6) plenty.push(new Date(ymd));
+      else if (remaining >= 4) some.push(new Date(ymd));
+      else if (remaining >= 1) few.push(new Date(ymd));
+    });
+    return { plenty, some, few };
+  }, [countsByYMD]);
 
   async function handleReserve() {
     if (pausedNow) {
@@ -395,6 +435,42 @@ export default function CheckAvailabilityPage() {
               pausedNow ? "opacity-75" : ""
             }`}
           >
+            {/* Header row: selected date + quick actions */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {selectedDate ? (
+                  <SelectedDatePill
+                    date={selectedDate}
+                    onClear={() => setSelectedDate(null)}
+                  />
+                ) : (
+                  <span className="text-xs text-[#7a6a58]">
+                    Pick a date to see times
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(new Date())}
+                  className="rounded-full border border-[#e0dcd4] px-3 py-1.5 text-xs text-[#5a4a3f] hover:bg-[#faf7f1]"
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = earliestDayWithAvailability(availableSlots);
+                    if (d && !pausedNow) setSelectedDate(d);
+                  }}
+                  className="rounded-full bg-[#8b6f47] px-3 py-1.5 text-xs text-white hover:bg-[#7a5f3a]"
+                >
+                  First available
+                </button>
+              </div>
+            </div>
+
             {loadingSlots ? (
               <SkeletonCalendar />
             ) : !hasAnySlots ? (
@@ -406,42 +482,82 @@ export default function CheckAvailabilityPage() {
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-center">
-                  <DayPicker
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={(d) => !pausedNow && setSelectedDate(d || null)}
-                    fromMonth={new Date()}
-                    toMonth={
-                      new Date(new Date().setMonth(new Date().getMonth() + 6))
-                    }
-                    modifiers={{ available: availableDates }}
-                    disabled={[
-                      { before: new Date() },
-                      (date) => !availableDates.some((d) => isSameDay(d, date)),
-                    ]}
-                    classNames={{
-                      caption: "rdp-caption mb-2",
-                      day_today:
-                        "rdp-day_today border border-[#8b6f47] !rounded-full",
-                      day_selected:
-                        "rdp-day_selected !bg-[#8b6f47] !text-white !rounded-full hover:!bg-[#7a5f3a]",
-                      day: "rdp-day !rounded-full",
-                    }}
-                    modifiersClassNames={{
-                      available:
-                        "bg-[#e9e4d8] text-[#5a4a3f] font-medium hover:bg-[#efe9db] hover:text-[#3d2b1f]",
-                    }}
-                  />
-                </div>
+                <DayPicker
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(d) => !pausedNow && setSelectedDate(d || null)}
+                  showOutsideDays
+                  fixedWeeks
+                  captionLayout="dropdown-buttons"
+                  fromMonth={new Date()}
+                  toMonth={
+                    new Date(new Date().setMonth(new Date().getMonth() + 6))
+                  }
+                  fromYear={new Date().getFullYear()}
+                  toYear={new Date().getFullYear() + 1}
+                  locale={enGB}
+                  /* style days by capacity + weekend tint */
+                  modifiers={{
+                    plenty: availabilityBuckets.plenty,
+                    some: availabilityBuckets.some,
+                    few: availabilityBuckets.few,
+                    weekend: { dayOfWeek: [0, 6] },
+                  }}
+                  /* disable past days + days without availability */
+                  disabled={[
+                    { before: new Date() },
+                    (date) => !availableDates.some((d) => isSameDay(d, date)),
+                  ]}
+                  classNames={{
+                    root: "rdp-root w-full",
+                    caption:
+                      "rdp-caption mb-3 flex items-center justify-between",
+                    caption_label:
+                      "text-sm font-semibold text-[#5a4a3f] px-2 py-1 rounded-lg bg-[#f7f3ed] border border-[#ece6dc]",
+                    nav: "rdp-nav flex items-center gap-2",
+                    nav_button:
+                      "rdp-nav_button h-8 w-8 grid place-items-center rounded-lg border border-[#e0dcd4] hover:bg-[#faf7f1] text-[#5a4a3f]",
+                    table:
+                      "rdp-table w-full border-separate border-spacing-y-1",
+                    head_cell:
+                      "rdp-head_cell text-[11px] font-medium text-[#7a6a58] pb-1",
+                    row: "rdp-row",
+                    cell: "rdp-cell text-center align-middle h-10 w-10 [&_.rdp-day_selected]:!bg-[#8b6f47] [&_.rdp-day_selected]:!text-white",
+                    day: "rdp-day !rounded-full focus:outline-none focus:ring-2 focus:ring-[#cbb89e]",
+                    day_selected:
+                      "rdp-day_selected !bg-[#8b6f47] !text-white !rounded-full hover:!bg-[#7a5f3a]",
+                    day_today:
+                      "rdp-day_today border border-[#8b6f47] !rounded-full text-[#5a4a3f]",
+                    day_outside: "rdp-day_outside text-[#cbbfae]",
+                    day_disabled: "rdp-day_disabled text-[#c7c0b6] opacity-60",
+                  }}
+                  modifiersClassNames={{
+                    plenty: "bg-[#e8f3ec] hover:bg-[#e2efe7] text-[#30433a]", // most capacity
+                    some: "bg-[#f4efe5] hover:bg-[#efe8dd] text-[#4a4136]", // medium
+                    few: "ring-1 ring-amber-400 bg-[#fff8ea] hover:bg-[#fff3d7] text-[#5a4a3f]", // low
+                    weekend: "bg-[#faf7f3]",
+                  }}
+                  components={{
+                    DayContent, // your availability dot stays
+                  }}
+                />
+
+                <Legend />
+                {/* update legend below */}
                 <p className="mt-3 text-center text-xs text-[#7a6a58]">
                   Showing the next 6 months of availability.
                 </p>
               </>
             )}
 
+            {/* Paused badge + overlay */}
             {pausedNow && (
-              <div className="pointer-events-none absolute inset-0 rounded-2xl" />
+              <>
+                <div className="pointer-events-none absolute inset-0 rounded-2xl" />
+                <div className="absolute right-4 top-4 rounded-full bg-[#8b6f47]/90 px-3 py-1.5 text-xs text-white shadow">
+                  Bookings paused
+                </div>
+              </>
             )}
           </section>
 
@@ -804,4 +920,76 @@ function titleCase(str = "") {
     .toLowerCase()
     .replace(/(^.|[\s-].)/g, (m) => m.toUpperCase())
     .trim();
+}
+
+function SelectedDatePill({ date, onClear }) {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-3 py-1.5 text-xs text-[#5a4a3f]">
+      <CalendarDays className="h-3.5 w-3.5 text-[#8b6f47]" />
+      {format(date, "EEE, d MMM")}
+      <button
+        type="button"
+        onClick={onClear}
+        className="ml-1 rounded-full px-1.5 py-0.5 hover:bg-white"
+        aria-label="Clear selected date"
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
+// (Optional) refresh your Legend to match the buckets
+function Legend() {
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-center gap-4 text-[11px] text-[#7a6a58]">
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-2 w-2 rounded-full bg-[#e8f3ec] ring-1 ring-[#bcd8c8]" />
+        Plenty
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-2 w-2 rounded-full bg-[#f4efe5] ring-1 ring-[#e1d6c5]" />
+        Some
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-2 w-2 rounded-full bg-[#fff8ea] ring-1 ring-amber-400" />
+        Few left
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-3 w-3 rounded-full border border-[#8b6f47]" />
+        Today
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-2 w-4 rounded bg-[#faf7f3]" />
+        Weekend
+      </span>
+    </div>
+  );
+}
+
+// a tiny dot under the date number for available days
+function DayDot({ date, countsByYMD }) {
+  const ymd = date.toISOString().slice(0, 10);
+  const remaining = countsByYMD.get(ymd) || 0;
+  if (!remaining) return null;
+  const few = remaining <= 3;
+  return (
+    <span
+      className={`pointer-events-none absolute bottom-1 left-1/2 -translate-x-1/2 h-1.5 w-1.5 rounded-full ${
+        few ? "bg-amber-600" : "bg-[#8b6f47]"
+      }`}
+      aria-hidden="true"
+    />
+  );
+}
+
+// inject the dot inside each day cell without breaking keyboard behavior
+function DayContent(props) {
+  // props.children is the date number
+  return (
+    <span className="relative inline-flex items-center justify-center w-7 h-7">
+      {props.children}
+      <DayDot date={props.date} countsByYMD={countsByYMD} />
+    </span>
+  );
 }
