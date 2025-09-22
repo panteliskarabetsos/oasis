@@ -50,6 +50,12 @@ export default function Dashboard() {
     }
     const last = titleCase(lastSource);
 
+    const role = user?.app_metadata?.role ?? md.role ?? "user";
+    const badge =
+      md.badge ??
+      user?.app_metadata?.badge ??
+      (role === "admin" ? "Admin" : "Explorer");
+
     return {
       email: user?.email ?? "",
       first,
@@ -57,7 +63,8 @@ export default function Dashboard() {
       phone: md.phone ?? "",
       dateOfBirth: md.dateOfBirth ?? md.dob ?? null,
       createdAt: md.createdAt ?? user?.created_at ?? null,
-      role: user?.app_metadata?.role ?? md.role ?? "user",
+      role, // kept for internal checks if you ever need it
+      badge, // NEW: preferred display field
       appUserId: md.appUserId ?? null,
     };
   }, [user]);
@@ -82,7 +89,7 @@ export default function Dashboard() {
   }, [user]);
 
   const finalProfile = useMemo(() => {
-    // dbProfile shape (from earlier API): { id, email, name, surname, phone, role, dateOfBirth, createdAt }
+    // dbProfile may include: { id, email, name, surname, phone, role, badge, dateOfBirth, createdAt }
     const merged = {
       email: dbProfile?.email ?? supaProfile.email,
       first: dbProfile?.name?.trim?.() || supaProfile.first,
@@ -90,7 +97,8 @@ export default function Dashboard() {
       phone: dbProfile?.phone ?? supaProfile.phone,
       dateOfBirth: dbProfile?.dateOfBirth ?? supaProfile.dateOfBirth,
       createdAt: dbProfile?.createdAt ?? supaProfile.createdAt,
-      role: dbProfile?.role ?? supaProfile.role,
+      role: dbProfile?.role ?? supaProfile.role, // still available if you need it
+      badge: dbProfile?.badge ?? supaProfile.badge ?? "Explorer", // NEW: main display field
       appUserId: dbProfile?.id ?? supaProfile.appUserId,
     };
     return merged;
@@ -265,7 +273,7 @@ export default function Dashboard() {
                   : "Not provided"
               }
             />
-            <Row label="Role" value={finalProfile.role} />
+            <Row label="Badge" value={finalProfile.badge || "Explorer"} />
           </div>
         </div>
 
