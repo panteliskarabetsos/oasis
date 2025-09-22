@@ -1,29 +1,41 @@
+// src/app/api/public/schedule/route.js
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
+
+const ok = (data, status = 200) => NextResponse.json(data, { status });
+const bad = (msg, status = 400) =>
+  NextResponse.json({ error: msg }, { status });
 
 export async function GET(req) {
-  const { searchParams } = new URL(req.url);
-  const experienceId = parseInt(searchParams.get('experienceId'), 10);
+  const admin = createSupabaseAdmin();
+  if (!admin) return bad("Server not configured", 500);
 
-  if (!experienceId) {
-    return NextResponse.json({ error: "Experience ID required" }, { status: 400 });
+  const { searchParams } = new URL(req.url);
+  const experienceIdRaw = searchParams.get("experienceId");
+  const experienceId = Number(experienceIdRaw);
+
+  if (!Number.isFinite(experienceId) || experienceId <= 0) {
+    return bad("Experience ID required", 400);
   }
 
   try {
-    const slots = await prisma.scheduleSlot.findMany({
-      where: { experienceId },
-      orderBy: { date: 'asc' },
-      select: {
-        id: true,
-        date: true,
-        totalSlots: true,
-        bookedSlots: true,
-      },
-    });
+    const { data, error } = await admin
+      .from("ScheduleSlot")
+      .select("id,date,totalSlots,bookedSlots")
+      .eq("experienceId", experienceId)
+      .order("date", { ascending: true });
 
-    return NextResponse.json(slots);
-  } catch (error) {
-    console.error("GET /public/schedule error:", error);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    if (error) {
+      console.error("[public/schedule] select error:", error);
+      return bad("Server error", 500);
+    }
+
+    return ok(data ?? []);
+  } catch (e) {
+    console.error("[public/schedule] exception:", e);
+    return bad("Server error", 500);
   }
 }

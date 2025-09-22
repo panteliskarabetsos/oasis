@@ -1,23 +1,40 @@
-export const runtime = 'nodejs';
+// src/app/api/experiences/[slug]/route.js
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-import prisma from '@/lib/prisma';
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
-export async function GET(_req, ctx) {
-  const { slug } = await ctx.params; 
+const ok = (data, status = 200) => NextResponse.json(data, { status });
+const bad = (msg, status = 400) =>
+  NextResponse.json({ error: msg }, { status });
 
-  if (!slug) {
-    return NextResponse.json({ error: 'Missing slug' }, { status: 400 });
-  }
+export async function GET(_req, { params }) {
+  const slug = params?.slug;
+  if (!slug) return bad("Missing slug", 400);
+
+  const admin = createSupabaseAdmin();
+  if (!admin) return bad("Server not configured", 500);
 
   try {
-    const experience = await prisma.experience.findUnique({ where: { slug } });
-    if (!experience) {
-      return NextResponse.json({ error: 'Experience not found' }, { status: 404 });
+    const { data, error } = await admin
+      .from("Experience")
+      .select(
+        "id,name,slug,description,price,location,duration,whatsIncluded,whatToBring,whyYoullLove,images,mapPin,guestReviews,frequency,visibility,createdAt,updatedAt"
+      )
+      .eq("slug", slug)
+      .eq("visibility", true) // only public items for this public route
+      .maybeSingle();
+
+    if (error) {
+      console.error("[experiences/:slug] select error:", error);
+      return bad("Internal server error", 500);
     }
-    return NextResponse.json(experience);
-  } catch (err) {
-    console.error('Error fetching experience:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    if (!data) return bad("Experience not found", 404);
+
+    return ok(data);
+  } catch (e) {
+    console.error("[experiences/:slug] exception:", e);
+    return bad("Internal server error", 500);
   }
 }
