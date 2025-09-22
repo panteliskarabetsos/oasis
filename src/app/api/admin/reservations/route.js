@@ -332,6 +332,26 @@ export async function DELETE(req) {
       })
       .eq("id", slot.id);
     if (decErr) throw decErr;
+    // 0) Global pause check
+    const { data: global, error: gErr } = await admin
+      .from("AppSetting")
+      .select("bookingsPaused, bookingsPausedUntil, bookingsPausedMessage")
+      .eq("key", "global")
+      .single();
+    if (gErr) throw gErr;
+
+    const isGloballyPaused =
+      !!global?.bookingsPaused ||
+      (global?.bookingsPausedUntil &&
+        new Date(global.bookingsPausedUntil) > new Date());
+
+    if (isGloballyPaused) {
+      return err(
+        global?.bookingsPausedMessage ||
+          "Bookings are temporarily unavailable. Please try again later.",
+        403
+      );
+    }
 
     // email cancellation (best-effort)
     try {

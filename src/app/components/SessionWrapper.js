@@ -1,10 +1,14 @@
 // src/app/components/SessionWrapper.js
-'use client';
+"use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { createSupabaseBrowser } from '@/lib/supabase/client';
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
-const AuthContext = createContext({ user: null, loading: true, supabase: null });
+const AuthContext = createContext({
+  user: null,
+  loading: true,
+  supabase: null,
+});
 
 export function useAuth() {
   return useContext(AuthContext);
@@ -19,12 +23,19 @@ export default function SessionWrapper({ children }) {
     let mounted = true;
 
     // initial fetch
-    supabase.auth.getUser()
-      .then(({ data }) => { if (mounted) setUser(data.user ?? null); })
-      .finally(() => { if (mounted) setLoading(false); });
+    supabase.auth
+      .getUser()
+      .then(({ data }) => {
+        if (mounted) setUser(data.user ?? null);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
 
     // subscribe to auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
       setUser(session?.user ?? null);
     });

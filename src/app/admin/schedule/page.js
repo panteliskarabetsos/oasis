@@ -13,6 +13,7 @@ import {
   PlusCircle,
   Users,
   Loader2,
+  ChevronDown,
 } from "lucide-react";
 
 // ---------- Helpers ----------
@@ -240,6 +241,67 @@ export default function AdminSchedulePage() {
     );
   };
 
+  // NEW state
+  const [globalPause, setGlobalPause] = useState({
+    bookingsPaused: false,
+    bookingsPausedMessage: "",
+    bookingsPausedUntil: "",
+  });
+  const [loadingGlobal, setLoadingGlobal] = useState(true);
+  const [savingGlobal, setSavingGlobal] = useState(false);
+
+  // Load on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/settings/bookings", {
+          cache: "no-store",
+        });
+        const data = await res.json();
+        setGlobalPause({
+          bookingsPaused: !!data.bookingsPaused,
+          bookingsPausedMessage: data.bookingsPausedMessage || "",
+          bookingsPausedUntil: data.bookingsPausedUntil
+            ? data.bookingsPausedUntil.slice(0, 16) // yyyy-MM-ddTHH:mm
+            : "",
+        });
+      } catch (e) {
+        toast.error("Failed to load global booking setting.");
+      } finally {
+        setLoadingGlobal(false);
+      }
+    })();
+  }, []);
+
+  async function saveGlobalPause() {
+    setSavingGlobal(true);
+    const payload = {
+      bookingsPaused: !!globalPause.bookingsPaused,
+      bookingsPausedMessage: globalPause.bookingsPausedMessage?.trim() || null,
+      bookingsPausedUntil: globalPause.bookingsPausedUntil
+        ? new Date(globalPause.bookingsPausedUntil).toISOString()
+        : null,
+    };
+
+    const res = await fetch("/api/admin/settings/bookings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    setSavingGlobal(false);
+
+    if (!res.ok) {
+      toast.error("Failed to update global booking setting.");
+      return;
+    }
+    toast.success(
+      payload.bookingsPaused || payload.bookingsPausedUntil
+        ? "Bookings paused globally."
+        : "Global bookings resumed."
+    );
+  }
+
   const handleSaveEdit = async () => {
     const slot = slots.find((s) => s.id === editingSlotId);
     if (!slot) return toast.error("Slot not found.");
@@ -300,6 +362,12 @@ export default function AdminSchedulePage() {
       </div>
     </div>
   );
+  const [isGlobalOpen, setIsGlobalOpen] = useState(false);
+
+  // when the global setting loads, auto-open if paused
+  useEffect(() => {
+    if (!loadingGlobal) setIsGlobalOpen(!!globalPause.bookingsPaused);
+  }, [loadingGlobal, globalPause.bookingsPaused]);
 
   const SlotRow = ({ s }) => {
     const booked = s.bookedSlots || 0;
@@ -523,7 +591,7 @@ export default function AdminSchedulePage() {
 
   // ---------- Render ----------
   return (
-    <main className="max-w-6xl mx-auto pt-24 px-4 sm:px-6 lg:px-8">
+    <main className="max-w-6xl mx-auto pt-4 px-4 sm:px-6 lg:px-8">
       {/* Delete confirmation modal */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
@@ -580,7 +648,149 @@ export default function AdminSchedulePage() {
         <Stat icon={Users} label="Total Capacity" value={stats.totalSlots} />
         <Stat icon={Users} label="Total Booked" value={stats.booked} />
       </div>
+      <section className="mt-6 rounded-2xl border border-[#e3dcd2] bg-white p-0 shadow-sm overflow-hidden">
+        {/* Header / Toggle */}
+        <button
+          type="button"
+          onClick={() => setIsGlobalOpen((v) => !v)}
+          aria-expanded={isGlobalOpen}
+          className="w-full flex items-center gap-4 px-6 py-4"
+        >
+          <div className="flex-1 text-left">
+            <h2 className="text-lg font-semibold text-[#5a4a3f]">
+              Global booking switch
+            </h2>
+            <p className="mt-0.5 text-xs text-[#7a6a5f]">
+              Stops new appointments for <strong>all experiences</strong>
+              &nbsp;(existing bookings remain).
+            </p>
+          </div>
 
+          {/* Status pill */}
+          <span
+            className={`mr-2 inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${
+              globalPause.bookingsPaused
+                ? "border-[#f0dede] bg-[#fff7f7] text-[#8a3636]"
+                : "border-[#e0efd9] bg-[#f4fbf1] text-[#2f6b2f]"
+            }`}
+            title={
+              globalPause.bookingsPaused
+                ? "Bookings are currently paused"
+                : "Bookings are open"
+            }
+          >
+            {globalPause.bookingsPaused ? "Paused" : "Accepting"}
+          </span>
+
+          <ChevronDown
+            className={`shrink-0 text-[#7a6a5f] transition-transform ${
+              isGlobalOpen ? "rotate-180" : ""
+            }`}
+            size={18}
+            aria-hidden="true"
+          />
+        </button>
+
+        {/* Collapsible body */}
+        <div
+          className={`grid transition-all duration-300 ease-out ${
+            isGlobalOpen
+              ? "grid-rows-[1fr] opacity-100"
+              : "grid-rows-[0fr] opacity-0"
+          }`}
+        >
+          <div className="min-h-0 overflow-hidden border-t border-[#eee]">
+            {loadingGlobal ? (
+              <div className="p-6 text-sm text-[#7a6a5f]">Loading…</div>
+            ) : (
+              <div className="p-6 grid gap-4 sm:grid-cols-2">
+                {/* Toggle */}
+                <label className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-[#8b6f47]"
+                    checked={globalPause.bookingsPaused}
+                    onChange={(e) =>
+                      setGlobalPause((p) => ({
+                        ...p,
+                        bookingsPaused: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-[#5a4a3f]">
+                    {globalPause.bookingsPaused
+                      ? "Globally paused"
+                      : "Accepting bookings"}
+                  </span>
+                </label>
+
+                {/* Until */}
+                <div>
+                  <label className="mb-1 block text-xs text-[#7a6a5f]">
+                    Pause until (optional)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={globalPause.bookingsPausedUntil}
+                    onChange={(e) =>
+                      setGlobalPause((p) => ({
+                        ...p,
+                        bookingsPausedUntil: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-lg border border-[#dcd2c3] bg-white px-3 py-2 text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
+                  />
+                </div>
+
+                {/* Message */}
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs text-[#7a6a5f]">
+                    Public message (shown on booking pages)
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={globalPause.bookingsPausedMessage}
+                    onChange={(e) =>
+                      setGlobalPause((p) => ({
+                        ...p,
+                        bookingsPausedMessage: e.target.value,
+                      }))
+                    }
+                    placeholder='e.g. "We are closed for the season and reopen in March."'
+                    className="w-full rounded-lg border border-[#dcd2c3] bg-white px-3 py-2 text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
+                  />
+                </div>
+
+                {/* Actions */}
+                <div className="sm:col-span-2">
+                  <button
+                    onClick={saveGlobalPause}
+                    disabled={savingGlobal}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#8b6f47] px-5 py-3 text-white shadow hover:bg-[#7a5f3a] disabled:opacity-60"
+                  >
+                    {savingGlobal ? "Saving…" : "Save global booking status"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setGlobalPause((p) => ({
+                        ...p,
+                        bookingsPaused: true,
+                        bookingsPausedUntil: "",
+                      }))
+                    }
+                    className="ml-3 inline-flex items-center justify-center gap-2 rounded-xl border border-[#e0dcd4] bg-white px-5 py-3 text-sm text-[#5a4a3f] hover:bg-[#faf7f1]"
+                    title="Quick pause"
+                  >
+                    Pause now
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
       {/* Step 1 — Experience selection */}
       <section className="mt-8 rounded-2xl border border-[#e3dcd2] bg-[#f8f6f1] p-6 shadow-sm">
         <p className="mb-2 text-xs font-semibold tracking-wider text-[#7a6a5f]">

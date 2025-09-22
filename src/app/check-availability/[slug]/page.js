@@ -19,6 +19,7 @@ import {
   MapPin,
   Info,
   CheckCircle2,
+  PauseCircle,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 
@@ -37,7 +38,55 @@ export default function CheckAvailabilityPage() {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
+  // --- Global booking settings ---
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [globalSettings, setGlobalSettings] = useState({
+    bookingsPaused: false,
+    bookingsPausedUntil: null,
+    bookingsPausedMessage: "",
+  });
+
   const slotsContainerRef = useRef(null);
+
+  // Fetch global settings (public GET)
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setSettingsLoading(true);
+        const res = await fetch("/api/settings/bookings", {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error("settings GET failed");
+        const data = await res.json();
+        if (alive) setGlobalSettings(data || {});
+      } catch {
+        // If the public route doesn’t exist yet, just continue silently.
+        if (alive) {
+          setGlobalSettings({
+            bookingsPaused: false,
+            bookingsPausedUntil: null,
+            bookingsPausedMessage: "",
+          });
+        }
+      } finally {
+        if (alive) setSettingsLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const pausedNow = useMemo(() => {
+    const paused = !!globalSettings.bookingsPaused;
+    if (!paused) return false;
+    const until = globalSettings.bookingsPausedUntil
+      ? new Date(globalSettings.bookingsPausedUntil)
+      : null;
+    // paused indefinitely or until a future time
+    return !until || Date.now() < until.getTime();
+  }, [globalSettings]);
 
   // Fetch experience & slots
   useEffect(() => {
@@ -101,13 +150,12 @@ export default function CheckAvailabilityPage() {
     : 8;
   const maxPeopleAllowed = Math.min(8, availablePlaces || 8);
 
+  // DB profile → nicer display name
   const [dbProfile, setDbProfile] = useState(null);
-
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        // only fetch when logged in
         if (!user) return;
         const res = await fetch("/api/me", { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to load profile");
@@ -123,27 +171,27 @@ export default function CheckAvailabilityPage() {
     };
   }, [user]);
 
-  // replace your displayName with this:
   const displayName = useMemo(() => {
-    // 1) Prefer DB
     const fromDb = [dbProfile?.name, dbProfile?.surname]
       .filter(Boolean)
       .join(" ")
       .trim();
     if (fromDb) return fromDb;
 
-    // 2) Fallback to auth metadata
     const md = user?.user_metadata || {};
     const first = titleCase(
       md.firstName ?? md.given_name ?? md.name ?? md.full_name ?? ""
     );
     const last = titleCase(md.lastName ?? md.family_name ?? md.surname ?? "");
     const full = [first, last].filter(Boolean).join(" ").trim();
-
     return full || "Explorer";
   }, [dbProfile, user]);
 
   async function handleReserve() {
+    if (pausedNow) {
+      toast.error("Bookings are temporarily paused.");
+      return;
+    }
     if (!selectedSlotId || numberOfPeople <= 0) {
       toast.error("Please select a time slot and number of people.");
       return;
@@ -203,7 +251,6 @@ export default function CheckAvailabilityPage() {
   }, [availableSlots, selectedDate]);
 
   const hasAnySlots = availableSlots.length > 0;
-
   const firstImage =
     Array.isArray(experience?.images) && experience.images.length
       ? experience.images[0]
@@ -290,18 +337,51 @@ export default function CheckAvailabilityPage() {
               <Step label="Confirm details" active={step >= 3} />
             </div>
 
-            {/* Info banner */}
-            <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
-              <Info size={14} className="mt-0.5 text-[#8b6f47]" />
-              <p>
-                Pick a date with availability, then choose a time. Max 8 people
-                per booking. Larger group?{" "}
-                <a href="/contact" className="underline text-[#8b6f47]">
-                  Contact us
-                </a>
-                .
-              </p>
-            </div>
+            {/* Info / Pause banner */}
+            {settingsLoading ? (
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#8b6f47]" />
+                Loading booking status…
+              </div>
+            ) : pausedNow ? (
+              <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#f1d7d7] bg-[#fff6f6] px-3 py-2 text-xs text-[#7a4a4a] shadow-sm">
+                <PauseCircle size={14} className="mt-0.5 text-[#b14545]" />
+                <div>
+                  <p className="font-medium">
+                    Bookings are temporarily paused.
+                  </p>
+                  {globalSettings.bookingsPausedUntil ? (
+                    <p>
+                      Resuming after{" "}
+                      <span className="font-semibold">
+                        {format(
+                          new Date(globalSettings.bookingsPausedUntil),
+                          "PPpp"
+                        )}
+                      </span>
+                      .
+                    </p>
+                  ) : null}
+                  {globalSettings.bookingsPausedMessage ? (
+                    <p className="mt-1">
+                      {globalSettings.bookingsPausedMessage}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
+                <Info size={14} className="mt-0.5 text-[#8b6f47]" />
+                <p>
+                  Pick a date with availability, then choose a time. Max 8
+                  people per booking. Larger group?{" "}
+                  <a href="/contact" className="underline text-[#8b6f47]">
+                    Contact us
+                  </a>
+                  .
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -310,7 +390,11 @@ export default function CheckAvailabilityPage() {
       <main className="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-10">
           {/* Left: Calendar */}
-          <section className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm">
+          <section
+            className={`relative rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm ${
+              pausedNow ? "opacity-75" : ""
+            }`}
+          >
             {loadingSlots ? (
               <SkeletonCalendar />
             ) : !hasAnySlots ? (
@@ -326,7 +410,7 @@ export default function CheckAvailabilityPage() {
                   <DayPicker
                     mode="single"
                     selected={selectedDate}
-                    onSelect={(d) => setSelectedDate(d || null)}
+                    onSelect={(d) => !pausedNow && setSelectedDate(d || null)}
                     fromMonth={new Date()}
                     toMonth={
                       new Date(new Date().setMonth(new Date().getMonth() + 6))
@@ -355,12 +439,20 @@ export default function CheckAvailabilityPage() {
                 </p>
               </>
             )}
+
+            {pausedNow && (
+              <div className="pointer-events-none absolute inset-0 rounded-2xl" />
+            )}
           </section>
 
           {/* Right: Slots + Booking card */}
           <section className="space-y-6" ref={slotsContainerRef}>
             {/* Slots */}
-            <div className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm">
+            <div
+              className={`rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm ${
+                pausedNow ? "opacity-60" : ""
+              }`}
+            >
               <h3 className="mb-3 text-lg font-semibold text-[#5a4a3f] flex items-center gap-2">
                 <Clock className="w-5 h-5 text-[#8b6f47]" />
                 {selectedDate
@@ -382,7 +474,7 @@ export default function CheckAvailabilityPage() {
                     const available =
                       (slot.totalSlots ?? 0) - (slot.bookedSlots ?? 0);
                     const isSelected = selectedSlotId === slot.id;
-                    const isDisabled = available <= 0;
+                    const isDisabled = pausedNow || available <= 0;
                     const time = format(parseISO(slot.date), "p");
 
                     return (
@@ -406,10 +498,12 @@ export default function CheckAvailabilityPage() {
                           <div className="text-sm font-semibold">{time}</div>
                           <div
                             className={`text-xs font-medium ${
-                              isDisabled ? "text-gray-500" : "text-green-700"
+                              available <= 0
+                                ? "text-gray-500"
+                                : "text-green-700"
                             }`}
                           >
-                            {isDisabled
+                            {available <= 0
                               ? "Fully booked"
                               : `${available} available`}
                           </div>
@@ -445,7 +539,9 @@ export default function CheckAvailabilityPage() {
                 )}
 
                 {/* People stepper */}
-                <div className="mt-4 space-y-2">
+                <div
+                  className={`mt-4 space-y-2 ${pausedNow ? "opacity-60" : ""}`}
+                >
                   <label className="block text-sm font-medium text-[#5a4a3f] flex items-center gap-2">
                     <Users className="w-4 h-4 text-[#8b6f47]" />
                     Number of People
@@ -460,9 +556,11 @@ export default function CheckAvailabilityPage() {
                     <button
                       type="button"
                       onClick={() =>
+                        !pausedNow &&
                         setNumberOfPeople((p) => Math.max(1, p - 1))
                       }
-                      className="text-[#8b6f47] hover:text-[#5a4a3f] p-1"
+                      disabled={pausedNow}
+                      className="text-[#8b6f47] hover:text-[#5a4a3f] p-1 disabled:opacity-40"
                       aria-label="Decrease"
                     >
                       <Minus className="w-4 h-4" />
@@ -473,6 +571,7 @@ export default function CheckAvailabilityPage() {
                       max={maxPeopleAllowed}
                       value={numberOfPeople}
                       onChange={(e) => {
+                        if (pausedNow) return;
                         const val = Math.min(
                           maxPeopleAllowed,
                           Math.max(1, Number(e.target.value) || 1)
@@ -480,20 +579,18 @@ export default function CheckAvailabilityPage() {
                         setNumberOfPeople(val);
                       }}
                       className="w-12 text-center text-[#5a4a3f] bg-transparent border-0 focus:outline-none font-semibold"
+                      disabled={pausedNow}
                     />
                     <button
                       type="button"
                       onClick={() =>
+                        !pausedNow &&
                         setNumberOfPeople((p) =>
                           Math.min(maxPeopleAllowed, p + 1)
                         )
                       }
-                      disabled={numberOfPeople >= maxPeopleAllowed}
-                      className={`text-[#8b6f47] hover:text-[#5a4a3f] p-1 ${
-                        numberOfPeople >= maxPeopleAllowed
-                          ? "opacity-40 cursor-not-allowed"
-                          : ""
-                      }`}
+                      disabled={pausedNow || numberOfPeople >= maxPeopleAllowed}
+                      className="text-[#8b6f47] hover:text-[#5a4a3f] p-1 disabled:opacity-40"
                       aria-label="Increase"
                     >
                       <Plus className="w-4 h-4" />
@@ -533,9 +630,10 @@ export default function CheckAvailabilityPage() {
                   <textarea
                     rows={3}
                     value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
+                    onChange={(e) => !pausedNow && setNotes(e.target.value)}
                     placeholder="E.g. vegan, nut allergy..."
-                    className="w-full p-3 rounded-lg border border-[#d7d2c6] bg-white focus:outline-none focus:ring focus:ring-[#c4b89f] text-[#5a4a3f]"
+                    className="w-full p-3 rounded-lg border border-[#d7d2c6] bg-white focus:outline-none focus:ring focus:ring-[#c4b89f] text-[#5a4a3f] disabled:opacity-40"
+                    disabled={pausedNow}
                   />
                 </div>
 
@@ -545,8 +643,11 @@ export default function CheckAvailabilityPage() {
                     type="checkbox"
                     id="agreeTerms"
                     checked={agreedToTerms}
-                    onChange={(e) => setAgreedToTerms(e.target.checked)}
+                    onChange={(e) =>
+                      !pausedNow && setAgreedToTerms(e.target.checked)
+                    }
                     className="accent-[#8b6f47]"
+                    disabled={pausedNow}
                   />
                   <label
                     htmlFor="agreeTerms"
@@ -564,15 +665,21 @@ export default function CheckAvailabilityPage() {
                 <button
                   onClick={handleReserve}
                   disabled={
-                    !user || isSubmitting || !agreedToTerms || !selectedSlotId
+                    pausedNow ||
+                    !user ||
+                    isSubmitting ||
+                    !agreedToTerms ||
+                    !selectedSlotId
                   }
                   className={`mt-6 w-full py-3 rounded-lg font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md ${
-                    !user || !agreedToTerms || !selectedSlotId
+                    pausedNow || !user || !agreedToTerms || !selectedSlotId
                       ? "bg-gray-400 cursor-not-allowed text-white"
                       : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
                   }`}
                 >
-                  {isSubmitting ? (
+                  {pausedNow ? (
+                    "Bookings are paused"
+                  ) : isSubmitting ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
                       Reserving...
@@ -587,12 +694,14 @@ export default function CheckAvailabilityPage() {
                 </button>
 
                 {/* Small reassurance */}
-                <p className="mt-3 text-center text-[11px] text-[#7a6a58]">
-                  <span className="inline-flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    No charge yet — you’ll receive a confirmation email.
-                  </span>
-                </p>
+                {!pausedNow && (
+                  <p className="mt-3 text-center text-[11px] text-[#7a6a58]">
+                    <span className="inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      No charge yet — you’ll receive a confirmation email.
+                    </span>
+                  </p>
+                )}
               </div>
             </div>
           </section>
