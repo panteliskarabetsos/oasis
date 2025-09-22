@@ -1,33 +1,87 @@
-// src/app/components/Header.js
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Menu, X, UserCircle, ChevronDown, LogIn, User } from "lucide-react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { usePathname } from "next/navigation";
+import {
+  Menu,
+  X,
+  UserCircle,
+  ChevronDown,
+  LogIn,
+  User,
+  ShieldCheck,
+} from "lucide-react";
 import { useRouteLoader } from "./RouteLoader";
 import { useAuth } from "./SessionWrapper";
 
+/* ---------- helpers ---------- */
+function safeTitle(str = "") {
+  return String(str)
+    .toLowerCase()
+    .replace(/(^.|[\s-].)/g, (m) => m.toUpperCase())
+    .trim();
+}
+function initialsFrom(first = "", last = "") {
+  const a = (first || "").trim()[0];
+  const b = (last || "").trim()[0];
+  return [a, b].filter(Boolean).join("").toUpperCase() || "•";
+}
+function useClickOutside(ref, onClose) {
+  useEffect(() => {
+    function handler(e) {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target)) onClose?.();
+    }
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [ref, onClose]);
+}
+
 export default function Header() {
+  const pathname = usePathname();
+  const routeLoader = useRouteLoader();
+  const { user, supabase } = useAuth();
+
   const [isOpen, setIsOpen] = useState(false);
   const [hasShadow, setHasShadow] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
-
   const [dbProfile, setDbProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
 
-  const routeLoader = useRouteLoader();
-  const { user, loading, supabase } = useAuth();
+  const dropdownRef = useRef(null);
+  useClickOutside(dropdownRef, () => setDropdownOpen(false));
 
-  const navLinks = [
-    { name: "Experiences", href: "/experiences" },
-    { name: "About", href: "/about" },
-    { name: "Contact", href: "/contact" },
-  ];
+  useEffect(() => {
+    const onScroll = () => setHasShadow(window.scrollY > 4);
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
-  // fetch profile from your /api/me (same shape as dashboard expects)
+  // Esc closes menus
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        setDropdownOpen(false);
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const navLinks = useMemo(
+    () => [
+      { name: "Experiences", href: "/experiences" },
+      { name: "About", href: "/about" },
+      { name: "Contact", href: "/contact" },
+    ],
+    []
+  );
+
+  // Fetch profile from your API (DB-first identity)
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    (async () => {
       if (!user) {
         setDbProfile(null);
         setProfileLoading(false);
@@ -42,20 +96,18 @@ export default function Header() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!cancelled) setDbProfile(data || null);
-      } catch (e) {
-        console.error("[Header] /api/me failed", e);
+      } catch {
         if (!cancelled) setDbProfile(null);
       } finally {
         if (!cancelled) setProfileLoading(false);
       }
-    };
-    load();
+    })();
     return () => {
       cancelled = true;
     };
   }, [user]);
 
-  // build a merged profile: DB first, then auth metadata
+  // Merge DB + metadata
   const finalProfile = useMemo(() => {
     const md = user?.user_metadata || {};
     const rawFull = (
@@ -84,247 +136,310 @@ export default function Header() {
       first: first ? safeTitle(first) : "",
       last: last ? safeTitle(last) : "",
       email: dbProfile?.email || user?.email || "",
-      role: dbProfile?.role || user?.app_metadata?.role || md.role || "user",
+      badge:
+        dbProfile?.badge ||
+        dbProfile?.role ||
+        md.badge ||
+        md.role ||
+        "Explorer",
+      isAdmin:
+        (dbProfile?.badge || dbProfile?.role || md.badge || md.role) ===
+        "admin",
     };
   }, [dbProfile, user]);
 
-  // final display name for the button
   const displayName =
     [finalProfile.first, finalProfile.last].filter(Boolean).join(" ") ||
     user?.email?.split("@")[0] ||
     "Account";
 
-  const role = finalProfile.role || "user";
+  const avatar = initialsFrom(finalProfile.first, finalProfile.last);
+  const isAuthed = !!user;
 
-  useEffect(() => {
-    const handleScroll = () => setHasShadow(window.scrollY > 10);
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  const go = useCallback(
+    (href) => routeLoader?.triggerRouteChange(href),
+    [routeLoader]
+  );
 
   async function handleSignOut() {
     await supabase?.auth.signOut();
     setDropdownOpen(false);
-    setAccountDropdownOpen(false);
-    routeLoader?.triggerRouteChange("/");
+    setIsOpen(false);
+    go("/");
   }
-
-  const isAuthed = !!user;
 
   return (
     <header
-      className={`fixed top-0 left-0 w-full z-50 transition-shadow duration-300 print:hidden ${
-        hasShadow ? "shadow-xl" : "shadow-none"
-      } bg-[#f4f1ec]/90 backdrop-blur-lg border-b border-[#eae6e0]`}
+      className={`fixed top-0 left-0 right-0 z-50 print:hidden transition-shadow ${
+        hasShadow ? "shadow-lg" : "shadow-none"
+      } bg-[#f4f1ec]/85 backdrop-blur-md border-b border-[#eae6e0]`}
+      role="banner"
     >
-      <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
-        {/* Logo */}
+      <div className="mx-auto max-w-6xl px-6 py-3 flex items-center justify-between">
+        {/* Brand */}
         <button
-          onClick={() => routeLoader?.triggerRouteChange("/")}
-          className="text-3xl font-serif text-[#5a4a3f] hover:text-[#8b6f47] transition-all"
+          onClick={() => go("/")}
+          className="group inline-flex items-center gap-2"
+          aria-label="Go to homepage"
         >
-          Oasis
+          <span className="text-3xl font-serif tracking-tight text-[#5a4a3f] group-hover:text-[#8b6f47] transition-colors">
+            Oasis
+          </span>
         </button>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex gap-6 items-center">
-          {navLinks.map((link) => (
-            <button
-              key={link.name}
-              onClick={() => routeLoader?.triggerRouteChange(link.href)}
-              className="text-lg text-[#5a4a3f] hover:bg-[#e8e2d9] hover:text-[#8b6f47] px-4 py-2 rounded-full transition-all"
-            >
-              {link.name}
-            </button>
-          ))}
-
-          {isAuthed ? (
-            <div className="relative">
+        <nav className="hidden md:flex items-center gap-1" aria-label="Primary">
+          {navLinks.map((l) => {
+            const active = pathname?.startsWith(l.href);
+            return (
               <button
-                onClick={() => setDropdownOpen((v) => !v)}
-                className="flex items-center gap-2 text-sm text-[#5a4a3f] px-4 py-2 rounded-full border border-[#e4ddd3] bg-[#fdfaf5] hover:bg-[#f1ede7] transition"
-                aria-label="Account menu"
+                key={l.href}
+                onClick={() => go(l.href)}
+                className={`rounded-full px-4 py-2 text-sm transition-all ${
+                  active
+                    ? "bg-white text-[#5a4a3f] border border-[#e0dcd4]"
+                    : "text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                }`}
+                aria-current={active ? "page" : undefined}
               >
-                <UserCircle size={20} />
-                {/* show first name if available; fall back to full displayName */}
-                {(finalProfile.first || displayName).split(" ")[0]}
-                <ChevronDown size={16} />
+                {l.name}
               </button>
+            );
+          })}
 
-              {dropdownOpen && (
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-[#eae6e0] z-10">
-                  <div className="px-4 py-2 border-b border-[#eee]">
-                    <p className="text-sm font-medium text-[#5a4a3f] truncate">
-                      {displayName}
-                    </p>
-                    <p className="text-xs text-[#7a6a5f] truncate">
-                      {finalProfile.email}
-                    </p>
-                  </div>
+          {/* CTA */}
+          <button
+            onClick={() => go("/experiences")}
+            className="ml-2 rounded-full bg-[#8b6f47] px-4 py-2 text-sm text-white hover:bg-[#7a5f3a] transition-colors"
+          >
+            Book a Journey
+          </button>
 
-                  <button
-                    onClick={() => routeLoader?.triggerRouteChange("/bookings")}
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-[#fdfaf5] text-[#5a4a3f]"
+          {/* Account */}
+          <div className="relative ml-2" ref={dropdownRef}>
+            {isAuthed ? (
+              <>
+                <button
+                  onClick={() => setDropdownOpen((v) => !v)}
+                  className="flex items-center gap-2 rounded-full border border-[#e4ddd3] bg-[#fdfaf5] px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#f1ede7] transition"
+                  aria-haspopup="menu"
+                  aria-expanded={dropdownOpen}
+                  aria-controls="account-menu"
+                >
+                  {/* Avatar */}
+                  <span className="inline-grid h-6 w-6 place-items-center rounded-full bg-[#e8dfcf] text-[10px] font-semibold text-[#5a4a3f]">
+                    {avatar}
+                  </span>
+                  <span className="max-w-[10rem] truncate">
+                    {finalProfile.first || displayName}
+                  </span>
+                  <ChevronDown size={16} />
+                </button>
+
+                {dropdownOpen && (
+                  <div
+                    id="account-menu"
+                    role="menu"
+                    className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-[#eae6e0] bg-white shadow-xl"
                   >
-                    My Bookings
-                  </button>
-                  <button
-                    onClick={() =>
-                      routeLoader?.triggerRouteChange("/dashboard")
-                    }
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-[#fdfaf5] text-[#5a4a3f]"
-                  >
-                    Dashboard
-                  </button>
+                    <div className="border-b border-[#eee] px-4 py-3">
+                      <p className="truncate text-sm font-medium text-[#5a4a3f]">
+                        {displayName}
+                      </p>
+                      <p className="truncate text-xs text-[#7a6a5f]">
+                        {finalProfile.email}
+                      </p>
+                      <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-[#efe7d9] bg-[#fbf7ef] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
+                        <ShieldCheck size={12} />{" "}
+                        {safeTitle(finalProfile.badge)}
+                      </span>
+                    </div>
 
-                  {role === "admin" && (
-                    <nav>
-                      <a
-                        className="block w-full text-left px-4 py-2 text-sm hover:bg-[#fdfaf5] text-[#5a4a3f]"
-                        href="/admin"
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        go("/bookings");
+                      }}
+                      className="block w-full px-4 py-2 text-left text-sm text-[#5a4a3f] hover:bg-[#fdfaf5]"
+                    >
+                      My Bookings
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        go("/dashboard");
+                      }}
+                      className="block w-full px-4 py-2 text-left text-sm text-[#5a4a3f] hover:bg-[#fdfaf5]"
+                    >
+                      Dashboard
+                    </button>
+
+                    {(finalProfile.isAdmin ?? false) && (
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setDropdownOpen(false);
+                          go("/admin");
+                        }}
+                        className="block w-full px-4 py-2 text-left text-sm text-[#5a4a3f] hover:bg-[#fdfaf5]"
                       >
                         Admin Dashboard
-                      </a>
-                    </nav>
-                  )}
+                      </button>
+                    )}
 
-                  <button
-                    onClick={handleSignOut}
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-[#fdfaf5] text-[#b44d4d]"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={() => routeLoader?.triggerRouteChange("/login")}
-                className="flex items-center gap-2 text-sm text-[#8b6f47] hover:text-[#5a4a3f] py-1.5 px-3 transition-all font-medium hover:bg-[#e8e2d9] rounded-full"
-              >
-                <LogIn size={16} />
-                Log In
-              </button>
-
-              <button
-                onClick={() => routeLoader?.triggerRouteChange("/sign-up")}
-                className="flex items-center gap-2 text-sm text-[#8b6f47] hover:text-[#5a4a3f] py-1.5 px-3 transition-all font-medium hover:bg-[#e8e2d9] rounded-full"
-              >
-                <User size={16} />
-                Register
-              </button>
-            </>
-          )}
+                    <button
+                      role="menuitem"
+                      onClick={handleSignOut}
+                      className="block w-full px-4 py-2 text-left text-sm text-[#b44d4d] hover:bg-[#fdfaf5]"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => go("/login")}
+                  className="flex items-center gap-2 rounded-full border border-transparent px-3 py-2 text-sm text-[#8b6f47] hover:bg-[#e8e2d9] hover:text-[#5a4a3f]"
+                >
+                  <LogIn size={16} />
+                  Log In
+                </button>
+                <button
+                  onClick={() => go("/sign-up")}
+                  className="flex items-center gap-2 rounded-full border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#faf7f1]"
+                >
+                  <User size={16} />
+                  Register
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
 
-        {/* Mobile: Account + Hamburger */}
-        <div className="md:hidden flex items-center gap-4 print:hidden">
-          {isAuthed && (
+        {/* Mobile controls */}
+        <div className="md:hidden flex items-center gap-2">
+          {isAuthed ? (
             <button
-              onClick={() => setAccountDropdownOpen((v) => !v)}
-              className="flex items-center gap-2 text-sm text-[#5a4a3f] hover:text-[#8b6f47] px-4 py-2 rounded-full border border-[#e4ddd3] bg-[#fdfaf5] hover:bg-[#f1ede7] transition"
+              onClick={() => setDropdownOpen((v) => !v)}
+              className="flex items-center gap-2 rounded-full border border-[#e4ddd3] bg-[#fdfaf5] px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#f1ede7] transition"
               aria-label="Account"
+              aria-expanded={dropdownOpen}
             >
               <UserCircle size={20} />
+              <ChevronDown size={16} />
             </button>
-          )}
-
+          ) : null}
           <button
-            className="text-[#5a4a3f]"
             onClick={() => setIsOpen((v) => !v)}
+            className="rounded-full p-2 text-[#5a4a3f] hover:bg-[#e8e2d9]"
             aria-label="Toggle menu"
+            aria-expanded={isOpen}
           >
-            {isOpen ? <X size={24} /> : <Menu size={24} />}
+            {isOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
         </div>
       </div>
 
-      {/* Mobile Nav */}
+      {/* Mobile sheet */}
       {isOpen && (
-        <div className="md:hidden bg-[#f4f1ec] border-t border-[#e2ded8] px-6 py-6 animate-fade-in shadow-xl transition-all">
-          <nav className="flex flex-col gap-6 items-center">
-            {navLinks.map((link) => (
-              <button
-                key={link.name}
-                onClick={() => {
-                  routeLoader?.triggerRouteChange(link.href);
-                  setIsOpen(false);
-                }}
-                className="text-[#5a4a3f] text-lg hover:bg-[#e8e2d9] px-4 py-2 rounded-full transition-all"
-              >
-                {link.name}
-              </button>
-            ))}
-
-            {!isAuthed && (
-              <>
+        <div className="md:hidden border-t border-[#e2ded8] bg-[#f4f1ec] px-6 py-6 shadow-xl">
+          <nav className="flex flex-col gap-2" aria-label="Mobile">
+            <p className="px-2 pb-2 text-xs uppercase tracking-wide text-[#7a6a5f]">
+              Navigate
+            </p>
+            {navLinks.map((l) => {
+              const active = pathname?.startsWith(l.href);
+              return (
                 <button
+                  key={l.href}
                   onClick={() => {
-                    routeLoader?.triggerRouteChange("/login");
                     setIsOpen(false);
+                    go(l.href);
                   }}
-                  className="flex items-center gap-2 text-sm text-[#8b6f47] hover:text-[#5a4a3f] py-1.5 px-3 transition-all font-medium hover:bg-[#e8e2d9] rounded-full"
+                  className={`rounded-xl px-4 py-3 text-left text-base ${
+                    active
+                      ? "bg-white text-[#5a4a3f] border border-[#e0dcd4]"
+                      : "text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                  }`}
+                  aria-current={active ? "page" : undefined}
                 >
-                  <LogIn size={16} /> Log In
+                  {l.name}
                 </button>
+              );
+            })}
 
+            <div className="mt-4 h-px bg-[#e7e2da]" />
+
+            {isAuthed ? (
+              <>
+                <p className="px-2 pt-2 text-xs uppercase tracking-wide text-[#7a6a5f]">
+                  Account
+                </p>
                 <button
                   onClick={() => {
-                    routeLoader?.triggerRouteChange("/sign-up");
                     setIsOpen(false);
+                    go("/bookings");
                   }}
-                  className="flex items-center gap-2 text-sm text-[#8b6f47] hover:text-[#5a4a3f] py-1.5 px-3 transition-all font-medium hover:bg-[#e8e2d9] rounded-full"
+                  className="rounded-xl px-4 py-3 text-left text-base text-[#5a4a3f] hover:bg-[#e8e2d9]"
                 >
-                  <User size={16} /> Register
+                  My Bookings
+                </button>
+                <button
+                  onClick={() => {
+                    setIsOpen(false);
+                    go("/dashboard");
+                  }}
+                  className="rounded-xl px-4 py-3 text-left text-base text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                >
+                  Dashboard
+                </button>
+                {finalProfile.isAdmin && (
+                  <button
+                    onClick={() => {
+                      setIsOpen(false);
+                      go("/admin");
+                    }}
+                    className="rounded-xl px-4 py-3 text-left text-base text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                  >
+                    Admin Dashboard
+                  </button>
+                )}
+                <button
+                  onClick={handleSignOut}
+                  className="mt-2 rounded-xl px-4 py-3 text-left text-base text-[#b44d4d] hover:bg-[#faecea]"
+                >
+                  Sign Out
                 </button>
               </>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setIsOpen(false);
+                    go("/login");
+                  }}
+                  className="flex-1 rounded-xl border border-transparent bg-white px-4 py-3 text-center text-[#5a4a3f] hover:bg-[#faf7f1]"
+                >
+                  Log In
+                </button>
+                <button
+                  onClick={() => {
+                    setIsOpen(false);
+                    go("/sign-up");
+                  }}
+                  className="flex-1 rounded-xl border border-[#e0dcd4] bg-white px-4 py-3 text-center text-[#5a4a3f] hover:bg-[#faf7f1]"
+                >
+                  Register
+                </button>
+              </div>
             )}
           </nav>
         </div>
       )}
-
-      {/* Mobile Account Dropdown */}
-      {accountDropdownOpen && isAuthed && (
-        <div className="md:hidden absolute top-20 right-4 w-48 bg-white rounded-xl shadow-lg border border-[#eae6e0] z-10">
-          <button
-            onClick={() => routeLoader?.triggerRouteChange("/bookings")}
-            className="block w-full text-left px-4 py-2 text-sm hover:bg-[#fdfaf5] text-[#5a4a3f]"
-          >
-            My Bookings
-          </button>
-          <button
-            onClick={() => routeLoader?.triggerRouteChange("/dashboard")}
-            className="block w-full text-left px-4 py-2 text-sm hover:bg-[#fdfaf5] text-[#5a4a3f]"
-          >
-            Dashboard
-          </button>
-          {role === "admin" && (
-            <nav>
-              <a
-                className="block w-full text-left px-4 py-2 text-sm hover:bg-[#fdfaf5] text-[#5a4a3f]"
-                href="/admin"
-              >
-                Admin Dashboard
-              </a>
-            </nav>
-          )}
-          <button
-            onClick={handleSignOut}
-            className="block w-full text-left px-4 py-2 text-sm hover:bg-[#fdfaf5] text-[#b44d4d]"
-          >
-            Sign Out
-          </button>
-        </div>
-      )}
     </header>
   );
-}
-
-/* helpers */
-function safeTitle(str = "") {
-  return String(str)
-    .toLowerCase()
-    .replace(/(^.|[\s-].)/g, (m) => m.toUpperCase())
-    .trim();
 }
