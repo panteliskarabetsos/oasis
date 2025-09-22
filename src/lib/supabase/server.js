@@ -1,14 +1,13 @@
 // src/lib/supabase/server.js
+import "server-only";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
 export async function createSupabaseServer() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
   if (!url || !anon) return null;
 
-  // ⬇️ Next.js 14.2+/15: cookies() is async
   const cookieStore = await cookies();
 
   return createServerClient(url, anon, {

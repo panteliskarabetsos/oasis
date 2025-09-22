@@ -77,6 +77,9 @@ export async function GET(req) {
 }
 
 // POST: create a slot
+// ...existing imports and helpers
+
+// POST: create a slot
 export async function POST(req) {
   const gate = await requireAdmin();
   if ("body" in gate) return gate;
@@ -89,11 +92,16 @@ export async function POST(req) {
   if (!experienceId || !date || totalSlots == null)
     return bad("Missing required fields");
 
+  const nowIso = new Date().toISOString();
+
   const payload = {
     experienceId: Number(experienceId),
-    date: new Date(date).toISOString(), // ensure ISO string
+    date: new Date(date).toISOString(),
     totalSlots: Number(totalSlots),
     bookedSlots: 0,
+    createdAt: nowIso, // ✅ add this
+    updatedAt: nowIso, // ✅ and this
+    // isCancelled: false,  // optional if your column has a default
   };
 
   const { data, error } = await admin
@@ -123,7 +131,6 @@ export async function PUT(req) {
   if (typeof totalSlots !== "number" || totalSlots < 0)
     return bad("Invalid totalSlots");
 
-  // Fetch current to compare bookedSlots
   const { data: existing, error: getErr } = await admin
     .from("ScheduleSlot")
     .select("id,bookedSlots")
@@ -131,9 +138,11 @@ export async function PUT(req) {
     .single();
 
   if (getErr) {
-    if (getErr.code === "PGRST116") return bad("Slot not found", 404); // PostgREST not found
     console.error("PUT /admin/schedule fetch error:", getErr);
-    return bad("Server error", 500);
+    return bad(
+      getErr.code === "PGRST116" ? "Slot not found" : "Server error",
+      getErr.code === "PGRST116" ? 404 : 500
+    );
   }
 
   if ((existing?.bookedSlots ?? 0) > totalSlots) {
@@ -145,7 +154,7 @@ export async function PUT(req) {
 
   const { data, error: updErr } = await admin
     .from("ScheduleSlot")
-    .update({ totalSlots })
+    .update({ totalSlots, updatedAt: new Date().toISOString() }) // ✅ keep updatedAt current
     .eq("id", Number(id))
     .select()
     .single();

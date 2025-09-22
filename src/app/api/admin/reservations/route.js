@@ -17,14 +17,13 @@ async function getAuthUser() {
   const supa = await createSupabaseServer();
   const { data, error } = await supa.auth.getUser();
   if (error || !data?.user) return null;
-  return data.user; // { id, email, app_metadata, user_metadata }
+  return data.user;
 }
 
 async function requireAdmin() {
   const user = await getAuthUser();
   if (!user) return err("Unauthorized", 401);
 
-  // quick metadata check
   if (
     user?.app_metadata?.role === "admin" ||
     user?.user_metadata?.role === "admin"
@@ -35,7 +34,6 @@ async function requireAdmin() {
   const admin = createSupabaseAdmin();
   if (!admin) return err("Server not configured", 500);
 
-  // fallback: check DB role
   const { data: dbUser, error: roleErr } = await admin
     .from("User")
     .select("role")
@@ -57,7 +55,6 @@ async function requireUserAndDbId() {
   const admin = createSupabaseAdmin();
   if (!admin) return { error: err("Server not configured", 500) };
 
-  // Map auth user -> public."User".id
   const { data: dbUser, error: upErr } = await admin
     .from("User")
     .select("id,email")
@@ -76,11 +73,10 @@ async function requireUserAndDbId() {
 /* ===================== GET (Admin) ===================== */
 export async function GET() {
   const gate = await requireAdmin();
-  if ("body" in gate) return gate; // NextResponse from err()
+  if ("body" in gate) return gate;
 
   const admin = createSupabaseAdmin();
   try {
-    // Nested select using PostgREST relationships (requires proper FKs)
     const { data, error } = await admin
       .from("Booking")
       .select(
@@ -88,9 +84,7 @@ export async function GET() {
         id,
         numberOfPeople,
         notes,
-        user:User (
-          id, email, name, surname, phone
-        ),
+        user:User ( id, email, name, surname, phone ),
         scheduleSlot:ScheduleSlot (
           id, date,
           experience:Experience ( id, name )
@@ -117,6 +111,7 @@ export async function POST(req) {
 
   const { dbUserId } = map;
   const { scheduleSlotId, numberOfPeople = 1, notes = "" } = await req.json();
+  const nowIso = new Date().toISOString();
 
   try {
     // 1) load slot
@@ -133,14 +128,15 @@ export async function POST(req) {
       return err("Not enough available slots for this date", 400);
     }
 
-    // 2) increment slot.bookedSlots
+    // 2) increment slot.bookedSlots (+ touch updatedAt)
+    const newBooked = slot.bookedSlots + Number(numberOfPeople);
     const { error: incErr } = await admin
       .from("ScheduleSlot")
-      .update({ bookedSlots: slot.bookedSlots + Number(numberOfPeople) })
+      .update({ bookedSlots: newBooked, updatedAt: nowIso })
       .eq("id", slot.id);
     if (incErr) throw incErr;
 
-    // 3) create booking
+    // 3) create booking with timestamps
     const { data: booking, error: bookErr } = await admin
       .from("Booking")
       .insert({
@@ -148,22 +144,29 @@ export async function POST(req) {
         scheduleSlotId: Number(scheduleSlotId),
         numberOfPeople: Number(numberOfPeople),
         notes: notes || null,
+        createdAt: nowIso, // ✅ required
+        updatedAt: nowIso, // ✅ required
+        // status: "confirmed",      // if you don't have a default
       })
       .select(
         `
         id,
         user:User ( name, email ),
-        scheduleSlot:ScheduleSlot (
-          date,
-          experience:Experience ( name, location )
-        )
+        scheduleSlot:ScheduleSlot ( date, experience:Experience ( name, location ) )
       `
       )
       .single();
 
-    if (bookErr) throw bookErr;
+    // If insert failed, roll back the increment to keep counts consistent
+    if (bookErr) {
+      await admin
+        .from("ScheduleSlot")
+        .update({ bookedSlots: slot.bookedSlots, updatedAt: nowIso })
+        .eq("id", slot.id);
+      throw bookErr;
+    }
 
-    // 4) send email
+    // 4) send email (best-effort)
     try {
       const { subject, html } = generateBookingConfirmationEmail(booking);
       await transporter.sendMail({
@@ -193,6 +196,7 @@ export async function PATCH(req) {
 
   const body = await req.json();
   const { id, userId, scheduleSlotId, numberOfPeople = 1, notes = "" } = body;
+  const nowIso = new Date().toISOString();
 
   try {
     // Load old booking
@@ -219,7 +223,11 @@ export async function PATCH(req) {
       const { error: decErr } = await admin
         .from("ScheduleSlot")
         .update({
-          bookedSlots: Math.max(0, oldSlot.bookedSlots - old.numberOfPeople),
+          bookedSlots: Math.max(
+            0,
+            (oldSlot.bookedSlots || 0) - old.numberOfPeople
+          ),
+          updatedAt: nowIso,
         })
         .eq("id", oldSlot.id);
       if (decErr) throw decErr;
@@ -240,12 +248,15 @@ export async function PATCH(req) {
       // increment new slot
       const { error: incErr } = await admin
         .from("ScheduleSlot")
-        .update({ bookedSlots: newSlot.bookedSlots + Number(numberOfPeople) })
+        .update({
+          bookedSlots: newSlot.bookedSlots + Number(numberOfPeople),
+          updatedAt: nowIso,
+        })
         .eq("id", newSlot.id);
       if (incErr) throw incErr;
     }
 
-    // update booking
+    // update booking (+ touch updatedAt)
     const { data: updated, error: upErr } = await admin
       .from("Booking")
       .update({
@@ -253,6 +264,7 @@ export async function PATCH(req) {
         scheduleSlotId: Number(scheduleSlotId),
         numberOfPeople: Number(numberOfPeople),
         notes: notes || null,
+        updatedAt: nowIso, // ✅ keep fresh
       })
       .eq("id", Number(id))
       .select()
@@ -286,10 +298,7 @@ export async function DELETE(req) {
         numberOfPeople,
         scheduleSlotId,
         user:User ( email, name ),
-        scheduleSlot:ScheduleSlot (
-          id, date,
-          experience:Experience ( id, name, location )
-        )
+        scheduleSlot:ScheduleSlot ( id, date, experience:Experience ( id, name, location ) )
       `
       )
       .eq("id", Number(id))
@@ -319,11 +328,12 @@ export async function DELETE(req) {
           0,
           (slot.bookedSlots || 0) - booking.numberOfPeople
         ),
+        updatedAt: new Date().toISOString(),
       })
       .eq("id", slot.id);
     if (decErr) throw decErr;
 
-    // email cancellation
+    // email cancellation (best-effort)
     try {
       const emailContent = generateCancellationEmail(booking);
       await transporter.sendMail({
