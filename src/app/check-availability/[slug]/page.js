@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { format, isSameDay, parseISO } from "date-fns";
+import { format, isSameDay, parseISO, isAfter } from "date-fns";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/dist/style.css";
 import toast from "react-hot-toast";
@@ -16,6 +16,9 @@ import {
   Minus,
   Plus,
   ArrowLeft,
+  MapPin,
+  Info,
+  CheckCircle2,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 
@@ -34,8 +37,59 @@ export default function CheckAvailabilityPage() {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
+  const slotsContainerRef = useRef(null);
+
+  // Fetch experience & slots
+  useEffect(() => {
+    if (!slug) return;
+    (async () => {
+      try {
+        setLoadingSlots(true);
+        const expRes = await fetch(`/api/experiences/${slug}`, {
+          cache: "no-store",
+        });
+        if (!expRes.ok) throw new Error("Experience not found");
+        const exp = await expRes.json();
+        setExperience(exp);
+
+        const slotsRes = await fetch(
+          `/api/public/schedule?experienceId=${exp.id}`,
+          { cache: "no-store" }
+        );
+        const slots = (await slotsRes.json()) || [];
+        const now = new Date();
+        const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+        const futureOnly = slots.filter((s) =>
+          isAfter(parseISO(s.date), oneHourFromNow)
+        );
+        setAvailableSlots(futureOnly);
+
+        const firstDay = earliestDayWithAvailability(futureOnly);
+        if (firstDay) setSelectedDate(firstDay);
+      } catch (e) {
+        console.error(e);
+        toast.error("Failed to load experience or availability.");
+      } finally {
+        setLoadingSlots(false);
+      }
+    })();
+  }, [slug]);
+
+  // Reset slot choice when date changes + scroll
+  useEffect(() => {
+    setSelectedSlotId(null);
+    if (selectedDate && slotsContainerRef.current) {
+      setTimeout(() => {
+        slotsContainerRef.current.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 50);
+    }
+  }, [selectedDate]);
+
   const selectedSlot = useMemo(
-    () => availableSlots.find((slot) => slot.id === selectedSlotId) || null,
+    () => availableSlots.find((s) => s.id === selectedSlotId) || null,
     [availableSlots, selectedSlotId]
   );
 
@@ -47,57 +101,58 @@ export default function CheckAvailabilityPage() {
     : 8;
   const maxPeopleAllowed = Math.min(8, availablePlaces || 8);
 
+  const [dbProfile, setDbProfile] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        // only fetch when logged in
+        if (!user) return;
+        const res = await fetch("/api/me", { cache: "no-store" });
+        if (!res.ok) throw new Error("Failed to load profile");
+        const data = await res.json();
+        if (alive) setDbProfile(data || null);
+      } catch (e) {
+        console.warn("[check-availability] /api/me failed", e);
+        if (alive) setDbProfile(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [user]);
+
+  // replace your displayName with this:
   const displayName = useMemo(() => {
+    // 1) Prefer DB
+    const fromDb = [dbProfile?.name, dbProfile?.surname]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    if (fromDb) return fromDb;
+
+    // 2) Fallback to auth metadata
     const md = user?.user_metadata || {};
     const first = titleCase(
       md.firstName ?? md.given_name ?? md.name ?? md.full_name ?? ""
     );
     const last = titleCase(md.lastName ?? md.family_name ?? md.surname ?? "");
     const full = [first, last].filter(Boolean).join(" ").trim();
+
     return full || "Explorer";
-  }, [user]);
-
-  // Fetch experience + slots when slug is ready
-  useEffect(() => {
-    if (!slug) return;
-    const fetchExperienceAndSlots = async () => {
-      try {
-        setLoadingSlots(true);
-        const res = await fetch(`/api/experiences/${slug}`, {
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error("Experience not found");
-        const matched = await res.json();
-        setExperience(matched);
-
-        const slotsRes = await fetch(
-          `/api/public/schedule?experienceId=${matched.id}`,
-          { cache: "no-store" }
-        );
-        const slots = await slotsRes.json();
-        setAvailableSlots(Array.isArray(slots) ? slots : []);
-      } catch (error) {
-        console.error(error);
-        toast.error("Failed to load experience or availability.");
-      } finally {
-        setLoadingSlots(false);
-      }
-    };
-    fetchExperienceAndSlots();
-  }, [slug]);
+  }, [dbProfile, user]);
 
   async function handleReserve() {
     if (!selectedSlotId || numberOfPeople <= 0) {
       toast.error("Please select a time slot and number of people.");
       return;
     }
-
     if (!user) {
       toast.error("Please log in to continue.");
       router.push("/login");
       return;
     }
-
     if (!agreedToTerms) {
       toast.error("You must agree to the Terms of Use to proceed.");
       return;
@@ -105,9 +160,8 @@ export default function CheckAvailabilityPage() {
 
     try {
       setIsSubmitting(true);
-      // Send both appUserId (if you store it in user_metadata) and email
       const payload = {
-        appUserId: user?.user_metadata?.appUserId ?? null, // optional numeric app user id
+        appUserId: user?.user_metadata?.appUserId ?? null,
         email: user?.email ?? null,
         scheduleSlotId: selectedSlotId,
         numberOfPeople,
@@ -122,8 +176,7 @@ export default function CheckAvailabilityPage() {
 
       if (res.ok) {
         const data = await res.json();
-        const id = data.id;
-        router.push(`/booking-confirmed/${id}`);
+        router.push(`/booking-confirmed/${data.id}`);
       } else {
         const error = await res.json().catch(() => ({}));
         toast.error(error?.error || "Reservation failed. Try again.");
@@ -136,125 +189,196 @@ export default function CheckAvailabilityPage() {
     }
   }
 
+  // Calendar helpers
+  const availableDates = useMemo(
+    () => availableSlots.map((s) => parseISO(s.date)),
+    [availableSlots]
+  );
+
+  const slotsOnSelectedDay = useMemo(() => {
+    if (!selectedDate) return [];
+    return availableSlots
+      .filter((s) => isSameDay(parseISO(s.date), selectedDate))
+      .sort((a, b) => parseISO(a.date) - parseISO(b.date));
+  }, [availableSlots, selectedDate]);
+
+  const hasAnySlots = availableSlots.length > 0;
+
+  const firstImage =
+    Array.isArray(experience?.images) && experience.images.length
+      ? experience.images[0]
+      : null;
+
+  const step = !selectedDate ? 1 : !selectedSlotId ? 2 : 3;
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-start bg-gradient-to-br from-[#fdfaf5] to-[#f4f1ec] px-4 sm:px-6 pt-20 pb-10">
-      <div className="w-full max-w-4xl bg-[#fcf9f4] rounded-3xl shadow-2xl border border-[#e5e0d8] p-6 sm:p-10 flex flex-col gap-10 sm:gap-12">
-        {/* Back Button */}
-        <div className="w-full">
+    <div className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
+      {/* Top bar */}
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-20">
+        <div className="flex items-center justify-between">
           <button
             onClick={() => router.back()}
-            className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#8b6f47] rounded-full px-5 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all font-medium shadow-sm hover:shadow-md"
+            className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#8b6f47]/70 rounded-full px-4 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm"
           >
-            <ArrowLeft size={18} className="text-[#8b6f47]" />
+            <ArrowLeft size={16} />
             Back
           </button>
-        </div>
 
-        {/* Auth notice */}
-        {loading ? (
-          <p className="text-[#5a4a3f] text-center mb-4">Checking session…</p>
-        ) : !user ? (
-          <div className="bg-[#fff8f5] border border-[#f5d0c5] rounded-xl p-6 text-center text-[#5a4a3f] shadow-sm">
-            <h2 className="text-2xl font-semibold mb-3">
-              Please Log In or Register
-            </h2>
-            <p className="text-sm mb-4">
-              You need to be logged in to make a reservation.
+          {!loading && user ? (
+            <p className="text-xs sm:text-sm text-[#5a4a3f]">
+              Logged in as <span className="font-medium">{displayName}</span>
             </p>
+          ) : loading ? (
+            <span className="text-xs text-[#7a6a5a]">Checking session…</span>
+          ) : (
             <button
               onClick={() => router.push("/login")}
-              className="inline-block bg-[#8b6f47] text-white px-6 py-2 rounded-full font-medium hover:bg-[#7a5f3a] transition"
+              className="text-xs sm:text-sm rounded-full bg-[#8b6f47] px-4 py-2 text-white hover:bg-[#7a5f3a]"
             >
-              Log In to Continue
+              Log in
             </button>
-          </div>
-        ) : (
-          <div className="text-sm text-center text-[#5a4a3f]">
-            Logged in as: <span className="font-medium">{displayName}</span>
-          </div>
-        )}
+          )}
+        </div>
+      </div>
 
-        {/* Main content */}
-        <div className="flex flex-col lg:flex-row gap-16 items-start justify-center">
-          {/* Left: Calendar */}
-          <div className="flex-1 w-full flex flex-col items-center text-center">
-            <h1 className="text-4xl font-serif font-bold text-[#5a4a3f] mb-4 flex items-center justify-center gap-2">
-              <CalendarDays className="w-7 h-7 text-[#8b6f47]" />
-              Check Availability
-            </h1>
+      {/* Header banner */}
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 mt-6">
+        <div className="relative overflow-hidden rounded-3xl border border-[#e5e0d8] bg-[#fcf9f4]">
+          <div className="absolute inset-0 bg-gradient-to-r from-[#efe9df] via-transparent to-[#efe9df] pointer-events-none" />
+          {firstImage ? (
+            <img
+              src={firstImage}
+              alt={experience?.name || "Experience"}
+              className="absolute inset-0 h-full w-full object-cover opacity-20"
+            />
+          ) : null}
 
-            {experience && (
-              <p className="text-lg sm:text-xl text-[#8b6f47] font-medium mb-8 tracking-wide">
-                {experience.name}
-              </p>
-            )}
-
-            <div className="w-full max-w-full sm:max-w-md bg-white rounded-2xl border border-[#e8e5df] shadow-inner p-4 sm:p-6 flex items-center justify-center">
-              {loadingSlots ? (
-                <div className="flex flex-col items-center gap-3 text-[#5a4a3f]">
-                  <Loader2 className="w-8 h-8 animate-spin text-[#8b6f47]" />
-                  <span className="text-sm">Loading availability...</span>
+          <div className="relative z-10 p-6 sm:p-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-full bg-[#efeae2] p-2">
+                  <CalendarDays className="h-5 w-5 text-[#8b6f47]" />
                 </div>
-              ) : (
-                <div className="flex items-center justify-center mb-4">
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#5a4a3f]">
+                    {experience?.name || "Experience"}
+                  </h1>
+                  {experience?.location ? (
+                    <p className="mt-1 flex items-center gap-2 text-sm text-[#6b5e53]">
+                      <MapPin size={14} className="text-[#8b6f47]" />
+                      {experience.location}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              {typeof experience?.price === "number" ? (
+                <div className="mt-3 sm:mt-0 rounded-xl border border-[#e0dcd4] bg-white px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
+                  From{" "}
+                  <span className="font-semibold">
+                    €{experience.price.toFixed(2)}
+                  </span>{" "}
+                  / person
+                </div>
+              ) : null}
+            </div>
+
+            {/* Stepper */}
+            <div className="mt-5 grid grid-cols-3 gap-2 text-xs sm:text-sm">
+              <Step label="Choose date" active={step >= 1} done={step > 1} />
+              <Step label="Choose time" active={step >= 2} done={step > 2} />
+              <Step label="Confirm details" active={step >= 3} />
+            </div>
+
+            {/* Info banner */}
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
+              <Info size={14} className="mt-0.5 text-[#8b6f47]" />
+              <p>
+                Pick a date with availability, then choose a time. Max 8 people
+                per booking. Larger group?{" "}
+                <a href="/contact" className="underline text-[#8b6f47]">
+                  Contact us
+                </a>
+                .
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-10">
+          {/* Left: Calendar */}
+          <section className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm">
+            {loadingSlots ? (
+              <SkeletonCalendar />
+            ) : !hasAnySlots ? (
+              <div className="py-8 text-center text-[#5a4a3f]">
+                <p className="font-medium">No upcoming availability yet.</p>
+                <p className="text-sm text-[#7a6a5a] mt-1">
+                  Please check back soon or reach out for custom dates.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-center">
                   <DayPicker
                     mode="single"
                     selected={selectedDate}
-                    onSelect={setSelectedDate}
+                    onSelect={(d) => setSelectedDate(d || null)}
                     fromMonth={new Date()}
                     toMonth={
                       new Date(new Date().setMonth(new Date().getMonth() + 6))
                     }
-                    modifiers={{
-                      available: availableSlots.map((s) => parseISO(s.date)),
+                    modifiers={{ available: availableDates }}
+                    disabled={[
+                      { before: new Date() },
+                      (date) => !availableDates.some((d) => isSameDay(d, date)),
+                    ]}
+                    classNames={{
+                      caption: "rdp-caption mb-2",
+                      day_today:
+                        "rdp-day_today border border-[#8b6f47] !rounded-full",
+                      day_selected:
+                        "rdp-day_selected !bg-[#8b6f47] !text-white !rounded-full hover:!bg-[#7a5f3a]",
+                      day: "rdp-day !rounded-full",
                     }}
                     modifiersClassNames={{
                       available:
-                        "bg-[#e5dfd2] text-[#5a4a3f] font-semibold rounded-full hover:bg-[#efe9db] hover:text-[#3d2b1f] transition-all duration-300",
+                        "bg-[#e9e4d8] text-[#5a4a3f] font-medium hover:bg-[#efe9db] hover:text-[#3d2b1f]",
                     }}
-                    disabled={[
-                      { before: new Date() },
-                      (date) => {
-                        const today = new Date();
-                        const slotsOnDay = availableSlots.filter((s) =>
-                          isSameDay(parseISO(s.date), date)
-                        );
-                        if (slotsOnDay.length === 0) return true;
-                        if (isSameDay(date, today)) {
-                          const oneHourLater = new Date(
-                            today.getTime() + 60 * 60 * 1000
-                          );
-                          const hasValidSlot = slotsOnDay.some(
-                            (slot) => parseISO(slot.date) > oneHourLater
-                          );
-                          return !hasValidSlot;
-                        }
-                        return false;
-                      },
-                    ]}
-                    className="w-full"
                   />
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
+                <p className="mt-3 text-center text-xs text-[#7a6a58]">
+                  Showing the next 6 months of availability.
+                </p>
+              </>
+            )}
+          </section>
 
-        {/* Right: Slots + Form */}
-        {selectedDate && (
-          <div className="flex-1 space-y-8 w-full">
+          {/* Right: Slots + Booking card */}
+          <section className="space-y-6" ref={slotsContainerRef}>
             {/* Slots */}
-            <div>
-              <h3 className="text-lg font-semibold text-[#5a4a3f] mb-3 text-center flex items-center justify-center gap-2">
+            <div className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm">
+              <h3 className="mb-3 text-lg font-semibold text-[#5a4a3f] flex items-center gap-2">
                 <Clock className="w-5 h-5 text-[#8b6f47]" />
-                Available Time Slots for {format(selectedDate, "PPP")}:
+                {selectedDate
+                  ? `Available times on ${format(selectedDate, "PPP")}`
+                  : "Select a date"}
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {availableSlots
-                  .filter((slot) =>
-                    isSameDay(parseISO(slot.date), selectedDate)
-                  )
-                  .map((slot) => {
+
+              {!selectedDate ? (
+                <p className="text-sm text-[#7a6a5a]">
+                  Choose a date to see times.
+                </p>
+              ) : slotsOnSelectedDay.length === 0 ? (
+                <p className="text-sm text-[#7a6a5a]">
+                  No times available for this day.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {slotsOnSelectedDay.map((slot) => {
                     const available =
                       (slot.totalSlots ?? 0) - (slot.bookedSlots ?? 0);
                     const isSelected = selectedSlotId === slot.id;
@@ -262,210 +386,189 @@ export default function CheckAvailabilityPage() {
                     const time = format(parseISO(slot.date), "p");
 
                     return (
-                      <label
+                      <button
                         key={slot.id}
-                        className={`border rounded-xl p-4 transition-all shadow-sm flex items-center justify-between gap-4 cursor-pointer
-                          ${
-                            isDisabled
-                              ? "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed opacity-60"
-                              : isSelected
-                              ? "bg-[#f5efe4] border-[#8b6f47]"
-                              : "bg-white border-[#e8e5df] hover:shadow-md"
-                          }`}
+                        type="button"
+                        onClick={() =>
+                          !isDisabled && setSelectedSlotId(slot.id)
+                        }
+                        disabled={isDisabled}
+                        className={`flex items-center justify-between rounded-xl border p-4 text-left transition-all shadow-sm ${
+                          isDisabled
+                            ? "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
+                            : isSelected
+                            ? "bg-[#f5efe4] border-[#8b6f47]"
+                            : "bg-white border-[#e8e5df] hover:shadow-md"
+                        }`}
+                        aria-pressed={isSelected}
                       >
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="radio"
-                            name="slot"
-                            value={slot.id}
-                            checked={isSelected}
-                            disabled={isDisabled}
-                            onChange={() => setSelectedSlotId(slot.id)}
-                            className="accent-[#8b6f47] w-5 h-5"
-                          />
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium">{time}</span>
-                            <span
-                              className={`text-xs font-medium ${
-                                isDisabled ? "text-gray-500" : "text-green-700"
-                              }`}
-                            >
-                              {isDisabled
-                                ? "Fully booked"
-                                : `${available} available`}
-                            </span>
+                        <div>
+                          <div className="text-sm font-semibold">{time}</div>
+                          <div
+                            className={`text-xs font-medium ${
+                              isDisabled ? "text-gray-500" : "text-green-700"
+                            }`}
+                          >
+                            {isDisabled
+                              ? "Fully booked"
+                              : `${available} available`}
                           </div>
                         </div>
-                      </label>
+                        <input
+                          type="radio"
+                          name="slot"
+                          className="accent-[#8b6f47]"
+                          checked={isSelected}
+                          readOnly
+                          aria-label={`Time ${time}`}
+                        />
+                      </button>
                     );
                   })}
-              </div>
-            </div>
-
-            {/* Form */}
-            <div className="bg-white rounded-2xl shadow-md border border-[#e5e0d8] px-4 sm:px-6 py-6 sm:py-8 space-y-8 transition-all duration-300">
-              {/* Number of People */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-[#5a4a3f] flex items-center gap-2">
-                  <Users className="w-4 h-4 text-[#8b6f47]" />
-                  Number of People
-                </label>
-
-                <div
-                  className={`flex items-center justify-between gap-3 bg-[#faf7f2] border border-[#e2ddd2] rounded-lg w-full max-w-[200px] px-2 py-2 shadow-inner transition-all duration-200 ${
-                    numberOfPeople >= maxPeopleAllowed
-                      ? "ring-2 ring-[#d97706]/60"
-                      : ""
-                  }`}
-                >
-                  <button
-                    onClick={() =>
-                      setNumberOfPeople((prev) => Math.max(1, prev - 1))
-                    }
-                    className="text-[#8b6f47] hover:text-[#5a4a3f] transition p-1"
-                    type="button"
-                    aria-label="Decrease"
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-
-                  <input
-                    type="number"
-                    min={1}
-                    max={maxPeopleAllowed}
-                    value={numberOfPeople}
-                    onChange={(e) => {
-                      const val = Math.min(
-                        maxPeopleAllowed,
-                        Math.max(1, Number(e.target.value) || 1)
-                      );
-                      setNumberOfPeople(val);
-                    }}
-                    className="w-12 text-center text-[#5a4a3f] bg-transparent border-0 focus:outline-none font-semibold"
-                  />
-
-                  <button
-                    onClick={() =>
-                      setNumberOfPeople((prev) =>
-                        Math.min(maxPeopleAllowed, prev + 1)
-                      )
-                    }
-                    disabled={numberOfPeople >= maxPeopleAllowed}
-                    className={`text-[#8b6f47] hover:text-[#5a4a3f] transition p-1 ${
-                      numberOfPeople >= maxPeopleAllowed
-                        ? "opacity-40 cursor-not-allowed"
-                        : ""
-                    }`}
-                    type="button"
-                    aria-label="Increase"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {selectedSlotId && (
-                  <p className="text-xs text-[#5a4a3f] mt-2">
-                    Only{" "}
-                    <span className="font-semibold">{maxPeopleAllowed}</span>{" "}
-                    slot
-                    {maxPeopleAllowed > 1 ? "s" : ""} available for this time.
-                  </p>
-                )}
-
-                {numberOfPeople >= maxPeopleAllowed && (
-                  <p className="text-xs text-[#d97706] mt-1">
-                    {maxPeopleAllowed === 8
-                      ? "Maximum number of people allowed per booking is 8. For larger groups, please contact us directly."
-                      : `Only ${maxPeopleAllowed} slot${
-                          maxPeopleAllowed > 1 ? "s" : ""
-                        } available for this time.`}
-                  </p>
-                )}
-              </div>
-
-              {/* Total Price */}
-              {experience && typeof experience.price === "number" && (
-                <div className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2 text-[#5a4a3f]">
-                      <svg
-                        className="w-5 h-5 text-[#8b6f47]"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 8c-1.657 0-3 1.567-3 3.5S10.343 15 12 15s3-1.567 3-3.5S13.657 8 12 8z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 19.95l-.71.71m0-16.97l.71.71m15.14 15.14l.71.71M21 12h1M2 12H1"
-                        />
-                      </svg>
-                      <span className="text-sm font-medium">
-                        Price Breakdown
-                      </span>
-                    </div>
-                    <span className="text-sm text-[#5a4a3f] opacity-75">
-                      €{experience.price.toFixed(2)} × {numberOfPeople}{" "}
-                      {numberOfPeople > 1 ? "people" : "person"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-lg font-semibold text-[#5a4a3f]">
-                      Total Price
-                    </span>
-                    <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                      €{(experience.price * numberOfPeople).toFixed(2)}
-                    </span>
-                  </div>
                 </div>
               )}
+            </div>
 
-              {/* Notes */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-[#5a4a3f] flex items-center gap-2">
-                  <StickyNote className="w-4 h-4 text-[#8b6f47]" />
-                  Notes / Allergies / Special Requests
-                </label>
-                <textarea
-                  rows={3}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="E.g. vegan, nut allergy..."
-                  className="w-full p-3 rounded-lg border border-[#d7d2c6] bg-[#fafafa] focus:outline-none focus:ring focus:ring-[#c4b89f] text-[#5a4a3f]"
-                />
-              </div>
+            {/* Booking card (sticky on desktop) */}
+            <div className="lg:sticky lg:top-24">
+              <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
+                <h3 className="text-lg font-semibold text-[#5a4a3f]">
+                  Your booking
+                </h3>
 
-              {/* Terms */}
-              <div className="flex items-center justify-start gap-2 mt-6">
-                <input
-                  type="checkbox"
-                  id="agreeTerms"
-                  checked={agreedToTerms}
-                  onChange={(e) => setAgreedToTerms(e.target.checked)}
-                  className="accent-[#8b6f47]"
-                />
-                <label htmlFor="agreeTerms" className="text-sm text-[#5a4a3f]">
-                  I agree to the{" "}
-                  <a href="/terms" className="underline text-[#8b6f47]">
-                    Terms of Use
-                  </a>
-                </label>
-              </div>
+                {/* Capacity meter */}
+                {selectedSlot && (
+                  <CapacityBar
+                    total={selectedSlot.totalSlots}
+                    booked={selectedSlot.bookedSlots}
+                  />
+                )}
 
-              {/* Submit */}
-              <div className="pt-2">
+                {/* People stepper */}
+                <div className="mt-4 space-y-2">
+                  <label className="block text-sm font-medium text-[#5a4a3f] flex items-center gap-2">
+                    <Users className="w-4 h-4 text-[#8b6f47]" />
+                    Number of People
+                  </label>
+                  <div
+                    className={`flex items-center justify-between gap-3 bg-[#faf7f2] border border-[#e2ddd2] rounded-lg w-full max-w-[220px] px-2 py-2 shadow-inner ${
+                      numberOfPeople >= maxPeopleAllowed
+                        ? "ring-2 ring-[#d97706]/60"
+                        : ""
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNumberOfPeople((p) => Math.max(1, p - 1))
+                      }
+                      className="text-[#8b6f47] hover:text-[#5a4a3f] p-1"
+                      aria-label="Decrease"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={maxPeopleAllowed}
+                      value={numberOfPeople}
+                      onChange={(e) => {
+                        const val = Math.min(
+                          maxPeopleAllowed,
+                          Math.max(1, Number(e.target.value) || 1)
+                        );
+                        setNumberOfPeople(val);
+                      }}
+                      className="w-12 text-center text-[#5a4a3f] bg-transparent border-0 focus:outline-none font-semibold"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNumberOfPeople((p) =>
+                          Math.min(maxPeopleAllowed, p + 1)
+                        )
+                      }
+                      disabled={numberOfPeople >= maxPeopleAllowed}
+                      className={`text-[#8b6f47] hover:text-[#5a4a3f] p-1 ${
+                        numberOfPeople >= maxPeopleAllowed
+                          ? "opacity-40 cursor-not-allowed"
+                          : ""
+                      }`}
+                      aria-label="Increase"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {selectedSlotId && (
+                    <p className="text-xs text-[#5a4a3f]">
+                      Only{" "}
+                      <span className="font-semibold">{maxPeopleAllowed}</span>{" "}
+                      slot{maxPeopleAllowed > 1 ? "s" : ""} available for this
+                      time.
+                    </p>
+                  )}
+                </div>
+
+                {/* Price summary */}
+                {experience && typeof experience.price === "number" && (
+                  <div className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-[#5a4a3f]">
+                        €{experience.price.toFixed(2)} × {numberOfPeople}{" "}
+                        {numberOfPeople > 1 ? "people" : "person"}
+                      </span>
+                      <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
+                        €{(experience.price * numberOfPeople).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Notes */}
+                <div className="mt-6 space-y-2">
+                  <label className="block text-sm font-medium text-[#5a4a3f] flex items-center gap-2">
+                    <StickyNote className="w-4 h-4 text-[#8b6f47]" />
+                    Notes / Allergies / Special Requests
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="E.g. vegan, nut allergy..."
+                    className="w-full p-3 rounded-lg border border-[#d7d2c6] bg-white focus:outline-none focus:ring focus:ring-[#c4b89f] text-[#5a4a3f]"
+                  />
+                </div>
+
+                {/* Terms */}
+                <div className="mt-6 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="agreeTerms"
+                    checked={agreedToTerms}
+                    onChange={(e) => setAgreedToTerms(e.target.checked)}
+                    className="accent-[#8b6f47]"
+                  />
+                  <label
+                    htmlFor="agreeTerms"
+                    className="text-sm text-[#5a4a3f]"
+                  >
+                    I agree to the{" "}
+                    <a href="/terms" className="underline text-[#8b6f47]">
+                      Terms of Use
+                    </a>
+                    .
+                  </label>
+                </div>
+
+                {/* Submit */}
                 <button
                   onClick={handleReserve}
-                  disabled={!user || isSubmitting || !agreedToTerms}
-                  className={`w-full py-3 rounded-lg font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md ${
-                    !user || !agreedToTerms
-                      ? "bg-gray-400 cursor-not-allowed"
+                  disabled={
+                    !user || isSubmitting || !agreedToTerms || !selectedSlotId
+                  }
+                  className={`mt-6 w-full py-3 rounded-lg font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md ${
+                    !user || !agreedToTerms || !selectedSlotId
+                      ? "bg-gray-400 cursor-not-allowed text-white"
                       : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
                   }`}
                 >
@@ -476,20 +579,116 @@ export default function CheckAvailabilityPage() {
                     </>
                   ) : !user ? (
                     "Log in to Reserve"
+                  ) : !selectedSlotId ? (
+                    "Select a time"
                   ) : (
                     "Reserve Now"
                   )}
                 </button>
+
+                {/* Small reassurance */}
+                <p className="mt-3 text-center text-[11px] text-[#7a6a58]">
+                  <span className="inline-flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    No charge yet — you’ll receive a confirmation email.
+                  </span>
+                </p>
               </div>
             </div>
-          </div>
-        )}
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/* ---------- UI bits ---------- */
+
+function Step({ label, active, done }) {
+  return (
+    <div
+      className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${
+        active
+          ? "border-[#dcd3c6] bg-white shadow-sm"
+          : "border-[#e9e4da] bg-white/70"
+      }`}
+    >
+      <span
+        className={`inline-grid h-5 w-5 place-items-center rounded-full text-[10px] ${
+          done
+            ? "bg-[#8b6f47] text-white"
+            : active
+            ? "bg-[#efe9df] text-[#5a4a3f] border border-[#e1d8c9]"
+            : "bg-[#f2ede6] text-[#8b6f47]"
+        }`}
+      >
+        {done ? "✓" : "•"}
+      </span>
+      <span className="text-xs text-[#5a4a3f]">{label}</span>
+    </div>
+  );
+}
+
+function CapacityBar({ total = 0, booked = 0 }) {
+  const available = Math.max(0, (total ?? 0) - (booked ?? 0));
+  const usedPct =
+    total > 0 ? Math.min(100, Math.round((booked / total) * 100)) : 0;
+  const tone =
+    usedPct >= 80
+      ? "bg-red-500"
+      : usedPct >= 50
+      ? "bg-yellow-500"
+      : "bg-green-600";
+
+  return (
+    <div className="mt-3">
+      <div className="mb-1 flex items-center justify-between text-xs text-[#7a6a58]">
+        <span>Capacity</span>
+        <span>
+          {available} / {total} available
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-[#ece6dc]">
+        <div
+          className={`h-2 ${tone} transition-all`}
+          style={{ width: `${usedPct}%` }}
+        />
       </div>
     </div>
   );
 }
 
-/* Utils */
+function SkeletonCalendar() {
+  return (
+    <div className="py-6">
+      <div className="mx-auto h-6 w-28 rounded bg-[#ece6dc]" />
+      <div className="mt-4 grid grid-cols-7 gap-2">
+        {Array.from({ length: 35 }).map((_, i) => (
+          <div key={i} className="h-10 rounded-full bg-[#f0ebe3]" />
+        ))}
+      </div>
+      <p className="mt-3 text-center text-xs text-[#7a6a58]">
+        Loading availability…
+      </p>
+    </div>
+  );
+}
+
+/* ---------- Helpers ---------- */
+
+function earliestDayWithAvailability(slots = []) {
+  const days = slots
+    .map((s) => {
+      const d = parseISO(s.date);
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    })
+    .sort((a, b) => a - b);
+  for (let i = 0; i < days.length; i++) {
+    if (i === 0 || days[i].getTime() !== days[i - 1].getTime()) return days[i];
+  }
+  return null;
+}
+
 function titleCase(str = "") {
   if (!str) return "";
   return str
