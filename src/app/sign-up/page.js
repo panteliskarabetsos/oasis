@@ -155,7 +155,7 @@ export default function Register() {
 
   return (
     <div className="relative min-h-screen bg-[#f4f1ec] overflow-hidden">
-      {/* Ambient blobs */}
+
       <div className="pointer-events-none absolute -top-32 -left-24 h-96 w-96 rounded-full bg-[#e9e4dc] blur-3xl opacity-60" />
       <div className="pointer-events-none absolute -bottom-32 -right-24 h-[28rem] w-[28rem] rounded-full bg-[#fff4e1] blur-3xl opacity-70" />
 
@@ -374,7 +374,7 @@ export default function Register() {
   );
 }
 
-/* ---------- Reusable input with icon ---------- */
+
 function Input({
   label,
   value,
