@@ -11,32 +11,69 @@ import {
   CalendarDays,
   Clock,
   Users,
-  StickyNote,
   Loader2,
   Minus,
   Plus,
   ArrowLeft,
   MapPin,
   Info,
-  CheckCircle2,
   PauseCircle,
 } from "lucide-react";
-import { useAuth } from "@/app/components/SessionWrapper";
+
+// --- Currency helpers ---
+function formatEuro(n) {
+  return `€${(Number(n) || 0).toFixed(2)}`;
+}
+
+// --- Pricing helpers ---
+function normalizePricing(exp) {
+  // Priority: pricing JSON -> explicit columns -> legacy price
+  const pj = exp?.pricing || {};
+  const adult = toNum(pj.adult ?? exp?.priceAdult ?? exp?.price ?? 0);
+  const teen = toNum(pj.teen ?? exp?.priceTeen ?? adult); // default = adult
+  const kid = toNum(pj.kid ?? exp?.priceKid ?? adult); // default = adult
+  return { adult, teen, kid };
+}
+function toNum(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+function eur(n) {
+  return `€${(Number(n) || 0).toFixed(2)}`;
+}
 
 export default function CheckAvailabilityPage() {
   const router = useRouter();
   const { slug } = useParams();
-  const { user, loading } = useAuth();
 
+  // Experience + availability
   const [experience, setExperience] = useState(null);
   const [availableSlots, setAvailableSlots] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlotId, setSelectedSlotId] = useState(null);
-  const [numberOfPeople, setNumberOfPeople] = useState(1);
-  const [notes, setNotes] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  // alias (in case other parts use `eur(...)`)
+  const eur = formatEuro;
+  // Group split
+  const [adults, setAdults] = useState(1);
+  const [teens, setTeens] = useState(0);
+  const [kids, setKids] = useState(0);
+  const totalPeople = adults + teens + kids;
+  // Tiered prices (adult/teen/kid)
+  const prices = useMemo(() => normalizePricing(experience), [experience]);
+  const fromPrice = useMemo(() => {
+    const arr = [prices.adult, prices.teen, prices.kid].filter((v) => v > 0);
+    return arr.length ? Math.min(...arr) : null;
+  }, [prices]);
+
+  // Line items + total
+  const lineAdult = adults * prices.adult;
+  const lineTeen = teens * prices.teen;
+  const lineKid = kids * prices.kid;
+  const totalPrice = lineAdult + lineTeen + lineKid;
+
+  // Submit state
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- Global booking settings ---
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -47,8 +84,9 @@ export default function CheckAvailabilityPage() {
   });
 
   const slotsContainerRef = useRef(null);
+
+  // Remaining capacity per calendar day (not per time)
   const countsByYMD = useMemo(() => {
-    // remaining capacity per calendar day (not per time)
     const m = new Map();
     for (const s of availableSlots) {
       const d = parseISO(s.date);
@@ -59,20 +97,17 @@ export default function CheckAvailabilityPage() {
     return m;
   }, [availableSlots]);
 
-  const availableSet = useMemo(
-    () => new Set(Array.from(countsByYMD.keys())),
-    [countsByYMD]
-  );
-
-  const fewLeftDates = useMemo(() => {
-    // mark days with <= 3 total remaining as "few"
-    const list = [];
+  // Buckets for calendar coloring
+  const availabilityBuckets = useMemo(() => {
+    const plenty = [],
+      some = [],
+      few = [];
     countsByYMD.forEach((remaining, ymd) => {
-      if (remaining > 0 && remaining <= 3) {
-        list.push(new Date(ymd)); // Y-M-D → local midnight; good enough for modifiers
-      }
+      if (remaining >= 6) plenty.push(new Date(ymd));
+      else if (remaining >= 4) some.push(new Date(ymd));
+      else if (remaining >= 1) few.push(new Date(ymd));
     });
-    return list;
+    return { plenty, some, few };
   }, [countsByYMD]);
 
   // Fetch global settings (public GET)
@@ -88,7 +123,6 @@ export default function CheckAvailabilityPage() {
         const data = await res.json();
         if (alive) setGlobalSettings(data || {});
       } catch {
-        // If the public route doesn’t exist yet, just continue silently.
         if (alive) {
           setGlobalSettings({
             bookingsPaused: false,
@@ -111,7 +145,6 @@ export default function CheckAvailabilityPage() {
     const until = globalSettings.bookingsPausedUntil
       ? new Date(globalSettings.bookingsPausedUntil)
       : null;
-    // paused indefinitely or until a future time
     return !until || Date.now() < until.getTime();
   }, [globalSettings]);
 
@@ -151,7 +184,7 @@ export default function CheckAvailabilityPage() {
     })();
   }, [slug]);
 
-  // Reset slot choice when date changes + scroll
+  // Reset slot when date changes + scroll to times
   useEffect(() => {
     setSelectedSlotId(null);
     if (selectedDate && slotsContainerRef.current) {
@@ -163,119 +196,6 @@ export default function CheckAvailabilityPage() {
       }, 50);
     }
   }, [selectedDate]);
-
-  const selectedSlot = useMemo(
-    () => availableSlots.find((s) => s.id === selectedSlotId) || null,
-    [availableSlots, selectedSlotId]
-  );
-
-  const availablePlaces = selectedSlot
-    ? Math.max(
-        0,
-        (selectedSlot.totalSlots ?? 0) - (selectedSlot.bookedSlots ?? 0)
-      )
-    : 8;
-  const maxPeopleAllowed = Math.min(8, availablePlaces || 8);
-
-  // DB profile → nicer display name
-  const [dbProfile, setDbProfile] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        if (!user) return;
-        const res = await fetch("/api/me", { cache: "no-store" });
-        if (!res.ok) throw new Error("Failed to load profile");
-        const data = await res.json();
-        if (alive) setDbProfile(data || null);
-      } catch (e) {
-        console.warn("[check-availability] /api/me failed", e);
-        if (alive) setDbProfile(null);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [user]);
-
-  const displayName = useMemo(() => {
-    const fromDb = [dbProfile?.name, dbProfile?.surname]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-    if (fromDb) return fromDb;
-
-    const md = user?.user_metadata || {};
-    const first = titleCase(
-      md.firstName ?? md.given_name ?? md.name ?? md.full_name ?? ""
-    );
-    const last = titleCase(md.lastName ?? md.family_name ?? md.surname ?? "");
-    const full = [first, last].filter(Boolean).join(" ").trim();
-    return full || "Explorer";
-  }, [dbProfile, user]);
-  // Bucket remaining capacity per day → style days by intensity
-  const availabilityBuckets = useMemo(() => {
-    const plenty = [],
-      some = [],
-      few = [];
-    // requires countsByYMD (ymd -> remaining) from your previous setup
-    countsByYMD.forEach((remaining, ymd) => {
-      if (remaining >= 6) plenty.push(new Date(ymd));
-      else if (remaining >= 4) some.push(new Date(ymd));
-      else if (remaining >= 1) few.push(new Date(ymd));
-    });
-    return { plenty, some, few };
-  }, [countsByYMD]);
-
-  async function handleReserve() {
-    if (pausedNow) {
-      toast.error("Bookings are temporarily paused.");
-      return;
-    }
-    if (!selectedSlotId || numberOfPeople <= 0) {
-      toast.error("Please select a time slot and number of people.");
-      return;
-    }
-    if (!user) {
-      toast.error("Please log in to continue.");
-      router.push("/login");
-      return;
-    }
-    if (!agreedToTerms) {
-      toast.error("You must agree to the Terms of Use to proceed.");
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      const payload = {
-        appUserId: user?.user_metadata?.appUserId ?? null,
-        email: user?.email ?? null,
-        scheduleSlotId: selectedSlotId,
-        numberOfPeople,
-        notes,
-      };
-
-      const res = await fetch("/api/admin/reservations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        router.push(`/booking-confirmed/${data.id}`);
-      } else {
-        const error = await res.json().catch(() => ({}));
-        toast.error(error?.error || "Reservation failed. Try again.");
-      }
-    } catch (e) {
-      console.error(e);
-      toast.error("Something went wrong. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
 
   // Calendar helpers
   const availableDates = useMemo(
@@ -289,6 +209,58 @@ export default function CheckAvailabilityPage() {
       .filter((s) => isSameDay(parseISO(s.date), selectedDate))
       .sort((a, b) => parseISO(a.date) - parseISO(b.date));
   }, [availableSlots, selectedDate]);
+
+  const selectedSlot = useMemo(
+    () => availableSlots.find((s) => s.id === selectedSlotId) || null,
+    [availableSlots, selectedSlotId]
+  );
+
+  const availablePlaces = selectedSlot
+    ? Math.max(
+        0,
+        (selectedSlot.totalSlots ?? 0) - (selectedSlot.bookedSlots ?? 0)
+      )
+    : 0;
+
+  // Business cap: max 8 per booking (and never exceed availability)
+  const bookingCap = Math.min(8, availablePlaces || 8);
+
+  const canContinue =
+    !pausedNow &&
+    !!selectedSlotId &&
+    totalPeople > 0 &&
+    totalPeople <= (availablePlaces || 0);
+
+  async function handleContinue() {
+    if (!canContinue) {
+      toast.error("Select a time and valid group size.");
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const payload = {
+        experienceId: experience.id,
+        scheduleSlotId: selectedSlotId,
+        counts: { adults, teens, kids },
+      };
+      const res = await fetch("/api/bookings/drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "Could not start booking.");
+      }
+      const data = await res.json();
+      router.push(`/booking/${data.id}/attendees`);
+    } catch (e) {
+      console.error(e);
+      toast.error(e.message || "Something went wrong.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   const hasAnySlots = availableSlots.length > 0;
   const firstImage =
@@ -310,21 +282,6 @@ export default function CheckAvailabilityPage() {
             <ArrowLeft size={16} />
             Back
           </button>
-
-          {!loading && user ? (
-            <p className="text-xs sm:text-sm text-[#5a4a3f]">
-              Logged in as <span className="font-medium">{displayName}</span>
-            </p>
-          ) : loading ? (
-            <span className="text-xs text-[#7a6a5a]">Checking session…</span>
-          ) : (
-            <button
-              onClick={() => router.push("/login")}
-              className="text-xs sm:text-sm rounded-full bg-[#8b6f47] px-4 py-2 text-white hover:bg-[#7a5f3a]"
-            >
-              Log in
-            </button>
-          )}
         </div>
       </div>
 
@@ -358,14 +315,10 @@ export default function CheckAvailabilityPage() {
                   ) : null}
                 </div>
               </div>
-
-              {typeof experience?.price === "number" ? (
+              {fromPrice !== null ? (
                 <div className="mt-3 sm:mt-0 rounded-xl border border-[#e0dcd4] bg-white px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
-                  From{" "}
-                  <span className="font-semibold">
-                    €{experience.price.toFixed(2)}
-                  </span>{" "}
-                  / person
+                  From <span className="font-semibold">{eur(fromPrice)}</span> /
+                  person
                 </div>
               ) : null}
             </div>
@@ -374,7 +327,7 @@ export default function CheckAvailabilityPage() {
             <div className="mt-5 grid grid-cols-3 gap-2 text-xs sm:text-sm">
               <Step label="Choose date" active={step >= 1} done={step > 1} />
               <Step label="Choose time" active={step >= 2} done={step > 2} />
-              <Step label="Confirm details" active={step >= 3} />
+              <Step label="Group size" active={step >= 3} />
             </div>
 
             {/* Info / Pause banner */}
@@ -413,12 +366,8 @@ export default function CheckAvailabilityPage() {
               <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
                 <Info size={14} className="mt-0.5 text-[#8b6f47]" />
                 <p>
-                  Pick a date with availability, then choose a time. Max 8
-                  people per booking. Larger group?{" "}
-                  <a href="/contact" className="underline text-[#8b6f47]">
-                    Contact us
-                  </a>
-                  .
+                  Pick a date and time, then set your group split. You’ll fill
+                  attendee details on the next page.
                 </p>
               </div>
             )}
@@ -532,18 +481,15 @@ export default function CheckAvailabilityPage() {
                     day_disabled: "rdp-day_disabled text-[#c7c0b6] opacity-60",
                   }}
                   modifiersClassNames={{
-                    plenty: "bg-[#e8f3ec] hover:bg-[#e2efe7] text-[#30433a]", // most capacity
-                    some: "bg-[#f4efe5] hover:bg-[#efe8dd] text-[#4a4136]", // medium
-                    few: "ring-1 ring-amber-400 bg-[#fff8ea] hover:bg-[#fff3d7] text-[#5a4a3f]", // low
+                    plenty: "bg-[#e8f3ec] hover:bg-[#e2efe7] text-[#30433a]",
+                    some: "bg-[#f4efe5] hover:bg-[#efe8dd] text-[#4a4136]",
+                    few: "ring-1 ring-amber-400 bg-[#fff8ea] hover:bg-[#fff3d7] text-[#5a4a3f]",
                     weekend: "bg-[#faf7f3]",
                   }}
-                  components={{
-                    DayContent, // your availability dot stays
-                  }}
+                  components={{ DayContent }}
                 />
 
                 <Legend />
-                {/* update legend below */}
                 <p className="mt-3 text-center text-xs text-[#7a6a58]">
                   Showing the next 6 months of availability.
                 </p>
@@ -561,9 +507,9 @@ export default function CheckAvailabilityPage() {
             )}
           </section>
 
-          {/* Right: Slots + Booking card */}
+          {/* Right: Times + Group card */}
           <section className="space-y-6" ref={slotsContainerRef}>
-            {/* Slots */}
+            {/* Times */}
             <div
               className={`rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm ${
                 pausedNow ? "opacity-60" : ""
@@ -639,11 +585,11 @@ export default function CheckAvailabilityPage() {
               )}
             </div>
 
-            {/* Booking card (sticky on desktop) */}
+            {/* Group & Summary (sticky on desktop) */}
             <div className="lg:sticky lg:top-24">
               <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
                 <h3 className="text-lg font-semibold text-[#5a4a3f]">
-                  Your booking
+                  Your group
                 </h3>
 
                 {/* Capacity meter */}
@@ -654,141 +600,98 @@ export default function CheckAvailabilityPage() {
                   />
                 )}
 
-                {/* People stepper */}
-                <div
-                  className={`mt-4 space-y-2 ${pausedNow ? "opacity-60" : ""}`}
-                >
-                  <label className="block text-sm font-medium text-[#5a4a3f] flex items-center gap-2">
-                    <Users className="w-4 h-4 text-[#8b6f47]" />
-                    Number of People
-                  </label>
-                  <div
-                    className={`flex items-center justify-between gap-3 bg-[#faf7f2] border border-[#e2ddd2] rounded-lg w-full max-w-[220px] px-2 py-2 shadow-inner ${
-                      numberOfPeople >= maxPeopleAllowed
-                        ? "ring-2 ring-[#d97706]/60"
-                        : ""
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        !pausedNow &&
-                        setNumberOfPeople((p) => Math.max(1, p - 1))
-                      }
-                      disabled={pausedNow}
-                      className="text-[#8b6f47] hover:text-[#5a4a3f] p-1 disabled:opacity-40"
-                      aria-label="Decrease"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </button>
-                    <input
-                      type="number"
-                      min={1}
-                      max={maxPeopleAllowed}
-                      value={numberOfPeople}
-                      onChange={(e) => {
-                        if (pausedNow) return;
-                        const val = Math.min(
-                          maxPeopleAllowed,
-                          Math.max(1, Number(e.target.value) || 1)
-                        );
-                        setNumberOfPeople(val);
-                      }}
-                      className="w-12 text-center text-[#5a4a3f] bg-transparent border-0 focus:outline-none font-semibold"
-                      disabled={pausedNow}
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        !pausedNow &&
-                        setNumberOfPeople((p) =>
-                          Math.min(maxPeopleAllowed, p + 1)
+                {/* Counters */}
+                <div className={`mt-4 ${pausedNow ? "opacity-60" : ""}`}>
+                  <p className="text-xs text-[#7a6a58]">
+                    Adults 18+, Teens 13–17, Kids 3–12 (exact ages next step).
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <Counter
+                      label="Adults"
+                      value={adults}
+                      onChange={(v) =>
+                        setAdults(
+                          clampGroup(v, 1, bookingCap, totalPeople, "adults")
                         )
                       }
-                      disabled={pausedNow || numberOfPeople >= maxPeopleAllowed}
-                      className="text-[#8b6f47] hover:text-[#5a4a3f] p-1 disabled:opacity-40"
-                      aria-label="Increase"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
+                      min={1}
+                      disabled={!selectedSlot || pausedNow}
+                    />
+                    <Counter
+                      label="Teens"
+                      value={teens}
+                      onChange={(v) =>
+                        setTeens(
+                          clampGroup(v, 0, bookingCap, totalPeople, "teens")
+                        )
+                      }
+                      disabled={!selectedSlot || pausedNow}
+                    />
+                    <Counter
+                      label="Kids"
+                      value={kids}
+                      onChange={(v) =>
+                        setKids(
+                          clampGroup(v, 0, bookingCap, totalPeople, "kids")
+                        )
+                      }
+                      disabled={!selectedSlot || pausedNow}
+                    />
                   </div>
-                  {selectedSlotId && (
-                    <p className="text-xs text-[#5a4a3f]">
-                      Only{" "}
-                      <span className="font-semibold">{maxPeopleAllowed}</span>{" "}
-                      slot{maxPeopleAllowed > 1 ? "s" : ""} available for this
-                      time.
+
+                  {selectedSlot && (
+                    <p className="mt-2 text-xs text-[#5a4a3f]">
+                      {totalPeople} selected —{" "}
+                      {Math.max(0, availablePlaces - totalPeople)} of{" "}
+                      {availablePlaces} spots remain for this time. (Max 8 per
+                      booking)
                     </p>
                   )}
                 </div>
 
-                {/* Price summary */}
-                {experience && typeof experience.price === "number" && (
-                  <div className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-[#5a4a3f]">
-                        €{experience.price.toFixed(2)} × {numberOfPeople}{" "}
-                        {numberOfPeople > 1 ? "people" : "person"}
-                      </span>
-                      <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                        €{(experience.price * numberOfPeople).toFixed(2)}
-                      </span>
-                    </div>
+                {/* Price summary (tiered) */}
+                <div className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner">
+                  <div className="space-y-1 text-sm text-[#5a4a3f]">
+                    {adults > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span>
+                          Adults × {adults} @ {eur(prices.adult)}
+                        </span>
+                        <span className="font-semibold">{eur(lineAdult)}</span>
+                      </div>
+                    )}
+                    {teens > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span>
+                          Teens × {teens} @ {eur(prices.teen)}
+                        </span>
+                        <span className="font-semibold">{eur(lineTeen)}</span>
+                      </div>
+                    )}
+                    {kids > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span>
+                          Kids × {kids} @ {eur(prices.kid)}
+                        </span>
+                        <span className="font-semibold">{eur(lineKid)}</span>
+                      </div>
+                    )}
                   </div>
-                )}
 
-                {/* Notes */}
-                <div className="mt-6 space-y-2">
-                  <label className="block text-sm font-medium text-[#5a4a3f] flex items-center gap-2">
-                    <StickyNote className="w-4 h-4 text-[#8b6f47]" />
-                    Notes / Allergies / Special Requests
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={notes}
-                    onChange={(e) => !pausedNow && setNotes(e.target.value)}
-                    placeholder="E.g. vegan, nut allergy..."
-                    className="w-full p-3 rounded-lg border border-[#d7d2c6] bg-white focus:outline-none focus:ring focus:ring-[#c4b89f] text-[#5a4a3f] disabled:opacity-40"
-                    disabled={pausedNow}
-                  />
+                  <div className="mt-3 border-t border-[#e5e0d8] pt-3 flex items-center justify-between">
+                    <span className="text-sm text-[#5a4a3f]">Total</span>
+                    <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
+                      {eur(totalPrice)}
+                    </span>
+                  </div>
                 </div>
 
-                {/* Terms */}
-                <div className="mt-6 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="agreeTerms"
-                    checked={agreedToTerms}
-                    onChange={(e) =>
-                      !pausedNow && setAgreedToTerms(e.target.checked)
-                    }
-                    className="accent-[#8b6f47]"
-                    disabled={pausedNow}
-                  />
-                  <label
-                    htmlFor="agreeTerms"
-                    className="text-sm text-[#5a4a3f]"
-                  >
-                    I agree to the{" "}
-                    <a href="/terms" className="underline text-[#8b6f47]">
-                      Terms of Use
-                    </a>
-                    .
-                  </label>
-                </div>
-
-                {/* Submit */}
+                {/* Continue */}
                 <button
-                  onClick={handleReserve}
-                  disabled={
-                    pausedNow ||
-                    !user ||
-                    isSubmitting ||
-                    !agreedToTerms ||
-                    !selectedSlotId
-                  }
+                  onClick={handleContinue}
+                  disabled={!canContinue || isSubmitting}
                   className={`mt-6 w-full py-3 rounded-lg font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md ${
-                    pausedNow || !user || !agreedToTerms || !selectedSlotId
+                    !canContinue
                       ? "bg-gray-400 cursor-not-allowed text-white"
                       : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
                   }`}
@@ -798,26 +701,16 @@ export default function CheckAvailabilityPage() {
                   ) : isSubmitting ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      Reserving...
+                      Starting your booking...
                     </>
-                  ) : !user ? (
-                    "Log in to Reserve"
                   ) : !selectedSlotId ? (
                     "Select a time"
+                  ) : totalPeople <= 0 ? (
+                    "Add people"
                   ) : (
-                    "Reserve Now"
+                    "Continue to Details"
                   )}
                 </button>
-
-                {/* Small reassurance */}
-                {!pausedNow && (
-                  <p className="mt-3 text-center text-[11px] text-[#7a6a58]">
-                    <span className="inline-flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      No charge yet — you’ll receive a confirmation email.
-                    </span>
-                  </p>
-                )}
               </div>
             </div>
           </section>
@@ -883,6 +776,56 @@ function CapacityBar({ total = 0, booked = 0 }) {
   );
 }
 
+function Counter({ label, value, onChange, min = 0, disabled = false }) {
+  return (
+    <div className="bg-white border border-[#e2ddd2] rounded-xl p-3 shadow-sm">
+      <div className="text-sm text-[#5a4a3f] mb-2">{label}</div>
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => !disabled && onChange(Math.max(min, (value || 0) - 1))}
+          disabled={disabled}
+          className="text-[#8b6f47] p-1 disabled:opacity-40"
+          aria-label="Decrease"
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+        <input
+          type="number"
+          min={min}
+          value={value}
+          onChange={(e) =>
+            !disabled && onChange(Math.max(min, Number(e.target.value) || 0))
+          }
+          className="w-12 text-center text-[#5a4a3f] bg-transparent border-0 focus:outline-none font-semibold"
+          disabled={disabled}
+        />
+        <button
+          type="button"
+          onClick={() => !disabled && onChange((value || 0) + 1)}
+          disabled={disabled}
+          className="text-[#8b6f47] p-1 disabled:opacity-40"
+          aria-label="Increase"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Helpers ---------- */
+
+// Keep total within cap and never drop below min adult count
+function clampGroup(nextVal, min, bookingCap, totalPeople, which) {
+  const raw = Math.max(min, Number(nextVal) || 0);
+  // We don't know others here; caller passes setState in sequence,
+  // so just rely on Continue button validation to enforce total ≤ cap.
+  // Optional: enforce soft cap here by not allowing a single field to push over cap.
+  // Return raw and rely on disabled button + message for UX clarity.
+  return raw;
+}
+
 function SkeletonCalendar() {
   return (
     <div className="py-6">
@@ -899,8 +842,6 @@ function SkeletonCalendar() {
   );
 }
 
-/* ---------- Helpers ---------- */
-
 function earliestDayWithAvailability(slots = []) {
   const days = slots
     .map((s) => {
@@ -912,14 +853,6 @@ function earliestDayWithAvailability(slots = []) {
     if (i === 0 || days[i].getTime() !== days[i - 1].getTime()) return days[i];
   }
   return null;
-}
-
-function titleCase(str = "") {
-  if (!str) return "";
-  return str
-    .toLowerCase()
-    .replace(/(^.|[\s-].)/g, (m) => m.toUpperCase())
-    .trim();
 }
 
 function SelectedDatePill({ date, onClear }) {
@@ -939,7 +872,7 @@ function SelectedDatePill({ date, onClear }) {
   );
 }
 
-// (Optional) refresh your Legend to match the buckets
+// Legend for calendar buckets
 function Legend() {
   return (
     <div className="mt-3 flex flex-wrap items-center justify-center gap-4 text-[11px] text-[#7a6a58]">
@@ -985,10 +918,10 @@ function DayDot({ date, countsByYMD }) {
 
 // inject the dot inside each day cell without breaking keyboard behavior
 function DayContent(props) {
-  // props.children is the date number
   return (
     <span className="relative inline-flex items-center justify-center w-7 h-7">
       {props.children}
+      {/* countsByYMD is captured from the outer scope */}
       <DayDot date={props.date} countsByYMD={countsByYMD} />
     </span>
   );

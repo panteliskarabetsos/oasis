@@ -1,18 +1,31 @@
 // src/app/experiences/page.js
 import Image from "next/image";
 import LinkWithLoader from "@/app/components/LinkWithLoader";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { createSupabaseAdmin } from "../../lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
 export default async function Experiences() {
-  // Use admin to bypass RLS for public listing; you can swap to createSupabaseServer if you prefer.
   const supa = createSupabaseAdmin();
 
   const { data: publicExperiences, error } = await supa
     .from("Experience")
     .select(
-      "id,name,slug,description,price,location,duration,images,frequency,visibility,createdAt"
+      `
+      id,
+      name,
+      slug,
+      description,
+      location,
+      duration,
+      images,
+      frequency,
+      visibility,
+      "createdAt",
+      "priceAdult",
+      "priceTeen",
+      "priceKid"
+    `
     )
     .eq("visibility", true)
     .order("createdAt", { ascending: false });
@@ -57,6 +70,12 @@ export default async function Experiences() {
               (exp.images[0].startsWith("http") ||
                 exp.images[0].startsWith("/"));
 
+            const fromPrice = getFromPrice(exp);
+            const freq =
+              Array.isArray(exp.frequency) && exp.frequency.length
+                ? exp.frequency.join(", ")
+                : "—";
+
             return (
               <div
                 key={exp.id}
@@ -86,14 +105,12 @@ export default async function Experiences() {
                       {exp.description?.length > 120 ? "..." : ""}
                     </p>
                     <p className="text-sm text-[#8b6f47] font-medium mb-1 italic">
-                      Duration: {exp.duration}{" "}
-                      {" - " +
-                        (Array.isArray(exp.frequency)
-                          ? exp.frequency.join(", ")
-                          : "—")}
+                      Duration: {exp.duration || "—"} {" - " + freq}
                     </p>
                     <p className="text-lg font-semibold text-[#5a4a3f] mb-6">
-                      €{exp.price}
+                      {fromPrice !== null
+                        ? `From ${eur(fromPrice)} / person`
+                        : "Pricing available"}
                     </p>
                   </div>
 
@@ -128,4 +145,29 @@ export default async function Experiences() {
       </section>
     </main>
   );
+}
+
+/* ---------- helpers ---------- */
+
+function eur(n) {
+  return `€${(Number(n) || 0).toFixed(2)}`;
+}
+
+function getFromPrice(exp) {
+  const vals = [
+    toNum(exp?.priceAdult),
+    toNum(exp?.priceTeen),
+    toNum(exp?.priceKid),
+  ].filter((v) => Number.isFinite(v) && v > 0);
+
+  if (vals.length === 0) {
+    // fallback: if adult is 0/undefined but you want a default, set it here (e.g., 85)
+    return null;
+  }
+  return Math.min(...vals);
+}
+
+function toNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
 }

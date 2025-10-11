@@ -3,14 +3,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { createSupabaseAdmin } from "../../../../lib/supabase/admin";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const bad = (msg, status = 400) =>
   NextResponse.json({ error: msg }, { status });
 
-export async function GET(_req, { params }) {
-  const slug = params?.slug;
+export async function GET(_req, ctx) {
+  const { slug } = await ctx.params;
   if (!slug) return bad("Missing slug", 400);
 
   const admin = createSupabaseAdmin();
@@ -20,10 +20,30 @@ export async function GET(_req, { params }) {
     const { data, error } = await admin
       .from("Experience")
       .select(
-        "id,name,slug,description,price,location,duration,whatsIncluded,whatToBring,whyYoullLove,images,mapPin,guestReviews,frequency,visibility,createdAt,updatedAt"
+        `
+        id,
+        name,
+        slug,
+        description,
+        location,
+        duration,
+        "whatsIncluded",
+        "whatToBring",
+        "whyYoullLove",
+        images,
+        "mapPin",
+        "guestReviews",
+        frequency,
+        visibility,
+        "createdAt",
+        "updatedAt",
+        "priceAdult",
+        "priceTeen",
+        "priceKid"
+      `
       )
       .eq("slug", slug)
-      .eq("visibility", true) // only public items for this public route
+      .eq("visibility", true)
       .maybeSingle();
 
     if (error) {
@@ -32,9 +52,21 @@ export async function GET(_req, { params }) {
     }
     if (!data) return bad("Experience not found", 404);
 
-    return ok(data);
+    // ✅ Normalize tiered pricing (adult required; teen/kid fallback to adult)
+    const priceAdult = numberOr(data.priceAdult, 85);
+    const priceTeen = numberOr(data.priceTeen, priceAdult);
+    const priceKid = numberOr(data.priceKid, priceAdult);
+
+    const pricing = { adult: priceAdult, teen: priceTeen, kid: priceKid };
+
+    return ok({ ...data, pricing });
   } catch (e) {
     console.error("[experiences/:slug] exception:", e);
     return bad("Internal server error", 500);
   }
+}
+
+function numberOr(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : Number(fallback) || 0;
 }
