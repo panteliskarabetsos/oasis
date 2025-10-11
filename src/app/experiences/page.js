@@ -1,7 +1,7 @@
 // src/app/experiences/page.js
 import Image from "next/image";
 import LinkWithLoader from "@/app/components/LinkWithLoader";
-import { createSupabaseAdmin } from "../../lib/supabase/admin";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,6 @@ export default async function Experiences() {
       visibility,
       "createdAt",
       "priceAdult",
-      "priceTeen",
       "priceKid"
     `
     )
@@ -154,16 +153,11 @@ function eur(n) {
 }
 
 function getFromPrice(exp) {
-  const vals = [
-    toNum(exp?.priceAdult),
-    toNum(exp?.priceTeen),
-    toNum(exp?.priceKid),
-  ].filter((v) => Number.isFinite(v) && v > 0);
+  const vals = [toNum(exp?.priceAdult), toNum(exp?.priceKid)].filter(
+    (v) => Number.isFinite(v) && v > 0
+  );
 
-  if (vals.length === 0) {
-    // fallback: if adult is 0/undefined but you want a default, set it here (e.g., 85)
-    return null;
-  }
+  if (vals.length === 0) return null;
   return Math.min(...vals);
 }
 

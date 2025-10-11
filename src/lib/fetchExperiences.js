@@ -36,7 +36,6 @@ export async function getExperienceBySlug(slug) {
       "createdAt",
       "updatedAt",
       "priceAdult",
-      "priceTeen",
       "priceKid"
     `
     )
@@ -58,14 +57,13 @@ export async function getExperienceBySlug(slug) {
     return null;
   }
 
-  // Normalize pricing (teen/kid fallback to adult if null)
   const priceAdult = numOr(data.priceAdult, 85);
-  const priceTeen = numOr(data.priceTeen, priceAdult);
+
   const priceKid = numOr(data.priceKid, priceAdult);
 
   return {
     ...data,
-    pricing: { adult: priceAdult, teen: priceTeen, kid: priceKid },
+    pricing: { adult: priceAdult, kid: priceKid },
   };
 }
 
@@ -91,7 +89,7 @@ export async function getPublicExperiences() {
       visibility,
       "createdAt",
       "priceAdult",
-      "priceTeen",
+
       "priceKid"
     `
     )
@@ -110,11 +108,11 @@ export async function getPublicExperiences() {
 
   return (data || []).map((row) => {
     const priceAdult = numOr(row.priceAdult, 85);
-    const priceTeen = numOr(row.priceTeen, priceAdult);
+
     const priceKid = numOr(row.priceKid, priceAdult);
     return {
       ...row,
-      pricing: { adult: priceAdult, teen: priceTeen, kid: priceKid },
+      pricing: { adult: priceAdult, kid: priceKid },
     };
   });
 }

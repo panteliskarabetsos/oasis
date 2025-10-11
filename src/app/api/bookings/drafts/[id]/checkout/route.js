@@ -1,3 +1,4 @@
+// src/app/api/bookings/drafts/[id]/checkout/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -21,29 +22,46 @@ export async function POST(req, ctx) {
 
   // Lazy import Stripe to keep it server-only
   const Stripe = (await import("stripe")).default;
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-    apiVersion: "2024-06-20",
-  });
+  const key = process.env.STRIPE_SECRET_KEY || "";
+  if (!key) return bad("Stripe not configured", 500);
+  const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
 
-  // 1) Load draft
+  // 1) Load draft (allow re-entry when status=pending_payment)
   const { data: draft, error: dErr } = await admin
     .from("BookingDraft")
     .select(
       `
       id, experienceId, scheduleSlotId, counts, status, expiresAt,
-      "unitPriceAdult","unitPriceTeen","unitPriceKid","totalAmount"
+      "unitPriceAdult","unitPriceKid","totalAmount","stripeSessionId"
     `
     )
     .eq("id", draftId)
     .maybeSingle();
 
   if (dErr || !draft) return bad("Draft not found", 404);
-  if (draft.status !== "draft") return bad("Draft not in draft state", 400);
+
+  if (!["draft", "pending_payment"].includes(draft.status)) {
+    return bad("Draft not in a payable state", 400);
+  }
+
+  // If there's an existing session and it's still open, reuse it
+  if (draft.status === "pending_payment" && draft.stripeSessionId) {
+    try {
+      const existing = await stripe.checkout.sessions.retrieve(
+        draft.stripeSessionId
+      );
+      if (existing && existing.status === "open" && existing.url) {
+        return ok({ url: existing.url, reused: true });
+      }
+    } catch (e) {
+      // ignore and create a new session below
+      console.warn("[checkout] failed to reuse session", e?.message);
+    }
+  }
 
   const A = Number(draft.counts?.adults || 0);
-  const T = Number(draft.counts?.teens || 0);
   const K = Number(draft.counts?.kids || 0);
-  const totalPeople = A + T + K;
+  const totalPeople = A + K;
   if (totalPeople <= 0) return bad("Empty group", 400);
 
   // 2) Load supporting data
@@ -73,13 +91,21 @@ export async function POST(req, ctx) {
     const newExpiresAt = new Date(
       Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000
     ).toISOString();
-    const { error: uErr } = await admin
+    const upd = await admin
       .from("BookingDraft")
       .update({ expiresAt: newExpiresAt, updatedAt: new Date().toISOString() })
       .eq("id", draftId);
-    if (uErr) {
-      // If we fail to extend for any reason, stop here
-      return bad("Draft expired. Please start again.", 400);
+    if (upd.error) {
+      if (String(upd.error.code) === "42703") {
+        // missing column updatedAt — retry without it
+        const upd2 = await admin
+          .from("BookingDraft")
+          .update({ expiresAt: newExpiresAt })
+          .eq("id", draftId);
+        if (upd2.error) return bad("Draft expired. Please start again.", 400);
+      } else {
+        return bad("Draft expired. Please start again.", 400);
+      }
     }
   }
 
@@ -88,15 +114,6 @@ export async function POST(req, ctx) {
   const items = [];
   if (A > 0)
     items.push(line(`${exp.name} — Adult`, currency, draft.unitPriceAdult, A));
-  if (T > 0)
-    items.push(
-      line(
-        `${exp.name} — Teen (13–17)`,
-        currency,
-        draft.unitPriceTeen ?? draft.unitPriceAdult,
-        T
-      )
-    );
   if (K > 0)
     items.push(
       line(
@@ -112,26 +129,31 @@ export async function POST(req, ctx) {
   const origin =
     process.env.NEXT_PUBLIC_SITE_URL ||
     `${hdrs.get("x-forwarded-proto") || "https"}://${hdrs.get("host")}`;
-
   const successUrl = `${origin}/booking/${draftId}/confirmation?session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${origin}/booking/${draftId}/payment?cancelled=1`;
 
-  // 6) Create Checkout Session
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    payment_method_types: ["card"],
-    line_items: items,
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    metadata: {
-      draftId: String(draftId),
-      scheduleSlotId: String(draft.scheduleSlotId),
-      experienceId: String(draft.experienceId),
-    },
-  });
+  // 6) Create Checkout Session (wrap in try/catch to surface Stripe errors)
+  let session;
+  try {
+    session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: items,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        draftId: String(draftId),
+        scheduleSlotId: String(draft.scheduleSlotId),
+        experienceId: String(draft.experienceId),
+      },
+    });
+  } catch (e) {
+    console.error("[checkout] stripe error", e?.message);
+    return bad(e?.message || "Stripe error creating session", 400);
+  }
 
-  // 7) Store session & mark pending
-  await admin
+  // 7) Store session & mark pending (tolerate schema diffs)
+  const upd = await admin
     .from("BookingDraft")
     .update({
       status: "pending_payment",
@@ -141,11 +163,20 @@ export async function POST(req, ctx) {
     })
     .eq("id", draftId);
 
+  if (upd.error && String(upd.error.code) === "42703") {
+    // missing some columns → do minimal update
+    await admin
+      .from("BookingDraft")
+      .update({ status: "pending_payment", stripeSessionId: session.id })
+      .eq("id", draftId);
+  }
+
   return ok({ url: session.url });
 }
 
 function line(name, currency, unitPrice, qty) {
   const amount = Math.round(Number(unitPrice || 0) * 100); // cents
+
   return {
     quantity: qty,
     price_data: {

@@ -16,9 +16,9 @@ export async function POST(req) {
   const scheduleSlotId = Number(body?.scheduleSlotId);
   const counts = body?.counts || {};
   const A = toInt(counts.adults, 0);
-  const T = toInt(counts.teens, 0);
+
   const K = toInt(counts.kids, 0);
-  const total = A + T + K;
+  const total = A + K;
   const clientToken = (body?.clientToken || "").trim() || null;
 
   if (clientToken) {
@@ -39,7 +39,7 @@ export async function POST(req) {
       const { error: upErr } = await admin
         .from("BookingDraft")
         .update({
-          counts: { adults: A, teens: T, kids: K },
+          counts: { adults: A, kids: K },
           scheduleSlotId,
           expiresAt: newExpiry,
         })
@@ -63,7 +63,7 @@ export async function POST(req) {
   // 1) Fetch experience (for prices + visibility)
   const { data: exp, error: expErr } = await admin
     .from("Experience")
-    .select(`id, visibility, "priceAdult", "priceTeen", "priceKid"`)
+    .select(`id, visibility, "priceAdult", "priceKid"`)
     .eq("id", experienceId)
     .maybeSingle();
 
@@ -97,9 +97,8 @@ export async function POST(req) {
 
   // 4) Pricing snapshot (authoritative)
   const unitAdult = toNum(exp.priceAdult, 0);
-  const unitTeen = isNum(exp.priceTeen) ? Number(exp.priceTeen) : unitAdult;
   const unitKid = isNum(exp.priceKid) ? Number(exp.priceKid) : unitAdult;
-  const totalAmount = A * unitAdult + T * unitTeen + K * unitKid;
+  const totalAmount = A * unitAdult + K * unitKid;
 
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min hold
 
@@ -109,10 +108,9 @@ export async function POST(req) {
     .insert({
       experienceId,
       scheduleSlotId,
-      counts: { adults: A, teens: T, kids: K },
+      counts: { adults: A, kids: K },
       status: "draft",
       unitPriceAdult: unitAdult,
-      unitPriceTeen: unitTeen,
       unitPriceKid: unitKid,
       totalAmount,
       expiresAt,

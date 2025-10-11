@@ -1,3 +1,4 @@
+// app/experiences/[slug]/page.js
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // Prisma-safe runtime
 
@@ -23,9 +24,8 @@ const getExperience = cache((slug) => getExperienceBySlug(slug));
 function normalizePricing(exp) {
   const pj = exp?.pricing || {};
   const adult = toNum(pj.adult ?? exp?.priceAdult);
-  const teen = toNum(pj.teen ?? exp?.priceTeen, adult);
   const kid = toNum(pj.kid ?? exp?.priceKid, adult);
-  return { adult, teen, kid };
+  return { adult, kid };
 }
 function toNum(x, fallback = null) {
   if (x === null || x === undefined) return fallback;
@@ -117,7 +117,7 @@ export default async function ExperienceDetailPage({ params }) {
   } = experience;
 
   const prices = normalizePricing(experience);
-  const fromPrice = minDefined(prices.adult, prices.teen, prices.kid);
+  const fromPrice = minDefined(prices.adult, prices.kid);
 
   const parsedImages = (Array.isArray(images) ? images : []).filter(Boolean);
   const parsedReviews = Array.isArray(guestReviews)
@@ -284,29 +284,27 @@ export default async function ExperienceDetailPage({ params }) {
           </section>
         )}
 
-        {/* Optional: Pricing table */}
+        {/* Pricing table (Adult + Kid) */}
         <section className="pb-12">
           <div className="mx-auto max-w-3xl rounded-3xl border-2 border-[#e0dcd4] bg-white p-6 shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
             <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-4 text-center">
               Pricing
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 text-center gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 text-center gap-4">
               <div className="rounded-xl border border-[#e0dcd4] p-4">
                 <div className="text-sm text-[#7a6a58] mb-1">Adult</div>
                 <div className="text-xl font-semibold text-[#5a4a3f]">
-                  {prices.adult ? eur(prices.adult) : "—"}
-                </div>
-              </div>
-              <div className="rounded-xl border border-[#e0dcd4] p-4">
-                <div className="text-sm text-[#7a6a58] mb-1">Teen (13–17)</div>
-                <div className="text-xl font-semibold text-[#5a4a3f]">
-                  {prices.teen ? eur(prices.teen) : eur(prices.adult)}
+                  {typeof prices.adult === "number" ? eur(prices.adult) : "—"}
                 </div>
               </div>
               <div className="rounded-xl border border-[#e0dcd4] p-4">
                 <div className="text-sm text-[#7a6a58] mb-1">Kid (3–12)</div>
                 <div className="text-xl font-semibold text-[#5a4a3f]">
-                  {prices.kid ? eur(prices.kid) : eur(prices.adult)}
+                  {typeof prices.kid === "number"
+                    ? eur(prices.kid)
+                    : typeof prices.adult === "number"
+                    ? eur(prices.adult)
+                    : "—"}
                 </div>
               </div>
             </div>
@@ -503,8 +501,8 @@ function initials(name) {
 
 // Use AggregateOffer so Google understands min/max tier pricing
 function buildJsonLd({ name, description, prices, location, images, pageUrl }) {
-  const low = minDefined(prices?.kid, prices?.teen, prices?.adult);
-  const high = maxDefined(prices?.kid, prices?.teen, prices?.adult);
+  const low = minDefined(prices?.kid, prices?.adult);
+  const high = maxDefined(prices?.kid, prices?.adult);
 
   const offers =
     low !== null

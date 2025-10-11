@@ -29,8 +29,8 @@ export default function AttendeesPage() {
   const [error, setError] = useState("");
 
   // Draft data
-  const [counts, setCounts] = useState({ adults: 0, teens: 0, kids: 0 });
-  const [unitPrices, setUnitPrices] = useState({ adult: 0, teen: 0, kid: 0 });
+  const [counts, setCounts] = useState({ adults: 0, kids: 0 });
+  const [unitPrices, setUnitPrices] = useState({ adult: 0, kid: 0 });
   const [totalAmount, setTotalAmount] = useState(0);
   const [experience, setExperience] = useState(null);
   const [slot, setSlot] = useState(null);
@@ -42,10 +42,7 @@ export default function AttendeesPage() {
 
   // Attendees array
   const expectedTotal = useMemo(
-    () =>
-      Number(counts.adults || 0) +
-      Number(counts.teens || 0) +
-      Number(counts.kids || 0),
+    () => Number(counts.adults || 0) + Number(counts.kids || 0),
     [counts]
   );
   const [attendees, setAttendees] = useState([]);
@@ -85,12 +82,10 @@ export default function AttendeesPage() {
 
         setCounts({
           adults: Number(data?.counts?.adults || 0),
-          teens: Number(data?.counts?.teens || 0),
           kids: Number(data?.counts?.kids || 0),
         });
         setUnitPrices({
           adult: Number(data?.unitPrices?.adult || 0),
-          teen: Number(data?.unitPrices?.teen || 0),
           kid: Number(data?.unitPrices?.kid || 0),
         });
         setTotalAmount(Number(data?.totalAmount || 0));
@@ -107,7 +102,6 @@ export default function AttendeesPage() {
         // Build attendee list to match expected total & categories
         const catList = makeCategoryList(
           Number(data?.counts?.adults || 0),
-          Number(data?.counts?.teens || 0),
           Number(data?.counts?.kids || 0)
         );
 
@@ -141,23 +135,18 @@ export default function AttendeesPage() {
     };
   }, [slot]);
 
+  // replace whole priceBreakdown useMemo with:
   const priceBreakdown = useMemo(() => {
     const A = Number(counts.adults || 0);
-    const T = Number(counts.teens || 0);
     const K = Number(counts.kids || 0);
     const la = A * unitPrices.adult;
-    const lt = T * unitPrices.teen;
     const lk = K * unitPrices.kid;
-    const sum = la + lt + lk;
+    const sum = la + lk;
     return {
       lines: [
         A > 0 && {
           label: `Adults × ${A} @ ${eur(unitPrices.adult)}`,
           value: eur(la),
-        },
-        T > 0 && {
-          label: `Teens × ${T} @ ${eur(unitPrices.teen)}`,
-          value: eur(lt),
         },
         K > 0 && {
           label: `Kids × ${K} @ ${eur(unitPrices.kid)}`,
@@ -203,7 +192,7 @@ export default function AttendeesPage() {
             lastName: a.lastName.trim(),
             age: Number(a.age),
             allergies: (a.allergies || "").trim(),
-            category: a.category, // "adult" | "teen" | "kid"
+            category: a.category,
           })),
         }),
       });
@@ -227,7 +216,7 @@ export default function AttendeesPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
       {/* Top bar */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-20">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-10">
         <div className="flex items-center justify-between">
           <button
             onClick={() => router.back()}
@@ -294,8 +283,7 @@ export default function AttendeesPage() {
                 <div className="rounded-xl border border-[#e0dcd4] bg-white px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
                   Group:{" "}
                   <span className="font-semibold">
-                    {counts.adults}A{counts.teens ? ` • ${counts.teens}T` : ""}
-                    {counts.kids ? ` • ${counts.kids}K` : ""}
+                    {counts.adults}A{counts.kids ? ` • ${counts.kids}K` : ""}
                   </span>
                 </div>
                 <button
@@ -327,11 +315,11 @@ export default function AttendeesPage() {
           <LoadingBlock />
         ) : (
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-10">
-            {/* Left: attendee forms */}
+            {/* Left: Explorer forms */}
             <section className="lg:col-span-2 space-y-4">
               <div className="flex items-center justify-between text-xs text-[#6b5e53] pl-1">
                 <span>
-                  Attendees:{" "}
+                  Explorer:{" "}
                   <strong>
                     {completedCount}/{expectedTotal}
                   </strong>{" "}
@@ -353,7 +341,7 @@ export default function AttendeesPage() {
                       </div>
                       <div>
                         <h3 className="text-sm font-semibold text-[#5a4a3f]">
-                          Attendee {idx + 1}
+                          Explorer {idx + 1}
                           <span className="ml-2 inline-block rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
                             {labelForCategory(a.category)}
                           </span>
@@ -627,25 +615,23 @@ function Field({ label, hint, children }) {
 const inputCls =
   "w-full p-2.5 rounded-lg border border-[#d7d2c6] bg-white focus:outline-none focus:ring focus:ring-[#c4b89f] text-[#5a4a3f] placeholder:text-[#9b8f7e]";
 
-function makeCategoryList(adults, teens, kids) {
+function makeCategoryList(adults, kids) {
   const arr = [];
   for (let i = 0; i < adults; i++) arr.push("adult");
-  for (let i = 0; i < teens; i++) arr.push("teen");
+
   for (let i = 0; i < kids; i++) arr.push("kid");
   return arr;
 }
 
 function labelForCategory(c) {
-  if (c === "adult") return "Adult (18+)";
-  if (c === "teen") return "Teen (13–17)";
-  if (c === "kid") return "Kid (3–12)";
+  if (c === "adult") return "Adult (16+)";
+  if (c === "kid") return "Kid (3–15)";
   return c;
 }
 
 function hintForCategory(c) {
-  if (c === "adult") return "Adults must be 18 or older.";
-  if (c === "teen") return "Teens must be between 13 and 17 years old.";
-  if (c === "kid") return "Kids must be between 3 and 12 years old.";
+  if (c === "adult") return "Adults must be 16 or older.";
+  if (c === "kid") return "Kids must be between 3 and 15 years old.";
   return "";
 }
 
@@ -657,41 +643,49 @@ function isValidEmail(email = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
+// replace the entire validate(...) with:
 function validate(attendees, counts, primaryContact) {
   const issues = [];
-  const expected =
-    Number(counts.adults || 0) +
-    Number(counts.teens || 0) +
-    Number(counts.kids || 0);
+  const expected = Number(counts.adults || 0) + Number(counts.kids || 0);
+
   if (attendees.length !== expected) {
     issues.push(`Expected ${expected} attendees, found ${attendees.length}.`);
   }
 
+  let hasEighteenPlus = false;
+
   attendees.forEach((a, i) => {
     const idx = i + 1;
+    const age = Number(a.age);
+
     if (!a.firstName?.trim() || !a.lastName?.trim()) {
       issues.push(`Attendee ${idx}: name is required.`);
       return;
     }
-    const age = Number(a.age);
     if (!Number.isFinite(age)) {
       issues.push(`Attendee ${idx}: age is required.`);
       return;
     }
-    if (age < 0 || age > 120) {
+    if (age < 0 || age > 100) {
       issues.push(`Attendee ${idx}: age looks invalid.`);
       return;
     }
-    if (a.category === "adult" && age < 18) {
-      issues.push(`Attendee ${idx}: adults must be 18+.`);
+
+    if (a.category === "adult") {
+      if (age < 16) issues.push(`Attendee ${idx}: adults must be 16+.`);
+    } else if (a.category === "kid") {
+      if (age < 3 || age > 15)
+        issues.push(`Attendee ${idx}: kids must be 3–15.`);
+    } else {
+      issues.push(`Attendee ${idx}: unknown category.`);
     }
-    if (a.category === "teen" && (age < 13 || age > 17)) {
-      issues.push(`Attendee ${idx}: teens must be 13–17.`);
-    }
-    if (a.category === "kid" && (age < 3 || age > 12)) {
-      issues.push(`Attendee ${idx}: kids must be 3–12.`);
-    }
+
+    if (age >= 18) hasEighteenPlus = true;
   });
+
+  if (!hasEighteenPlus) {
+    issues.push("At least one attendee must be 18+.");
+  }
 
   if (!primaryContact.name?.trim())
     issues.push("Primary contact: name is required.");

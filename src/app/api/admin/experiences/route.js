@@ -11,6 +11,12 @@ const ok = (data, status = 200) => NextResponse.json(data, { status });
 const bad = (msg, status = 400) =>
   NextResponse.json({ error: msg }, { status });
 
+// helpers
+const toNumOrNull = (v) =>
+  v === null || v === undefined || v === "" ? null : Number(v);
+
+const isNonNegative = (n) => Number.isFinite(n) && n >= 0;
+
 async function requireAdmin() {
   const supa = await createSupabaseServer();
   if (!supa) return bad("Server not configured", 500);
@@ -40,7 +46,10 @@ async function requireAdmin() {
   return bad("Forbidden", 403);
 }
 
-// GET /api/admin/experiences  (all experiences, no visibility filter)
+/**
+ * GET /api/admin/experiences
+ * All experiences (no visibility filter)
+ */
 export async function GET() {
   const gate = await requireAdmin();
   if (gate instanceof Response) return gate;
@@ -54,7 +63,6 @@ export async function GET() {
         "name",
         "slug",
         "description",
-        "price",
         "location",
         "duration",
         "whatsIncluded",
@@ -67,6 +75,9 @@ export async function GET() {
         "visibility",
         "createdAt",
         "updatedAt",
+        "priceAdult",
+
+        "priceKid",
       ].join(",")
     )
     .order("createdAt", { ascending: false });
@@ -78,7 +89,11 @@ export async function GET() {
   return ok(data ?? []);
 }
 
-// POST /api/admin/experiences  (create)
+/**
+ * POST /api/admin/experiences
+ * Create experience (uses tiered pricing)
+ * Accepts legacy `price` and maps it to `priceAdult`
+ */
 export async function POST(req) {
   const gate = await requireAdmin();
   if (gate instanceof Response) return gate;
@@ -91,6 +106,8 @@ export async function POST(req) {
     name,
     description,
     price,
+    priceAdult,
+    priceKid,
     location,
     duration,
     whatsIncluded,
@@ -103,25 +120,43 @@ export async function POST(req) {
     visibility,
   } = body;
 
-  if (!name || !description || price == null || !location || !duration) {
+  if (!name || !description || !location || !duration) {
     return bad("Missing required fields");
   }
+
+  // normalize prices
+  let pAdult = toNumOrNull(priceAdult ?? price);
+
+  let pKid = toNumOrNull(priceKid);
+
+  // required: priceAdult (either via priceAdult or legacy price)
+  if (!Number.isFinite(pAdult))
+    return bad("priceAdult is required (or legacy 'price')");
+
+  // validate non-negative
+  if (!isNonNegative(pAdult)) return bad("priceAdult must be ≥ 0");
+  if (pKid !== null && !isNonNegative(pKid)) return bad("priceKid must be ≥ 0");
+
+  const nowIso = new Date().toISOString();
 
   const payload = {
     name,
     slug: slugify(String(name), { lower: true, strict: true }),
     description,
-    price: Number(price),
     location,
     duration,
     whatsIncluded: whatsIncluded ?? null,
     whatToBring: whatToBring ?? null,
     whyYoullLove: whyYoullLove ?? null,
-    images: images ?? null,
+    images: Array.isArray(images) ? images : images ?? null,
     mapPin: mapPin ?? null,
     guestReviews: guestReviews ?? null,
-    frequency: frequency ?? null,
+    frequency: Array.isArray(frequency) ? frequency : frequency ?? null,
     visibility: visibility ?? true,
+    // tiered prices
+    priceAdult: pAdult,
+    priceKid: pKid,
+    updatedAt: nowIso,
   };
 
   const { data, error } = await admin
@@ -129,16 +164,20 @@ export async function POST(req) {
     .insert(payload)
     .select()
     .single();
+
   if (error) {
     console.error("[admin/experiences] POST error", error);
-    // 23505 = unique violation (e.g. duplicate slug)
-    if (error.code === "23505") return bad("Duplicate value", 409);
+    if (error.code === "23505") return bad("Duplicate value", 409); // unique violation
     return bad("Failed to add experience", 500);
   }
   return ok(data, 201);
 }
 
-// PUT /api/admin/experiences  (update)
+/**
+ * PUT /api/admin/experiences
+ * Update experience (tiered pricing)
+ * Accepts legacy `price` and maps to priceAdult
+ */
 export async function PUT(req) {
   const gate = await requireAdmin();
   if (gate instanceof Response) return gate;
@@ -152,6 +191,9 @@ export async function PUT(req) {
     name,
     description,
     price,
+    priceAdult,
+
+    priceKid,
     location,
     duration,
     whatsIncluded,
@@ -164,27 +206,43 @@ export async function PUT(req) {
     visibility,
   } = body;
 
-  if (!id || !name || !description || price == null || !location || !duration) {
+  if (!id || !name || !description || !location || !duration) {
     return bad("Missing required fields");
   }
+
+  // normalize prices (only update provided fields; allow partial)
+  const pAdult = priceAdult ?? price; // prefer new field
+  const pKid = priceKid;
 
   const payload = {
     name,
     slug: slugify(String(name), { lower: true, strict: true }),
     description,
-    price: Number(price),
     location,
     duration,
     whatsIncluded: whatsIncluded ?? null,
     whatToBring: whatToBring ?? null,
     whyYoullLove: whyYoullLove ?? null,
-    images: images ?? null,
+    images: Array.isArray(images) ? images : images ?? null,
     mapPin: mapPin ?? null,
     guestReviews: guestReviews ?? null,
-    frequency: frequency ?? null,
+    frequency: Array.isArray(frequency) ? frequency : frequency ?? null,
     visibility: visibility ?? true,
     updatedAt: new Date().toISOString(),
   };
+
+  // Only set price fields if present in request (so we don't overwrite unintentionally)
+  if (pAdult !== undefined) {
+    const n = Number(pAdult);
+    if (!isNonNegative(n)) return bad("priceAdult must be ≥ 0");
+    payload.priceAdult = n;
+  }
+
+  if (pKid !== undefined) {
+    const n = toNumOrNull(pKid);
+    if (n !== null && !isNonNegative(n)) return bad("priceKid must be ≥ 0");
+    payload.priceKid = n; // can be null
+  }
 
   const { data, error, status } = await admin
     .from("Experience")
@@ -202,7 +260,9 @@ export async function PUT(req) {
   return ok(data);
 }
 
-// DELETE /api/admin/experiences  (delete)
+/**
+ * DELETE /api/admin/experiences
+ */
 export async function DELETE(req) {
   const gate = await requireAdmin();
   if (gate instanceof Response) return gate;
@@ -221,7 +281,6 @@ export async function DELETE(req) {
   if (status === 406) return bad("Experience not found", 404);
   if (error) {
     console.error("[admin/experiences] DELETE error", error);
-    // 23503 = foreign key violation (e.g., bookings referencing this)
     if (error.code === "23503") {
       return bad(
         "The experience is related to other records (e.g., bookings). Please delete them first.",

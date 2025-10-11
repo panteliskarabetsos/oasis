@@ -29,7 +29,6 @@ export async function GET(_req, ctx) {
       primary_contact,
       status,
       "unitPriceAdult",
-      "unitPriceTeen",
       "unitPriceKid",
       "totalAmount",
       "expiresAt",
@@ -45,9 +44,7 @@ export async function GET(_req, ctx) {
   // Experience (minimal fields for UI)
   const { data: exp } = await createSupabaseAdmin()
     .from("Experience")
-    .select(
-      `id, name, slug, location, images, "priceAdult", "priceTeen", "priceKid"`
-    )
+    .select(`id, name, slug, location, images, "priceAdult",  "priceKid"`)
     .eq("id", draft.experienceId)
     .maybeSingle();
 
@@ -67,7 +64,6 @@ export async function GET(_req, ctx) {
     status: draft.status,
     unitPrices: {
       adult: draft.unitPriceAdult,
-      teen: draft.unitPriceTeen ?? draft.unitPriceAdult,
       kid: draft.unitPriceKid ?? draft.unitPriceAdult,
     },
     totalAmount: draft.totalAmount,
@@ -100,9 +96,8 @@ export async function PATCH(req, ctx) {
   if (draft.status !== "draft") return bad("Draft not editable", 400);
 
   const A = Number(draft.counts?.adults || 0);
-  const T = Number(draft.counts?.teens || 0);
   const K = Number(draft.counts?.kids || 0);
-  const expected = A + T + K;
+  const expected = A + K;
 
   if (attendees.length !== expected)
     return bad(`Expected ${expected} attendees, got ${attendees.length}`);
@@ -114,12 +109,10 @@ export async function PATCH(req, ctx) {
       return bad("Name missing for an attendee");
     if (!Number.isFinite(age) || age < 0 || age > 120)
       return bad("Invalid age");
-    if (a?.category === "teen" && !(age >= 13 && age <= 17))
-      return bad("Teen age must be 13–17");
     if (a?.category === "kid" && !(age >= 3 && age <= 12))
       return bad("Kid age must be 3–12");
-    if (a?.category === "adult" && !(age >= 18))
-      return bad("Adult age must be 18+");
+    if (a?.category === "adult" && !(age >= 16))
+      return bad("Adult age must be 16+");
   }
 
   const { error: upErr } = await admin

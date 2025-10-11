@@ -480,7 +480,7 @@ function HelpCard() {
 
 function labelForCategory(c) {
   if (c === "adult") return "Adult (18+)";
-  if (c === "teen") return "Teen (13–17)";
+
   if (c === "kid") return "Kid (3–12)";
   return c;
 }

@@ -68,7 +68,7 @@ export async function GET() {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (e) {
-    console.error("[api/me] error", e);
+    // console.error("[api/me] error", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

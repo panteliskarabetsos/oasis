@@ -38,7 +38,7 @@ export async function GET(_req, ctx) {
         "createdAt",
         "updatedAt",
         "priceAdult",
-        "priceTeen",
+  
         "priceKid"
       `
       )
@@ -52,12 +52,11 @@ export async function GET(_req, ctx) {
     }
     if (!data) return bad("Experience not found", 404);
 
-    // ✅ Normalize tiered pricing (adult required; teen/kid fallback to adult)
     const priceAdult = numberOr(data.priceAdult, 85);
-    const priceTeen = numberOr(data.priceTeen, priceAdult);
+
     const priceKid = numberOr(data.priceKid, priceAdult);
 
-    const pricing = { adult: priceAdult, teen: priceTeen, kid: priceKid };
+    const pricing = { adult: priceAdult, kid: priceKid };
 
     return ok({ ...data, pricing });
   } catch (e) {

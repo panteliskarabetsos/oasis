@@ -30,9 +30,9 @@ function normalizePricing(exp) {
   // Priority: pricing JSON -> explicit columns -> legacy price
   const pj = exp?.pricing || {};
   const adult = toNum(pj.adult ?? exp?.priceAdult ?? exp?.price ?? 0);
-  const teen = toNum(pj.teen ?? exp?.priceTeen ?? adult); // default = adult
+
   const kid = toNum(pj.kid ?? exp?.priceKid ?? adult); // default = adult
-  return { adult, teen, kid };
+  return { adult, kid };
 }
 function toNum(x) {
   const n = Number(x);
@@ -56,21 +56,20 @@ export default function CheckAvailabilityPage() {
   const eur = formatEuro;
   // Group split
   const [adults, setAdults] = useState(1);
-  const [teens, setTeens] = useState(0);
+
   const [kids, setKids] = useState(0);
-  const totalPeople = adults + teens + kids;
-  // Tiered prices (adult/teen/kid)
+  const totalPeople = adults + kids;
+
   const prices = useMemo(() => normalizePricing(experience), [experience]);
   const fromPrice = useMemo(() => {
-    const arr = [prices.adult, prices.teen, prices.kid].filter((v) => v > 0);
+    const arr = [prices.adult, prices.kid].filter((v) => v > 0);
     return arr.length ? Math.min(...arr) : null;
   }, [prices]);
 
   // Line items + total
   const lineAdult = adults * prices.adult;
-  const lineTeen = teens * prices.teen;
   const lineKid = kids * prices.kid;
-  const totalPrice = lineAdult + lineTeen + lineKid;
+  const totalPrice = lineAdult + lineKid;
 
   // Submit state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -241,7 +240,7 @@ export default function CheckAvailabilityPage() {
       const payload = {
         experienceId: experience.id,
         scheduleSlotId: selectedSlotId,
-        counts: { adults, teens, kids },
+        counts: { adults, kids },
       };
       const res = await fetch("/api/bookings/drafts", {
         method: "POST",
@@ -603,7 +602,7 @@ export default function CheckAvailabilityPage() {
                 {/* Counters */}
                 <div className={`mt-4 ${pausedNow ? "opacity-60" : ""}`}>
                   <p className="text-xs text-[#7a6a58]">
-                    Adults 18+, Teens 13–17, Kids 3–12 (exact ages next step).
+                    Adults 15+, Kids 3–14.
                   </p>
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <Counter
@@ -617,16 +616,7 @@ export default function CheckAvailabilityPage() {
                       min={1}
                       disabled={!selectedSlot || pausedNow}
                     />
-                    <Counter
-                      label="Teens"
-                      value={teens}
-                      onChange={(v) =>
-                        setTeens(
-                          clampGroup(v, 0, bookingCap, totalPeople, "teens")
-                        )
-                      }
-                      disabled={!selectedSlot || pausedNow}
-                    />
+
                     <Counter
                       label="Kids"
                       value={kids}
@@ -660,14 +650,7 @@ export default function CheckAvailabilityPage() {
                         <span className="font-semibold">{eur(lineAdult)}</span>
                       </div>
                     )}
-                    {teens > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span>
-                          Teens × {teens} @ {eur(prices.teen)}
-                        </span>
-                        <span className="font-semibold">{eur(lineTeen)}</span>
-                      </div>
-                    )}
+
                     {kids > 0 && (
                       <div className="flex items-center justify-between">
                         <span>

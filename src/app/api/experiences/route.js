@@ -12,7 +12,7 @@ const bad = (msg, status = 400) =>
 /**
  * GET /api/experiences
  * Optional: ?limit=20&offset=0&order=asc|desc  (defaults: 100, 0, desc)
- * Only returns public (visibility=true) experiences.
+ * Returns only public (visibility=true) experiences.
  */
 export async function GET(req) {
   const admin = createSupabaseAdmin();
@@ -21,16 +21,36 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const limit = Math.min(Number(searchParams.get("limit")) || 100, 200);
   const offset = Math.max(Number(searchParams.get("offset")) || 0, 0);
-  const order = (searchParams.get("order") || "desc").toLowerCase(); // 'asc' | 'desc'
+  const order = (searchParams.get("order") || "desc").toLowerCase();
+  const asc = order === "asc";
 
   try {
     const { data, error } = await admin
       .from("Experience")
       .select(
-        "id,name,slug,description,price,location,duration,whatsIncluded,whatToBring,whyYoullLove,images,mapPin,guestReviews,frequency,visibility,createdAt,updatedAt"
+        [
+          "id",
+          "name",
+          "slug",
+          "description",
+          "location",
+          "duration",
+          "whatsIncluded",
+          "whatToBring",
+          "whyYoullLove",
+          "images",
+          "mapPin",
+          "guestReviews",
+          "frequency",
+          "visibility",
+          "createdAt",
+          "updatedAt",
+          "priceAdult",
+          "priceKid",
+        ].join(",")
       )
       .eq("visibility", true)
-      .order("createdAt", { ascending: order === "asc" })
+      .order("createdAt", { ascending: asc })
       .range(offset, offset + limit - 1);
 
     if (error) throw error;
