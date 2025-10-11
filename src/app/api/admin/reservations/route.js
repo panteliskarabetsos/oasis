@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { transporter } from "@/lib/email/nodemailer";
-import { generateBookingConfirmationEmail } from "@/lib/email/bookingConfirmationEmail";
+import { sendConfirmationEmail } from "@/lib/email/sendConfirmationEmail";
 import { generateCancellationEmail } from "@/lib/email/cancellationEmail";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
@@ -144,8 +144,8 @@ export async function POST(req) {
         scheduleSlotId: Number(scheduleSlotId),
         numberOfPeople: Number(numberOfPeople),
         notes: notes || null,
-        createdAt: nowIso, // ✅ required
-        updatedAt: nowIso, // ✅ required
+        createdAt: nowIso,
+        updatedAt: nowIso,
         // status: "confirmed",      // if you don't have a default
       })
       .select(
@@ -168,7 +168,7 @@ export async function POST(req) {
 
     // 4) send email (best-effort)
     try {
-      const { subject, html } = generateBookingConfirmationEmail(booking);
+      const { subject, html } = sendBookingConfirmationEmail(booking);
       await transporter.sendMail({
         from: `"Oasis" <${process.env.EMAIL_USER}>`,
         to: booking.user?.email,
