@@ -100,21 +100,47 @@ export default function AdminAccountsPage() {
 
   const searchRef = useRef(null);
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "/") {
-        e.preventDefault();
+    const onKey = (ev) => {
+      // Guard against undefined keys and non-keyboard events
+      const key = typeof ev?.key === "string" ? ev.key.toLowerCase() : "";
+      if (!key) return;
+
+      // Don’t fire shortcuts when typing in inputs, textareas, selects, or contentEditable
+      const el = ev.target;
+      const tag = (el?.tagName || "").toLowerCase();
+      const typing =
+        el?.isContentEditable ||
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select";
+      if (typing) return;
+
+      if (key === "/") {
+        ev.preventDefault();
         searchRef.current?.focus();
+        return;
       }
-      if (e.key.toLowerCase() === "a") setShowAddDrawer(true);
-      if (e.key.toLowerCase() === "r") fetchUsers();
-      if (e.key === "Escape") {
+      if (key === "a") {
+        ev.preventDefault();
+        setShowAddDrawer(true);
+        return;
+      }
+      if (key === "r") {
+        ev.preventDefault();
+        fetchUsers();
+        return;
+      }
+      if (key === "escape") {
         setShowAddDrawer(false);
         setEditingUser(null);
         setConfirmDeleteId(null);
       }
     };
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // If your linter complains about fetchUsers in deps, either wrap fetchUsers in useCallback
+    // or ignore with: // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // role gate logic

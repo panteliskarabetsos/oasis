@@ -58,7 +58,7 @@ function AdminClientsPage() {
   const [isPending, startTransition] = useTransition();
 
   const searchRef = useRef(null);
-
+  const currentAuthId = user?.id;
   // Client-only rendering
   const [isClient, setIsClient] = useState(false);
   useEffect(() => setIsClient(true), []);
@@ -486,7 +486,18 @@ function AdminClientsPage() {
                           </button>
                           <button
                             onClick={() => setConfirmDeleteId(u.id)}
+                            disabled={
+                              u.auth_user_id === currentAuthId ||
+                              // fallback if API isn’t updated yet: compare emails
+                              u.email?.toLowerCase?.() ===
+                                user?.email?.toLowerCase?.()
+                            }
                             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-600 text-white text-sm hover:bg-red-700 transition shadow-sm"
+                            title={
+                              u.auth_user_id === currentAuthId
+                                ? "Can't delete yourself"
+                                : "Delete"
+                            }
                           >
                             <Trash2 size={16} /> Delete
                           </button>

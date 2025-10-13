@@ -49,7 +49,9 @@ export async function GET() {
   try {
     const { data, error } = await admin
       .from("User")
-      .select("id,email,name,surname,phone,role,dateOfBirth,createdAt")
+      .select(
+        "id,auth_user_id,email,name,surname,phone,role,dateOfBirth,createdAt"
+      )
       .order("createdAt", { ascending: false });
 
     if (error) throw error;
