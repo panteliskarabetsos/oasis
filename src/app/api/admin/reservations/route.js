@@ -5,370 +5,253 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { transporter } from "@/lib/email/nodemailer";
-import { sendConfirmationEmail } from "@/lib/email/sendConfirmationEmail";
-import { generateCancellationEmail } from "@/lib/email/cancellationEmail";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
-const err = (msg, status = 500) =>
+const bad = (msg, status = 400) =>
   NextResponse.json({ error: msg }, { status });
 
-async function getAuthUser() {
-  const supa = await createSupabaseServer();
-  const { data, error } = await supa.auth.getUser();
-  if (error || !data?.user) return null;
-  return data.user;
-}
-
 async function requireAdmin() {
-  const user = await getAuthUser();
-  if (!user) return err("Unauthorized", 401);
+  const supa = await createSupabaseServer();
+  if (!supa)
+    return { error: true, response: bad("Server not configured", 500) };
 
-  if (
-    user?.app_metadata?.role === "admin" ||
-    user?.user_metadata?.role === "admin"
-  ) {
-    return { user };
-  }
+  const { data, error } = await supa.auth.getUser();
+  const user = data?.user;
+  if (error || !user)
+    return { error: true, response: bad("Unauthorized", 401) };
 
   const admin = createSupabaseAdmin();
-  if (!admin) return err("Server not configured", 500);
+  if (!admin)
+    return { error: true, response: bad("Server not configured", 500) };
 
-  const { data: dbUser, error: roleErr } = await admin
+  // Prefer your public.User table role over app/user_metadata
+  const { data: profile } = await admin
     .from("User")
-    .select("role")
+    .select("id, role")
     .eq("auth_user_id", user.id)
-    .maybeSingle();
-
-  if (roleErr) {
-    console.error("[reservations] role lookup error", roleErr);
-    return err("Server error", 500);
+    .single();
+  const role =
+    profile?.role ||
+    user?.app_metadata?.role ||
+    user?.user_metadata?.role ||
+    "user";
+  if (!["admin", "superadmin"].includes(role)) {
+    return { error: true, response: bad("Forbidden", 403) };
   }
-  if (dbUser?.role === "admin") return { user };
-  return err("Unauthorized", 401);
+
+  return { error: false, admin, user, role };
 }
 
-async function requireUserAndDbId() {
-  const user = await getAuthUser();
-  if (!user) return { error: err("Unauthorized", 401) };
+/**
+ * GET /api/admin/reservations
+ * Query params:
+ * - page (default 1)
+ * - pageSize (default 20)
+ * - q (search: name/email/phone/code)
+ * - status (pending|confirmed|cancelled|draft or empty)
+ * - from, to (YYYY-MM-DD)
+ * - experienceId (number)
+ */
+export async function GET(req) {
+  const auth = await requireAdmin();
+  if (auth.error) return auth.response;
+  const supa = auth.admin; // service-role client (bypasses RLS)
 
-  const admin = createSupabaseAdmin();
-  if (!admin) return { error: err("Server not configured", 500) };
-
-  const { data: dbUser, error: upErr } = await admin
-    .from("User")
-    .select("id,email")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-
-  if (upErr) {
-    console.error("[reservations] user map error", upErr);
-    return { error: err("Server error", 500) };
-  }
-  if (!dbUser) return { error: err("User profile not found", 404) };
-
-  return { authUser: user, dbUserId: dbUser.id };
-}
-
-/* ===================== GET (Admin) ===================== */
-export async function GET() {
-  const gate = await requireAdmin();
-  if ("body" in gate) return gate;
-
-  const admin = createSupabaseAdmin();
   try {
-    const { data, error } = await admin
-      .from("Booking")
-      .select(
-        `
-        id,
-        numberOfPeople,
-        notes,
-        user:User ( id, email, name, surname, phone ),
-        scheduleSlot:ScheduleSlot (
-          id, date,
-          experience:Experience ( id, name )
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, Number(searchParams.get("page")) || 1);
+    const pageSize = Math.max(
+      1,
+      Math.min(200, Number(searchParams.get("pageSize")) || 20)
+    );
+    const q = (searchParams.get("q") || "").trim().toLowerCase();
+    const status = (searchParams.get("status") || "").trim();
+    const experienceId = Number(searchParams.get("experienceId")) || null;
+    const from = (searchParams.get("from") || "").trim();
+    const to = (searchParams.get("to") || "").trim();
+
+    const fromTs = from ? `${from}T00:00:00` : null; // schema uses timestamp w/o TZ
+    const toTs = to ? `${to}T23:59:59.999` : null;
+
+    // --- Build ScheduleSlot filter first (robust across PostgREST versions) ---
+    let slotIds = null; // null => no slot filter, [] => nothing matches
+    if (experienceId || fromTs || toTs) {
+      let slotQ = supa
+        .from("ScheduleSlot")
+        .select("id, date, isCancelled, experienceId")
+        .eq("isCancelled", false);
+      if (experienceId) slotQ = slotQ.eq("experienceId", experienceId);
+      if (fromTs) slotQ = slotQ.gte("date", fromTs);
+      if (toTs) slotQ = slotQ.lte("date", toTs);
+      const { data: slots, error: slotsErr } = await slotQ.limit(3000);
+      if (slotsErr) throw slotsErr;
+      slotIds = (slots || []).map((s) => s.id);
+    }
+
+    // --- BOOKING (confirmed reservations) ---
+    let bookings = [];
+    if (status !== "draft") {
+      let bq = supa
+        .from("Booking")
+        .select(
+          `id, status, createdAt, numberOfPeople, notes, scheduleSlotId,
+           ScheduleSlot:ScheduleSlot(id, date, experienceId, Experience:Experience(id, name)),
+           User:User(id, email, name, surname, phone)`
         )
-      `
-      )
-      .order("date", { foreignTable: "ScheduleSlot", ascending: false });
+        .order("createdAt", { ascending: false })
+        .limit(2000);
 
-    if (error) throw error;
-    return ok(Array.isArray(data) ? data : []);
-  } catch (e) {
-    console.error("Error fetching reservations:", e);
-    return err("Failed to fetch reservations", 500);
-  }
-}
-
-/* ===================== POST (User) ===================== */
-export async function POST(req) {
-  const map = await requireUserAndDbId();
-  if (map.error) return map.error;
-
-  const admin = createSupabaseAdmin();
-  if (!admin) return err("Server not configured", 500);
-
-  const { dbUserId } = map;
-  const { scheduleSlotId, numberOfPeople = 1, notes = "" } = await req.json();
-  const nowIso = new Date().toISOString();
-
-  try {
-    // 1) load slot
-    const { data: slot, error: slotErr } = await admin
-      .from("ScheduleSlot")
-      .select("id, totalSlots, bookedSlots")
-      .eq("id", Number(scheduleSlotId))
-      .single();
-
-    if (slotErr) throw slotErr;
-    if (!slot) return err("Schedule slot not found", 404);
-
-    if (slot.bookedSlots + Number(numberOfPeople) > slot.totalSlots) {
-      return err("Not enough available slots for this date", 400);
-    }
-
-    // 2) increment slot.bookedSlots (+ touch updatedAt)
-    const newBooked = slot.bookedSlots + Number(numberOfPeople);
-    const { error: incErr } = await admin
-      .from("ScheduleSlot")
-      .update({ bookedSlots: newBooked, updatedAt: nowIso })
-      .eq("id", slot.id);
-    if (incErr) throw incErr;
-
-    // 3) create booking with timestamps
-    const { data: booking, error: bookErr } = await admin
-      .from("Booking")
-      .insert({
-        userId: Number(dbUserId),
-        scheduleSlotId: Number(scheduleSlotId),
-        numberOfPeople: Number(numberOfPeople),
-        notes: notes || null,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        // status: "confirmed",      // if you don't have a default
-      })
-      .select(
-        `
-        id,
-        user:User ( name, email ),
-        scheduleSlot:ScheduleSlot ( date, experience:Experience ( name, location ) )
-      `
-      )
-      .single();
-
-    // If insert failed, roll back the increment to keep counts consistent
-    if (bookErr) {
-      await admin
-        .from("ScheduleSlot")
-        .update({ bookedSlots: slot.bookedSlots, updatedAt: nowIso })
-        .eq("id", slot.id);
-      throw bookErr;
-    }
-
-    // 4) send email (best-effort)
-    try {
-      const { subject, html } = sendBookingConfirmationEmail(booking);
-      await transporter.sendMail({
-        from: `"Oasis" <${process.env.EMAIL_USER}>`,
-        to: booking.user?.email,
-        subject,
-        html,
-      });
-    } catch (mailErr) {
-      console.warn("[reservations] mail send failed", mailErr);
-    }
-
-    return ok({ id: booking.id }, 201);
-  } catch (e) {
-    console.error("Error creating reservation:", e);
-    return err("Failed to create reservation", 500);
-  }
-}
-
-/* ===================== PATCH (Admin) ===================== */
-export async function PATCH(req) {
-  const gate = await requireAdmin();
-  if ("body" in gate) return gate;
-
-  const admin = createSupabaseAdmin();
-  if (!admin) return err("Server not configured", 500);
-
-  const body = await req.json();
-  const { id, userId, scheduleSlotId, numberOfPeople = 1, notes = "" } = body;
-  const nowIso = new Date().toISOString();
-
-  try {
-    // Load old booking
-    const { data: old, error: oldErr } = await admin
-      .from("Booking")
-      .select("id, userId, scheduleSlotId, numberOfPeople")
-      .eq("id", Number(id))
-      .single();
-    if (oldErr) throw oldErr;
-    if (!old) return err("Booking not found", 404);
-
-    const isSlotChanged = old.scheduleSlotId !== Number(scheduleSlotId);
-    const isPeopleChanged = old.numberOfPeople !== Number(numberOfPeople);
-
-    if (isSlotChanged || isPeopleChanged) {
-      // revert old slot count
-      const { data: oldSlot, error: osErr } = await admin
-        .from("ScheduleSlot")
-        .select("id, bookedSlots")
-        .eq("id", old.scheduleSlotId)
-        .single();
-      if (osErr) throw osErr;
-
-      const { error: decErr } = await admin
-        .from("ScheduleSlot")
-        .update({
-          bookedSlots: Math.max(
-            0,
-            (oldSlot.bookedSlots || 0) - old.numberOfPeople
-          ),
-          updatedAt: nowIso,
-        })
-        .eq("id", oldSlot.id);
-      if (decErr) throw decErr;
-
-      // check new slot
-      const { data: newSlot, error: nsErr } = await admin
-        .from("ScheduleSlot")
-        .select("id, totalSlots, bookedSlots")
-        .eq("id", Number(scheduleSlotId))
-        .single();
-      if (nsErr) throw nsErr;
-      if (!newSlot) return err("Schedule slot not found", 404);
-
-      if (newSlot.bookedSlots + Number(numberOfPeople) > newSlot.totalSlots) {
-        return err("Not enough availability on new slot", 400);
+      if (status) bq = bq.eq("status", status);
+      if (slotIds !== null) {
+        if (slotIds.length === 0) {
+          bookings = [];
+        } else {
+          bq = bq.in("scheduleSlotId", slotIds);
+          const { data: bookingsRaw, error: bookingsErr } = await bq;
+          if (bookingsErr) throw bookingsErr;
+          bookings = (bookingsRaw || []).map((b) => {
+            const slot = b?.ScheduleSlot || {};
+            const ex = slot?.Experience || {};
+            const u = b?.User || {};
+            return {
+              id: b.id,
+              source: "booking",
+              code: `B-${String(b.id).padStart(6, "0")}`,
+              startTime: slot?.date || null,
+              experienceId: slot?.experienceId || null,
+              experienceName: ex?.name || null,
+              guestName:
+                [u?.name, u?.surname].filter(Boolean).join(" ") || null,
+              guestEmail: u?.email || null,
+              guestPhone: u?.phone || null,
+              adults:
+                typeof b.numberOfPeople === "number" ? b.numberOfPeople : null,
+              kids: null,
+              totalAmount: null,
+              status: b?.status || "confirmed",
+              createdAt: b?.createdAt || null,
+            };
+          });
+        }
+      } else {
+        const { data: bookingsRaw, error: bookingsErr } = await bq;
+        if (bookingsErr) throw bookingsErr;
+        bookings = (bookingsRaw || []).map((b) => {
+          const slot = b?.ScheduleSlot || {};
+          const ex = slot?.Experience || {};
+          const u = b?.User || {};
+          return {
+            id: b.id,
+            source: "booking",
+            code: `B-${String(b.id).padStart(6, "0")}`,
+            startTime: slot?.date || null,
+            experienceId: slot?.experienceId || null,
+            experienceName: ex?.name || null,
+            guestName: [u?.name, u?.surname].filter(Boolean).join(" ") || null,
+            guestEmail: u?.email || null,
+            guestPhone: u?.phone || null,
+            adults:
+              typeof b.numberOfPeople === "number" ? b.numberOfPeople : null,
+            kids: null,
+            totalAmount: null,
+            status: b?.status || "confirmed",
+            createdAt: b?.createdAt || null,
+          };
+        });
       }
-
-      // increment new slot
-      const { error: incErr } = await admin
-        .from("ScheduleSlot")
-        .update({
-          bookedSlots: newSlot.bookedSlots + Number(numberOfPeople),
-          updatedAt: nowIso,
-        })
-        .eq("id", newSlot.id);
-      if (incErr) throw incErr;
     }
 
-    // update booking (+ touch updatedAt)
-    const { data: updated, error: upErr } = await admin
-      .from("Booking")
-      .update({
-        userId: Number(userId),
-        scheduleSlotId: Number(scheduleSlotId),
-        numberOfPeople: Number(numberOfPeople),
-        notes: notes || null,
-        updatedAt: nowIso, // ✅ keep fresh
-      })
-      .eq("id", Number(id))
-      .select()
-      .single();
+    // --- BOOKING DRAFT (draft/pending carts) ---
+    let drafts = [];
+    {
+      let dq = supa
+        .from("BookingDraft")
+        .select(
+          `id, status, createdAt, totalAmount, counts, primary_contact, experienceId, scheduleSlotId,
+           ScheduleSlot:ScheduleSlot(id, date, experienceId, Experience:Experience(id, name))`
+        )
+        .order("createdAt", { ascending: false })
+        .limit(2000);
 
-    if (upErr) throw upErr;
-    return ok(updated);
-  } catch (e) {
-    console.error("Error updating reservation:", e);
-    return err("Failed to update reservation", 500);
-  }
-}
+      if (status) dq = dq.eq("status", status);
+      if (slotIds !== null) {
+        if (slotIds.length === 0) {
+          drafts = [];
+        } else {
+          dq = dq.in("scheduleSlotId", slotIds);
+          const { data: draftsRaw, error: draftsErr } = await dq;
+          if (draftsErr) throw draftsErr;
+          drafts = (draftsRaw || []).map((d) => mapDraft(d));
+        }
+      } else {
+        const { data: draftsRaw, error: draftsErr } = await dq;
+        if (draftsErr) throw draftsErr;
+        drafts = (draftsRaw || []).map((d) => mapDraft(d));
+      }
+    }
 
-/* ===================== DELETE (Admin) ===================== */
-export async function DELETE(req) {
-  const gate = await requireAdmin();
-  if ("body" in gate) return gate;
-
-  const admin = createSupabaseAdmin();
-  if (!admin) return err("Server not configured", 500);
-
-  const { id } = await req.json();
-
-  try {
-    // load full booking to email & decrement
-    const { data: booking, error: loadErr } = await admin
-      .from("Booking")
-      .select(
-        `
-        id,
-        numberOfPeople,
-        scheduleSlotId,
-        user:User ( email, name ),
-        scheduleSlot:ScheduleSlot ( id, date, experience:Experience ( id, name, location ) )
-      `
-      )
-      .eq("id", Number(id))
-      .single();
-    if (loadErr) throw loadErr;
-    if (!booking) return err("Booking not found", 404);
-
-    // delete booking
-    const { error: delErr } = await admin
-      .from("Booking")
-      .delete()
-      .eq("id", Number(id));
-    if (delErr) throw delErr;
-
-    // decrement slot count
-    const { data: slot, error: slotErr } = await admin
-      .from("ScheduleSlot")
-      .select("id, bookedSlots")
-      .eq("id", booking.scheduleSlotId)
-      .single();
-    if (slotErr) throw slotErr;
-
-    const { error: decErr } = await admin
-      .from("ScheduleSlot")
-      .update({
-        bookedSlots: Math.max(
-          0,
-          (slot.bookedSlots || 0) - booking.numberOfPeople
-        ),
-        updatedAt: new Date().toISOString(),
-      })
-      .eq("id", slot.id);
-    if (decErr) throw decErr;
-    // 0) Global pause check
-    const { data: global, error: gErr } = await admin
-      .from("AppSetting")
-      .select("bookingsPaused, bookingsPausedUntil, bookingsPausedMessage")
-      .eq("key", "global")
-      .single();
-    if (gErr) throw gErr;
-
-    const isGloballyPaused =
-      !!global?.bookingsPaused ||
-      (global?.bookingsPausedUntil &&
-        new Date(global.bookingsPausedUntil) > new Date());
-
-    if (isGloballyPaused) {
-      return err(
-        global?.bookingsPausedMessage ||
-          "Bookings are temporarily unavailable. Please try again later.",
-        403
+    // Merge + client-side filtering for q
+    let merged = [...bookings, ...drafts];
+    if (q) {
+      const like = (s) => (s || "").toString().toLowerCase().includes(q);
+      merged = merged.filter(
+        (r) =>
+          like(r.code) ||
+          like(r.guestName) ||
+          like(r.guestEmail) ||
+          like(r.guestPhone)
       );
     }
 
-    // email cancellation (best-effort)
-    try {
-      const emailContent = generateCancellationEmail(booking);
-      await transporter.sendMail({
-        to: booking.user?.email,
-        from: `"Oasis" <${process.env.EMAIL_USER}>`,
-        subject: emailContent.subject,
-        html: emailContent.html,
-      });
-    } catch (mailErr) {
-      console.warn("[reservations] cancellation mail failed", mailErr);
-    }
+    // Sort by startTime desc then createdAt desc
+    merged.sort((a, b) => {
+      const at = a.startTime ? new Date(a.startTime).getTime() : 0;
+      const bt = b.startTime ? new Date(b.startTime).getTime() : 0;
+      if (bt !== at) return bt - at;
+      const ac = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bc = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return bc - ac;
+    });
 
-    return ok({ success: true });
+    const total = merged.length;
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    const items = merged.slice(start, end);
+
+    return ok({ items, total });
   } catch (e) {
-    console.error("Error deleting reservation:", e);
-    return err("Failed to delete reservation", 500);
+    console.error("/api/admin/reservations GET error", e);
+    return bad(e?.message || "Failed to load reservations", 500);
   }
+}
+
+function mapDraft(d) {
+  const slot = d?.ScheduleSlot || {};
+  const ex = slot?.Experience || {};
+  const pc = d?.primary_contact || {};
+  const cnt = d?.counts || {};
+  const adults = ["adults", "adult", "A", "people"].reduce(
+    (acc, k) => (typeof cnt?.[k] === "number" ? cnt[k] : acc),
+    null
+  );
+  const kids = ["kids", "children", "K"].reduce(
+    (acc, k) => (typeof cnt?.[k] === "number" ? cnt[k] : acc),
+    null
+  );
+  return {
+    id: d.id,
+    source: "draft",
+    code: `D-${String(d.id).padStart(6, "0")}`,
+    startTime: slot?.date || null,
+    experienceId: slot?.experienceId || d?.experienceId || null,
+    experienceName: ex?.name || null,
+    guestName: pc?.name || null,
+    guestEmail: pc?.email || null,
+    guestPhone: pc?.phone || null,
+    adults,
+    kids,
+    totalAmount: typeof d.totalAmount === "number" ? d.totalAmount : null,
+    status: d?.status || "draft",
+    createdAt: d?.createdAt || null,
+  };
 }

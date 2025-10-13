@@ -1,855 +1,846 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/app/components/SessionWrapper";
-import * as XLSX from "xlsx";
+import {
+  Calendar as CalendarIcon,
+  Search as SearchIcon,
+  Filter as FilterIcon,
+  Download as DownloadIcon,
+  RefreshCw,
+  Eye,
+  X as XIcon,
+  CalendarClock,
+  XCircle as XCircleIcon,
+} from "lucide-react";
+import { toast } from "react-hot-toast";
 
-const AdminReservationsPage = () => {
+/* ---------------------------- helpers ---------------------------- */
+const fmtDate = (d) =>
+  d
+    ? new Date(d).toLocaleString("el-GR", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "-";
+const fmtMoney = (n) =>
+  typeof n === "number"
+    ? n.toLocaleString("el-GR", { style: "currency", currency: "EUR" })
+    : "-";
+const cx = (...xs) => xs.filter(Boolean).join(" ");
+
+const STATUS_OPTIONS = [
+  { value: "", label: "Όλες" },
+  { value: "pending", label: "Σε εκκρεμότητα" },
+  { value: "confirmed", label: "Επιβεβαιωμένες" },
+  { value: "cancelled", label: "Ακυρωμένες" },
+  { value: "draft", label: "Προσχέδια" },
+];
+
+const PAGE_SIZE = 20;
+
+/* ------------------------------ Page ------------------------------ */
+export default function ReservationsPage() {
   const router = useRouter();
-  const { user, loading } = useAuth();
 
-  const [isAdmin, setIsAdmin] = useState(null); // null = unknown, true/false when resolved
-  const [booted, setBooted] = useState(false);
+  // Filters & state
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
+  const [from, setFrom] = useState(""); // YYYY-MM-DD
+  const [to, setTo] = useState(""); // YYYY-MM-DD
+  const [experienceId, setExperienceId] = useState("");
 
-  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const [selectedSlotId, setSelectedSlotId] = useState("");
-  const [selectedExperienceId, setSelectedExperienceId] = useState("");
-  const [numberOfPeople, setNumberOfPeople] = useState(1);
-  const [notes, setNotes] = useState("");
-  const [bookings, setBookings] = useState([]);
-  const [users, setUsers] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
   const [experiences, setExperiences] = useState([]);
 
-  const [grouped, setGrouped] = useState({});
-  const [selectedDate, setSelectedDate] = useState("");
-  const [selectedExperience, setSelectedExperience] = useState("");
+  // Actions state
+  const [selected, setSelected] = useState(null);
+  const [showCancel, setShowCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
-  const [editingBooking, setEditingBooking] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const [viewMode, setViewMode] = useState("today"); // today | all | upcoming | past
-  const [isLoadingGrouped, setIsLoadingGrouped] = useState(true);
-  const [availableSlots, setAvailableSlots] = useState([]);
-  const [userSearch, setUserSearch] = useState("");
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [showUserList, setShowUserList] = useState(false);
-  const [formError, setFormError] = useState("");
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [slotLoading, setSlotLoading] = useState(false);
+  const [slots, setSlots] = useState([]);
+  const [slotFrom, setSlotFrom] = useState(() => today());
+  const [slotTo, setSlotTo] = useState(() => plusDays(60));
+  const [targetSlotId, setTargetSlotId] = useState("");
 
-  const userSearchRef = useRef();
-  const isFormValid =
-    !!selectedUser &&
-    !!selectedExperienceId &&
-    !!selectedSlotId &&
-    numberOfPeople > 0;
+  const controllerRef = useRef(null);
 
-  const filteredUsers = users.filter(
-    (u) =>
-      `${u.name} ${u.surname}`
-        .toLowerCase()
-        .includes(userSearch.toLowerCase()) ||
-      u.email.toLowerCase().includes(userSearch.toLowerCase())
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    [total]
   );
 
-  // ----- Resolve admin role using /api/me (fallback to Supabase metadata)
+  // Debounce query
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   useEffect(() => {
-    let cancel = false;
-    async function resolveRole() {
-      if (!user) {
-        setIsAdmin(false);
-        setBooted(true);
-        return;
-      }
+    const id = setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => clearTimeout(id);
+  }, [query]);
+
+  // Load experiences for filter
+  useEffect(() => {
+    let abort = new AbortController();
+    (async () => {
       try {
-        const res = await fetch("/api/me", {
+        const res = await fetch(
+          `/api/admin/experiences?fields=id,name&limit=200`,
+          {
+            signal: abort.signal,
+            cache: "no-store",
+            credentials: "include",
+          }
+        );
+        if (!res.ok) throw new Error("Failed to load experiences");
+        const data = await res.json();
+        const items = Array.isArray(data?.items) ? data.items : data;
+        setExperiences(items || []);
+      } catch (e) {
+        // non-blocking
+        console.warn(e);
+      }
+    })();
+    return () => abort.abort();
+  }, []);
+
+  // Fetch reservations
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setError("");
+      if (controllerRef.current) controllerRef.current.abort();
+      controllerRef.current = new AbortController();
+
+      const qs = new URLSearchParams({
+        page: String(page),
+        pageSize: String(PAGE_SIZE),
+      });
+      if (debouncedQuery) qs.set("q", debouncedQuery);
+      if (status) qs.set("status", status);
+      if (from) qs.set("from", from);
+      if (to) qs.set("to", to);
+      if (experienceId) qs.set("experienceId", experienceId);
+
+      try {
+        const res = await fetch(`/api/admin/reservations?${qs.toString()}`, {
+          signal: controllerRef.current.signal,
           cache: "no-store",
           credentials: "include",
         });
-        const data = res.ok ? await res.json() : null;
-        const role =
-          data?.role ||
-          user?.app_metadata?.role ||
-          user?.user_metadata?.role ||
-          "user";
-        if (!cancel) {
-          setIsAdmin(role === "admin");
-          setBooted(true);
-        }
-      } catch {
-        const fallback =
-          user?.app_metadata?.role || user?.user_metadata?.role || "user";
-        if (!cancel) {
-          setIsAdmin(fallback === "admin");
-          setBooted(true);
-        }
-      }
-    }
-    if (!loading) resolveRole();
-    return () => {
-      cancel = true;
-    };
-  }, [user, loading]);
 
-  // ----- Redirect non-admins
-  useEffect(() => {
-    if (!loading && booted && isAdmin === false) {
-      router.replace("/");
-    }
-  }, [loading, booted, isAdmin, router]);
-
-  // ----- Close user dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (userSearchRef.current && !userSearchRef.current.contains(e.target)) {
-        setShowUserList(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // ----- Export to Excel (unchanged)
-  const exportToExcel = () => {
-    if (!bookings || bookings.length === 0) {
-      alert("No bookings available to export.");
-      return;
-    }
-    setIsLoadingGrouped(true);
-    const now = new Date();
-
-    const filteredBookings = bookings.filter((b) => {
-      const date = new Date(b.scheduleSlot?.date);
-      const isToday = date.toDateString() === now.toDateString();
-      const isAfterToday = date > now && !isToday;
-      const isBeforeNow = date < now && !isToday;
-
-      switch (viewMode) {
-        case "today":
-          return isToday;
-        case "upcoming":
-          return isAfterToday;
-        case "past":
-          return isBeforeNow;
-        case "all":
-        default:
-          return true;
-      }
-    });
-
-    if (filteredBookings.length === 0) {
-      alert("No bookings to export for selected view.");
-      setIsLoadingGrouped(false);
-      return;
-    }
-
-    const workbook = XLSX.utils.book_new();
-    const sheetData = [];
-    const merges = [];
-
-    const groupedByExperience = filteredBookings.reduce((acc, b) => {
-      const expName = b.experience?.name || "Unknown Experience";
-      if (!acc[expName]) acc[expName] = [];
-      acc[expName].push({
-        Name: `${b.user?.name ?? "—"} ${b.user?.surname ?? ""}`.trim(),
-        Email: b.user?.email ?? "—",
-        Phone: b.user?.phone ?? "—",
-        Date: new Date(b.scheduleSlot?.date),
-      });
-      return acc;
-    }, {});
-
-    let rowIndex = 0;
-
-    Object.entries(groupedByExperience).forEach(
-      ([experienceName, rows], index, array) => {
-        sheetData.push([`${experienceName} Reservations`]);
-        merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 3 } });
-        rowIndex++;
-
-        const headers = ["Name", "Email", "Phone", "Date"];
-        sheetData.push(headers);
-        rowIndex++;
-
-        rows
-          .sort((a, b) => a.Date - b.Date)
-          .forEach((row) => {
-            sheetData.push([
-              row.Name,
-              row.Email,
-              row.Phone,
-              row.Date.toLocaleString(),
-            ]);
-            rowIndex++;
-          });
-
-        if (index < array.length - 1) {
-          sheetData.push([]);
-          rowIndex++;
-        }
-      }
-    );
-
-    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-    worksheet["!merges"] = merges;
-    worksheet["!cols"] = [{ wch: 25 }, { wch: 30 }, { wch: 20 }, { wch: 25 }];
-
-    Object.keys(worksheet).forEach((cell) => {
-      if (!cell.startsWith("!")) {
-        const cellRef = XLSX.utils.decode_cell(cell);
-        const value = worksheet[cell].v;
-
-        if (
-          typeof value === "string" &&
-          value.includes("Reservations") &&
-          cellRef.c === 0
-        ) {
-          worksheet[cell].s = {
-            font: { bold: true, sz: 14 },
-            alignment: { horizontal: "center" },
-          };
+        if (!res.ok) {
+          const msg =
+            (await res.json().catch(() => ({})))?.error || "Σφάλμα φόρτωσης";
+          throw new Error(msg);
         }
 
-        if (
-          sheetData[cellRef.r]?.[0] === "Name" &&
-          ["Name", "Email", "Phone", "Date"].includes(value)
-        ) {
-          worksheet[cell].s = {
-            font: { bold: true },
-            alignment: { horizontal: "left" },
-            fill: { fgColor: { rgb: "E8EAF6" } },
-          };
-        }
-
-        worksheet[cell].s = {
-          ...(worksheet[cell].s || {}),
-          border: {
-            top: { style: "thin", color: { auto: 1 } },
-            bottom: { style: "thin", color: { auto: 1 } },
-            left: { style: "thin", color: { auto: 1 } },
-            right: { style: "thin", color: { auto: 1 } },
-          },
-          alignment: {
-            ...(worksheet[cell].s?.alignment || {}),
-            vertical: "center",
-          },
-        };
+        const data = await res.json();
+        const items = data?.items || [];
+        setRows(items);
+        setTotal(Number(data?.total || items.length));
+      } catch (e) {
+        setError(e.message);
+        setRows((prev) => (prev.length ? prev : DEMO_ROWS));
+        setTotal((prev) => prev || DEMO_ROWS.length);
+      } finally {
+        setLoading(false);
       }
-    });
+    })();
+  }, [debouncedQuery, status, from, to, experienceId, page]);
 
-    XLSX.utils.book_append_sheet(
-      workbook,
-      worksheet,
-      `Reservations - ${viewMode}`
-    );
-    XLSX.writeFile(
-      workbook,
-      `reservations-${viewMode}-${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
+  function resetFilters() {
+    setQuery("");
+    setStatus("");
+    setFrom("");
+    setTo("");
+    setExperienceId("");
+    setPage(1);
+  }
 
-    setIsLoadingGrouped(false);
-  };
+  function onExportCSV() {
+    const headers = [
+      "ID",
+      "Κωδικός",
+      "Ημερομηνία",
+      "Εμπειρία",
+      "Όνομα",
+      "Email",
+      "Τηλέφωνο",
+      "Ενήλικες",
+      "Παιδιά",
+      "Σύνολο",
+      "Κατάσταση",
+      "Δημιουργήθηκε",
+    ];
+    const lines = rows.map((r) => [
+      r.id,
+      r.code || "",
+      r.date || r.startTime || "",
+      r.experienceName || "",
+      r.guestName || "",
+      r.guestEmail || "",
+      r.guestPhone || "",
+      r.adults ?? "",
+      r.kids ?? "",
+      r.totalAmount ?? "",
+      r.status || "",
+      r.createdAt || "",
+    ]);
 
-  // ----- Load available slots when experience changes
-  useEffect(() => {
-    if (!selectedExperienceId) {
-      setAvailableSlots([]);
-      return;
-    }
+    const csv = [headers, ...lines]
+      .map((row) =>
+        row.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")
+      )
+      .join("");
 
-    const loadSlots = async () => {
-      setIsLoadingSlots(true);
-      const res = await fetch(
-        `/api/admin/schedule?experienceId=${selectedExperienceId}`
-      );
-      const data = await res.json();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `reservations_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
-      const futureSlots = data.filter(
-        (slot) =>
-          new Date(slot.date) >= new Date() &&
-          slot.totalSlots > slot.bookedSlots &&
-          !slot.isCancelled
-      );
-
-      // include current slot of an editing booking if not in the future list
-      if (
-        editingBooking?.scheduleSlot?.experience?.id === selectedExperienceId
-      ) {
-        const currentSlot = editingBooking.scheduleSlot;
-        const alreadyIncluded = futureSlots.some(
-          (slot) => slot.id === currentSlot.id
-        );
-        if (!alreadyIncluded) futureSlots.push(currentSlot);
-      }
-
-      futureSlots.sort((a, b) => new Date(a.date) - new Date(b.date));
-      setAvailableSlots(futureSlots);
-      setIsLoadingSlots(false);
-    };
-
-    loadSlots();
-  }, [selectedExperienceId, editingBooking]);
-
-  // ----- Fetch bookings/users/experiences once admin is confirmed
-  useEffect(() => {
-    async function fetchAllData() {
-      setIsLoadingGrouped(true);
-      const [bookingsRes, usersRes, experiencesRes] = await Promise.all([
-        fetch("/api/admin/reservations"),
-        fetch("/api/admin/users"),
-        fetch("/api/admin/experiences"),
-      ]);
-
-      const [bookingsData, usersData, experiencesData] = await Promise.all([
-        bookingsRes.json(),
-        usersRes.json(),
-        experiencesRes.json(),
-      ]);
-
-      setBookings(Array.isArray(bookingsData) ? bookingsData : []);
-      setUsers(Array.isArray(usersData) ? usersData : []);
-      setExperiences(Array.isArray(experiencesData) ? experiencesData : []);
-      setIsLoadingGrouped(false);
-    }
-
-    if (isAdmin) fetchAllData();
-  }, [isAdmin]);
-
-  // ----- Filter & group bookings for view
-  useEffect(() => {
-    const now = new Date();
-    setIsLoadingGrouped(true);
-
-    const filtered = bookings.filter((b) => {
-      const bookingDate = new Date(b.scheduleSlot?.date);
-      const matchesExperience = selectedExperience
-        ? b.scheduleSlot?.experience?.id?.toString() === selectedExperience
-        : true;
-      const matchesDate = selectedDate
-        ? new Date(b.scheduleSlot?.date).toISOString().slice(0, 10) ===
-          selectedDate
-        : true;
-
-      if (!matchesExperience || !matchesDate) return false;
-
-      const isToday = bookingDate.toDateString() === now.toDateString();
-      const isAfterToday = bookingDate > now && !isToday;
-      const isBeforeNow = bookingDate < now && !isToday;
-
-      switch (viewMode) {
-        case "today":
-          return isToday;
-        case "upcoming":
-          return isAfterToday;
-        case "past":
-          return isBeforeNow || (isToday && bookingDate < now);
-        case "all":
-        default:
-          return true;
-      }
-    });
-
-    const groupedByExperience = filtered.reduce((acc, booking) => {
-      const expId = booking.scheduleSlot?.experience?.id;
-      if (!expId) return acc;
-
-      const bookingDate = new Date(booking.scheduleSlot?.date);
-      const isToday = bookingDate.toDateString() === now.toDateString();
-
-      const group = isToday
-        ? bookingDate > now
-          ? "upcoming"
-          : "past" // today split into upcoming/past
-        : bookingDate > now
-        ? "future"
-        : "past"; // future vs past for other days
-
-      if (!acc[expId]) {
-        acc[expId] = {
-          experience: booking.scheduleSlot?.experience,
-          upcoming: [],
-          past: [],
-          future: [],
-        };
-      }
-      acc[expId][group].push(booking);
-      return acc;
-    }, {});
-
-    setGrouped(groupedByExperience);
-    setIsLoadingGrouped(false);
-  }, [bookings, selectedDate, selectedExperience, viewMode]);
-
-  // ----- Delete booking
-  const handleDelete = async (id) => {
-    if (!confirm("Are you sure you want to delete this booking?")) return;
-
-    const res = await fetch("/api/admin/reservations", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-
-    if (res.ok) {
-      setBookings((prev) => prev.filter((b) => b.id !== id));
-    }
-  };
-
-  // ----- Create / Update booking
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setFormError("");
-    setIsSaving(true);
-
-    const form = e.target;
-    const people = Number(form.numberOfPeople.value);
-
-    const selectedSlot = availableSlots.find(
-      (slot) => slot.id === selectedSlotId
-    );
-    if (selectedSlot) {
-      const remaining = selectedSlot.totalSlots - selectedSlot.bookedSlots;
-      if (people > remaining) {
-        setFormError(
-          `Only ${remaining} spot${
-            remaining > 1 ? "s" : ""
-          } left for this slot.`
-        );
-        setIsSaving(false);
-        return;
-      }
-    }
-
-    const bookingData = {
-      id: editingBooking?.id,
-      userId: form.userId.value,
-      scheduleSlotId: form.slotId.value,
-      numberOfPeople: people,
-      notes: form.notes.value || null,
-    };
-
-    const method = editingBooking ? "PATCH" : "POST";
-
+  // ---------------------------- Actions ----------------------------
+  function openCancel(r) {
+    setSelected(r);
+    setCancelReason("");
+    setShowCancel(true);
+  }
+  async function submitCancel() {
+    if (!selected) return;
     try {
-      const res = await fetch("/api/admin/reservations", {
-        method,
+      const res = await fetch(`/api/admin/reservations/${selected.id}/cancel`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bookingData),
+        credentials: "include",
+        body: JSON.stringify({ reason: cancelReason }),
       });
-
-      const result = await res.json();
-
       if (!res.ok) {
-        setFormError(
-          result?.error || "Something went wrong while saving the reservation."
-        );
-        setIsSaving(false);
-        return;
+        const msg =
+          (await res.json().catch(() => ({})))?.error || "Αποτυχία ακύρωσης";
+        throw new Error(msg);
       }
-
-      setBookings((prev) =>
-        editingBooking
-          ? prev.map((b) => (b.id === result.id ? result : b))
-          : [...prev, result]
+      toast.success("Η κράτηση ακυρώθηκε");
+      setRows((cur) =>
+        cur.map((r) =>
+          r.id === selected.id ? { ...r, status: "cancelled" } : r
+        )
       );
-
-      setEditingBooking(null);
-      setShowForm(false);
-    } catch (err) {
-      console.error(err);
-      setFormError("Unexpected error. Please try again.");
+      setShowCancel(false);
+      setSelected(null);
+    } catch (e) {
+      toast.error(e.message);
     }
+  }
 
-    setIsSaving(false);
-  };
+  function openReschedule(r) {
+    setSelected(r);
+    setShowReschedule(true);
+    setTargetSlotId("");
+    // preset date window around today or the current reservation date
+    const base = r?.startTime ? new Date(r.startTime) : new Date();
+    const fromStr = toDateInput(base);
+    const toStr = toDateInput(plusDaysFrom(base, 60));
+    setSlotFrom(fromStr);
+    setSlotTo(toStr);
+    loadSlots(r.experienceId, fromStr, toStr);
+  }
 
-  // ----- Loading/redirect states
-  if (loading || !booted || isAdmin === null) return null;
-  if (!isAdmin) return null;
+  async function loadSlots(expId, fromStr, toStr) {
+    if (!expId) return setSlots([]);
+    setSlotLoading(true);
+    try {
+      const qs = new URLSearchParams({ experienceId: String(expId) });
+      if (fromStr) qs.set("from", fromStr);
+      if (toStr) qs.set("to", toStr);
+      const res = await fetch(`/api/admin/schedule/slots?${qs.toString()}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok)
+        throw new Error(
+          (await res.json().catch(() => ({})))?.error || "Σφάλμα φόρτωσης slots"
+        );
+      const data = await res.json();
+      setSlots(data?.items || []);
+    } catch (e) {
+      toast.error(e.message);
+      setSlots([]);
+    } finally {
+      setSlotLoading(false);
+    }
+  }
+
+  async function submitReschedule() {
+    if (!selected || !targetSlotId) return toast.error("Επιλέξτε νέο slot");
+    try {
+      const res = await fetch(
+        `/api/admin/reservations/${selected.id}/reschedule`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ scheduleSlotId: Number(targetSlotId) }),
+        }
+      );
+      if (!res.ok) {
+        const msg =
+          (await res.json().catch(() => ({})))?.error || "Αποτυχία μεταφοράς";
+        throw new Error(msg);
+      }
+      const payload = await res.json().catch(() => ({}));
+      const newStartTime = payload?.newStartTime;
+      toast.success("Η κράτηση μεταφέρθηκε");
+      setRows((cur) =>
+        cur.map((r) =>
+          r.id === selected.id
+            ? { ...r, startTime: newStartTime || r.startTime }
+            : r
+        )
+      );
+      setShowReschedule(false);
+      setSelected(null);
+    } catch (e) {
+      toast.error(e.message);
+    }
+  }
 
   return (
-    <div className="p-6 max-w-screen-xl mx-auto print:block">
-      <h1 className="text-3xl font-serif font-semibold text-[#5a4a3f] mb-8 text-center">
-        Reservations per Experience
-      </h1>
-
-      <div className="flex flex-wrap gap-4 mb-8 justify-center sm:justify-start print:hidden">
-        {/* Back to Dashboard */}
-        <button
-          onClick={() => router.push("/admin/")}
-          className="px-5 py-2.5 rounded-full bg-[#f4f1ec] text-[#5a4a3f] border border-[#d8cfc3] shadow-sm hover:bg-[#eae5df] transition-all text-sm font-medium"
-        >
-          ← Back to Dashboard
-        </button>
-
-        {/* Add Reservation */}
-        <button
-          onClick={() => {
-            setEditingBooking(null);
-            setSelectedUser(null);
-            setUserSearch("");
-            setSelectedExperienceId("");
-            setSelectedSlotId("");
-            setNumberOfPeople(1);
-            setNotes("");
-            setShowForm(true);
-          }}
-          className="px-5 py-2.5 rounded-full bg-[#8b6f47] text-white shadow hover:bg-[#a78b62] transition-all text-sm font-medium"
-        >
-          + Add Reservation
-        </button>
-
-        {/* Export Excel */}
-        <button
-          onClick={exportToExcel}
-          className="px-5 py-2.5 rounded-full bg-[#6b63ff] text-white shadow hover:bg-[#5852dc] transition-all text-sm font-medium"
-        >
-          Download Excel
-        </button>
-
-        {/* Print Reservations */}
-        <button
-          onClick={() => window.print()}
-          className="px-5 py-2.5 rounded-full bg-[#5a4a3f] text-white shadow hover:bg-[#463c33] transition-all text-sm font-medium"
-        >
-          Print Reservations
-        </button>
+    <div className="p-6 max-w-[1400px] mx-auto">
+      <div className="flex items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold text-[#45362b]">Κρατήσεις</h1>
+          <p className="text-sm text-[#7b6a5f]">
+            Διαχείριση κρατήσεων για όλες τις εμπειρίες.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => window.location.reload()}
+            className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50"
+          >
+            <RefreshCw className="h-4 w-4" /> Ανανέωση
+          </button>
+          <button
+            onClick={onExportCSV}
+            className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50"
+          >
+            <DownloadIcon className="h-4 w-4" /> Εξαγωγή CSV
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-4 mb-8 print:hidden">
-        {/* Date Picker */}
-        <input
-          type="date"
-          value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
-          className="px-4 py-2 rounded-full border border-[#d8cfc3] bg-[#fefcf9] text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47] font-serif"
-        />
-
-        {/* Experience Select */}
-        <select
-          value={selectedExperience}
-          onChange={(e) => setSelectedExperience(e.target.value)}
-          className="px-4 py-2 rounded-full border border-[#d8cfc3] bg-[#fefcf9] text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47] font-serif"
-        >
-          <option value="">All Experiences</option>
-          {experiences.map((exp) => (
-            <option key={exp.id} value={exp.id}>
-              {exp.name}
-            </option>
-          ))}
-        </select>
-
-        {/* View Mode */}
-        <select
-          value={viewMode}
-          onChange={(e) => setViewMode(e.target.value)}
-          className="px-4 py-2 rounded-full border border-[#d8cfc3] bg-[#fefcf9] text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47] font-serif"
-        >
-          <option value="today">Today</option>
-          <option value="upcoming">Upcoming</option>
-          <option value="past">Past</option>
-          <option value="all">All</option>
-        </select>
-      </div>
-
-      {/* Grouped bookings */}
-      <div className="space-y-12 print:block">
-        {isLoadingGrouped ? (
-          <div className="flex flex-col items-center justify-center mt-12 text-[#5a4a3f] font-serif text-lg">
-            <div className="animate-spin rounded-full h-8 w-8 border-4 border-[#8b6f47] border-t-transparent mb-4" />
-            Loading reservations...
+      <div className="rounded-2xl border bg-white/70 backdrop-blur p-4 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+          {/* search */}
+          <div className="col-span-2">
+            <label className="text-xs text-[#6e5e54]">Αναζήτηση</label>
+            <div className="relative mt-1">
+              <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+              <input
+                className="w-full pl-8 pr-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-[#d9c6b8]"
+                placeholder="Όνομα, email, τηλέφωνο ή κωδικός κράτησης..."
+                value={query}
+                onChange={(e) => {
+                  setPage(1);
+                  setQuery(e.target.value);
+                }}
+              />
+            </div>
           </div>
-        ) : Object.keys(grouped).length === 0 ? (
-          <p className="text-center text-[#5a4a3f] text-lg font-serif italic mt-12">
-            No {viewMode} reservations found.
-          </p>
-        ) : (
-          Object.entries(grouped).map(
-            ([expId, { experience, upcoming, past, future }]) => (
-              <div
-                key={expId}
-                className="bg-white shadow-lg rounded-2xl p-8 border border-[#e6e0d3] print:border-none print:shadow-none"
-              >
-                <h2 className="text-2xl font-serif font-semibold text-[#5a4a3f] mb-6 print:text黑">
-                  {experience.name}
-                </h2>
 
-                {[
-                  {
-                    title: "Upcoming Today",
-                    data: upcoming,
-                    color: "text-green-700",
-                    border: "border-l-4 border-green-400",
-                  },
-                  {
-                    title: "Past Today",
-                    data: past,
-                    color: "text-gray-600",
-                    border: "border-l-4 border-gray-300",
-                  },
-                  {
-                    title: "Future Reservations",
-                    data: future,
-                    color: "text-purple-700",
-                    border: "border-l-4 border-purple-300",
-                  },
-                ].map(
-                  ({ title, data, color, border }) =>
-                    data?.length > 0 && (
-                      <div key={title} className={`mb-8 pl-4 ${border}`}>
-                        <h3
-                          className={`text-lg font-medium mb-3 ${color} print:text-black`}
-                        >
-                          {title}
-                        </h3>
-                        <div className="overflow-x-auto rounded-xl border border-[#e0dcd4] print:border-black">
-                          <table className="w-full text-left text-[#5a4a3f] print:text-black text-sm">
-                            <thead className="bg-[#f7f5f1] text-sm print:bg-white print:border-b print:border-black">
-                              <tr>
-                                <th className="p-3 font-normal">User</th>
-                                <th className="p-3 font-normal">Email</th>
-                                <th className="p-3 font-normal">Phone</th>
-                                <th className="p-3 font-normal">Date</th>
-                                <th className="p-3 font-normal">Comments</th>
-                                <th className="p-3 font-normal print:hidden">
-                                  Actions
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {data.map((b) => (
-                                <tr
-                                  key={b.id}
-                                  className="border-t border-[#f0ece6] hover:bg-[#f9f7f4] transition print:hover:bg-transparent"
-                                >
-                                  <td className="p-3">
-                                    {b.user?.name} {b.user?.surname}
-                                  </td>
-                                  <td className="p-3">{b.user?.email}</td>
-                                  <td className="p-3">{b.user?.phone}</td>
-                                  <td className="p-3">
-                                    {new Date(
-                                      b.scheduleSlot?.date
-                                    ).toLocaleString()}
-                                  </td>
-                                  <td className="p-3">{b.notes || "—"}</td>
-                                  <td className="p-3 space-x-2 print:hidden">
-                                    <button
-                                      onClick={() => {
-                                        setEditingBooking(b);
-                                        setSelectedUser(b.user);
-                                        setUserSearch(
-                                          `${b.user?.name || ""} ${
-                                            b.user?.surname || ""
-                                          }`
-                                        );
-                                        setSelectedExperienceId(
-                                          b.scheduleSlot?.experience?.id || ""
-                                        );
-                                        setSelectedSlotId(
-                                          b.scheduleSlot?.id || ""
-                                        );
-                                        setNumberOfPeople(
-                                          b.numberOfPeople || 1
-                                        );
-                                        setNotes(b.notes || "");
-                                        setShowForm(true);
-                                      }}
-                                      className="px-3 py-1 rounded-full bg-yellow-400 text-white hover:bg-yellow-500 transition-all text-sm"
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      onClick={() => handleDelete(b.id)}
-                                      className="px-3 py-1 rounded-full bg-red-600 text-white hover:bg-red-700 transition-all text-sm"
-                                    >
-                                      Delete
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )
-                )}
-              </div>
-            )
-          )
-        )}
+          {/* status */}
+          <div>
+            <label className="text-xs text-[#6e5e54]">Κατάσταση</label>
+            <select
+              className="w-full mt-1 rounded-xl border px-3 py-2 text-sm"
+              value={status}
+              onChange={(e) => {
+                setPage(1);
+                setStatus(e.target.value);
+              }}
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* experience */}
+          <div>
+            <label className="text-xs text-[#6e5e54]">Εμπειρία</label>
+            <select
+              className="w-full mt-1 rounded-xl border px-3 py-2 text-sm"
+              value={experienceId}
+              onChange={(e) => {
+                setPage(1);
+                setExperienceId(e.target.value);
+              }}
+            >
+              <option value="">Όλες</option>
+              {experiences?.map((ex) => (
+                <option key={ex.id} value={ex.id}>
+                  {ex.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* from */}
+          <div>
+            <label className="text-xs text-[#6e5e54] flex items-center gap-1">
+              Από <CalendarIcon className="h-3 w-3" />
+            </label>
+            <input
+              type="date"
+              className="w-full mt-1 rounded-xl border px-3 py-2 text-sm"
+              value={from}
+              onChange={(e) => {
+                setPage(1);
+                setFrom(e.target.value);
+              }}
+            />
+          </div>
+
+          {/* to */}
+          <div>
+            <label className="text-xs text-[#6e5e54] flex items-center gap-1">
+              Έως <CalendarIcon className="h-3 w-3" />
+            </label>
+            <input
+              type="date"
+              className="w-full mt-1 rounded-xl border px-3 py-2 text-sm"
+              value={to}
+              onChange={(e) => {
+                setPage(1);
+                setTo(e.target.value);
+              }}
+            />
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={resetFilters}
+            className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50"
+          >
+            <FilterIcon className="h-4 w-4" /> Καθαρισμός φίλτρων
+          </button>
+        </div>
       </div>
 
-      {/* Add/Edit form modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex justify-center items-center z-50">
-          <form
-            onSubmit={handleSubmit}
-            className="bg-white p-8 rounded-2xl shadow-xl border border-[#e5ded2] w-full max-w-md space-y-5"
-          >
-            <h2 className="text-2xl font-semibold text-[#5a4a3f] mb-2 text-center">
-              Manage Booking
-            </h2>
-
-            {/* Search User */}
-            <div>
-              <label className="block text-sm text-[#5a4a3f] mb-1">
-                Search User
-              </label>
-              <div ref={userSearchRef} className="relative">
-                <input
-                  type="text"
-                  placeholder="Type to search user..."
-                  value={userSearch}
-                  onChange={(e) => {
-                    setUserSearch(e.target.value);
-                    setShowUserList(true);
-                    setSelectedUser(null);
-                  }}
-                  className="w-full border border-[#e0dcd4] rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]"
-                />
-                {showUserList && (
-                  <div className="absolute z-10 w-full max-h-40 overflow-y-auto border border-[#e0dcd4] rounded-md bg-white shadow-md">
-                    {filteredUsers.map((u) => (
-                      <div
-                        key={u.id}
-                        onClick={() => {
-                          setSelectedUser(u);
-                          setUserSearch(`${u.name} ${u.surname}`);
-                          setShowUserList(false);
-                        }}
-                        className="px-4 py-2 hover:bg-[#f5f3ef] cursor-pointer text-sm text-[#5a4a3f]"
-                      >
-                        {u.name} {u.surname} ({u.email})
+      {/* Table */}
+      <div className="rounded-2xl border overflow-hidden bg-white">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-neutral-50 text-neutral-600">
+              <tr className="text-left">
+                <Th>Κωδικός</Th>
+                <Th>Ημερομηνία</Th>
+                <Th>Εμπειρία</Th>
+                <Th>Πελάτης</Th>
+                <Th>Τηλέφωνο</Th>
+                <Th className="text-right">Άτομα</Th>
+                <Th className="text-right">Σύνολο</Th>
+                <Th>Κατάσταση</Th>
+                <Th>Ενέργειες</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && rows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="p-6 text-center text-neutral-500">
+                    Φόρτωση…
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="p-6 text-center text-neutral-500">
+                    Δεν βρέθηκαν κρατήσεις.
+                  </td>
+                </tr>
+              ) : (
+                rows.map((r) => (
+                  <tr key={r.id} className="border-t hover:bg-neutral-50/50">
+                    <Td className="font-mono">{r.code || r.id}</Td>
+                    <Td>{fmtDate(r.startTime || r.date)}</Td>
+                    <Td
+                      className="max-w-[260px] truncate"
+                      title={r.experienceName}
+                    >
+                      {r.experienceName}
+                    </Td>
+                    <Td>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{r.guestName}</span>
+                        <span className="text-neutral-500">{r.guestEmail}</span>
                       </div>
-                    ))}
-                    {filteredUsers.length === 0 && userSearch.length > 0 && (
-                      <div className="px-4 py-2 text-sm text-red-600 font-medium">
-                        No users found with that name or email.
+                    </Td>
+                    <Td className="whitespace-nowrap">{r.guestPhone || "-"}</Td>
+                    <Td className="text-right">
+                      {r.adults ?? 0}
+                      {typeof r.kids === "number" ? ` + ${r.kids}` : ""}
+                    </Td>
+                    <Td className="text-right">{fmtMoney(r.totalAmount)}</Td>
+                    <Td>
+                      <StatusBadge status={r.status} />
+                    </Td>
+                    <Td>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() =>
+                            router.push(`/admin/reservations/${r.id}`)
+                          }
+                          className="inline-flex items-center rounded-lg border p-1.5 hover:bg-neutral-50"
+                          title="Προβολή"
+                          aria-label="Προβολή"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => openReschedule(r)}
+                          className="inline-flex items-center rounded-lg border p-1.5 hover:bg-amber-50"
+                          title="Μεταφορά"
+                          aria-label="Μεταφορά"
+                        >
+                          <CalendarClock className="h-4 w-4" />
+                        </button>
+                        {r.status !== "cancelled" && (
+                          <button
+                            onClick={() => openCancel(r)}
+                            className="inline-flex items-center rounded-lg border p-1.5 hover:bg-red-50"
+                            title="Ακύρωση"
+                            aria-label="Ακύρωση"
+                          >
+                            <XCircleIcon className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
-              <input
-                type="hidden"
-                name="userId"
-                value={selectedUser?.id || ""}
-              />
-            </div>
-
-            {/* Experience and Slot */}
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-sm text-[#5a4a3f] mb-1">
-                  Experience
-                </label>
-                <select
-                  name="experienceId"
-                  required
-                  value={selectedExperienceId}
-                  onChange={(e) => {
-                    setSelectedExperienceId(e.target.value);
-                    setSelectedSlotId("");
-                  }}
-                  className="w-full border border-[#e0dcd4] rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]"
-                >
-                  <option value="">Select Experience</option>
-                  {experiences.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm text-[#5a4a3f] mb-1">
-                  Slot
-                </label>
-                <select
-                  name="slotId"
-                  required
-                  value={selectedSlotId}
-                  onChange={(e) => setSelectedSlotId(e.target.value)}
-                  className="w-full border border-[#e0dcd4] rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]"
-                >
-                  <option value="">Select Slot</option>
-                  {availableSlots.map((slot) => (
-                    <option key={slot.id} value={slot.id}>
-                      {new Date(slot.date).toLocaleString()} —{" "}
-                      {slot.totalSlots - slot.bookedSlots} spots left
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Number of People */}
-            <div>
-              <label className="block text-sm text-[#5a4a3f] mb-1">
-                Number of People
-              </label>
-              <input
-                type="number"
-                name="numberOfPeople"
-                min={1}
-                value={numberOfPeople}
-                onChange={(e) => setNumberOfPeople(Number(e.target.value))}
-                required
-                className="w-full border border-[#e0dcd4] rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]"
-              />
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label className="block text-sm text-[#5a4a3f] mb-1">
-                Notes (optional)
-              </label>
-              <textarea
-                name="notes"
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full border border-[#e0dcd4] rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]"
-                placeholder="e.g. Vegetarian meal, accessibility needs..."
-              />
-            </div>
-
-            {formError && (
-              <p className="text-sm text-red-600 font-medium text-center -mt-2">
-                {formError}
-              </p>
-            )}
-
-            {/* Buttons */}
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="submit"
-                disabled={!isFormValid || isSaving || isLoadingSlots}
-                className={`px-4 py-2 rounded-full transition-all ${
-                  !isFormValid || isSaving || isLoadingSlots
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : "bg-[#8b6f47] text-white hover:bg-[#a78b62]"
-                }`}
-              >
-                {isSaving ? "Saving..." : "Save"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="px-4 py-2 bg-gray-300 text-[#5a4a3f] rounded-full hover:bg-gray-400 transition-all"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+                    </Td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
+
+        {/* footer */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 border-t bg-neutral-50/60">
+          <div className="text-sm text-neutral-600">
+            {error ? (
+              <span className="text-red-600">{error}</span>
+            ) : (
+              <span>
+                Εμφάνιση {rows.length ? (page - 1) * PAGE_SIZE + 1 : 0}–
+                {Math.min(page * PAGE_SIZE, total)} από {total}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className={cx(
+                "rounded-xl border px-3 py-2 text-sm",
+                page <= 1
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-neutral-50"
+              )}
+            >
+              Προηγούμενη
+            </button>
+            <span className="text-sm text-neutral-700">
+              Σελίδα {page} / {totalPages}
+            </span>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className={cx(
+                "rounded-xl border px-3 py-2 text-sm",
+                page >= totalPages
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-neutral-50"
+              )}
+            >
+              Επόμενη
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Cancel modal */}
+      {showCancel && (
+        <Modal onClose={() => setShowCancel(false)} title="Ακύρωση κράτησης">
+          <div className="space-y-3">
+            <p className="text-sm text-neutral-600">
+              Είστε βέβαιοι ότι θέλετε να ακυρώσετε αυτή την κράτηση;
+            </p>
+            <label className="block text-sm">
+              <span className="text-neutral-700">Λόγος (προαιρετικό)</span>
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                className="mt-1 w-full rounded-xl border p-2 text-sm"
+                rows={3}
+              />
+            </label>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                className="rounded-xl border px-3 py-2 text-sm"
+                onClick={() => setShowCancel(false)}
+              >
+                Κλείσιμο
+              </button>
+              <button
+                className="rounded-xl border px-3 py-2 text-sm bg-red-600 text-white"
+                onClick={submitCancel}
+              >
+                Ακύρωση κράτησης
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Reschedule modal */}
+      {showReschedule && (
+        <Modal
+          onClose={() => setShowReschedule(false)}
+          title="Μεταφορά κράτησης"
+        >
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-neutral-600">Από</label>
+                <input
+                  type="date"
+                  value={slotFrom}
+                  onChange={(e) => setSlotFrom(e.target.value)}
+                  className="mt-1 w-full rounded-xl border p-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-600">Έως</label>
+                <input
+                  type="date"
+                  value={slotTo}
+                  onChange={(e) => setSlotTo(e.target.value)}
+                  className="mt-1 w-full rounded-xl border p-2 text-sm"
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={() =>
+                    loadSlots(selected?.experienceId, slotFrom, slotTo)
+                  }
+                  className="rounded-xl border px-3 py-2 text-sm w-full sm:w-auto"
+                >
+                  Φόρτωση διαθέσιμων
+                </button>
+              </div>
+            </div>
+
+            <label className="block text-sm">
+              <span className="text-neutral-700">Νέο slot</span>
+              <select
+                value={targetSlotId}
+                onChange={(e) => setTargetSlotId(e.target.value)}
+                className="mt-1 w-full rounded-xl border p-2 text-sm"
+              >
+                <option value="">— Επιλέξτε —</option>
+                {slotLoading ? (
+                  <option value="" disabled>
+                    Φόρτωση…
+                  </option>
+                ) : (
+                  slots.map((s) => (
+                    <option key={s.id} value={s.id} disabled={s.available <= 0}>
+                      {labelSlot(s)}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                className="rounded-xl border px-3 py-2 text-sm"
+                onClick={() => setShowReschedule(false)}
+              >
+                Κλείσιμο
+              </button>
+              <button
+                className="rounded-xl border px-3 py-2 text-sm bg-amber-600 text-white"
+                onClick={submitReschedule}
+              >
+                Μεταφορά κράτησης
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
-};
+}
 
-export default AdminReservationsPage;
+/* ---------------------------- Subcomponents ---------------------------- */
+function Th({ children, className = "" }) {
+  return (
+    <th
+      className={cx(
+        "px-3 py-2 text-xs font-semibold uppercase tracking-wide",
+        className
+      )}
+    >
+      {children}
+    </th>
+  );
+}
+function Td({ children, className = "" }) {
+  return (
+    <td
+      className={cx(
+        "px-3 py-3 align-middle text-[13px] text-neutral-800",
+        className
+      )}
+    >
+      {children}
+    </td>
+  );
+}
+
+function StatusBadge({ status }) {
+  const map = {
+    confirmed: "bg-green-100 text-green-800 border-green-200",
+    pending: "bg-amber-100 text-amber-800 border-amber-200",
+    cancelled: "bg-red-100 text-red-800 border-red-200",
+    draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
+  };
+  const label =
+    {
+      confirmed: "Επιβεβαιωμένη",
+      pending: "Σε εκκρεμότητα",
+      cancelled: "Ακυρωμένη",
+      draft: "Προσχέδιο",
+    }[status] ||
+    status ||
+    "-";
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs",
+        map[status]
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+      <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h3 className="text-base font-semibold text-neutral-800">{title}</h3>
+          <button
+            className="rounded-lg p-1 hover:bg-neutral-100"
+            onClick={onClose}
+          >
+            <XIcon className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------ Utils ------------------------------ */
+function today() {
+  const d = new Date();
+  return toDateInput(d);
+}
+function plusDays(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return toDateInput(d);
+}
+function plusDaysFrom(base, days) {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return toDateInput(d);
+}
+function toDateInput(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+function labelSlot(s) {
+  const dt = fmtDate(s.date);
+  const name = s.experienceName ? ` — ${s.experienceName}` : "";
+  const avail =
+    typeof s.available === "number" ? ` • Διαθέσιμες: ${s.available}` : "";
+  return `${dt}${name}${avail}`;
+}
+
+/* ------------------------------ Demo Data ------------------------------ */
+const DEMO_ROWS = [
+  {
+    id: 1,
+    code: "RSV-2025-0001",
+    startTime: new Date().toISOString(),
+    experienceId: 1,
+    experienceName: "Old Town Food Walk",
+    guestName: "Giorgos Papadakis",
+    guestEmail: "giorgos@example.com",
+    guestPhone: "+30 690 000 0001",
+    adults: 2,
+    kids: 0,
+    totalAmount: 170,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 2,
+    code: "RSV-2025-0002",
+    startTime: new Date(Date.now() + 86400000).toISOString(),
+    experienceId: 2,
+    experienceName: "Sunset Sailing in Chania",
+    guestName: "Anna K.",
+    guestEmail: "anna@example.com",
+    guestPhone: "+30 690 000 0002",
+    adults: 2,
+    kids: 1,
+    totalAmount: 255,
+    status: "confirmed",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 3,
+    code: "RSV-2025-0003",
+    startTime: new Date(Date.now() + 2 * 86400000).toISOString(),
+    experienceId: 3,
+    experienceName: "Hiking Samaria Gorge",
+    guestName: "Nikos T.",
+    guestEmail: "nikos@example.com",
+    guestPhone: "+30 690 000 0003",
+    adults: 1,
+    kids: 0,
+    totalAmount: 85,
+    status: "cancelled",
+    createdAt: new Date().toISOString(),
+  },
+];
