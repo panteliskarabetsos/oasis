@@ -16,6 +16,9 @@ const toNumOrNull = (v) =>
   v === null || v === undefined || v === "" ? null : Number(v);
 
 const isNonNegative = (n) => Number.isFinite(n) && n >= 0;
+const toArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+const cleanStr = (v) =>
+  v === null || v === undefined ? null : String(v).trim() || null;
 
 async function requireAdmin() {
   const supa = await createSupabaseServer();
@@ -104,6 +107,7 @@ export async function POST(req) {
 
   const {
     name,
+    slug,
     description,
     price,
     priceAdult,
@@ -120,9 +124,7 @@ export async function POST(req) {
     visibility,
   } = body;
 
-  if (!name || !description || !location || !duration) {
-    return bad("Missing required fields");
-  }
+  if (!name) return bad("Missing required field: name");
 
   // normalize prices
   let pAdult = toNumOrNull(priceAdult ?? price);
@@ -141,18 +143,18 @@ export async function POST(req) {
 
   const payload = {
     name,
-    slug: slugify(String(name), { lower: true, strict: true }),
-    description,
-    location,
-    duration,
-    whatsIncluded: whatsIncluded ?? null,
-    whatToBring: whatToBring ?? null,
-    whyYoullLove: whyYoullLove ?? null,
-    images: Array.isArray(images) ? images : images ?? null,
-    mapPin: mapPin ?? null,
-    guestReviews: guestReviews ?? null,
-    frequency: Array.isArray(frequency) ? frequency : frequency ?? null,
-    visibility: visibility ?? true,
+    slug: slugify(String(slug ?? name), { lower: true, strict: true }),
+    description: cleanStr(description), // allow null
+    location: cleanStr(location) || " Not specified", // default if empty
+    duration: cleanStr(duration), // allow null
+    whatsIncluded: cleanStr(whatsIncluded),
+    whatToBring: cleanStr(whatToBring),
+    whyYoullLove: cleanStr(whyYoullLove),
+    images: toArray(images), // always an array
+    mapPin: cleanStr(mapPin),
+    guestReviews: Array.isArray(guestReviews) ? guestReviews : null,
+    frequency: Array.isArray(frequency) ? frequency : [], // default []
+    visibility: typeof visibility === "boolean" ? visibility : true,
     // tiered prices
     priceAdult: pAdult,
     priceKid: pKid,

@@ -4,58 +4,71 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 export async function GET() {
   try {
-    const supabase = await createSupabaseServer();
+    const supa = await createSupabaseServer();
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser();
-    if (authError) console.error("[api/me] supabase auth error", authError);
+    } = await supa.auth.getUser();
+    if (authError) console.error("[api/me] auth error:", authError);
 
-    if (!user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const admin = createSupabaseAdmin();
-    if (!admin) {
+    if (!user) {
+      // Always 200 to avoid noisy client errors; role falls back to "user"
       return NextResponse.json(
-        { error: "Server not configured: missing Supabase admin env vars" },
-        { status: 500 }
+        {
+          id: null,
+          email: "",
+          name: "",
+          surname: "",
+          phone: "",
+          role: "user",
+          dateOfBirth: null,
+          createdAt: null,
+        },
+        { headers: { "Cache-Control": "private, no-store" } }
       );
     }
 
-    const email = (user.email || "").trim().toLowerCase();
-
-    const { data, error } = await admin
-      .from("User")
+    const { data: row, error: dbErr } = await supa
+      .from("User") // quoted table name in PostgREST is fine
       .select("id,email,name,surname,phone,role,dateOfBirth,createdAt")
       .eq("auth_user_id", user.id)
       .maybeSingle();
 
-    console.log("[/api/me] raw row:", data, "error:", error);
-
-    if (error) {
-      console.error("[api/me] supabase select error", error);
-      return NextResponse.json({ error: "Server error" }, { status: 500 });
+    if (dbErr) {
+      console.error("[api/me] select error:", dbErr);
+      // Soft-fallback, don’t break the UI
+      return NextResponse.json(
+        {
+          id: null,
+          email: user.email ?? "",
+          name: "",
+          surname: "",
+          phone: "",
+          role: "user",
+          dateOfBirth: null,
+          createdAt: null,
+        },
+        { headers: { "Cache-Control": "private, no-store" } }
+      );
     }
 
-    const payload = data
+    const payload = row
       ? {
-          id: data.id,
-          email: data.email,
-          name: data.name ?? "",
-          surname: data.surname ?? "",
-          phone: data.phone ?? "",
-          role: data.role ?? "user",
-          dateOfBirth: data.dateOfBirth ?? null,
-          createdAt: data.createdAt ?? null,
+          id: row.id,
+          email: row.email,
+          name: row.name ?? "",
+          surname: row.surname ?? "",
+          phone: row.phone ?? "",
+          role: row.role ?? "user",
+          dateOfBirth: row.dateOfBirth ?? null,
+          createdAt: row.createdAt ?? null,
         }
       : {
           id: null,
-          email,
+          email: user.email ?? "",
           name: "",
           surname: "",
           phone: "",
@@ -65,10 +78,22 @@ export async function GET() {
         };
 
     return NextResponse.json(payload, {
-      headers: { "Cache-Control": "no-store" },
+      headers: { "Cache-Control": "private, no-store" },
     });
   } catch (e) {
-    // console.error("[api/me] error", e);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    console.error("[api/me] unexpected error:", e);
+    return NextResponse.json(
+      {
+        id: null,
+        email: "",
+        name: "",
+        surname: "",
+        phone: "",
+        role: "user",
+        dateOfBirth: null,
+        createdAt: null,
+      },
+      { headers: { "Cache-Control": "private, no-store" } }
+    );
   }
 }

@@ -1,21 +1,66 @@
 // src/app/admin/experiences/page.js
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MapPin, Clock, Euro, Pencil, Trash2, Eye } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
+import Link from "next/link";
+function slugifyLocal(str) {
+  return (str || "")
+    .toString()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+}
+
+// Try to parse guestReviews input as JSON, else treat as CSV -> array of strings
+function parseGuestReviews(input) {
+  const raw = (input || "").trim();
+  if (!raw) return [];
+  if (/^[\s]*[\[{]/.test(raw)) {
+    try {
+      const j = JSON.parse(raw);
+      return j;
+    } catch {
+      // fall through to CSV parsing
+    }
+  }
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// Normalize for display: accept array of strings or array of objects with "text"/"comment"
+function reviewsToDisplay(rv) {
+  if (!rv) return [];
+  if (Array.isArray(rv)) {
+    return rv
+      .map((x) =>
+        typeof x === "string"
+          ? x
+          : typeof x === "object" && (x.text || x.comment)
+          ? String(x.text || x.comment)
+          : null
+      )
+      .filter(Boolean);
+  }
+  // object case not typical, ignore keys
+  return [];
+}
 
 const AdminExperiencesPage = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading } = useAuth(); // still fine to read, just not used for redirect
 
   const [isClient, setIsClient] = useState(false);
   const [experiences, setExperiences] = useState(null);
-  const [editingExperience, setEditingExperience] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [uploadedImages, setUploadedImages] = useState([]);
-  const [imagePreviews, setImagePreviews] = useState([]);
   const [previewExperience, setPreviewExperience] = useState(null);
 
   useEffect(() => setIsClient(true), []);
@@ -48,43 +93,65 @@ const AdminExperiencesPage = () => {
         (error, result) => {
           if (!error && result && result.event === "success") {
             setUploadedImages((prev) => [...prev, result.info.secure_url]);
-            setImagePreviews((prev) => [...prev, result.info.secure_url]);
           }
         }
       );
     }
   }, [isClient]);
 
+  const [toast, setToast] = useState(null);
+  const seenRef = useRef(false);
+
+  useEffect(() => {
+    if (seenRef.current) return;
+    const t = searchParams.get("toast");
+    if (!t) return;
+
+    const messages = {
+      saved: "Experience saved successfully",
+      deleted: "Experience deleted",
+    };
+    const types = { saved: "success", deleted: "danger" };
+
+    if (messages[t]) {
+      seenRef.current = true;
+      setToast({ message: messages[t], type: types[t] });
+
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("toast");
+        window.history.replaceState(null, "", url.toString());
+      }
+    }
+  }, [searchParams]);
+
+  // Handle auto-dismiss independently of URL changes
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
   const openCloudinaryWidget = () => {
     if (typeof window === "undefined" || !window.cloudinary) return;
     const widget = window.cloudinary.createUploadWidget(
       {
         cloudName: "docgxigth",
-        uploadPreset: "ml_default",
+        uploadPreset: "oasis_photos",
         multiple: true,
         maxFiles: 5,
       },
       (error, result) => {
         if (!error && result && result.event === "success") {
           setUploadedImages((prev) => [...prev, result.info.secure_url]);
-          setImagePreviews((prev) => [...prev, result.info.secure_url]);
         }
       }
     );
     widget.open();
   };
 
-  const handleDeleteImage = (index, isNew = false) => {
-    if (isNew) {
-      setUploadedImages((prev) => prev.filter((_, i) => i !== index));
-    } else {
-      const upd = { ...editingExperience };
-      upd.images = (upd.images || []).filter((_, i) => i !== index);
-      setEditingExperience(upd);
-    }
-  };
-  const handleDeleteImageFromNew = (i) =>
-    setUploadedImages((prev) => prev.filter((_, idx) => idx !== i));
+  const handleRemoveUploadedImage = (index) =>
+    setUploadedImages((prev) => prev.filter((_, i) => i !== index));
 
   const handleDeleteExperience = async (id) => {
     if (!confirm("Are you sure you want to delete this experience?")) return;
@@ -98,8 +165,6 @@ const AdminExperiencesPage = () => {
     else alert(data.error || "Failed to delete experience.");
   };
 
-  const handleEditExperience = (experience) => setEditingExperience(experience);
-
   const handleAddExperience = async (newExperience) => {
     const res = await fetch("/api/admin/experiences", {
       method: "POST",
@@ -111,30 +176,13 @@ const AdminExperiencesPage = () => {
     else alert((data && data.error) || "Failed to add experience.");
   };
 
-  const handleUpdateExperience = async (updatedExperience) => {
-    const res = await fetch("/api/admin/experiences", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updatedExperience),
-    });
-    const data = await res.json().catch(() => null);
-    if (res.ok) {
-      setExperiences((prev) =>
-        prev.map((e) => (e.id === updatedExperience.id ? updatedExperience : e))
-      );
-      setEditingExperience(null);
-    } else {
-      alert((data && data.error) || "Failed to update experience.");
-    }
-  };
-
   // While we’re checking auth (or loading experiences), render nothing / a spinner
   if (!isClient || loading || experiences === null) {
     return null;
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#faf8f4] via-white to-[#f4f1ec]">
+    <main className="min-h-screen bg-gradient-to-b from-[#faf8f4] via-white to-[#f4f1ec] rounded-t-3xl text-[#5a4a3f] pt-5">
       {/* Page header */}
       <header className="sticky top-0 z-10 bg-gradient-to-b from-[#faf8f4]/90 to-white/80 backdrop-blur supports-[backdrop-filter]:backdrop-blur border-b border-[#e8e2d8]">
         <div className="container mx-auto px-6 py-5">
@@ -157,279 +205,19 @@ const AdminExperiencesPage = () => {
                 Back to Dashboard
               </button>
 
-              {!showAddForm && (
-                <button
-                  onClick={() => {
-                    setShowAddForm(true);
-                    setUploadedImages([]);
-                  }}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] focus:outline-none focus:ring-2 focus:ring-[#c7b29e] transition-all"
-                >
-                  <span className="text-lg leading-none">＋</span>
-                  Add New Experience
-                </button>
-              )}
+              <Link
+                href="/admin/experiences/new"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] focus:outline-none focus:ring-2 focus:ring-[#c7b29e] transition-all"
+              >
+                <span className="text-lg leading-none">＋</span>
+                Add New Experience
+              </Link>
             </div>
           </div>
         </div>
       </header>
 
       <section className="container mx-auto px-6 pt-6 pb-12">
-        {/* Add form card */}
-        {showAddForm && (
-          <div className="mb-8 rounded-3xl border border-[#e8e2d8] bg-white/90 shadow-xl overflow-hidden">
-            <div className="px-6 sm:px-8 py-6 border-b border-[#efe9e1] bg-[#faf7f1]">
-              <div className="flex items-center justify-between">
-                <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f]">
-                  Add New Experience
-                </h3>
-                <button
-                  onClick={() => setShowAddForm(false)}
-                  className="px-3 py-1.5 rounded-full text-[#5a4a3f] bg-[#efeae2] hover:bg-[#e7e1d7] border border-[#e0d9cf] text-sm"
-                  title="Close"
-                >
-                  Close ✕
-                </button>
-              </div>
-            </div>
-
-            <form
-              className="p-6 sm:p-8 grid grid-cols-1 gap-6 text-[#5a4a3f] font-serif"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const selectedDays = Array.from(
-                  e.currentTarget.querySelectorAll(
-                    'input[name="frequency"]:checked'
-                  )
-                ).map((c) => c.value);
-
-                const newExperience = {
-                  name: e.currentTarget.name.value,
-                  description: e.currentTarget.description.value,
-                  price: parseFloat(e.currentTarget.price.value),
-                  location: e.currentTarget.location.value,
-                  duration: e.currentTarget.duration.value,
-                  whatsIncluded: e.currentTarget.whatsIncluded.value,
-                  whatToBring: e.currentTarget.whatToBring.value,
-                  whyYoullLove: e.currentTarget.whyYoullLove.value,
-                  images: uploadedImages,
-                  mapPin: e.currentTarget.mapPin.value,
-                  guestReviews: e.currentTarget.guestReviews.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                  frequency: selectedDays,
-                  visibility: e.currentTarget.visibility.checked,
-                };
-
-                handleAddExperience(newExperience);
-                e.currentTarget.reset();
-                setShowAddForm(false);
-                setUploadedImages([]);
-              }}
-            >
-              {/* Inputs */}
-              <div className="rounded-2xl border border-[#e8e2d8] p-5 sm:p-6 bg-white/70">
-                <h4 className="text-lg font-medium mb-4 text-[#5a4a3f]">
-                  Basics
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {[
-                    {
-                      label: "Name",
-                      name: "name",
-                      placeholder: "Olive Harvest & Brunch",
-                    },
-                    {
-                      label: "Location",
-                      name: "location",
-                      placeholder: "Chania, Crete",
-                    },
-                    {
-                      label: "Duration",
-                      name: "duration",
-                      placeholder: "3 hours",
-                    },
-                    {
-                      label: "Price (€)",
-                      name: "price",
-                      type: "number",
-                      placeholder: "120",
-                    },
-                    {
-                      label: "Map Pin",
-                      name: "mapPin",
-                      placeholder: "35.513, 24.019",
-                    },
-                    {
-                      label: "Guest Reviews (comma-separated)",
-                      name: "guestReviews",
-                      placeholder: "Unforgettable!, Would do again",
-                    },
-                  ].map(({ label, name, type = "text", placeholder }) => (
-                    <div key={name}>
-                      <label className="block text-xs tracking-wide uppercase text-[#8a7c6d] mb-1">
-                        {label}
-                      </label>
-                      <input
-                        type={type}
-                        name={name}
-                        placeholder={placeholder}
-                        required={name !== "mapPin" && name !== "guestReviews"}
-                        className="w-full px-4 py-2.5 rounded-xl border border-[#dcd2c3] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47] shadow-sm"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Details */}
-              <div className="rounded-2xl border border-[#e8e2d8] p-5 sm:p-6 bg-white/70">
-                <h4 className="text-lg font-medium mb-4 text-[#5a4a3f]">
-                  Details
-                </h4>
-                <div className="grid grid-cols-1 gap-5">
-                  {[
-                    {
-                      label: "Description",
-                      name: "description",
-                      placeholder: "What guests can expect...",
-                    },
-                    {
-                      label: "What’s Included",
-                      name: "whatsIncluded",
-                      placeholder: "Guided tour, tasting...",
-                    },
-                    {
-                      label: "What to Bring",
-                      name: "whatToBring",
-                      placeholder: "Comfortable shoes...",
-                    },
-                    {
-                      label: "Why You’ll Love It",
-                      name: "whyYoullLove",
-                      placeholder: "Authentic, intimate...",
-                    },
-                  ].map(({ label, name, placeholder }) => (
-                    <div key={name}>
-                      <label className="block text-xs tracking-wide uppercase text-[#8a7c6d] mb-1">
-                        {label}
-                      </label>
-                      <textarea
-                        name={name}
-                        placeholder={placeholder}
-                        required
-                        rows={3}
-                        className="w-full px-4 py-3 rounded-xl border border-[#dcd2c3] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47] shadow-sm"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Frequency & Visibility */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="rounded-2xl border border-[#e8e2d8] p-5 sm:p-6 bg-white/70">
-                  <h4 className="text-lg font-medium mb-4 text-[#5a4a3f]">
-                    Frequency (Select Days)
-                  </h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {[
-                      "Monday",
-                      "Tuesday",
-                      "Wednesday",
-                      "Thursday",
-                      "Friday",
-                      "Saturday",
-                      "Sunday",
-                    ].map((day) => (
-                      <label
-                        key={day}
-                        className="inline-flex items-center gap-2 rounded-xl border border-[#e8e2d8] px-3 py-2 hover:bg-[#fbfaf7]"
-                      >
-                        <input type="checkbox" name="frequency" value={day} />
-                        <span className="text-sm">{day}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-[#e8e2d8] p-5 sm:p-6 bg-white/70">
-                  <h4 className="text-lg font-medium mb-4 text-[#5a4a3f]">
-                    Visibility
-                  </h4>
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      name="visibility"
-                      className="h-4 w-4"
-                    />
-                    <span className="text-sm">Public (visible on site)</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Images */}
-              <div className="rounded-2xl border border-[#e8e2d8] p-5 sm:p-6 bg-white/70">
-                <h4 className="text-lg font-medium mb-4 text-[#5a4a3f]">
-                  Images
-                </h4>
-                <button
-                  type="button"
-                  onClick={openCloudinaryWidget}
-                  className="px-4 py-2 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] transition-all"
-                >
-                  Upload Images
-                </button>
-
-                {uploadedImages.length > 0 && (
-                  <div className="mt-5">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                      {uploadedImages.map((img, i) => (
-                        <div
-                          key={i}
-                          className="group relative aspect-video rounded-xl overflow-hidden border border-[#e8e2d8]"
-                        >
-                          <img
-                            src={img}
-                            alt={`Uploaded ${i + 1}`}
-                            className="w-full h-full object-cover"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteImage(i, true)}
-                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 rounded-full text-white bg-red-600/90 text-xs"
-                            title="Remove"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="flex flex-col sm:flex-row justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddForm(false)}
-                  className="px-6 py-3 rounded-full bg-[#efeae2] text-[#5a4a3f] hover:bg-[#e7e1d7] border border-[#e0d9cf] transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-3 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] transition-all"
-                >
-                  Save Experience
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
         {/* Experiences list */}
         {!experiences ? (
           <div className="flex flex-col items-center justify-center mt-16 text-[#5a4a3f] font-serif text-lg">
@@ -494,7 +282,9 @@ const AdminExperiencesPage = () => {
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-3 py-1">
                       <Euro size={14} className="text-[#8b6f47]" />€
-                      {experience.price}
+                      {experience.priceAdult}
+                      {typeof experience.priceKid === "number" &&
+                        ` (kid €${experience.priceKid})`}
                     </span>
                   </div>
 
@@ -509,19 +299,21 @@ const AdminExperiencesPage = () => {
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handleEditExperience(experience)}
+                        onClick={() =>
+                          router.push(`/admin/experiences/${experience.id}`)
+                        }
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-400 text-white hover:bg-amber-500 transition-all"
                         title="Edit"
                       >
                         <Pencil size={18} /> Edit
                       </button>
-                      <button
+                      {/* <button
                         onClick={() => handleDeleteExperience(experience.id)}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-all"
                         title="Delete"
                       >
                         <Trash2 size={18} /> Delete
-                      </button>
+                      </button> */}
                     </div>
                   </div>
                 </div>
@@ -530,248 +322,6 @@ const AdminExperiencesPage = () => {
           </div>
         )}
       </section>
-
-      {/* Edit modal — viewport-safe & scrollable */}
-      {editingExperience && (
-        <div
-          className="fixed inset-0 z-50 bg-black/50 p-4 sm:p-6 overflow-y-auto"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="mx-auto w-full max-w-3xl">
-            <div className="bg-white rounded-3xl shadow-2xl flex flex-col max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]">
-              {/* Sticky header */}
-              <div className="px-6 py-4 border-b border-[#efe9e1] bg-[#faf7f1] sticky top-0 z-10">
-                <h3 className="text-2xl font-serif text-center text-[#5a4a3f]">
-                  Edit Experience
-                </h3>
-              </div>
-
-              {/* Scrollable form content */}
-              <form
-                className="flex-1 overflow-y-auto p-6 grid grid-cols-1 sm:grid-cols-2 gap-6 text-[#5a4a3f] font-serif"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const form = e.currentTarget;
-                  const selectedDays = Array.from(
-                    form.querySelectorAll('input[name="frequency"]:checked')
-                  ).map((c) => c.value);
-
-                  const updatedExperience = {
-                    id: editingExperience.id,
-                    name: form.name.value,
-                    description: form.description.value,
-                    price: parseFloat(form.price.value),
-                    location: form.location.value,
-                    duration: form.duration.value,
-                    whatsIncluded: form.whatsIncluded.value,
-                    whatToBring: form.whatToBring.value,
-                    whyYoullLove: form.whyYoullLove.value,
-                    images: [
-                      ...(editingExperience.images || []),
-                      ...uploadedImages,
-                    ],
-                    mapPin: form.mapPin.value,
-                    guestReviews: form.guestReviews.value
-                      .split(",")
-                      .map((r) => r.trim())
-                      .filter(Boolean),
-                    frequency: selectedDays,
-                    visibility: form.visibility.checked,
-                  };
-
-                  handleUpdateExperience(updatedExperience);
-                }}
-              >
-                {/* Left */}
-                <div className="space-y-4">
-                  <LabeledInput
-                    name="name"
-                    label="Name"
-                    defaultValue={editingExperience.name}
-                  />
-                  <LabeledInput
-                    name="location"
-                    label="Location"
-                    defaultValue={editingExperience.location}
-                  />
-                  <LabeledInput
-                    name="duration"
-                    label="Duration"
-                    defaultValue={editingExperience.duration}
-                  />
-                  <LabeledInput
-                    name="price"
-                    label="Price (€)"
-                    type="number"
-                    defaultValue={editingExperience.price}
-                  />
-                  <LabeledInput
-                    name="mapPin"
-                    label="Map Pin"
-                    defaultValue={editingExperience.mapPin}
-                    required={false}
-                  />
-                </div>
-
-                {/* Right */}
-                <div className="space-y-4">
-                  <LabeledTextarea
-                    name="description"
-                    label="Description"
-                    defaultValue={editingExperience.description}
-                  />
-                  <LabeledTextarea
-                    name="whatsIncluded"
-                    label="What’s Included"
-                    defaultValue={editingExperience.whatsIncluded}
-                    required={false}
-                  />
-                  <LabeledTextarea
-                    name="whatToBring"
-                    label="What to Bring"
-                    defaultValue={editingExperience.whatToBring}
-                    required={false}
-                  />
-                  <LabeledTextarea
-                    name="whyYoullLove"
-                    label="Why You’ll Love It"
-                    defaultValue={editingExperience.whyYoullLove}
-                    required={false}
-                  />
-                </div>
-
-                {/* Images */}
-                <div className="col-span-1 sm:col-span-2 space-y-4">
-                  <label className="block text-sm font-medium">
-                    Uploaded Images
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                    {(editingExperience.images || []).map((img, i) => (
-                      <div
-                        key={i}
-                        className="relative aspect-video rounded-xl overflow-hidden border border-[#e8e2d8]"
-                      >
-                        <img
-                          src={img}
-                          alt={`Uploaded ${i + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteImage(i)}
-                          className="absolute top-2 right-2 px-2 py-1 rounded-full text-white bg-red-600/90 text-xs"
-                          title="Remove"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                    {uploadedImages.map((img, i) => (
-                      <div
-                        key={`new-${i}`}
-                        className="relative aspect-video rounded-xl overflow-hidden border border-[#e8e2d8]"
-                      >
-                        <img
-                          src={img}
-                          alt={`New ${i + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteImageFromNew(i)}
-                          className="absolute top-2 right-2 px-2 py-1 rounded-full text-white bg-red-600/90 text-xs"
-                          title="Remove"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={openCloudinaryWidget}
-                    className="px-4 py-2 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] transition-all"
-                  >
-                    Upload New Image
-                  </button>
-
-                  <LabeledInput
-                    name="guestReviews"
-                    label="Guest Reviews (comma-separated)"
-                    defaultValue={(editingExperience.guestReviews || []).join(
-                      ","
-                    )}
-                    required={false}
-                  />
-                </div>
-
-                {/* Frequency */}
-                <div className="mb-2 col-span-1 sm:col-span-2">
-                  <label className="block text-sm font-medium mb-1">
-                    Frequency (Select Days)
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {[
-                      "Monday",
-                      "Tuesday",
-                      "Wednesday",
-                      "Thursday",
-                      "Friday",
-                      "Saturday",
-                      "Sunday",
-                    ].map((day) => (
-                      <label
-                        key={day}
-                        className="inline-flex items-center gap-2 rounded-xl border border-[#e8e2d8] px-3 py-2"
-                      >
-                        <input
-                          type="checkbox"
-                          name="frequency"
-                          value={day}
-                          defaultChecked={editingExperience.frequency?.includes(
-                            day
-                          )}
-                        />
-                        <span className="text-sm">{day}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Sticky footer (inside scroll container) */}
-                <div className="col-span-1 sm:col-span-2 sticky bottom-0 -mx-6 sm:-mx-6 bg-white/90 backdrop-blur border-t border-[#e8e2d8] px-6 py-3 flex items-center justify-between">
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      name="visibility"
-                      defaultChecked={editingExperience.visibility}
-                    />
-                    <span className="text-sm">Public (visibility)</span>
-                  </label>
-
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setEditingExperience(null)}
-                      className="px-6 py-2 rounded-full bg-[#efeae2] text-[#5a4a3f] hover:bg-[#e7e1d7] border border-[#e0d9cf] transition-all"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-6 py-2 rounded-full bg-[#8b6f47] text-white hover:bg-[#a78b62] transition-all shadow-sm"
-                    >
-                      Save
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Preview modal — scrollable & viewport-safe */}
       {previewExperience && (
@@ -809,7 +359,9 @@ const AdminExperiencesPage = () => {
                     {previewExperience.duration}
                   </p>
                   <p className="text-2xl font-medium text-[#5a4a3f]">
-                    €{previewExperience.price}
+                    €{previewExperience.priceAdult}
+                    {typeof previewExperience.priceKid === "number" &&
+                      ` (kid €${previewExperience.priceKid})`}
                   </p>
                 </div>
 
@@ -844,7 +396,7 @@ const AdminExperiencesPage = () => {
                       What’s Included
                     </h3>
                     <ul className="list-disc list-inside text-[#4a4a4a] space-y-1">
-                      {previewExperience.whatsIncluded
+                      {String(previewExperience.whatsIncluded)
                         .split("\n")
                         .map((item, i) => (
                           <li key={i} className="text-lg">
@@ -896,29 +448,55 @@ const AdminExperiencesPage = () => {
                   </section>
                 )}
 
-                {previewExperience.guestReviews?.length > 0 && (
+                {reviewsToDisplay(previewExperience.guestReviews).length >
+                  0 && (
                   <section className="max-w-4xl mx-auto">
                     <h3 className="text-2xl font-serif text-[#5a4a3f] mb-4 text-center">
                       Guest Reviews
                     </h3>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      {previewExperience.guestReviews.map((review, i) => (
-                        <div
-                          key={i}
-                          className="bg-white p-5 rounded-2xl shadow border border-[#e0dcd4]"
-                        >
-                          <p className="font-semibold text-[#5a4a3f]">Guest</p>
-                          <p className="italic text-[#4a4a4a] mt-1">
-                            “{review}”
-                          </p>
-                        </div>
-                      ))}
+                      {reviewsToDisplay(previewExperience.guestReviews).map(
+                        (review, i) => (
+                          <div
+                            key={i}
+                            className="bg-white p-5 rounded-2xl shadow border border-[#e0dcd4]"
+                          >
+                            <p className="font-semibold text-[#5a4a3f]">
+                              Guest
+                            </p>
+                            <p className="italic text-[#4a4a4a] mt-1">
+                              “{review}”
+                            </p>
+                          </div>
+                        )
+                      )}
                     </div>
                   </section>
                 )}
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {toast && (
+        <div
+          className={[
+            "fixed right-4 top-4 z-[60] px-4 py-3 rounded-xl shadow-lg border flex items-center gap-3",
+            toast.type === "success"
+              ? "bg-green-50 text-green-900 border-green-200"
+              : "bg-red-50 text-red-900 border-red-200",
+          ].join(" ")}
+          role="status"
+        >
+          <span className="font-medium">{toast.message}</span>
+          <button
+            onClick={() => setToast(null)}
+            className="ml-2 inline-flex items-center justify-center rounded-md px-2 py-0.5 hover:bg-black/5"
+            aria-label="Dismiss"
+            title="Dismiss"
+          >
+            ✕
+          </button>
         </div>
       )}
     </main>

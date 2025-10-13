@@ -13,20 +13,18 @@ const bad = (msg, status = 400) =>
 async function requireAdmin() {
   const supabase = createSupabaseServer();
   if (!supabase)
-    return { error: true, response: bad("Supabase not configured", 500) };
+    return { error: true, response: bad("Server not configured", 500) };
 
   const {
-    data: { session },
+    data: { user },
     error,
-  } = await supabase.auth.getSession();
+  } = await supabase.auth.getUser();
 
-  if (error || !session?.user)
+  if (error || !user)
     return { error: true, response: bad("Unauthorized", 401) };
 
-  const role =
-    session.user.app_metadata?.role ||
-    session.user.user_metadata?.role ||
-    "user";
+  const role = user.app_metadata?.role ?? user.user_metadata?.role ?? "user";
+
   if (role !== "admin") return { error: true, response: bad("Forbidden", 403) };
 
   const admin = createSupabaseAdmin();
@@ -53,19 +51,20 @@ export async function GET(_req, { params }) {
           "name",
           "slug",
           "description",
-          "price",
           "location",
           "duration",
           "whatsIncluded",
           "whatToBring",
           "whyYoullLove",
-          "images",
           "mapPin",
+          "images",
           "guestReviews",
           "frequency",
           "visibility",
           "createdAt",
           "updatedAt",
+          "priceAdult",
+          "priceKid",
         ].join(",")
       )
       .eq("id", id)
