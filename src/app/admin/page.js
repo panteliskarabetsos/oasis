@@ -171,12 +171,12 @@ export default function AdminDashboardPage() {
         {/* Secondary: Shortcuts row */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           <Shortcut
-            label="Create Experience"
-            onClick={() => go("/admin/experiences/new")}
+            label="Manage Administrators"
+            onClick={() => go("/admin/accounts")}
           />
           <Shortcut
-            label="Upcoming Schedule"
-            onClick={() => go("/admin/schedule")}
+            label="Create New Experience"
+            onClick={() => go("/admin/experiences/new")}
           />
           <Shortcut
             label="Pending Reservations"
