@@ -18,29 +18,40 @@ import {
   Mail,
   Users,
   ArrowLeft,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  ListFilter,
+  SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 
 /* ---------------------------- helpers ---------------------------- */
+const LOCALE = "en-GB"; // UI in English; keep EUR
+const TIMEZONE = "Europe/Athens";
+
 const fmtDate = (d) =>
   d
-    ? new Date(d).toLocaleString("en-UK", {
+    ? new Intl.DateTimeFormat(LOCALE, {
         dateStyle: "medium",
         timeStyle: "short",
-      })
+        timeZone: TIMEZONE,
+      }).format(new Date(d))
     : "-";
+
 const fmtMoney = (n) =>
   typeof n === "number"
-    ? n.toLocaleString("el-GR", { style: "currency", currency: "EUR" })
+    ? n.toLocaleString(LOCALE, { style: "currency", currency: "EUR" })
     : "-";
+
 const cx = (...xs) => xs.filter(Boolean).join(" ");
 
 const STATUS_OPTIONS = [
-  { value: "", label: "Όλες" },
-  { value: "pending", label: "Σε εκκρεμότητα" },
-  { value: "confirmed", label: "Επιβεβαιωμένες" },
-  { value: "cancelled", label: "Ακυρωμένες" },
-  { value: "draft", label: "Προσχέδια" },
+  { value: "", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "paid", label: "paid" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "draft", label: "Drafts" },
 ];
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -66,6 +77,10 @@ export default function ReservationsPage() {
   const [total, setTotal] = useState(0);
   const [experiences, setExperiences] = useState([]);
 
+  // UI polish
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [density, setDensity] = useState("compact"); // "cozy" | "compact"
+
   // Actions state
   const [selected, setSelected] = useState(null);
   const [showCancel, setShowCancel] = useState(false);
@@ -79,6 +94,7 @@ export default function ReservationsPage() {
   const [targetSlotId, setTargetSlotId] = useState("");
 
   const controllerRef = useRef(null);
+  const searchRef = useRef(null);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / pageSize)),
@@ -97,15 +113,34 @@ export default function ReservationsPage() {
     return () => clearTimeout(id);
   }, [query]);
 
-  // Load experiences for filter
+  // Keyboard shortcuts (UX): "/" focus search, "r" refresh, "e" export
   useEffect(() => {
-    let abort = new AbortController();
+    const onKey = (e) => {
+      if (e.key === "/") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        window.location.reload();
+      } else if (e.key.toLowerCase() === "e" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        onExportCSV();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
+  // Load experiences for filter (runs once; non-blocking)
+  useEffect(() => {
+    const ac = new AbortController();
     (async () => {
       try {
         const res = await fetch(
           `/api/admin/experiences?fields=id,name&limit=200`,
           {
-            signal: abort.signal,
+            signal: ac.signal,
             cache: "no-store",
             credentials: "include",
           }
@@ -113,13 +148,13 @@ export default function ReservationsPage() {
         if (!res.ok) throw new Error("Failed to load experiences");
         const data = await res.json();
         const items = Array.isArray(data?.items) ? data.items : data;
-        setExperiences(items || []);
+        if (!ac.signal.aborted) setExperiences(items || []);
       } catch (e) {
-        // non-blocking
-        console.warn(e);
+        if (e?.name === "AbortError") return;
+        console.warn("Failed to load experiences:", e);
       }
     })();
-    return () => abort.abort();
+    return () => ac.abort();
   }, []);
 
   // Fetch reservations
@@ -127,7 +162,7 @@ export default function ReservationsPage() {
     (async () => {
       setLoading(true);
       setError("");
-      if (controllerRef.current) controllerRef.current.abort();
+      controllerRef.current?.abort();
       controllerRef.current = new AbortController();
 
       const qs = new URLSearchParams({
@@ -149,7 +184,7 @@ export default function ReservationsPage() {
 
         if (!res.ok) {
           const msg =
-            (await res.json().catch(() => ({})))?.error || "Σφάλμα φόρτωσης";
+            (await res.json().catch(() => ({})))?.error || "Failed to load";
           throw new Error(msg);
         }
 
@@ -158,9 +193,8 @@ export default function ReservationsPage() {
         setRows(items);
         setTotal(Number(data?.total || items.length));
       } catch (e) {
-        setError(e.message);
-        setRows((prev) => prev);
-        setTotal((prev) => prev);
+        if (e?.name === "AbortError") return; // ignore aborted fetches
+        setError(e?.message || "Failed to load");
       } finally {
         setLoading(false);
       }
@@ -176,20 +210,44 @@ export default function ReservationsPage() {
     setPage(1);
   }
 
+  function quickRange(range) {
+    const now = new Date();
+    if (range === "today") {
+      const s = toDateInput(now);
+      setFrom(s);
+      setTo(s);
+    } else if (range === "7d") {
+      setFrom(toDateInput(now));
+      setTo(toDateInput(plusDaysFrom(now, 7)));
+    } else if (range === "30d") {
+      setFrom(toDateInput(now));
+      setTo(toDateInput(plusDaysFrom(now, 30)));
+    } else if (range === "month") {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setFrom(toDateInput(first));
+      setTo(toDateInput(last));
+    } else if (range === "all") {
+      setFrom("");
+      setTo("");
+    }
+    setPage(1);
+  }
+
   function onExportCSV() {
     const headers = [
       "ID",
-      "Κωδικός",
-      "Ημερομηνία",
-      "Εμπειρία",
-      "Όνομα",
+      "Code",
+      "Date",
+      "Experience",
+      "Name",
       "Email",
-      "Τηλέφωνο",
-      "Ενήλικες",
-      "Παιδιά",
-      "Σύνολο",
-      "Κατάσταση",
-      "Δημιουργήθηκε",
+      "Phone",
+      "Adults",
+      "Kids",
+      "Total",
+      "Status",
+      "Created At",
     ];
     const lines = rows.map((r) => [
       r.id,
@@ -210,10 +268,10 @@ export default function ReservationsPage() {
       .map((row) =>
         row.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")
       )
-      .join("\r\n");
+      .join("");
 
     // Add BOM for Excel compatibility
-    const blob = new Blob(["\uFEFF" + csv], {
+    const blob = new Blob(["﻿" + csv], {
       type: "text/csv;charset=utf-8;",
     });
     const url = URL.createObjectURL(blob);
@@ -222,7 +280,7 @@ export default function ReservationsPage() {
     a.download = `reservations_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success("Export completed");
+    toast.success("Exported current view as CSV");
   }
 
   // ---------------------------- Actions ----------------------------
@@ -242,10 +300,10 @@ export default function ReservationsPage() {
       });
       if (!res.ok) {
         const msg =
-          (await res.json().catch(() => ({})))?.error || "Αποτυχία ακύρωσης";
+          (await res.json().catch(() => ({})))?.error || "Cancel failed";
         throw new Error(msg);
       }
-      toast.success("Η κράτηση ακυρώθηκε");
+      toast.success("Booking cancelled");
       setRows((cur) =>
         cur.map((r) =>
           r.id === selected.id ? { ...r, status: "cancelled" } : r
@@ -330,6 +388,14 @@ export default function ReservationsPage() {
     }
   }
 
+  function clearChip(type) {
+    if (type === "status") setStatus("");
+    if (type === "experience") setExperienceId("");
+    if (type === "from") setFrom("");
+    if (type === "to") setTo("");
+    setPage(1);
+  }
+
   function copy(text, label = "Copied!") {
     if (!text) return;
     navigator.clipboard
@@ -337,53 +403,82 @@ export default function ReservationsPage() {
       .then(() => toast.success(label));
   }
 
+  const pad = density === "compact" ? "py-2" : "py-3";
+
   return (
-    <div className="rounded-3xl min-h-screen bg-[radial-gradient(30%_40%_at_10%_10%,#f0ece7,transparent),radial-gradient(30%_40%_at_90%_10%,#f3efe9,transparent)]">
-      <div className=" p-6 max-w-[1400px] mx-auto">
+    <div className="min-h-screen rounded-3xl bg-[radial-gradient(35%_50%_at_0%_0%,#f6f4f1,transparent),radial-gradient(35%_50%_at_100%_0%,#f3efe9,transparent)]">
+      <div className="mx-auto max-w-[1400px] p-6 sm:p-8">
         {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-[#2f261f] tracking-tight">
+            <h1 className="text-2xl font-semibold tracking-tight text-[#2f261f]">
               Bookings
             </h1>
             <p className="text-sm text-[#7b6a5f]">
               Manage your bookings for all the experiences.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.back()}
-              className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-50"
-            >
-              <ArrowLeft className="h-4 w-4" />
+          <div className="flex flex-wrap items-center gap-2">
+            <ToolbarButton onClick={() => router.back()} icon={ArrowLeft}>
               Back
-            </button>
-            <button
+            </ToolbarButton>
+            <ToolbarButton
               onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-50"
+              icon={RefreshCw}
             >
-              <RefreshCw className="h-4 w-4" /> Refresh
-            </button>
-            <button
-              onClick={onExportCSV}
-              className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-50"
-            >
-              <DownloadIcon className="h-4 w-4" /> Export CSV
-            </button>
+              Refresh
+            </ToolbarButton>
+            <ToolbarButton onClick={onExportCSV} icon={DownloadIcon}>
+              Export CSV
+            </ToolbarButton>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="rounded-2xl border bg-white/80 backdrop-blur p-4 mb-4 shadow-sm">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+        <div className="mb-4 rounded-2xl border bg-white/80 backdrop-blur shadow-sm">
+          <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-neutral-700">
+              <ListFilter className="h-4 w-4" /> Filters
+              {!!activeFilterCount && (
+                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs">
+                  {activeFilterCount}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAdvanced((s) => !s)}
+                className="inline-flex items-center gap-1 rounded-xl border bg-white px-3 py-1.5 text-xs shadow-sm hover:bg-neutral-50"
+              >
+                {showAdvanced ? (
+                  <>
+                    <ChevronUp className="h-4 w-4" /> Close
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-4 w-4" /> Advanced
+                  </>
+                )}
+              </button>
+              <button
+                onClick={resetFilters}
+                className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-1.5 text-xs shadow-sm hover:bg-neutral-50"
+              >
+                <FilterIcon className="h-4 w-4" /> Clear
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 lg:grid-cols-6">
             {/* search */}
             <div className="col-span-2">
               <label className="text-xs text-[#6e5e54]">Search</label>
               <div className="relative mt-1">
-                <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+                <SearchIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
                 <input
-                  className="w-full pl-8 pr-8 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-[#d9c6b8]"
-                  placeholder="Name, email, phone or booking code..."
+                  ref={searchRef}
+                  className="w-full rounded-xl border bg-white px-8 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#d9c6b8]"
+                  placeholder="Name, email, phone or booking code… (/ to focus)"
                   value={query}
                   onChange={(e) => {
                     setPage(1);
@@ -397,7 +492,7 @@ export default function ReservationsPage() {
                 {query && (
                   <button
                     onClick={() => setQuery("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-neutral-100"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-neutral-100"
                     aria-label="Clear search"
                   >
                     <XIcon className="h-4 w-4 text-neutral-500" />
@@ -408,7 +503,7 @@ export default function ReservationsPage() {
               <div className="mt-2 flex flex-wrap gap-2">
                 {[
                   { v: "", l: "All" },
-                  { v: "confirmed", l: "Confirmed" },
+                  { v: "paid", l: "Paid" },
                   { v: "pending", l: "Pending" },
                   { v: "cancelled", l: "Cancelled" },
                   { v: "draft", l: "Drafts" },
@@ -422,7 +517,7 @@ export default function ReservationsPage() {
                     className={cx(
                       "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition",
                       status === o.v
-                        ? "bg-neutral-900 text-white border-neutral-900"
+                        ? "border-neutral-900 bg-neutral-900 text-white"
                         : "bg-white hover:bg-neutral-50"
                     )}
                     aria-pressed={status === o.v}
@@ -437,7 +532,7 @@ export default function ReservationsPage() {
             <div>
               <label className="text-xs text-[#6e5e54]">Status</label>
               <select
-                className="w-full mt-1 rounded-xl border px-3 py-2 text-sm bg-white"
+                className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
                 value={status}
                 onChange={(e) => {
                   setPage(1);
@@ -456,7 +551,7 @@ export default function ReservationsPage() {
             <div>
               <label className="text-xs text-[#6e5e54]">Experience</label>
               <select
-                className="w-full mt-1 rounded-xl border px-3 py-2 text-sm bg-white"
+                className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
                 value={experienceId}
                 onChange={(e) => {
                   setPage(1);
@@ -474,12 +569,12 @@ export default function ReservationsPage() {
 
             {/* from */}
             <div>
-              <label className="text-xs text-[#6e5e54] flex items-center gap-1">
+              <label className="flex items-center gap-1 text-xs text-[#6e5e54]">
                 From <CalendarIcon className="h-3 w-3" />
               </label>
               <input
                 type="date"
-                className="w-full mt-1 rounded-xl border px-3 py-2 text-sm bg-white"
+                className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
                 value={from}
                 onChange={(e) => {
                   setPage(1);
@@ -490,12 +585,12 @@ export default function ReservationsPage() {
 
             {/* to */}
             <div>
-              <label className="text-xs text-[#6e5e54] flex items-center gap-1">
+              <label className="flex items-center gap-1 text-xs text-[#6e5e54]">
                 To <CalendarIcon className="h-3 w-3" />
               </label>
               <input
                 type="date"
-                className="w-full mt-1 rounded-xl border px-3 py-2 text-sm bg-white"
+                className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
                 value={to}
                 onChange={(e) => {
                   setPage(1);
@@ -505,51 +600,114 @@ export default function ReservationsPage() {
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              onClick={resetFilters}
-              className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-50"
-            >
-              <FilterIcon className="h-4 w-4" /> Clear filters
-            </button>
-            {!!activeFilterCount && (
-              <span className="text-xs text-neutral-600">
-                Active filters: {activeFilterCount}
-              </span>
-            )}
-          </div>
+          {/* Advanced row */}
+          {showAdvanced && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-neutral-600">Quick ranges:</span>
+                <QuickRange onClick={quickRange} label="Today" value="today" />
+                <QuickRange onClick={quickRange} label="+7 days" value="7d" />
+                <QuickRange onClick={quickRange} label="+30 days" value="30d" />
+                <QuickRange
+                  onClick={quickRange}
+                  label="This month"
+                  value="month"
+                />
+                <QuickRange onClick={quickRange} label="All time" value="all" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-600">Row density</span>
+                <button
+                  onClick={() => setDensity("cozy")}
+                  className={cx(
+                    "rounded-full px-3 py-1 text-xs",
+                    density === "cozy"
+                      ? "border border-neutral-900 bg-neutral-900 text-white"
+                      : "border bg-white"
+                  )}
+                >
+                  Cozy
+                </button>
+                <button
+                  onClick={() => setDensity("compact")}
+                  className={cx(
+                    "rounded-full px-3 py-1 text-xs",
+                    density === "compact"
+                      ? "border border-neutral-900 bg-neutral-900 text-white"
+                      : "border bg-white"
+                  )}
+                >
+                  Compact
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Active filter chips */}
+          {!!activeFilterCount && (
+            <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
+              {status && (
+                <Chip onClear={() => clearChip("status")}>
+                  Status:{" "}
+                  <strong className="ml-1">{labelStatus(status)}</strong>
+                </Chip>
+              )}
+              {experienceId && (
+                <Chip onClear={() => clearChip("experience")}>
+                  Experience:{" "}
+                  <strong className="ml-1">
+                    {experiences.find(
+                      (x) => String(x.id) === String(experienceId)
+                    )?.name || experienceId}
+                  </strong>
+                </Chip>
+              )}
+              {from && (
+                <Chip onClear={() => clearChip("from")}>
+                  From: <strong className="ml-1">{from}</strong>
+                </Chip>
+              )}
+              {to && (
+                <Chip onClear={() => clearChip("to")}>
+                  To: <strong className="ml-1">{to}</strong>
+                </Chip>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Table Card */}
-        <div className="relative rounded-2xl border overflow-hidden bg-white shadow-sm">
+        <div className="relative overflow-hidden rounded-2xl border bg-white shadow-sm">
           {/* top tools */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 border-b bg-neutral-50/60">
-            <div className="text-sm text-neutral-700">
+          <div className="flex flex-col gap-3 border-b bg-neutral-50/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-neutral-700" aria-live="polite">
               {error ? (
                 <span className="text-red-600">{error}</span>
               ) : (
                 <span>
-                  Show {rows.length ? (page - 1) * pageSize + 1 : 0}–
-                  {Math.min(page * pageSize, total)} από {total}
+                  Showing {rows.length ? (page - 1) * pageSize + 1 : 0}–
+                  {Math.min(page * pageSize, total)} of {total}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-neutral-600">Per page</label>
-              <select
-                className="rounded-xl border px-2 py-1.5 text-sm bg-white"
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-              >
-                {PAGE_SIZE_OPTIONS.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-neutral-600">Per page</label>
+                <select
+                  className="rounded-xl border bg-white px-2 py-1.5 text-sm"
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                >
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -558,7 +716,7 @@ export default function ReservationsPage() {
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-9 bg-gradient-to-b from-white/90 to-transparent" />
             )}
             <table className="min-w-full text-sm">
-              <thead className="bg-neutral-50 text-neutral-600 sticky top-0 z-10">
+              <thead className="sticky top-0 z-10 bg-neutral-50 text-neutral-600">
                 <tr className="text-left">
                   <Th className="w-[140px]">Booking Code</Th>
                   <Th>Date</Th>
@@ -571,19 +729,22 @@ export default function ReservationsPage() {
                   <Th className="w-[120px]">Actions</Th>
                 </tr>
               </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td
-                      colSpan={9}
-                      className="p-10 text-center text-neutral-600"
-                    >
-                      <div className="inline-flex items-center gap-2">
-                        <Loader2 className="h-5 w-5 animate-spin" /> Loading...
-                      </div>
-                    </td>
-                  </tr>
-                ) : rows.length === 0 ? (
+              <tbody className="divide-y divide-neutral-100">
+                {loading && rows.length === 0 && (
+                  <>
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <tr key={i} className="animate-pulse">
+                        {Array.from({ length: 9 }).map((__, j) => (
+                          <td key={j} className="px-3 py-3">
+                            <div className="h-3 w-full max-w-[220px] rounded bg-neutral-100" />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </>
+                )}
+
+                {!loading && rows.length === 0 && (
                   <tr>
                     <td
                       colSpan={9}
@@ -594,8 +755,7 @@ export default function ReservationsPage() {
                       </div>
                       <p className="font-medium">No bookings found.</p>
                       <p className="text-sm text-neutral-500">
-                        Try adjusting your search or filter to find what you're
-                        looking for.
+                        Try adjusting your search or filters.
                       </p>
                       <div className="mt-3">
                         <button
@@ -607,143 +767,139 @@ export default function ReservationsPage() {
                       </div>
                     </td>
                   </tr>
-                ) : (
-                  rows.map((r) => (
-                    <tr
-                      key={r.id}
-                      className={cx(
-                        "border-t group cursor-pointer transition-colors",
-                        "hover:bg-neutral-50/60",
-                        r.status === "cancelled" && "opacity-70"
-                      )}
-                      onClick={() => router.push(`/admin/reservations/${r.id}`)}
+                )}
+
+                {rows.map((r) => (
+                  <tr
+                    key={r.id}
+                    className={cx(
+                      "group cursor-pointer transition-colors",
+                      r.status === "cancelled"
+                        ? "opacity-70"
+                        : "hover:bg-neutral-50/60"
+                    )}
+                  >
+                    <Td className={pad + " font-mono"}>
+                      <div className="flex items-center gap-2">
+                        <span className="truncate" title={r.code || r.id}>
+                          {r.code || r.id}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copy(r.code || r.id, "Booking code copied");
+                          }}
+                          className="invisible rounded p-1 hover:bg-neutral-100 group-hover:visible"
+                          title="Copy booking code"
+                          aria-label="Copy booking code"
+                        >
+                          <Copy className="h-3.5 w-3.5 text-neutral-500" />
+                        </button>
+                      </div>
+                    </Td>
+                    <Td className={pad}>{fmtDate(r.startTime || r.date)}</Td>
+                    <Td
+                      className={pad + " max-w-[260px] truncate"}
+                      title={r.experienceName}
                     >
-                      <Td className="font-mono">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate" title={r.code || r.id}>
-                            {r.code || r.id}
-                          </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              copy(r.code || r.id, "Booking code copied");
-                            }}
-                            className="invisible group-hover:visible rounded p-1 hover:bg-neutral-100"
-                            title="Copy booking code"
-                            aria-label="Copy booking code"
-                          >
-                            <Copy className="h-3.5 w-3.5 text-neutral-500" />
-                          </button>
-                        </div>
-                      </Td>
-                      <Td>{fmtDate(r.startTime || r.date)}</Td>
-                      <Td
-                        className="max-w-[260px] truncate"
-                        title={r.experienceName}
-                      >
-                        {r.experienceName}
-                      </Td>
-                      <Td>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{r.guestName}</span>
-                          <a
-                            href={
-                              r.guestEmail
-                                ? `mailto:${r.guestEmail}`
-                                : undefined
-                            }
-                            onClick={(e) => !r.guestEmail && e.preventDefault()}
-                            className={cx(
-                              "text-neutral-500 hover:underline",
-                              !r.guestEmail && "pointer-events-none"
-                            )}
-                            onMouseDown={(e) => e.stopPropagation()}
-                          >
-                            <span className="inline-flex items-center gap-1">
-                              <Mail className="h-3.5 w-3.5" />
-                              {r.guestEmail || "-"}
-                            </span>
-                          </a>
-                        </div>
-                      </Td>
-                      <Td className="whitespace-nowrap">
+                      {r.experienceName}
+                    </Td>
+                    <Td className={pad}>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{r.guestName}</span>
                         <a
                           href={
-                            r.guestPhone ? `tel:${r.guestPhone}` : undefined
+                            r.guestEmail ? `mailto:${r.guestEmail}` : undefined
                           }
-                          onClick={(e) => !r.guestPhone && e.preventDefault()}
+                          onClick={(e) => !r.guestEmail && e.preventDefault()}
                           className={cx(
-                            "hover:underline",
-                            !r.guestPhone &&
-                              "pointer-events-none text-neutral-500"
+                            "text-neutral-500 hover:underline",
+                            !r.guestEmail && "pointer-events-none"
                           )}
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           <span className="inline-flex items-center gap-1">
-                            {/* <Phone className="h-3.5 w-3.5" /> */}
-                            {r.guestPhone || "-"}
+                            <Mail className="h-3.5 w-3.5" />
+                            {r.guestEmail || "-"}
                           </span>
                         </a>
-                      </Td>
-                      <Td className="text-right">
-                        <span className="inline-flex items-center justify-end gap-1">
-                          {/* <Users className="h-3.5 w-3.5" /> */}
-                          {r.adults ?? 0}
-                          {typeof r.kids === "number" ? ` + ${r.kids}` : ""}
+                      </div>
+                    </Td>
+                    <Td className={pad + " whitespace-nowrap"}>
+                      <a
+                        href={r.guestPhone ? `tel:${r.guestPhone}` : undefined}
+                        onClick={(e) => !r.guestPhone && e.preventDefault()}
+                        className={cx(
+                          "hover:underline",
+                          !r.guestPhone &&
+                            "pointer-events-none text-neutral-500"
+                        )}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {r.guestPhone || "-"}
                         </span>
-                      </Td>
-                      <Td className="text-right">{fmtMoney(r.totalAmount)}</Td>
-                      <Td>
-                        <StatusBadge status={r.status} />
-                      </Td>
-                      <Td onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1">
+                      </a>
+                    </Td>
+                    <Td className={pad + " text-right"}>
+                      <span className="inline-flex items-center justify-end gap-1">
+                        {r.adults ?? 0}
+                        {typeof r.kids === "number" ? ` + ${r.kids}` : ""}
+                      </span>
+                    </Td>
+                    <Td className={pad + " text-right"}>
+                      {fmtMoney(r.totalAmount)}
+                    </Td>
+                    <Td className={pad}>
+                      <StatusBadge status={r.status} />
+                    </Td>
+                    <Td className={pad} onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() =>
+                            router.push(`/admin/reservations/${r.id}`)
+                          }
+                          className="inline-flex items-center rounded-lg border p-1.5 hover:bg-neutral-50"
+                          title="View"
+                          aria-label="View"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => openReschedule(r)}
+                          className="inline-flex items-center rounded-lg border p-1.5 hover:bg-amber-50"
+                          title="Reschedule"
+                          aria-label="Reschedule"
+                        >
+                          <CalendarClock className="h-4 w-4" />
+                        </button>
+                        {r.status !== "cancelled" && (
                           <button
-                            onClick={() =>
-                              router.push(`/admin/reservations/${r.id}`)
-                            }
-                            className="inline-flex items-center rounded-lg border p-1.5 hover:bg-neutral-50"
-                            title="View"
-                            aria-label="View"
+                            onClick={() => openCancel(r)}
+                            className="inline-flex items-center rounded-lg border p-1.5 hover:bg-red-50"
+                            title="Cancel"
+                            aria-label="Cancel"
                           >
-                            <Eye className="h-4 w-4" />
+                            <XCircleIcon className="h-4 w-4" />
                           </button>
-                          <button
-                            onClick={() => openReschedule(r)}
-                            className="inline-flex items-center rounded-lg border p-1.5 hover:bg-amber-50"
-                            title="Reschedule"
-                            aria-label="Reschedule"
-                          >
-                            <CalendarClock className="h-4 w-4" />
-                          </button>
-                          {r.status !== "cancelled" && (
-                            <button
-                              onClick={() => openCancel(r)}
-                              className="inline-flex items-center rounded-lg border p-1.5 hover:bg-red-50"
-                              title="Cancel"
-                              aria-label="Cancel"
-                            >
-                              <XCircleIcon className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      </Td>
-                    </tr>
-                  ))
-                )}
+                        )}
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
 
           {/* footer */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 border-t bg-neutral-50/60">
-            <div className="text-sm text-neutral-600">
+          <div className="flex flex-col gap-3 border-t bg-neutral-50/60 p-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-neutral-600" aria-live="polite">
               {error ? (
                 <span className="text-red-600">{error}</span>
               ) : (
                 <span>
-                  Εμφάνιση {rows.length ? (page - 1) * pageSize + 1 : 0}–
-                  {Math.min(page * pageSize, total)} από {total}
+                  Showing {rows.length ? (page - 1) * pageSize + 1 : 0}–
+                  {Math.min(page * pageSize, total)} of {total}
                 </span>
               )}
             </div>
@@ -754,14 +910,14 @@ export default function ReservationsPage() {
                 className={cx(
                   "rounded-xl border px-3 py-2 text-sm",
                   page <= 1
-                    ? "opacity-50 cursor-not-allowed"
+                    ? "cursor-not-allowed opacity-50"
                     : "hover:bg-neutral-50"
                 )}
               >
-                Προηγούμενη
+                Previous
               </button>
               <span className="text-sm text-neutral-700">
-                Σελίδα {page} / {totalPages}
+                Page {page} / {totalPages}
               </span>
               <button
                 disabled={page >= totalPages}
@@ -769,11 +925,11 @@ export default function ReservationsPage() {
                 className={cx(
                   "rounded-xl border px-3 py-2 text-sm",
                   page >= totalPages
-                    ? "opacity-50 cursor-not-allowed"
+                    ? "cursor-not-allowed opacity-50"
                     : "hover:bg-neutral-50"
                 )}
               >
-                Επόμενη
+                Next
               </button>
             </div>
           </div>
@@ -792,8 +948,8 @@ export default function ReservationsPage() {
           <Modal onClose={() => setShowCancel(false)} title="Cancel Booking">
             <div className="space-y-3">
               {selected && (
-                <div className="rounded-xl border bg-red-50 p-3 text-sm text-red-800">
-                  The booking will be canceled{" "}
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  The booking{" "}
                   <span className="font-mono">
                     {selected.code || selected.id}
                   </span>{" "}
@@ -802,12 +958,11 @@ export default function ReservationsPage() {
                     {" "}
                     {selected.guestName}
                   </span>{" "}
-                  στις {fmtDate(selected.startTime)}.
+                  on {fmtDate(selected.startTime)} will be cancelled.
                 </div>
               )}
               <p className="text-sm text-neutral-600">
-                Are you sure you want to cancel this booking? This action cannot
-                be undone.
+                Are you sure you want to cancel? This action cannot be undone.
               </p>
               <label className="block text-sm">
                 <span className="text-neutral-700">Reason (optional)</span>
@@ -816,7 +971,7 @@ export default function ReservationsPage() {
                   onChange={(e) => setCancelReason(e.target.value)}
                   className="mt-1 w-full rounded-xl border p-2 text-sm"
                   rows={3}
-                  placeholder="Π.χ. αδυναμία συμμετοχής πελάτη"
+                  placeholder="e.g. customer unable to attend"
                 />
               </label>
               <div className="flex items-center justify-end gap-2">
@@ -827,10 +982,10 @@ export default function ReservationsPage() {
                   Close
                 </button>
                 <button
-                  className="rounded-xl border px-3 py-2 text-sm bg-red-600 text-white hover:bg-red-700"
+                  className="rounded-xl border bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700"
                   onClick={submitCancel}
                 >
-                  Cancel Booking
+                  Cancel booking
                 </button>
               </div>
             </div>
@@ -841,16 +996,16 @@ export default function ReservationsPage() {
         {showReschedule && (
           <Modal
             onClose={() => setShowReschedule(false)}
-            title="Μεταφορά κράτησης"
+            title="Reschedule Booking"
           >
             <div className="space-y-3">
               {selected && (
-                <div className="rounded-xl border bg-amber-50 p-3 text-sm text-amber-800">
-                  Choose a new slot for rescheduling{" "}
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  Choose a new slot for booking{" "}
                   <span className="font-mono">
                     {selected.code || selected.id}
                   </span>{" "}
-                  της
+                  of
                   <span className="font-semibold">
                     {" "}
                     {selected.guestName}
@@ -858,9 +1013,9 @@ export default function ReservationsPage() {
                   (current: {fmtDate(selected.startTime)}).
                 </div>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
-                  <label className="text-xs text-neutral-600">Από</label>
+                  <label className="text-xs text-neutral-600">From</label>
                   <input
                     type="date"
                     value={slotFrom}
@@ -869,7 +1024,7 @@ export default function ReservationsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-neutral-600">Έως</label>
+                  <label className="text-xs text-neutral-600">To</label>
                   <input
                     type="date"
                     value={slotTo}
@@ -882,24 +1037,24 @@ export default function ReservationsPage() {
                     onClick={() =>
                       loadSlots(selected?.experienceId, slotFrom, slotTo)
                     }
-                    className="rounded-xl border px-3 py-2 text-sm w-full sm:w-auto"
+                    className="w-full rounded-xl border px-3 py-2 text-sm sm:w-auto"
                   >
-                    Φόρτωση διαθέσιμων
+                    Load available slots
                   </button>
                 </div>
               </div>
 
               <label className="block text-sm">
-                <span className="text-neutral-700">Νέο slot</span>
+                <span className="text-neutral-700">New slot</span>
                 <select
                   value={targetSlotId}
                   onChange={(e) => setTargetSlotId(e.target.value)}
                   className="mt-1 w-full rounded-xl border p-2 text-sm"
                 >
-                  <option value="">— Επιλέξτε —</option>
+                  <option value="">— Select —</option>
                   {slotLoading ? (
                     <option value="" disabled>
-                      Φόρτωση…
+                      Loading…
                     </option>
                   ) : (
                     slots.map((s) => (
@@ -920,13 +1075,13 @@ export default function ReservationsPage() {
                   className="rounded-xl border px-3 py-2 text-sm"
                   onClick={() => setShowReschedule(false)}
                 >
-                  Κλείσιμο
+                  Close
                 </button>
                 <button
-                  className="rounded-xl border px-3 py-2 text-sm bg-amber-600 text-white hover:bg-amber-700"
+                  className="rounded-xl border bg-amber-600 px-3 py-2 text-sm text-white hover:bg-amber-700"
                   onClick={submitReschedule}
                 >
-                  Μεταφορά κράτησης
+                  Reschedule booking
                 </button>
               </div>
             </div>
@@ -954,7 +1109,7 @@ function Td({ children, className = "" }) {
   return (
     <td
       className={cx(
-        "px-3 py-3 align-middle text-[13px] text-neutral-800",
+        "px-3 align-middle text-[13px] text-neutral-800",
         className
       )}
     >
@@ -970,15 +1125,7 @@ function StatusBadge({ status }) {
     cancelled: "bg-red-100 text-red-800 border-red-200",
     draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
   };
-  const label =
-    {
-      confirmed: "Επιβεβαιωμένη",
-      pending: "Σε εκκρεμότητα",
-      cancelled: "Ακυρωμένη",
-      draft: "Προσχέδιο",
-    }[status] ||
-    status ||
-    "-";
+  const label = labelStatus(status);
   return (
     <span
       className={cx(
@@ -991,6 +1138,19 @@ function StatusBadge({ status }) {
   );
 }
 
+function labelStatus(status) {
+  return (
+    {
+      confirmed: "Confirmed",
+      pending: "Pending",
+      cancelled: "Cancelled",
+      draft: "Draft",
+    }[status] ||
+    status ||
+    "-"
+  );
+}
+
 function Modal({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
@@ -1000,7 +1160,7 @@ function Modal({ title, children, onClose }) {
           <button
             className="rounded-lg p-1 hover:bg-neutral-100"
             onClick={onClose}
-            aria-label="Κλείσιμο"
+            aria-label="Close"
           >
             <XIcon className="h-5 w-5" />
           </button>
@@ -1008,6 +1168,44 @@ function Modal({ title, children, onClose }) {
         <div className="p-4">{children}</div>
       </div>
     </div>
+  );
+}
+
+function ToolbarButton({ icon: Icon, children, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-50"
+    >
+      <Icon className="h-4 w-4" /> {children}
+    </button>
+  );
+}
+
+function Chip({ children, onClear }) {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs">
+      {children}
+      <button
+        onClick={onClear}
+        className="rounded p-0.5 text-neutral-500 hover:bg-neutral-100"
+        aria-label="Clear filter"
+      >
+        <XIcon className="h-3.5 w-3.5" />
+      </button>
+    </span>
+  );
+}
+
+function QuickRange({ label, value, onClick }) {
+  return (
+    <button
+      onClick={() => onClick(value)}
+      className="inline-flex items-center gap-1 rounded-full border bg-white px-3 py-1 text-xs hover:bg-neutral-50"
+    >
+      <SlidersHorizontal className="h-3.5 w-3.5" />
+      {label}
+    </button>
   );
 }
 
@@ -1037,6 +1235,6 @@ function labelSlot(s) {
   const dt = fmtDate(s.date);
   const name = s.experienceName ? ` — ${s.experienceName}` : "";
   const avail =
-    typeof s.available === "number" ? ` • Διαθέσιμες: ${s.available}` : "";
+    typeof s.available === "number" ? ` • Available: ${s.available}` : "";
   return `${dt}${name}${avail}`;
 }

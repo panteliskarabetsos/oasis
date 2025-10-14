@@ -16,14 +16,14 @@ export async function GET(_req, ctx) {
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
 
-  // Draft
+  // Draft (include convertedBookingId + stripe ids)
   const { data: draft, error: dErr } = await admin
     .from("BookingDraft")
     .select(
       `
       id,
-      experienceId,
-      scheduleSlotId,
+      "experienceId",
+      "scheduleSlotId",
       counts,
       attendees,
       primary_contact,
@@ -33,7 +33,10 @@ export async function GET(_req, ctx) {
       "totalAmount",
       "expiresAt",
       "createdAt",
-      "updatedAt"
+      "updatedAt",
+      "convertedBookingId",
+      "stripeSessionId",
+      "stripePaymentIntentId"
     `
     )
     .eq("id", draftId)
@@ -42,32 +45,82 @@ export async function GET(_req, ctx) {
   if (dErr || !draft) return bad("Draft not found", 404);
 
   // Experience (minimal fields for UI)
-  const { data: exp } = await createSupabaseAdmin()
+  const { data: exp, error: eErr } = await admin
     .from("Experience")
-    .select(`id, name, slug, location, images, "priceAdult",  "priceKid"`)
+    .select(`id, name, slug, location, images, "priceAdult", "priceKid"`)
     .eq("id", draft.experienceId)
     .maybeSingle();
+  if (eErr) console.error("[drafts/:id] experience fetch error", eErr);
 
-  // Slot
-  const { data: slot } = await createSupabaseAdmin()
+  // Slot (date is enough for confirmation page)
+  const { data: slot, error: sErr } = await admin
     .from("ScheduleSlot")
-    .select("id, date, totalSlots, bookedSlots")
+    .select("id, date")
     .eq("id", draft.scheduleSlotId)
     .maybeSingle();
+  if (sErr) console.error("[drafts/:id] slot fetch error", sErr);
 
-  // Shape response to what your UI expects
+  // If converted, load minimal Booking for UI (ID, paid amount, currency, status)
+  let booking = null;
+  if (draft.convertedBookingId) {
+    const { data: bData, error: bErr } = await admin
+      .from("Booking")
+      .select(
+        `
+        id,
+        status,
+        "numberOfPeople",
+        "totalPaidAmount",
+        currency
+      `
+      )
+      .eq("id", draft.convertedBookingId)
+      .maybeSingle();
+    if (bErr) {
+      console.error("[drafts/:id] booking fetch error", bErr);
+    } else {
+      booking = bData || null;
+    }
+  }
+
+  // Derived status helper
+  const derivedStatus =
+    draft.convertedBookingId && draft.status !== "converted"
+      ? "converted"
+      : draft.status;
+
+  // Shape response
   return ok({
-    id: draft.id,
-    counts: draft.counts,
-    attendees: draft.attendees || [],
-    primary_contact: draft.primary_contact || null, // matches your AttendeesPage
-    status: draft.status,
-    unitPrices: {
-      adult: draft.unitPriceAdult,
-      kid: draft.unitPriceKid ?? draft.unitPriceAdult,
+    bookingId: draft.convertedBookingId ?? null, // convenience
+    booking, // minimal booking info when converted
+
+    // expose a "draft" object so pages using data.draft || data keep working
+    draft: {
+      id: draft.id,
+      experienceId: draft.experienceId,
+      scheduleSlotId: draft.scheduleSlotId,
+      counts: draft.counts,
+      attendees: draft.attendees || [],
+      primary_contact: draft.primary_contact || null,
+      status: derivedStatus,
+      unitPriceAdult: draft.unitPriceAdult,
+      unitPriceKid: draft.unitPriceKid ?? draft.unitPriceAdult,
+      totalAmount: draft.totalAmount,
+      expiresAt: draft.expiresAt,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+      convertedBookingId: draft.convertedBookingId ?? null,
+      stripeSessionId: draft.stripeSessionId ?? null,
+      stripePaymentIntentId: draft.stripePaymentIntentId ?? null,
+
+      // (optional convenience) legacy helper
+      unitPrices: {
+        adult: draft.unitPriceAdult,
+        kid: draft.unitPriceKid ?? draft.unitPriceAdult,
+      },
     },
-    totalAmount: draft.totalAmount,
-    expiresAt: draft.expiresAt,
+
+    // related entities for your page
     experience: exp || null,
     slot: slot || null,
   });
@@ -93,6 +146,8 @@ export async function PATCH(req, ctx) {
     .maybeSingle();
 
   if (!draft) return bad("Draft not found", 404);
+
+  // Attendees usually editable in 'draft'
   if (draft.status !== "draft") return bad("Draft not editable", 400);
 
   const A = Number(draft.counts?.adults || 0);
@@ -125,7 +180,7 @@ export async function PATCH(req, ctx) {
     .eq("id", draftId);
 
   if (upErr) {
-    console.error("[drafts] patch error:", upErr);
+    console.error("[drafts/:id] patch error:", upErr);
     return bad("Could not save draft", 500);
   }
 

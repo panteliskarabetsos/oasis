@@ -16,7 +16,6 @@ import {
   X,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
-import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -55,19 +54,56 @@ export default function PaymentPage() {
             (await res.json().catch(() => ({})))?.error ||
               "Failed to load booking."
           );
-        const d = await res.json();
-        setExperience(d.experience || null);
-        setSlot(d.slot || null);
-        setCounts(d.counts || { adults: 0, teens: 0, kids: 0 });
-        setUnitPrices(d.unitPrices || { adult: 0, teen: 0, kid: 0 });
+
+        const data = await res.json();
+        const d = data?.draft || data; // normalize
+
+        // If this draft is already paid/converted, jump to confirmation.
+        const st = String(d?.status || "").toLowerCase();
+        if (st === "paid" || st === "converted") {
+          const sid = d?.stripeSessionId
+            ? `?session_id=${encodeURIComponent(d.stripeSessionId)}`
+            : "";
+          router.replace(`/booking/${draftId}/confirmation${sid}`);
+          return;
+        }
+
+        setExperience(data?.experience || d?.experience || null);
+        setSlot(data?.slot || d?.slot || null);
+
+        const c = d?.counts || {};
+        setCounts({
+          adults: Number(c.adults || 0),
+          teens: Number(c.teens || 0), // stays zero for your current schema
+          kids: Number(c.kids || 0),
+        });
+
+        // Prefer unitPrices; fall back to unitPriceAdult/Kid snapshot
+        const up = d?.unitPrices || {};
+        const unitAdult = Number(
+          up.adult ?? d?.unitPriceAdult ?? d?.unit_price_adult ?? 0
+        );
+        const unitKid = Number(
+          up.kid ??
+            d?.unitPriceKid ??
+            d?.unit_price_kid ??
+            unitAdult /* fallback same as adult */
+        );
+        setUnitPrices({
+          adult: unitAdult,
+          teen: unitAdult, // no teens in schema; keep compatibility if UI shows it
+          kid: unitKid,
+        });
+
         setAttendees(extractAttendees(d));
+        setError("");
       } catch (e) {
         setError(e.message || "Failed to load booking.");
       } finally {
         setLoading(false);
       }
     })();
-  }, [draftId]);
+  }, [draftId, router]);
 
   useEffect(() => {
     function onKey(e) {
@@ -116,10 +152,12 @@ export default function PaymentPage() {
     if (Array.isArray(attendees) && attendees.length > 0) {
       return attendees.map((a, i) => ({
         idx: i + 1,
-        name: a?.name || `Attendee ${i + 1}`,
+        name:
+          a?.name ||
+          [a?.firstName, a?.lastName].filter(Boolean).join(" ") ||
+          `Attendee ${i + 1}`,
         type: a?.type || a?.category || "—",
-        email: a?.email || "",
-        notes: a?.notes || "",
+        notes: a?.notes || a?.allergies || "",
       }));
     }
     const rows = [];
@@ -127,10 +165,9 @@ export default function PaymentPage() {
     const pushN = (n, label) => {
       for (let i = 0; i < Number(n || 0); i++) {
         rows.push({
-          idx: idx,
+          idx,
           name: `Attendee ${idx}`,
           type: label,
-          email: "",
           notes: "",
         });
         idx++;
@@ -316,7 +353,7 @@ export default function PaymentPage() {
                     compliant via Stripe
                   </span>
                   <span className="inline-flex items-center gap-2">
-                    <Lock className="h-4 w-4 text-[#8b6f47]" /> 256‑bit SSL
+                    <Lock className="h-4 w-4 text-[#8b6f47]" /> 256-bit SSL
                     encryption
                   </span>
                   <span className="inline-flex items-center gap-2">
@@ -404,6 +441,7 @@ export default function PaymentPage() {
           </div>
         )}
       </div>
+
       {isDetailsOpen && (
         <div
           role="dialog"
@@ -466,14 +504,13 @@ export default function PaymentPage() {
                         <th className="py-2 pr-2">#</th>
                         <th className="py-2 pr-2">Name</th>
                         <th className="py-2 pr-2">Type</th>
-
                         <th className="py-2">Notes - Allergies</th>
                       </tr>
                     </thead>
                     <tbody className="text-[#5a4a3f]">
                       {attendeesRows.length === 0 ? (
                         <tr>
-                          <td className="py-3 text-[#7a6a58]" colSpan={5}>
+                          <td className="py-3 text-[#7a6a58]" colSpan={4}>
                             No attendee details available.
                           </td>
                         </tr>
@@ -486,7 +523,6 @@ export default function PaymentPage() {
                             <td className="py-2 pr-2">{row.idx}</td>
                             <td className="py-2 pr-2">{row.name}</td>
                             <td className="py-2 pr-2">{row.type}</td>
-
                             <td className="py-2">
                               {row.notes || (
                                 <span className="opacity-60">—</span>
@@ -534,17 +570,8 @@ function extractAttendees(d) {
       o.customer_name ||
       ""
     ).trim();
-  const readEmail = (o = {}) =>
-    o.email ||
-    o.mail ||
-    o.contact_email ||
-    o.contact?.email ||
-    o.holderEmail ||
-    o.customer_email ||
-    "";
   const readType = (o = {}) =>
     o.type || o.category || o.ticketType || o.kind || o.role || "";
-
   const candidates = [
     d?.attendees,
     d?.guests,
@@ -557,10 +584,9 @@ function extractAttendees(d) {
   for (const arr of candidates) {
     if (arr?.length) {
       if (typeof arr[0] === "string") {
-        return arr.map((name, i) => ({
+        return arr.map((name) => ({
           name: String(name),
           type: "",
-          email: "",
           notes: "",
         }));
       }
@@ -568,25 +594,15 @@ function extractAttendees(d) {
         .map((o) => ({
           name: readName(o),
           type: readType(o),
-          email: readEmail(o),
-          notes: o?.notes || o?.note || "",
+          notes: o?.notes || o?.note || o?.allergies || "",
         }))
-        .filter((a) => a.name || a.email || a.type || a.notes);
+        .filter((a) => a.name || a.type || a.notes);
     }
   }
 
-  const leadOptions = [d?.customer, d?.contact, d?.buyer, d?.leadGuest];
-  for (const lead of leadOptions) {
-    if (lead && (readName(lead) || readEmail(lead))) {
-      return [
-        {
-          name: readName(lead),
-          type: "Lead",
-          email: readEmail(lead),
-          notes: "",
-        },
-      ];
-    }
+  const lead = d?.primary_contact || d?.customer || d?.contact || d?.buyer;
+  if (lead && readName(lead)) {
+    return [{ name: readName(lead), type: "Lead", notes: "" }];
   }
 
   return [];

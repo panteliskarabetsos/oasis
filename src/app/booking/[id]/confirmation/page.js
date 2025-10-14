@@ -1,8 +1,8 @@
-// src/app/booking/[id]/confirmation/page.js (refined UI)
+// src/app/booking/[id]/confirmation/page.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   CalendarDays,
   Clock,
@@ -11,15 +11,14 @@ import {
   MapPin,
   Info,
   Printer,
-  Download,
   ExternalLink,
+  RefreshCw,
 } from "lucide-react";
 import { parseISO, format, addMinutes } from "date-fns";
 
 export default function BookingConfirmationPage() {
   const { id } = useParams();
   const qs = useSearchParams();
-  const router = useRouter();
 
   const sessionId = qs?.get("session_id"); // from Stripe success redirect
   const draftId = Number(id);
@@ -31,7 +30,7 @@ export default function BookingConfirmationPage() {
   const [error, setError] = useState("");
   const [tries, setTries] = useState(0);
 
-  // Fetch draft + related info; poll briefly if payment just finished and webhook hasn't landed yet
+  // Fetch draft + related info; poll until converted (or for a short time after pay)
   useEffect(() => {
     let alive = true;
 
@@ -41,11 +40,10 @@ export default function BookingConfirmationPage() {
         const res = await fetch(`/api/bookings/drafts/${draftId}`, {
           cache: "no-store",
         });
-        if (!res.ok)
-          throw new Error(
-            (await res.json().catch(() => ({})))?.error ||
-              "Could not load booking"
-          );
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j?.error || "Could not load booking");
+        }
 
         const data = await res.json();
         if (!alive) return;
@@ -56,10 +54,11 @@ export default function BookingConfirmationPage() {
         setSlot(data?.slot || d?.slot || null);
         setError("");
 
-        // If webhook hasn’t updated to "paid" yet, poll up to ~45s
-        const status = (d?.status || "").toLowerCase();
-        if (status !== "paid" && tries < 10) {
-          setTimeout(() => setTries((t) => t + 1), 4500);
+        // keep polling while not finalized
+        const status = String(d?.status || "").toLowerCase();
+        const converted = !!d?.convertedBookingId || status === "converted";
+        if (!converted && tries < 12) {
+          setTimeout(() => setTries((t) => t + 1), 4000); // ~48s total
         }
       } catch (e) {
         if (!alive) return;
@@ -87,18 +86,22 @@ export default function BookingConfirmationPage() {
           )}`,
           { method: "POST" }
         );
-        // Nudge polling
-        setTries((t) => t + 1);
-      } catch (e) {
-        // swallow; polling will still handle state
+        setTries((t) => t + 1); // nudge polling
+      } catch {
+        // noop; polling continues
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, draftId]);
 
-  const status = (draft?.status || "").toLowerCase();
-  const paid = status === "paid";
-  const pending = status === "pending_payment" || status === "draft";
+  const status = String(draft?.status || "").toLowerCase();
+  const bookingId = draft?.convertedBookingId || null;
+  const converted = !!bookingId || status === "converted"; // final state in our new model
+  const paid = status === "paid" || converted; // converted implies paid already
+  const processing =
+    status === "draft" ||
+    status === "checkout" ||
+    (status === "paid" && !converted);
 
   const when = useMemo(() => {
     if (!slot?.date) return null;
@@ -107,7 +110,7 @@ export default function BookingConfirmationPage() {
     return { dateLabel: format(d, "PPP"), timeLabel: format(d, "p"), start: d };
   }, [slot]);
 
-  const counts = draft?.counts || { adults: 0, teens: 0, kids: 0 };
+  const counts = draft?.counts || { adults: 0, kids: 0, teens: 0 };
   const unit = {
     adult: draft?.unitPriceAdult ?? 0,
     teen: draft?.unitPriceTeen ?? draft?.unitPriceAdult ?? 0,
@@ -128,18 +131,27 @@ export default function BookingConfirmationPage() {
   }
 
   function statusChip() {
-    if (paid)
+    if (converted) {
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 text-xs">
-          <CheckCircle2 className="h-4 w-4" /> Paid
+          <CheckCircle2 className="h-4 w-4" /> Confirmed
         </span>
       );
-    if (pending)
+    }
+    if (paid) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-3 py-1 text-xs">
+          <Loader2 className="h-4 w-4 animate-spin" /> Finalizing
+        </span>
+      );
+    }
+    if (processing) {
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1 text-xs">
           <Loader2 className="h-4 w-4 animate-spin" /> Processing
         </span>
       );
+    }
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 text-gray-700 border border-gray-200 px-3 py-1 text-xs">
         {status || "unknown"}
@@ -163,14 +175,16 @@ export default function BookingConfirmationPage() {
       d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
     const summary = experience?.name || "Booked Experience";
     const location = experience?.location || "";
-    const description = `Booking #${draftId}${paid ? " (Paid)" : ""}`;
+    const description = `Booking #${bookingId || draftId}${
+      converted ? " (Confirmed)" : paid ? " (Paid)" : ""
+    }`;
 
     const ics = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
       "PRODID:-//oasis//Booking//EN",
       "BEGIN:VEVENT",
-      `UID:booking-${draftId}@oasis`,
+      `UID:booking-${bookingId || draftId}@oasis`,
       `DTSTAMP:${toICS(new Date())}`,
       `DTSTART:${toICS(start)}`,
       `DTEND:${toICS(end)}`,
@@ -187,7 +201,7 @@ export default function BookingConfirmationPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `booking-${draftId}.ics`;
+    a.download = `booking-${bookingId || draftId}.ics`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -202,6 +216,10 @@ export default function BookingConfirmationPage() {
       .replace(/;/g, "\\;");
   }
 
+  async function manualRefresh() {
+    setTries((t) => t + 1);
+  }
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
       {/* Hero */}
@@ -212,7 +230,7 @@ export default function BookingConfirmationPage() {
             <div className="flex items-start justify-between gap-6">
               <div className="flex items-center gap-4">
                 <div className="grid place-items-center h-12 w-12 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-                  {paid ? (
+                  {converted ? (
                     <CheckCircle2 className="h-6 w-6" />
                   ) : (
                     <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
@@ -220,17 +238,21 @@ export default function BookingConfirmationPage() {
                 </div>
                 <div>
                   <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#5a4a3f]">
-                    {paid
-                      ? "Payment confirmed — you're all set!"
-                      : pending
+                    {converted
+                      ? "Booking confirmed — you're all set!"
+                      : paid
+                      ? "Payment received — finalizing your booking…"
+                      : processing
                       ? "Thanks! Finalizing your booking…"
                       : "Booking status"}
                   </h1>
                   <div className="mt-2 text-sm text-[#6b5e53]">
-                    {paid
+                    {converted
                       ? "We’ve emailed your confirmation and details."
-                      : pending
-                      ? "We’re waiting for payment confirmation. This page updates automatically."
+                      : paid
+                      ? "Your payment succeeded. We’re finishing up your booking."
+                      : processing
+                      ? "We’re waiting for confirmation. This page updates automatically."
                       : "We couldn’t verify your payment yet."}
                   </div>
                 </div>
@@ -238,19 +260,25 @@ export default function BookingConfirmationPage() {
               <div className="shrink-0">{statusChip()}</div>
             </div>
 
-            {(!paid && (pending || sessionId)) || error ? (
+            {((!converted && (processing || sessionId)) || error) && (
               <div
                 className="mt-4 flex items-start gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm"
                 role="status"
               >
                 <Info size={14} className="mt-0.5 text-[#8b6f47]" />
-                <p>
+                <p className="flex-1">
                   {error
                     ? error
                     : "If it takes longer than a minute, please check your email or contact us."}
                 </p>
+                <button
+                  onClick={manualRefresh}
+                  className="inline-flex items-center gap-1 rounded-full border border-[#cdbfa9] px-2.5 py-1 text-[11px] text-[#5a4a3f] hover:bg-white"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Refresh
+                </button>
               </div>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
@@ -420,17 +448,23 @@ export default function BookingConfirmationPage() {
               <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
                 <h3 className="text-lg font-semibold text-[#5a4a3f]">Status</h3>
                 <p className="text-sm text-[#5a4a3f] mt-2">
-                  {paid
-                    ? "All set! Your payment was received and your spots are secured. We’ve emailed your confirmation."
-                    : pending
+                  {converted
+                    ? "All set! Your booking is confirmed. We’ve emailed your details."
+                    : paid
+                    ? "Your payment is complete. We’re finalizing your booking."
+                    : processing
                     ? "Your payment is being confirmed. This usually takes a few seconds."
                     : "We couldn’t verify your payment yet. If you were charged, we’ll email you as soon as it clears."}
                 </p>
 
                 <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-[#6b5e53]">
                   <div className="rounded-lg border border-[#e5e0d8] bg-white p-3">
-                    <div className="text-[11px]">Booking ID</div>
-                    <div className="font-medium text-[#5a4a3f]">{draftId}</div>
+                    <div className="text-[11px]">
+                      {converted ? "Booking ID" : "Reference"}
+                    </div>
+                    <div className="font-medium text-[#5a4a3f]">
+                      {converted ? bookingId : draftId}
+                    </div>
                   </div>
                   {when?.start && (
                     <div className="rounded-lg border border-[#e5e0d8] bg-white p-3">
@@ -480,7 +514,6 @@ function HelpCard() {
 
 function labelForCategory(c) {
   if (c === "adult") return "Adult (18+)";
-
   if (c === "kid") return "Kid (3–12)";
   return c;
 }

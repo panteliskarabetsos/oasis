@@ -1,4 +1,4 @@
-// src/app/booking/[id]/attendees/page.js (refined UI)
+// src/app/booking/[id]/attendees/page.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -80,19 +80,39 @@ export default function AttendeesPage() {
         }
         const data = await res.json();
 
-        setCounts({
-          adults: Number(data?.counts?.adults || 0),
-          kids: Number(data?.counts?.kids || 0),
-        });
-        setUnitPrices({
-          adult: Number(data?.unitPrices?.adult || 0),
-          kid: Number(data?.unitPrices?.kid || 0),
-        });
-        setTotalAmount(Number(data?.totalAmount || 0));
-        setExperience(data?.experience || null);
-        setSlot(data?.slot || null);
+        // NEW: support either { draft, experience, slot } or legacy flat shape
+        const d = data?.draft || data;
 
-        const pc = data?.primary_contact || data?.primaryContact || null;
+        // If already paid/converted, bounce to confirmation
+        const st = String(d?.status || "").toLowerCase();
+        if (st === "paid" || st === "converted" || data?.bookingId) {
+          router.replace(`/booking/${draftId}/confirmation`);
+          return;
+        }
+
+        setCounts({
+          adults: Number(d?.counts?.adults || 0),
+          kids: Number(d?.counts?.kids || 0),
+        });
+
+        // Prefer unitPrices helper; fall back to unitPriceAdult/UnitPriceKid
+        const up = d?.unitPrices || {
+          adult: Number(d?.unitPriceAdult || 0),
+          kid: Number(
+            d?.unitPriceKid != null ? d.unitPriceKid : d?.unitPriceAdult || 0
+          ),
+        };
+        setUnitPrices({
+          adult: Number(up.adult || 0),
+          kid: Number(up.kid || 0),
+        });
+
+        setTotalAmount(Number(d?.totalAmount || 0));
+
+        setExperience(data?.experience || d?.experience || null);
+        setSlot(data?.slot || d?.slot || null);
+
+        const pc = d?.primary_contact || d?.primaryContact || null;
         if (pc) {
           setPcName(pc.name || "");
           setPcEmail(pc.email || "");
@@ -101,20 +121,21 @@ export default function AttendeesPage() {
 
         // Build attendee list to match expected total & categories
         const catList = makeCategoryList(
-          Number(data?.counts?.adults || 0),
-          Number(data?.counts?.kids || 0)
+          Number(d?.counts?.adults || 0),
+          Number(d?.counts?.kids || 0)
         );
 
-        const existing = Array.isArray(data?.attendees) ? data.attendees : [];
+        const existing = Array.isArray(d?.attendees) ? d.attendees : [];
         const initial = catList.map((cat, i) => ({
           firstName: existing[i]?.firstName || "",
           lastName: existing[i]?.lastName || "",
           age: existing[i]?.age ?? "",
           allergies: existing[i]?.allergies || "",
-          category: cat, // locked to chosen counts
+          category: cat, // lock to chosen counts
         }));
 
         setAttendees(initial);
+        setError("");
       } catch (e) {
         console.error(e);
         setError(e.message || "Failed to load draft.");
@@ -123,7 +144,7 @@ export default function AttendeesPage() {
         setLoading(false);
       }
     })();
-  }, [draftId]);
+  }, [draftId, router]);
 
   const when = useMemo(() => {
     if (!slot?.date) return null;
@@ -135,7 +156,7 @@ export default function AttendeesPage() {
     };
   }, [slot]);
 
-  // replace whole priceBreakdown useMemo with:
+  // Price breakdown
   const priceBreakdown = useMemo(() => {
     const A = Number(counts.adults || 0);
     const K = Number(counts.kids || 0);
@@ -618,7 +639,6 @@ const inputCls =
 function makeCategoryList(adults, kids) {
   const arr = [];
   for (let i = 0; i < adults; i++) arr.push("adult");
-
   for (let i = 0; i < kids; i++) arr.push("kid");
   return arr;
 }
@@ -643,7 +663,7 @@ function isValidEmail(email = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
-// replace the entire validate(...) with:
+// Replaced validate(...) with schema that matches your API rules
 function validate(attendees, counts, primaryContact) {
   const issues = [];
   const expected = Number(counts.adults || 0) + Number(counts.kids || 0);

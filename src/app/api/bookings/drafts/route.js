@@ -1,3 +1,4 @@
+// src/app/api/bookings/drafts/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -6,6 +7,10 @@ import { createSupabaseAdmin } from "../../../../lib/supabase/admin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
+
+const HOLD_MINUTES = 30;
+// statuses that count toward booked seats
+const COUNT_STATUSES = new Set(["confirmed", "completed", "checked_in"]);
 
 export async function POST(req) {
   const admin = createSupabaseAdmin();
@@ -16,32 +21,118 @@ export async function POST(req) {
   const scheduleSlotId = Number(body?.scheduleSlotId);
   const counts = body?.counts || {};
   const A = toInt(counts.adults, 0);
-
   const K = toInt(counts.kids, 0);
-  const total = A + K;
+  const requestedGroup = A + K;
   const clientToken = (body?.clientToken || "").trim() || null;
 
+  if (!Number.isFinite(experienceId) || experienceId <= 0)
+    return bad("experienceId required");
+  if (!Number.isFinite(scheduleSlotId) || scheduleSlotId <= 0)
+    return bad("scheduleSlotId required");
+  if (requestedGroup <= 0) return bad("At least 1 attendee required");
+  if (requestedGroup > 8) return bad("Maximum 8 people per booking");
+
+  // 1) Fetch Experience (pricing + visibility)
+  const { data: exp, error: expErr } = await admin
+    .from("Experience")
+    .select(`id, visibility, "priceAdult", "priceKid"`)
+    .eq("id", experienceId)
+    .maybeSingle();
+  if (expErr || !exp) return bad("Experience not found", 404);
+  if (!exp.visibility) return bad("Experience not public", 403);
+
+  // 2) Fetch Slot (ensure belongs to exp, not cancelled, >1h from now)
+  const { data: slot, error: slotErr } = await admin
+    .from("ScheduleSlot")
+    .select("id, experienceId, date, totalSlots, isCancelled")
+    .eq("id", scheduleSlotId)
+    .maybeSingle();
+  if (slotErr || !slot) return bad("Schedule slot not found", 404);
+  if (slot.experienceId !== experienceId)
+    return bad("Slot does not belong to experience", 400);
+  if (slot.isCancelled) return bad("This slot is cancelled", 400);
+  const now = new Date();
+  const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+  if (new Date(slot.date) <= oneHourFromNow)
+    return bad("Slot no longer available", 400);
+
+  // 3) Aggregate booked seats from real reservations (Booking)
+  const { data: bookings, error: bookErr } = await admin
+    .from("Booking")
+    .select("scheduleSlotId, numberOfPeople, status")
+    .eq("scheduleSlotId", scheduleSlotId);
+  if (bookErr) {
+    console.error("[drafts] bookings select error:", bookErr);
+    return bad("Server error", 500);
+  }
+  const bookedFromReservations = (bookings || []).reduce((sum, b) => {
+    const st = String(b.status || "").toLowerCase();
+    if (!COUNT_STATUSES.has(st)) return sum;
+    const n = Number(b.numberOfPeople || 0);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
+
+  // 4) Aggregate active holds from other drafts (draft/checkout unexpired + paid not converted)
+  const { data: holds, error: holdsErr } = await admin
+    .from("BookingDraft")
+    .select('id, counts, status, "expiresAt", "convertedBookingId"')
+    .eq("scheduleSlotId", scheduleSlotId);
+  if (holdsErr) {
+    console.error("[drafts] holds select error:", holdsErr);
+    return bad("Server error", 500);
+  }
+
+  const activeHoldSize = (list, excludeId = null) =>
+    (list || []).reduce((sum, d) => {
+      if (excludeId && d.id === excludeId) return sum;
+      const isPaidUnconverted = d.status === "paid" && !d.convertedBookingId;
+      const expAt = d.expiresAt ? new Date(d.expiresAt) : null;
+      const isActive =
+        isPaidUnconverted || (d.status !== "paid" && (!expAt || expAt > now));
+      if (!isActive) return sum;
+      const a = toInt(d?.counts?.adults, 0);
+      const k = toInt(d?.counts?.kids, 0);
+      return sum + a + k;
+    }, 0);
+
+  // 5) Optional: clientToken reuse (capacity-safe)
   if (clientToken) {
-    // Try to reuse existing draft for this token (still a draft & not expired)
     const { data: existing } = await admin
       .from("BookingDraft")
-      .select("id, expiresAt, status")
+      .select("id, counts, expiresAt, status, scheduleSlotId")
       .eq("clientToken", clientToken)
       .eq("status", "draft")
       .maybeSingle();
 
     if (
       existing &&
-      (!existing.expiresAt || new Date(existing.expiresAt) > new Date())
+      (!existing.expiresAt || new Date(existing.expiresAt) > now)
     ) {
-      // Update counts/slot and bump expiry instead of inserting
-      const newExpiry = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      // Capacity check excluding this draft's current hold
+      const holdsExcludingSelf = activeHoldSize(holds, existing.id);
+      const remaining =
+        Number(slot.totalSlots || 0) -
+        bookedFromReservations -
+        holdsExcludingSelf;
+
+      if (requestedGroup > remaining) {
+        return bad(
+          `Only ${Math.max(remaining, 0)} spots left for this time`,
+          400
+        );
+      }
+
+      // Update counts/slot and bump expiry
+      const newExpiry = new Date(
+        Date.now() + HOLD_MINUTES * 60 * 1000
+      ).toISOString();
       const { error: upErr } = await admin
         .from("BookingDraft")
         .update({
           counts: { adults: A, kids: K },
           scheduleSlotId,
           expiresAt: newExpiry,
+          updatedAt: new Date().toISOString(),
         })
         .eq("id", existing.id);
 
@@ -49,82 +140,76 @@ export async function POST(req) {
         console.error("[drafts] reuse update error", upErr);
         return bad("Could not update draft", 500);
       }
-      return ok({ id: existing.id });
+      return ok({ id: existing.id, expiresAt: newExpiry });
     }
   }
 
-  if (!Number.isFinite(experienceId) || experienceId <= 0)
-    return bad("experienceId required");
-  if (!Number.isFinite(scheduleSlotId) || scheduleSlotId <= 0)
-    return bad("scheduleSlotId required");
-  if (total <= 0) return bad("At least 1 attendee required");
-  if (total > 8) return bad("Maximum 8 people per booking");
+  // 6) Capacity check for a new draft (subtract other active holds)
+  const lockedPending = activeHoldSize(holds, null);
+  const remaining =
+    Number(slot.totalSlots || 0) - bookedFromReservations - lockedPending;
 
-  // 1) Fetch experience (for prices + visibility)
-  const { data: exp, error: expErr } = await admin
-    .from("Experience")
-    .select(`id, visibility, "priceAdult", "priceKid"`)
-    .eq("id", experienceId)
-    .maybeSingle();
+  if (requestedGroup > remaining) {
+    return bad(`Only ${Math.max(remaining, 0)} spots left for this time`, 400);
+  }
 
-  if (expErr || !exp) return bad("Experience not found", 404);
-  if (!exp.visibility) return bad("Experience not public", 403);
-
-  // 2) Fetch slot + ensure it belongs to the experience and is in the future (>1h)
-  const { data: slot, error: slotErr } = await admin
-    .from("ScheduleSlot")
-    .select("id, experienceId, date, totalSlots, bookedSlots, isCancelled")
-    .eq("id", scheduleSlotId)
-    .maybeSingle();
-
-  if (slotErr || !slot) return bad("Schedule slot not found", 404);
-  if (slot.experienceId !== experienceId)
-    return bad("Slot does not belong to experience", 400);
-  if (slot.isCancelled) return bad("This slot is cancelled", 400);
-
-  const now = new Date();
-  const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-  if (new Date(slot.date) <= oneHourFromNow)
-    return bad("Slot no longer available", 400);
-
-  // 3) Capacity check
-  const remaining = Math.max(
-    0,
-    (slot.totalSlots ?? 0) - (slot.bookedSlots ?? 0)
-  );
-  if (total > remaining)
-    return bad(`Only ${remaining} spots left for this time`, 400);
-
-  // 4) Pricing snapshot (authoritative)
+  // 7) Pricing snapshot
   const unitAdult = toNum(exp.priceAdult, 0);
   const unitKid = isNum(exp.priceKid) ? Number(exp.priceKid) : unitAdult;
   const totalAmount = A * unitAdult + K * unitKid;
 
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min hold
+  // 8) Insert draft
+  const expiresAt = new Date(
+    Date.now() + HOLD_MINUTES * 60 * 1000
+  ).toISOString();
+  const insertPayload = {
+    experienceId,
+    scheduleSlotId,
+    counts: { adults: A, kids: K },
+    status: "draft",
+    unitPriceAdult: unitAdult,
+    unitPriceKid: unitKid,
+    totalAmount,
+    expiresAt,
+    updatedAt: new Date().toISOString(),
+    ...(clientToken ? { clientToken } : {}),
+  };
 
-  // 5) Insert draft
-  const { data: inserted, error: insErr } = await admin
-    .from("BookingDraft")
-    .insert({
-      experienceId,
-      scheduleSlotId,
-      counts: { adults: A, kids: K },
-      status: "draft",
-      unitPriceAdult: unitAdult,
-      unitPriceKid: unitKid,
-      totalAmount,
-      expiresAt,
-      updatedAt: new Date().toISOString(),
-    })
-    .select("id")
-    .maybeSingle();
-
-  if (insErr || !inserted) {
-    console.error("[drafts] insert error:", insErr);
+  let inserted;
+  try {
+    const ins = await admin
+      .from("BookingDraft")
+      .insert(insertPayload)
+      .select("id")
+      .maybeSingle();
+    inserted = ins?.data || null;
+    if (!inserted) throw ins?.error || new Error("Insert failed");
+  } catch (e) {
+    // Handle unique active token race (partial unique index)
+    if (String(e?.code) === "23505" && clientToken) {
+      const { data: existing } = await admin
+        .from("BookingDraft")
+        .select("id, expiresAt, status")
+        .eq("clientToken", clientToken)
+        .eq("status", "draft")
+        .maybeSingle();
+      if (existing) {
+        return ok({
+          id: existing.id,
+          reused: true,
+          expiresAt: existing.expiresAt || null,
+        });
+      }
+    }
+    console.error("[drafts] insert error:", e);
     return bad("Could not create draft", 500);
   }
 
-  return ok({ id: inserted.id });
+  return ok({
+    id: inserted.id,
+    expiresAt,
+    remaining: remaining - requestedGroup,
+  });
 }
 
 /* helpers */

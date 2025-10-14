@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Clock3,
   Users,
+  Loader2,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 
@@ -23,21 +24,21 @@ import { toast } from "react-hot-toast";
 const cx = (...xs) => xs.filter(Boolean).join(" ");
 const fmtDateLong = (d) =>
   d
-    ? new Date(d).toLocaleString("el-GR", {
+    ? new Date(d).toLocaleString("en-GB", {
         dateStyle: "full",
         timeStyle: "short",
       })
     : "-";
 const fmtDateShort = (d) =>
   d
-    ? new Date(d).toLocaleString("el-GR", {
+    ? new Date(d).toLocaleString("en-GB", {
         dateStyle: "medium",
         timeStyle: "short",
       })
     : "-";
 const fmtMoney = (n) =>
   typeof n === "number"
-    ? n.toLocaleString("el-GR", { style: "currency", currency: "EUR" })
+    ? n.toLocaleString("en-GB", { style: "currency", currency: "EUR" })
     : "-";
 function toDateInput(date) {
   const d = new Date(date);
@@ -87,7 +88,7 @@ export default function ReservationDetailPage() {
         });
         if (!res.ok)
           throw new Error(
-            (await res.json().catch(() => ({})))?.error || "Σφάλμα φόρτωσης"
+            (await res.json().catch(() => ({})))?.error || "Failed to load"
           );
         const { item } = await res.json();
         setItem(item);
@@ -109,11 +110,11 @@ export default function ReservationDetailPage() {
     });
     if (!res.ok)
       throw new Error(
-        (await res.json().catch(() => ({})))?.error || "Αποτυχία ακύρωσης"
+        (await res.json().catch(() => ({})))?.error || "Cancellation failed"
       );
     setItem((curr) => ({ ...curr, status: "cancelled" }));
     setShowCancel(false);
-    toast.success("Η κράτηση ακυρώθηκε");
+    toast.success("Reservation cancelled");
   }
 
   async function loadSlots() {
@@ -132,7 +133,7 @@ export default function ReservationDetailPage() {
       if (!res.ok)
         throw new Error(
           (await res.json().catch(() => ({})))?.error ||
-            "Σφάλμα φόρτωσης διαθέσιμων"
+            "Failed to load availability"
         );
       const payload = await res.json();
       setSlots(payload?.items || []);
@@ -142,7 +143,7 @@ export default function ReservationDetailPage() {
   }
 
   async function submitReschedule() {
-    if (!targetSlotId) return toast.error("Επιλέξτε νέο slot");
+    if (!targetSlotId) return toast.error("Select a new slot");
     const res = await fetch(`/api/admin/reservations/${item.id}/reschedule`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -151,7 +152,7 @@ export default function ReservationDetailPage() {
     });
     if (!res.ok)
       throw new Error(
-        (await res.json().catch(() => ({})))?.error || "Αποτυχία μεταφοράς"
+        (await res.json().catch(() => ({})))?.error || "Reschedule failed"
       );
     const payload = await res.json();
     setItem((curr) => ({
@@ -159,7 +160,7 @@ export default function ReservationDetailPage() {
       startTime: payload?.newStartTime || curr.startTime,
     }));
     setShowReschedule(false);
-    toast.success("Η κράτηση μεταφέρθηκε");
+    toast.success("Reservation rescheduled");
   }
 
   const isCancelled = item?.status === "cancelled";
@@ -170,66 +171,88 @@ export default function ReservationDetailPage() {
     .slice(0, 2)
     .join("");
 
+  const sourceBadge = item?.source ? (
+    <span
+      className={cx(
+        "ml-2 rounded-full border px-2 py-0.5 text-xs",
+        item.source === "admin" &&
+          "bg-purple-50 border-purple-200 text-purple-700",
+        item.source === "web" && "bg-blue-50 border-blue-200 text-blue-700",
+        item.source === "phone" &&
+          "bg-amber-50 border-amber-200 text-amber-800",
+        !["admin", "web", "phone"].includes(item.source) &&
+          "bg-neutral-100 border-neutral-200 text-neutral-600"
+      )}
+    >
+      {item.source}
+    </span>
+  ) : null;
+
   /* ------------------------------ UI ------------------------------ */
   return (
     <div className="pb-16">
       {/* sticky header */}
-      <div className="sticky top-0 z-40 border-b bg-white/80 backdrop-blur">
+      <div className="rounded-full sticky top-0 z-40 border-b bg-white/75 backdrop-blur supports-[backdrop-filter]:bg-white/55 print:hidden">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               onClick={() => router.push("/admin/reservations")}
-              className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50"
+              className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400"
             >
-              <ArrowLeft className="h-4 w-4" /> Πίσω
+              <ArrowLeft className="h-4 w-4" /> Back
             </button>
-            <div className="ml-1 text-sm text-neutral-600">
+            <div className="ml-1 truncate text-sm text-neutral-600">
               {item?.code ? (
                 <span className="font-mono">{item.code}</span>
               ) : (
                 <span className="text-neutral-400">#{id}</span>
               )}
-              {item?.source ? (
-                <span className="ml-2 rounded-full bg-neutral-100 px-2 py-0.5 text-xs">
-                  {item.source}
-                </span>
-              ) : null}
+              {sourceBadge}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <IconButton
               onClick={() => {
-                navigator.clipboard?.writeText(window.location.href);
-                toast.success("Αντιγράφηκε ο σύνδεσμος");
+                const ok =
+                  typeof navigator !== "undefined" &&
+                  navigator.clipboard?.writeText;
+                if (ok) {
+                  navigator.clipboard.writeText(window.location.href);
+                  toast.success("Link copied");
+                } else {
+                  toast.error("Copy not supported by this browser");
+                }
               }}
-              className="rounded-xl border p-2 text-sm hover:bg-neutral-50"
-              title="Αντιγραφή συνδέσμου"
+              title="Copy link"
+              ariaLabel="Copy link"
             >
               <Copy className="h-4 w-4" />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               onClick={() => window.print()}
-              className="rounded-xl border p-2 text-sm hover:bg-neutral-50"
-              title="Εκτύπωση"
+              title="Print"
+              ariaLabel="Print"
             >
               <Printer className="h-4 w-4" />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               onClick={() => setShowReschedule(true)}
-              className="rounded-xl border p-2 text-sm hover:bg-amber-50 disabled:opacity-50"
-              title="Μεταφορά"
+              title="Reschedule"
+              ariaLabel="Reschedule reservation"
               disabled={isCancelled}
+              className="hover:bg-amber-50"
             >
               <CalendarClock className="h-4 w-4" />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               onClick={() => setShowCancel(true)}
-              className="rounded-xl border p-2 text-sm hover:bg-red-50 disabled:opacity-50"
-              title="Ακύρωση"
+              title="Cancel"
+              ariaLabel="Cancel reservation"
               disabled={isCancelled}
+              className="hover:bg-red-50"
             >
               <XCircle className="h-4 w-4" />
-            </button>
+            </IconButton>
           </div>
         </div>
       </div>
@@ -238,92 +261,93 @@ export default function ReservationDetailPage() {
         {loading ? (
           <Skeleton />
         ) : error ? (
-          <div className="mt-6 rounded-2xl border p-8 text-red-600">
+          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-8 text-red-700">
             {error}
           </div>
         ) : !item ? (
           <div className="mt-6 rounded-2xl border p-8 text-neutral-600">
-            Δεν βρέθηκε η κράτηση.
+            Reservation not found.
           </div>
         ) : (
           <div className="mt-6 space-y-6">
             {/* Hero */}
-            <div className="rounded-3xl border bg-white p-5">
-              <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-                <div className="flex items-center gap-4">
-                  {/* avatar */}
-                  <div className="grid h-12 w-12 place-items-center rounded-2xl border bg-neutral-50 font-semibold text-neutral-700">
-                    {guestInitials || "?"}
-                  </div>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h1 className="text-lg font-semibold text-neutral-900">
-                        {item.guest?.name || "Χωρίς όνομα"}
-                      </h1>
-                      <StatusBadge status={item.status} />
+            <div className="overflow-hidden rounded-3xl border bg-white shadow-sm">
+              <div className="relative">
+                <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-teal-400 via-amber-400 to-pink-400" />
+                <div className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-center">
+                  <div className="flex items-center gap-4 min-w-0">
+                    {/* avatar */}
+                    <div className="grid h-12 w-12 place-items-center rounded-2xl border bg-neutral-50 font-semibold text-neutral-700">
+                      {guestInitials || "?"}
                     </div>
-                    <div className="mt-1 text-sm text-neutral-600">
-                      <span className="inline-flex items-center gap-1">
-                        <Users className="h-4 w-4" /> {item.counts?.adults ?? 0}
-                        {typeof item.counts?.kids === "number"
-                          ? ` + ${item.counts.kids}`
-                          : ""}
-                      </span>
-                      <span className="mx-2">•</span>
-                      <span className="inline-flex items-center gap-1">
-                        <CalendarClock className="h-4 w-4" />{" "}
-                        {fmtDateShort(item.startTime)}
-                      </span>
-                      {item.experience?.name ? (
-                        <>
-                          <span className="mx-2">•</span>
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="h-4 w-4" />{" "}
-                            {item.experience?.name}
-                          </span>
-                        </>
-                      ) : null}
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h1 className="truncate text-lg font-semibold text-neutral-900">
+                          {item.guest?.name || "No name"}
+                        </h1>
+                        <StatusBadge status={item.status} />
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-600">
+                        <Chip icon={<Users className="h-3.5 w-3.5" />}>
+                          {item.counts?.adults ?? 0}
+                          {typeof item.counts?.kids === "number"
+                            ? ` + ${item.counts.kids}`
+                            : ""}
+                        </Chip>
+                        <Dot />
+                        <Chip icon={<CalendarClock className="h-3.5 w-3.5" />}>
+                          {fmtDateShort(item.startTime)}
+                        </Chip>
+                        {item.experience?.name ? (
+                          <>
+                            <Dot />
+                            <Chip icon={<MapPin className="h-3.5 w-3.5" />}>
+                              {item.experience?.name}
+                            </Chip>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-2xl font-semibold text-neutral-900">
-                    {fmtMoney(item.money?.totalAmount)}
+                  <div className="text-right">
+                    <div className="text-2xl font-semibold text-neutral-900">
+                      {fmtMoney(item.money?.totalAmount)}
+                    </div>
+                    <div className="text-xs text-neutral-500">Total</div>
                   </div>
-                  <div className="text-xs text-neutral-500">Σύνολο</div>
                 </div>
               </div>
             </div>
 
             {/* Grid cards */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Card title="Πληροφορίες κράτησης">
-                <Row label="Ημερομηνία">{fmtDateLong(item.startTime)}</Row>
-                <Row label="Εμπειρία">{item.experience?.name || "-"}</Row>
+              <Card title="Reservation info">
+                <Row label="Date">{fmtDateLong(item.startTime)}</Row>
+                <Row label="Experience">{item.experience?.name || "-"}</Row>
                 <Row
                   label={
                     <span className="inline-flex items-center gap-1">
-                      <MapPin className="h-4 w-4" /> Τοποθεσία
+                      <MapPin className="h-4 w-4" /> Location
                     </span>
                   }
                 >
                   {item.experience?.location || "-"}
                 </Row>
-                <Row label="Κωδικός" mono>
-                  {item.code}
+                <Row label="Code" mono>
+                  <Copyable value={item.code} empty="-" />
                 </Row>
-                <Row label="Δημιουργήθηκε">{fmtDateShort(item.createdAt)}</Row>
-                <Row label="Ενημερώθηκε">{fmtDateShort(item.updatedAt)}</Row>
-                <Row label="Πηγή" mono>
-                  {item.source}
+                <Row label="Created">{fmtDateShort(item.createdAt)}</Row>
+                <Row label="Updated">{fmtDateShort(item.updatedAt)}</Row>
+                <Row label="Source" mono>
+                  {item.source || "-"}
                 </Row>
               </Card>
 
-              <Card title="Πελάτης">
+              <Card title="Customer">
                 <Row
                   label={
                     <span className="inline-flex items-center gap-1">
-                      <User2 className="h-4 w-4" /> Όνομα
+                      <User2 className="h-4 w-4" /> Name
                     </span>
                   }
                 >
@@ -351,7 +375,7 @@ export default function ReservationDetailPage() {
                 <Row
                   label={
                     <span className="inline-flex items-center gap-1">
-                      <Phone className="h-4 w-4" /> Τηλέφωνο
+                      <Phone className="h-4 w-4" /> Phone
                     </span>
                   }
                   mono
@@ -367,11 +391,11 @@ export default function ReservationDetailPage() {
                     "-"
                   )}
                 </Row>
-                <Row label="Σημειώσεις">{item.notes || "-"}</Row>
+                <Row label="Notes">{item.notes || "-"}</Row>
               </Card>
 
-              <Card title="Πληρωμή">
-                <Row label="Κατάσταση πληρωμής">
+              <Card title="Payment">
+                <Row label="Payment status">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge status={item.status} />
                   </div>
@@ -384,7 +408,7 @@ export default function ReservationDetailPage() {
                   }
                   mono
                 >
-                  {item.payments?.stripeSessionId || "-"}
+                  <Copyable value={item.payments?.stripeSessionId} empty="-" />
                 </Row>
                 <Row
                   label={
@@ -394,27 +418,30 @@ export default function ReservationDetailPage() {
                   }
                   mono
                 >
-                  {item.payments?.stripePaymentIntentId || "-"}
+                  <Copyable
+                    value={item.payments?.stripePaymentIntentId}
+                    empty="-"
+                  />
                 </Row>
-                <Row label="Σύνολο" mono>
+                <Row label="Total" mono>
                   {fmtMoney(item.money?.totalAmount)}
                 </Row>
               </Card>
 
               {/* Optional attendees list if present */}
               {Array.isArray(item?.attendees) && item.attendees.length > 0 && (
-                <Card title="Συμμετέχοντες">
+                <Card title="Attendees">
                   <div className="divide-y rounded-xl border">
                     {item.attendees.map((a, idx) => (
                       <div
                         key={idx}
-                        className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                        className="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-neutral-50"
                       >
                         <span className="truncate">
                           {a?.name || `#${idx + 1}`}
                         </span>
-                        <span className="text-neutral-500">
-                          {a?.type || "ενήλικας"}
+                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
+                          {a?.type || "adult"}
                         </span>
                       </div>
                     ))}
@@ -428,36 +455,33 @@ export default function ReservationDetailPage() {
 
       {/* Cancel modal */}
       {showCancel && (
-        <Modal onClose={() => setShowCancel(false)} title="Ακύρωση κράτησης">
-          <div className="space-y-3">
+        <Modal onClose={() => setShowCancel(false)} title="Cancel reservation">
+          <div className="space-y-4">
             <p className="text-sm text-neutral-600">
-              Θέλετε σίγουρα να ακυρώσετε; Αυτή η ενέργεια θα ελευθερώσει θέσεις
-              στο slot.
+              Are you sure you want to cancel? This action will free up seats
+              for this slot.
             </p>
             <label className="block text-sm">
-              <span className="text-neutral-700">Λόγος (προαιρετικό)</span>
+              <span className="text-neutral-700">Reason (optional)</span>
               <textarea
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
-                className="mt-1 w-full rounded-xl border p-2 text-sm"
+                className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
                 rows={3}
               />
             </label>
             <div className="flex items-center justify-end gap-2">
-              <button
-                className="rounded-xl border px-3 py-2 text-sm"
-                onClick={() => setShowCancel(false)}
-              >
-                Κλείσιμο
-              </button>
-              <button
-                className="rounded-xl border px-3 py-2 text-sm bg-red-600 text-white"
+              <Button variant="ghost" onClick={() => setShowCancel(false)}>
+                Close
+              </Button>
+              <Button
+                variant="destructive"
                 onClick={() =>
                   cancelBooking().catch((e) => toast.error(e.message))
                 }
               >
-                Ακύρωση κράτησης
-              </button>
+                Cancel reservation
+              </Button>
             </div>
           </div>
         </Modal>
@@ -467,57 +491,63 @@ export default function ReservationDetailPage() {
       {showReschedule && (
         <Modal
           onClose={() => setShowReschedule(false)}
-          title="Μεταφορά κράτησης"
+          title="Reschedule reservation"
         >
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
-                <label className="text-xs text-neutral-600">Από</label>
+                <label className="text-xs text-neutral-600">From</label>
                 <input
                   type="date"
                   value={slotFrom}
                   onChange={(e) => setSlotFrom(e.target.value)}
-                  className="mt-1 w-full rounded-xl border p-2 text-sm"
+                  className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
                 />
               </div>
               <div>
-                <label className="text-xs text-neutral-600">Έως</label>
+                <label className="text-xs text-neutral-600">To</label>
                 <input
                   type="date"
                   value={slotTo}
                   onChange={(e) => setSlotTo(e.target.value)}
-                  className="mt-1 w-full rounded-xl border p-2 text-sm"
+                  className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
                 />
               </div>
               <div className="flex items-end">
-                <button
+                <Button
+                  className="w-full sm:w-auto"
                   onClick={() =>
                     loadSlots().catch((e) => toast.error(e.message))
                   }
-                  className="rounded-xl border px-3 py-2 text-sm w-full sm:w-auto"
                 >
-                  Φόρτωση διαθέσιμων
-                </button>
+                  {slotsLoading ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                    </span>
+                  ) : (
+                    "Load availability"
+                  )}
+                </Button>
               </div>
             </div>
 
             <div className="rounded-xl border">
               <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
                 <div>
-                  <div className="text-xs text-neutral-500">Τρέχον slot</div>
+                  <div className="text-xs text-neutral-500">Current slot</div>
                   <div className="text-sm">{fmtDateShort(item?.startTime)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-neutral-500">Νέο slot</div>
+                  <div className="text-xs text-neutral-500">New slot</div>
                   <select
                     value={targetSlotId}
                     onChange={(e) => setTargetSlotId(e.target.value)}
-                    className="mt-1 w-full rounded-xl border p-2 text-sm"
+                    className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                   >
-                    <option value="">— Επιλέξτε —</option>
+                    <option value="">— Select —</option>
                     {slotsLoading ? (
                       <option value="" disabled>
-                        Φόρτωση…
+                        Loading…
                       </option>
                     ) : (
                       slots.map((s) => (
@@ -527,7 +557,7 @@ export default function ReservationDetailPage() {
                           disabled={(s.available ?? 0) <= 0}
                         >
                           {fmtDateShort(s.date)} — {s.experienceName} •
-                          Διαθέσιμες: {s.available}
+                          Available: {s.available}
                         </option>
                       ))
                     )}
@@ -537,24 +567,30 @@ export default function ReservationDetailPage() {
             </div>
 
             <div className="flex items-center justify-end gap-2">
-              <button
-                className="rounded-xl border px-3 py-2 text-sm"
-                onClick={() => setShowReschedule(false)}
-              >
-                Κλείσιμο
-              </button>
-              <button
-                className="rounded-xl border px-3 py-2 text-sm bg-amber-600 text-white"
+              <Button variant="ghost" onClick={() => setShowReschedule(false)}>
+                Close
+              </Button>
+              <Button
+                variant="amber"
                 onClick={() =>
                   submitReschedule().catch((e) => toast.error(e.message))
                 }
               >
-                Μεταφορά κράτησης
-              </button>
+                Reschedule
+              </Button>
             </div>
           </div>
         </Modal>
       )}
+
+      {/* print helpers */}
+      <style jsx global>{`
+        @media print {
+          .print\:hidden {
+            display: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -562,62 +598,77 @@ export default function ReservationDetailPage() {
 /* ---------------------------- Subcomponents ---------------------------- */
 function Card({ title, children }) {
   return (
-    <div className="rounded-3xl border bg-white">
+    <div className="rounded-3xl border bg-white shadow-sm">
       <div className="border-b px-4 py-3 text-sm font-semibold text-neutral-800">
         {title}
       </div>
-      <div className="p-4 space-y-2">{children}</div>
+      <div className="space-y-2 p-4">{children}</div>
     </div>
   );
 }
 function Row({ label, children, mono }) {
   return (
     <div className="flex items-start justify-between gap-4 text-sm">
-      <div className="text-neutral-500 min-w-[160px]">{label}</div>
+      <div className="min-w-[160px] text-neutral-500">{label}</div>
       <div className={cx("flex-1 text-neutral-900", mono && "font-mono")}>
         {children}
       </div>
     </div>
   );
 }
+
 function StatusBadge({ status }) {
   const map = {
-    confirmed: "bg-green-100 text-green-800 border-green-200",
+    confirmed: "bg-emerald-100 text-emerald-800 border-emerald-200",
     pending: "bg-amber-100 text-amber-800 border-amber-200",
     cancelled: "bg-red-100 text-red-800 border-red-200",
     draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
   };
+  const dotMap = {
+    confirmed: "bg-emerald-500",
+    pending: "bg-amber-500",
+    cancelled: "bg-red-500",
+    draft: "bg-neutral-400",
+  };
   const label =
     {
-      confirmed: "Επιβεβαιωμένη",
-      pending: "Σε εκκρεμότητα",
-      cancelled: "Ακυρωμένη",
-      draft: "Προσχέδιο",
+      confirmed: "Confirmed",
+      pending: "Pending",
+      cancelled: "Cancelled",
+      draft: "Draft",
     }[status] ||
     status ||
     "-";
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs",
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
         map[status]
       )}
     >
+      <span className={cx("h-1.5 w-1.5 rounded-full", dotMap[status])} />
       {label}
     </span>
   );
 }
+
 function Modal({ title, children, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-      <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 print:hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="text-base font-semibold text-neutral-800">{title}</h3>
           <button
             className="rounded-lg p-1 hover:bg-neutral-100"
             onClick={onClose}
+            aria-label="Close"
           >
-            <span className="sr-only">Κλείσιμο</span>✕
+            ✕
           </button>
         </div>
         <div className="p-4">{children}</div>
@@ -625,6 +676,7 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
+
 function Skeleton() {
   return (
     <div className="mx-auto mt-6 max-w-5xl space-y-4">
@@ -636,5 +688,83 @@ function Skeleton() {
         <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
       </div>
     </div>
+  );
+}
+
+function IconButton({ children, className, title, ariaLabel, ...props }) {
+  return (
+    <button
+      className={cx(
+        "rounded-xl border p-2 text-sm hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 disabled:opacity-50",
+        className
+      )}
+      title={title}
+      aria-label={ariaLabel || title}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Button({ variant = "default", className, children, ...props }) {
+  const base =
+    "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50";
+  const variants = {
+    default:
+      "border-neutral-200 bg-white hover:bg-neutral-50 focus-visible:ring-neutral-300",
+    ghost:
+      "border-transparent bg-transparent hover:bg-neutral-50 focus-visible:ring-neutral-300",
+    destructive:
+      "border-red-600 bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-300",
+    amber:
+      "border-amber-600 bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-300",
+  };
+  return (
+    <button className={cx(base, variants[variant], className)} {...props}>
+      {children}
+    </button>
+  );
+}
+
+function Chip({ children, icon }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
+      {icon}
+      {children}
+    </span>
+  );
+}
+
+function Dot() {
+  return (
+    <span className="mx-2 inline-block h-1 w-1 rounded-full bg-neutral-300 align-middle" />
+  );
+}
+
+function Copyable({ value, empty = "-" }) {
+  if (!value) return <span>{empty}</span>;
+  return (
+    <span className="group inline-flex max-w-full items-center gap-2">
+      <span className="truncate">{value}</span>
+      <button
+        type="button"
+        onClick={() => {
+          const ok =
+            typeof navigator !== "undefined" && navigator.clipboard?.writeText;
+          if (ok) {
+            navigator.clipboard.writeText(String(value));
+            toast.success("Copied!");
+          } else {
+            toast.error("Copy not supported");
+          }
+        }}
+        className="invisible rounded-lg border p-1 text-xs group-hover:visible hover:bg-neutral-50"
+        title="Copy"
+        aria-label="Copy"
+      >
+        <Copy className="h-3.5 w-3.5" />
+      </button>
+    </span>
   );
 }

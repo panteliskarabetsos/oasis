@@ -10,6 +10,9 @@ const ok = (data, status = 200) => NextResponse.json(data, { status });
 const bad = (msg, status = 400) =>
   NextResponse.json({ error: msg }, { status });
 
+// How long to hold seats (minutes) while user fills attendees & goes to checkout
+const HOLD_MINUTES = 30;
+
 export async function POST(req, { params }) {
   const supa = await createSupabaseServer();
   if (!supa) return bad("Server not configured", 500);
@@ -41,7 +44,7 @@ export async function POST(req, { params }) {
     // Find app user profile by auth_user_id
     const { data: appUser, error: userErr } = await admin
       .from("User")
-      .select("id")
+      .select("id, email, name, surname, phone")
       .eq("auth_user_id", user.id)
       .maybeSingle();
 
@@ -66,61 +69,115 @@ export async function POST(req, { params }) {
       return bad("Slot not found or is cancelled", 400);
     }
 
-    // If a slug is present in the route, make sure the slot belongs to that experience
-    if (slug) {
-      const { data: exp, error: expErr } = await admin
-        .from("Experience")
-        .select("id,slug")
-        .eq("id", slot.experienceId)
-        .maybeSingle();
-
-      if (expErr) {
-        console.error("[availability] experience fetch error:", expErr);
-        return bad("Server error", 500);
-      }
-      if (!exp || exp.slug !== slug) {
-        return bad("Slot does not belong to this experience", 400);
-      }
+    // No booking for past slots
+    const now = new Date();
+    const slotDate = new Date(slot.date);
+    if (isFinite(slotDate) && slotDate < now) {
+      return bad("This slot has already passed", 400);
     }
 
-    // Availability check
-    const available = Number(slot.totalSlots) - Number(slot.bookedSlots);
+    // Ensure the slot belongs to the experience slug & get prices
+    const { data: exp, error: expErr } = await admin
+      .from("Experience")
+      .select("id,slug,priceAdult,priceKid")
+      .eq("id", slot.experienceId)
+      .maybeSingle();
+
+    if (expErr) {
+      console.error("[availability] experience fetch error:", expErr);
+      return bad("Server error", 500);
+    }
+    if (!exp || exp.slug !== slug) {
+      return bad("Slot does not belong to this experience", 400);
+    }
+
+    // Compute locked pending (unexpired drafts) for this slot
+    const { data: holds, error: holdsErr } = await admin
+      .from("BookingDraft")
+      .select("counts, expiresAt, status")
+      .eq("scheduleSlotId", slot.id)
+      .in("status", ["draft", "checkout"]);
+
+    if (holdsErr) {
+      console.error("[availability] holds fetch error:", holdsErr);
+      return bad("Server error", 500);
+    }
+
+    const lockedPending = (holds || []).reduce((sum, h) => {
+      const expAt = h.expiresAt ? new Date(h.expiresAt) : null;
+      const validHold = !expAt || expAt > now; // treat null as valid hold
+      if (!validHold) return sum;
+      const adults = Number(h?.counts?.adults ?? 0) || 0;
+      const kids = Number(h?.counts?.kids ?? 0) || 0;
+      return sum + adults + kids;
+    }, 0);
+
+    const available =
+      Number(slot.totalSlots) - Number(slot.bookedSlots) - lockedPending;
     if (available < count) {
-      return bad(`Only ${available} spots left`, 400);
+      return bad(`Only ${Math.max(available, 0)} spots left`, 400);
     }
 
-    // Create booking
-    const { data: booking, error: bookErr } = await admin
-      .from("Booking")
+    // Price calculation (treat everyone as adult if we only have total count)
+    const unitPriceAdult = Number(exp.priceAdult ?? 0);
+    const unitPriceKid = exp.priceKid ?? null;
+    const adults = count;
+    const kids = 0;
+    const totalAmount =
+      unitPriceAdult * adults + (unitPriceKid ? unitPriceKid * kids : 0);
+
+    // Primary contact snapshot (can be edited later in attendees step)
+    const primaryContact = {
+      userId: appUser.id,
+      email: appUser.email ?? user.email ?? null,
+      name: appUser.name ?? null,
+      surname: appUser.surname ?? null,
+      phone: appUser.phone ?? null,
+      notes: null,
+    };
+
+    // Create a BookingDraft hold (NOT a real Booking)
+    const expiresAt = new Date(
+      now.getTime() + HOLD_MINUTES * 60 * 1000
+    ).toISOString();
+    const { data: draft, error: draftErr } = await admin
+      .from("BookingDraft")
       .insert({
-        userId: appUser.id,
+        experienceId: exp.id,
         scheduleSlotId: slot.id,
-        numberOfPeople: count,
-        status: "CONFIRMED",
+        counts: { adults, kids },
+        attendees: null,
+        primary_contact: primaryContact,
+        status: "draft",
+        unitPriceAdult,
+        unitPriceKid,
+        totalAmount,
+        expiresAt,
+        updatedAt: new Date().toISOString(),
       })
-      .select()
+      .select(
+        "id, experienceId, scheduleSlotId, counts, totalAmount, expiresAt, status"
+      )
       .single();
 
-    if (bookErr) {
-      console.error("[availability] booking insert error:", bookErr);
-      return bad("Failed to create booking", 500);
+    if (draftErr) {
+      console.error("[availability] draft insert error:", draftErr);
+      return bad("Failed to create reservation draft", 500);
     }
 
-    // Update bookedSlots (read-modify-write)
-    const newBooked = Number(slot.bookedSlots) + count;
-    const { error: updErr } = await admin
-      .from("ScheduleSlot")
-      .update({ bookedSlots: newBooked })
-      .eq("id", slot.id);
-
-    if (updErr) {
-      console.error("[availability] bookedSlots update error:", updErr);
-      // Optional: delete booking if slot update failed
-      // await admin.from("Booking").delete().eq("id", booking.id);
-      return bad("Failed to finalize booking", 500);
-    }
-
-    return ok(booking, 201);
+    // Return draft so UI can continue to /booking/{draftId}/attendees
+    return ok(
+      {
+        draftId: draft.id,
+        scheduleSlotId: draft.scheduleSlotId,
+        experienceId: draft.experienceId,
+        counts: draft.counts,
+        totalAmount: draft.totalAmount,
+        expiresAt: draft.expiresAt,
+        status: draft.status,
+      },
+      201
+    );
   } catch (e) {
     console.error("[availability] unexpected error:", e);
     return bad("Internal server error", 500);

@@ -105,7 +105,7 @@ export async function GET(req, ctx) {
       .from("BookingDraft")
       .select(
         `id, createdAt, updatedAt, status, counts, attendees, primary_contact, totalAmount,
-         unitPriceAdult, unitPriceTeen, unitPriceKid, scheduleSlotId, stripeSessionId, stripePaymentIntentId,
+         unitPriceAdult,  unitPriceKid, scheduleSlotId, stripeSessionId, stripePaymentIntentId,
          ScheduleSlot:ScheduleSlot(id, date, experienceId, Experience:Experience(id, name, location))`
       )
       .eq("id", rid)
