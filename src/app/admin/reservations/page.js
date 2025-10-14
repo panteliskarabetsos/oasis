@@ -48,8 +48,9 @@ const cx = (...xs) => xs.filter(Boolean).join(" ");
 
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
+  { value: "paid", label: "Paid" },
+  { value: "confirmed", label: "Confirmed" },
   { value: "pending", label: "Pending" },
-  { value: "paid", label: "paid" },
   { value: "cancelled", label: "Cancelled" },
   { value: "draft", label: "Drafts" },
 ];
@@ -245,10 +246,11 @@ export default function ReservationsPage() {
       "Phone",
       "Adults",
       "Kids",
-      "Total",
+      "Total Paid", // <-- updated header
       "Status",
       "Created At",
     ];
+
     const lines = rows.map((r) => [
       r.id,
       r.code || "",
@@ -259,7 +261,8 @@ export default function ReservationsPage() {
       r.guestPhone || "",
       r.adults ?? "",
       r.kids ?? "",
-      r.totalAmount ?? "",
+      // prefer totalPaidAmount fallback to totalAmount
+      r.totalPaidAmount ?? r.totalAmount ?? "",
       r.status || "",
       r.createdAt || "",
     ]);
@@ -270,8 +273,7 @@ export default function ReservationsPage() {
       )
       .join("");
 
-    // Add BOM for Excel compatibility
-    const blob = new Blob(["﻿" + csv], {
+    const blob = new Blob(["\uFEFF" + csv], {
       type: "text/csv;charset=utf-8;",
     });
     const url = URL.createObjectURL(blob);
@@ -772,6 +774,7 @@ export default function ReservationsPage() {
                 {rows.map((r) => (
                   <tr
                     key={r.id}
+                    // onClick={() => router.push(`/admin/reservations/${r.id}`)}
                     className={cx(
                       "group cursor-pointer transition-colors",
                       r.status === "cancelled"
@@ -848,8 +851,9 @@ export default function ReservationsPage() {
                       </span>
                     </Td>
                     <Td className={pad + " text-right"}>
-                      {fmtMoney(r.totalAmount)}
+                      {fmtMoney(rowTotal(r))}
                     </Td>
+
                     <Td className={pad}>
                       <StatusBadge status={r.status} />
                     </Td>
@@ -1118,36 +1122,61 @@ function Td({ children, className = "" }) {
   );
 }
 
+function isNum(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+function rowTotal(r) {
+  return isNum(r.totalPaidAmount)
+    ? r.totalPaidAmount
+    : isNum(r.totalAmount)
+    ? r.totalAmount
+    : isNum(r.money?.totalPaidAmount)
+    ? r.money.totalPaidAmount
+    : isNum(r.money?.totalAmount)
+    ? r.money.totalAmount
+    : null;
+}
+
+function normalizeStatus(s) {
+  const v = String(s || "")
+    .toLowerCase()
+    .trim();
+  if (v === "confirmed") return "paid"; // legacy synonym
+  if (v === "processing") return "pending";
+  return v || "draft";
+}
+
+function labelStatus(status) {
+  const k = normalizeStatus(status);
+  return (
+    {
+      paid: "Paid",
+      pending: "Pending",
+      cancelled: "Cancelled",
+      draft: "Draft",
+    }[k] ||
+    status ||
+    "-"
+  );
+}
+
 function StatusBadge({ status }) {
+  const k = normalizeStatus(status);
   const map = {
-    confirmed: "bg-green-100 text-green-800 border-green-200",
+    paid: "bg-green-100 text-green-800 border-green-200",
     pending: "bg-amber-100 text-amber-800 border-amber-200",
     cancelled: "bg-red-100 text-red-800 border-red-200",
     draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
   };
-  const label = labelStatus(status);
   return (
     <span
       className={cx(
         "inline-flex items-center rounded-full border px-2.5 py-1 text-xs",
-        map[status]
+        map[k]
       )}
     >
-      {label}
+      {labelStatus(k)}
     </span>
-  );
-}
-
-function labelStatus(status) {
-  return (
-    {
-      confirmed: "Confirmed",
-      pending: "Pending",
-      cancelled: "Cancelled",
-      draft: "Draft",
-    }[status] ||
-    status ||
-    "-"
   );
 }
 

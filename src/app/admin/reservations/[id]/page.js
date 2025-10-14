@@ -36,9 +36,9 @@ const fmtDateShort = (d) =>
         timeStyle: "short",
       })
     : "-";
-const fmtMoney = (n) =>
+const fmtMoney = (n, currency = "EUR") =>
   typeof n === "number"
-    ? n.toLocaleString("en-GB", { style: "currency", currency: "EUR" })
+    ? n.toLocaleString("en-GB", { style: "currency", currency })
     : "-";
 function toDateInput(date) {
   const d = new Date(date);
@@ -66,6 +66,7 @@ export default function ReservationDetailPage() {
   // Modal state
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [showStripeSession, setShowStripeSession] = useState(false);
 
   const [showReschedule, setShowReschedule] = useState(false);
   const [slots, setSlots] = useState([]);
@@ -163,10 +164,36 @@ export default function ReservationDetailPage() {
     toast.success("Reservation rescheduled");
   }
 
-  const isCancelled = item?.status === "cancelled";
-  const isPaid = item?.status === "confirmed";
-  const guestInitials = (item?.guest?.name || "-")
+  // ------- derived UI state -------
+  const statusNorm = String(item?.status || "").toLowerCase();
+  const isCancelled = statusNorm === "cancelled";
+  const isPaid =
+    statusNorm === "paid" ||
+    statusNorm === "confirmed" ||
+    statusNorm === "completed" ||
+    statusNorm === "checked_in";
+
+  const moneyCurrency = (item?.money?.currency || "EUR").toUpperCase();
+  const paidTotal =
+    typeof item?.money?.totalPaidAmount === "number"
+      ? item.money.totalPaidAmount
+      : typeof item?.money?.totalAmount === "number"
+      ? item.money.totalAmount
+      : null;
+
+  const guestName =
+    (item?.guest?.name || "").trim() ||
+    (item?.guestSnapshot &&
+      (item.guestSnapshot.name ??
+        item.guestSnapshot.fullName ??
+        [item.guestSnapshot.firstName, item.guestSnapshot.lastName]
+          .filter(Boolean)
+          .join(" "))) ||
+    "";
+
+  const guestInitials = (guestName || "-")
     .split(" ")
+    .filter(Boolean)
     .map((x) => x[0])
     .slice(0, 2)
     .join("");
@@ -283,15 +310,18 @@ export default function ReservationDetailPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h1 className="truncate text-lg font-semibold text-neutral-900">
-                          {item.guest?.name || "No name"}
+                          {guestName || "No name"}
                         </h1>
-                        <StatusBadge status={item.status} />
+                        <StatusBadge status={statusNorm} />
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-600">
                         <Chip icon={<Users className="h-3.5 w-3.5" />}>
                           {item.counts?.adults ?? 0}
                           {typeof item.counts?.kids === "number"
                             ? ` + ${item.counts.kids}`
+                            : ""}
+                          {typeof item.counts?.teens === "number"
+                            ? ` + ${item.counts.teens}`
                             : ""}
                         </Chip>
                         <Dot />
@@ -311,9 +341,13 @@ export default function ReservationDetailPage() {
                   </div>
                   <div className="text-right">
                     <div className="text-2xl font-semibold text-neutral-900">
-                      {fmtMoney(item.money?.totalAmount)}
+                      {fmtMoney(paidTotal, moneyCurrency)}
                     </div>
-                    <div className="text-xs text-neutral-500">Total</div>
+                    <div className="text-xs text-neutral-500">
+                      {typeof item?.money?.totalPaidAmount === "number"
+                        ? "Total paid"
+                        : "Total"}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -351,7 +385,7 @@ export default function ReservationDetailPage() {
                     </span>
                   }
                 >
-                  {item.guest?.name || "-"}
+                  {guestName || "-"}
                 </Row>
                 <Row
                   label={
@@ -397,7 +431,7 @@ export default function ReservationDetailPage() {
               <Card title="Payment">
                 <Row label="Payment status">
                   <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge status={item.status} />
+                    <StatusBadge status={statusNorm} />
                   </div>
                 </Row>
                 <Row
@@ -408,8 +442,21 @@ export default function ReservationDetailPage() {
                   }
                   mono
                 >
-                  <Copyable value={item.payments?.stripeSessionId} empty="-" />
+                  {item?.payments?.stripeSessionId ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => setShowStripeSession(true)}
+                        className=" "
+                      >
+                        Show
+                      </Button>
+                      {/* <Copyable value={item.payments.stripeSessionId} /> */}
+                    </div>
+                  ) : (
+                    "-"
+                  )}
                 </Row>
+
                 <Row
                   label={
                     <span className="inline-flex items-center gap-1">
@@ -423,8 +470,15 @@ export default function ReservationDetailPage() {
                     empty="-"
                   />
                 </Row>
-                <Row label="Total" mono>
-                  {fmtMoney(item.money?.totalAmount)}
+                <Row
+                  label={
+                    typeof item?.money?.totalPaidAmount === "number"
+                      ? "Total paid"
+                      : "Total"
+                  }
+                  mono
+                >
+                  {fmtMoney(paidTotal, moneyCurrency)}
                 </Row>
               </Card>
 
@@ -432,19 +486,53 @@ export default function ReservationDetailPage() {
               {Array.isArray(item?.attendees) && item.attendees.length > 0 && (
                 <Card title="Attendees">
                   <div className="divide-y rounded-xl border">
-                    {item.attendees.map((a, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-neutral-50"
-                      >
-                        <span className="truncate">
-                          {a?.name || `#${idx + 1}`}
-                        </span>
-                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
-                          {a?.type || "adult"}
-                        </span>
-                      </div>
-                    ))}
+                    {item.attendees.map((a, idx) => {
+                      const name =
+                        a?.name ||
+                        [a?.firstName, a?.lastName].filter(Boolean).join(" ") ||
+                        `#${idx + 1}`;
+                      const type = a?.type || a?.category || "adult";
+                      const age =
+                        typeof a?.age === "number" && Number.isFinite(a.age)
+                          ? a.age
+                          : null;
+
+                      // pick the first non-empty notes-like field
+                      const notes =
+                        (typeof a?.notes === "string" && a.notes.trim()) ||
+                        (typeof a?.allergies === "string" &&
+                          a.allergies.trim()) ||
+                        (typeof a?.dietary === "string" && a.dietary.trim()) ||
+                        (typeof a?.comment === "string" && a.comment.trim()) ||
+                        null;
+
+                      return (
+                        <div
+                          key={idx}
+                          className="px-3 py-2 hover:bg-neutral-50"
+                        >
+                          <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="truncate">{name}</span>
+                            <div className="flex items-center gap-2">
+                              {age !== null && (
+                                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
+                                  {age}
+                                </span>
+                              )}
+                              <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
+                                {type}
+                              </span>
+                            </div>
+                          </div>
+
+                          {notes && (
+                            <div className="mt-1 text-xs text-neutral-600">
+                              Notes: {notes}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </Card>
               )}
@@ -452,6 +540,43 @@ export default function ReservationDetailPage() {
           </div>
         )}
       </div>
+
+      {showStripeSession && (
+        <Modal
+          onClose={() => setShowStripeSession(false)}
+          title="Stripe Session ID"
+        >
+          <div className="space-y-3">
+            <textarea
+              readOnly
+              value={item?.payments?.stripeSessionId || ""}
+              rows={8}
+              className="mt-1 w-full rounded-xl border p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setShowStripeSession(false)}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  const v = item?.payments?.stripeSessionId || "";
+                  if (navigator?.clipboard?.writeText) {
+                    navigator.clipboard.writeText(v);
+                    toast.success("Copied");
+                  } else {
+                    toast.error("Copy not supported");
+                  }
+                }}
+              >
+                Copy
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Cancel modal */}
       {showCancel && (
@@ -618,35 +743,48 @@ function Row({ label, children, mono }) {
 }
 
 function StatusBadge({ status }) {
+  const s = String(status || "").toLowerCase();
   const map = {
+    paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
     confirmed: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    completed: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    checked_in: "bg-emerald-100 text-emerald-800 border-emerald-200",
     pending: "bg-amber-100 text-amber-800 border-amber-200",
     cancelled: "bg-red-100 text-red-800 border-red-200",
     draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
+    converted: "bg-sky-100 text-sky-800 border-sky-200",
   };
   const dotMap = {
+    paid: "bg-emerald-500",
     confirmed: "bg-emerald-500",
+    completed: "bg-emerald-500",
+    checked_in: "bg-emerald-500",
     pending: "bg-amber-500",
     cancelled: "bg-red-500",
     draft: "bg-neutral-400",
+    converted: "bg-sky-500",
   };
-  const label =
-    {
-      confirmed: "Confirmed",
-      pending: "Pending",
-      cancelled: "Cancelled",
-      draft: "Draft",
-    }[status] ||
-    status ||
-    "-";
+  const labelMap = {
+    paid: "Paid",
+    confirmed: "Confirmed",
+    completed: "Completed",
+    checked_in: "Checked-in",
+    pending: "Pending",
+    cancelled: "Cancelled",
+    draft: "Draft",
+    converted: "Converted",
+  };
+  const cls = map[s] || "bg-neutral-100 text-neutral-700 border-neutral-200";
+  const dot = dotMap[s] || "bg-neutral-400";
+  const label = labelMap[s] || status || "-";
   return (
     <span
       className={cx(
         "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-        map[status]
+        cls
       )}
     >
-      <span className={cx("h-1.5 w-1.5 rounded-full", dotMap[status])} />
+      <span className={cx("h-1.5 w-1.5 rounded-full", dot)} />
       {label}
     </span>
   );

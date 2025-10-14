@@ -30,7 +30,43 @@ export default function BookingConfirmationPage() {
   const [error, setError] = useState("");
   const [tries, setTries] = useState(0);
 
-  // Fetch draft + related info; poll until converted (or for a short time after pay)
+  // NEW: store real booking code and DB status once we have them
+  const [bookingCode, setBookingCode] = useState("");
+  const [bookingDbStatus, setBookingDbStatus] = useState("");
+  const [confirmedBookingId, setConfirmedBookingId] = useState(null);
+
+  // Utilities
+  const deriveFallbackCode = (id) =>
+    id ? `BK-${String(id).padStart(6, "0")}` : "";
+
+  async function tryFetchBookingCode(id) {
+    // Try common public endpoints; gracefully fallback to BK-000123
+    const endpoints = [
+      `/api/bookings/${id}`, // if you have a public booking route
+      `/api/bookings/${id}/public`, // alternate
+    ];
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) continue;
+        const b = await res.json().catch(() => ({}));
+        const code =
+          b?.code ||
+          b?.reference ||
+          b?.bookingCode ||
+          b?.shortCode ||
+          b?.refCode ||
+          b?.ref ||
+          "";
+        if (code) return String(code);
+      } catch {
+        /* ignore and try next */
+      }
+    }
+    return deriveFallbackCode(id);
+  }
+
+  // Fetch draft + related info; poll until converted (or shortly after pay)
   useEffect(() => {
     let alive = true;
 
@@ -54,6 +90,14 @@ export default function BookingConfirmationPage() {
         setSlot(data?.slot || d?.slot || null);
         setError("");
 
+        // If already converted, capture booking id and code (server or fallback)
+        const convertedId = Number(d?.convertedBookingId) || null;
+        if (convertedId && !bookingCode) {
+          setConfirmedBookingId(convertedId);
+          const code = await tryFetchBookingCode(convertedId);
+          if (alive) setBookingCode(code);
+        }
+
         // keep polling while not finalized
         const status = String(d?.status || "").toLowerCase();
         const converted = !!d?.convertedBookingId || status === "converted";
@@ -72,21 +116,37 @@ export default function BookingConfirmationPage() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, tries]);
 
-  // Confirm with sessionId (fires once)
+  // Confirm with sessionId (fires once) and CAPTURE bookingCode from response
   useEffect(() => {
     if (!sessionId || !Number.isFinite(draftId) || draftId <= 0) return;
 
     (async () => {
       try {
-        await fetch(
+        const res = await fetch(
           `/api/bookings/drafts/${draftId}/confirm?session_id=${encodeURIComponent(
             sessionId
           )}`,
           { method: "POST" }
         );
-        setTries((t) => t + 1); // nudge polling
+
+        // Try to read the json safely; may be 200 or 202
+        const j = await res.json().catch(() => ({}));
+        if (j?.bookingId && !confirmedBookingId) {
+          setConfirmedBookingId(j.bookingId);
+        }
+        if (j?.bookingCode) {
+          setBookingCode(String(j.bookingCode));
+        } else if (j?.bookingId && !bookingCode) {
+          // fallback if backend didn’t send a code this time
+          setBookingCode(deriveFallbackCode(j.bookingId));
+        }
+        if (j?.status) setBookingDbStatus(String(j.status));
+
+        // nudge polling no matter what
+        setTries((t) => t + 1);
       } catch {
         // noop; polling continues
       }
@@ -95,9 +155,10 @@ export default function BookingConfirmationPage() {
   }, [sessionId, draftId]);
 
   const status = String(draft?.status || "").toLowerCase();
-  const bookingId = draft?.convertedBookingId || null;
-  const converted = !!bookingId || status === "converted"; // final state in our new model
-  const paid = status === "paid" || converted; // converted implies paid already
+  const bookingId = draft?.convertedBookingId || confirmedBookingId || null;
+  const converted = !!bookingId || status === "converted"; // final state in our model
+  const paid =
+    status === "paid" || bookingDbStatus.toLowerCase() === "paid" || converted; // converted implies paid already
   const processing =
     status === "draft" ||
     status === "checkout" ||
@@ -175,9 +236,13 @@ export default function BookingConfirmationPage() {
       d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
     const summary = experience?.name || "Booked Experience";
     const location = experience?.location || "";
-    const description = `Booking #${bookingId || draftId}${
-      converted ? " (Confirmed)" : paid ? " (Paid)" : ""
-    }`;
+    const description = bookingCode
+      ? `Booking ${bookingCode}${
+          converted ? " (Confirmed)" : paid ? " (Paid)" : ""
+        }`
+      : `Booking #${bookingId || draftId}${
+          converted ? " (Confirmed)" : paid ? " (Paid)" : ""
+        }`;
 
     const ics = [
       "BEGIN:VCALENDAR",
@@ -219,6 +284,11 @@ export default function BookingConfirmationPage() {
   async function manualRefresh() {
     setTries((t) => t + 1);
   }
+
+  // Value to show on the sidebar card
+  const referenceToShow = converted
+    ? bookingCode || deriveFallbackCode(bookingId)
+    : `DRAFT-${draftId}`;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
@@ -460,10 +530,10 @@ export default function BookingConfirmationPage() {
                 <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-[#6b5e53]">
                   <div className="rounded-lg border border-[#e5e0d8] bg-white p-3">
                     <div className="text-[11px]">
-                      {converted ? "Booking ID" : "Reference"}
+                      {converted ? "Booking Code" : "Reference"}
                     </div>
-                    <div className="font-medium text-[#5a4a3f]">
-                      {converted ? bookingId : draftId}
+                    <div className="font-medium text-[#5a4a3f] break-all">
+                      {referenceToShow}
                     </div>
                   </div>
                   {when?.start && (

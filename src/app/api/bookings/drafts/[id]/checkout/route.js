@@ -32,31 +32,13 @@ export async function POST(req, ctx) {
     .select(
       `
       id, experienceId, scheduleSlotId, counts, status, expiresAt,
-      primary_contact, "unitPriceAdult", "unitPriceKid", "totalAmount",
-      "stripeSessionId", "convertedBookingId"
+      primary_contact, "unitPriceAdult", "unitPriceKid", "totalAmount", "stripeSessionId"
     `
     )
     .eq("id", draftId)
     .maybeSingle();
 
   if (dErr || !draft) return bad("Draft not found", 404);
-
-  // Hard stop if already finalized / paid
-  if (
-    draft.convertedBookingId ||
-    draft.status === "converted" ||
-    draft.status === "paid"
-  ) {
-    return ok(
-      {
-        alreadyFinalized: true,
-        confirmationPath: `/booking/${draftId}/confirmation`,
-        message: "This booking is already paid/converted.",
-      },
-      409
-    );
-  }
-
   if (!["draft", "checkout"].includes(draft.status)) {
     return bad("Draft not in a payable state", 400);
   }
@@ -150,33 +132,21 @@ export async function POST(req, ctx) {
     }
   }
 
-  // 5) Reuse existing Stripe session if present
+  // 5) Reuse existing open Stripe session if present
   if (draft.status === "checkout" && draft.stripeSessionId) {
     try {
       const existing = await stripe.checkout.sessions.retrieve(
         draft.stripeSessionId
       );
-      if (existing) {
-        if (existing.status === "open" && existing.url) {
-          return ok({ url: existing.url, reused: true });
-        }
-        if (existing.status === "complete") {
-          // client should go to confirmation; don't create a new session
-          return ok(
-            {
-              alreadyPaid: true,
-              confirmationPath: `/booking/${draftId}/confirmation`,
-            },
-            409
-          );
-        }
+      if (existing && existing.status === "open" && existing.url) {
+        return ok({ url: existing.url, reused: true });
       }
     } catch (e) {
       console.warn("[checkout] failed to reuse session", e?.message);
     }
   }
 
-  // 6) Build Stripe line items from snapshot prices on the draft
+  // 6) Build Stripe line items
   const currency = "eur";
   const items = [];
   if (A > 0)

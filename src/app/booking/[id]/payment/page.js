@@ -381,10 +381,10 @@ export default function PaymentPage() {
 
                 <button
                   onClick={handlePay}
-                  disabled={submitting || breakdown.totalRaw <= 0}
+                  disabled={submitting || breakdown.totalRaw < 0}
                   className={`mt-6 w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40 focus:ring-offset-2
                     ${
-                      submitting || breakdown.totalRaw <= 0
+                      submitting || breakdown.totalRaw < 0
                         ? "bg-gray-300 text-white cursor-not-allowed"
                         : "bg-gradient-to-b from-[#8b6f47] to-[#7a5f3a] text-white hover:from-[#7f643f] hover:to-[#6a5233]"
                     }
@@ -399,7 +399,7 @@ export default function PaymentPage() {
                   ) : (
                     <>
                       Pay now{" "}
-                      {breakdown.totalRaw > 0 && (
+                      {breakdown.totalRaw >= 0 && (
                         <span className="text-base opacity-80">
                           · {breakdown.total}
                         </span>

@@ -24,17 +24,18 @@ async function requireAdmin() {
   if (!admin)
     return { error: true, response: bad("Server not configured", 500) };
 
-  // Prefer your public.User table role over app/user_metadata
   const { data: profile } = await admin
     .from("User")
     .select("id, role")
     .eq("auth_user_id", user.id)
     .single();
+
   const role =
     profile?.role ||
     user?.app_metadata?.role ||
     user?.user_metadata?.role ||
     "user";
+
   if (!["admin", "superadmin"].includes(role)) {
     return { error: true, response: bad("Forbidden", 403) };
   }
@@ -48,14 +49,14 @@ async function requireAdmin() {
  * - page (default 1)
  * - pageSize (default 20)
  * - q (search: name/email/phone/code)
- * - status (pending|confirmed|cancelled|draft or empty)
+ * - status (pending|confirmed|cancelled|draft|paid or empty)
  * - from, to (YYYY-MM-DD)
  * - experienceId (number)
  */
 export async function GET(req) {
   const auth = await requireAdmin();
   if (auth.error) return auth.response;
-  const supa = auth.admin; // service-role client (bypasses RLS)
+  const supa = auth.admin;
 
   try {
     const { searchParams } = new URL(req.url);
@@ -70,11 +71,11 @@ export async function GET(req) {
     const from = (searchParams.get("from") || "").trim();
     const to = (searchParams.get("to") || "").trim();
 
-    const fromTs = from ? `${from}T00:00:00` : null; // schema uses timestamp w/o TZ
+    const fromTs = from ? `${from}T00:00:00` : null;
     const toTs = to ? `${to}T23:59:59.999` : null;
 
-    // --- Build ScheduleSlot filter first (robust across PostgREST versions) ---
-    let slotIds = null; // null => no slot filter, [] => nothing matches
+    // ---- optional pre-filter on slots ----
+    let slotIds = null;
     if (experienceId || fromTs || toTs) {
       let slotQ = supa
         .from("ScheduleSlot")
@@ -88,109 +89,74 @@ export async function GET(req) {
       slotIds = (slots || []).map((s) => s.id);
     }
 
-    // --- BOOKING (confirmed reservations) ---
+    // ---- BOOKINGS (finalized) ----
     let bookings = [];
     if (status !== "draft") {
       let bq = supa
         .from("Booking")
         .select(
-          `id, status, createdAt, numberOfPeople, notes, scheduleSlotId,
-           ScheduleSlot:ScheduleSlot(id, date, experienceId, Experience:Experience(id, name)),
-           User:User(id, email, name, surname, phone)`
+          `
+          id, status, createdAt, numberOfPeople, notes, scheduleSlotId,
+          totalPaidAmount, currency, counts, adultsCount, kidsCount,
+          ScheduleSlot:ScheduleSlot(id, date, experienceId, Experience:Experience(id, name)),
+          User:User(id, email, name, surname, phone)
+        `
         )
         .order("createdAt", { ascending: false })
         .limit(2000);
 
-      if (status) bq = bq.eq("status", status);
+      // Case-insensitive status filter for safety ("Paid" vs "paid")
+      if (status) bq = bq.ilike("status", status);
+
       if (slotIds !== null) {
         if (slotIds.length === 0) {
           bookings = [];
         } else {
           bq = bq.in("scheduleSlotId", slotIds);
-          const { data: bookingsRaw, error: bookingsErr } = await bq;
-          if (bookingsErr) throw bookingsErr;
-          bookings = (bookingsRaw || []).map((b) => {
-            const slot = b?.ScheduleSlot || {};
-            const ex = slot?.Experience || {};
-            const u = b?.User || {};
-            return {
-              id: b.id,
-              source: "booking",
-              code: `B-${String(b.id).padStart(6, "0")}`,
-              startTime: slot?.date || null,
-              experienceId: slot?.experienceId || null,
-              experienceName: ex?.name || null,
-              guestName:
-                [u?.name, u?.surname].filter(Boolean).join(" ") || null,
-              guestEmail: u?.email || null,
-              guestPhone: u?.phone || null,
-              adults:
-                typeof b.numberOfPeople === "number" ? b.numberOfPeople : null,
-              kids: null,
-              totalAmount: null,
-              status: b?.status || "confirmed",
-              createdAt: b?.createdAt || null,
-            };
-          });
+          const { data: raw, error } = await bq;
+          if (error) throw error;
+          bookings = (raw || []).map(mapBookingRow);
         }
       } else {
-        const { data: bookingsRaw, error: bookingsErr } = await bq;
-        if (bookingsErr) throw bookingsErr;
-        bookings = (bookingsRaw || []).map((b) => {
-          const slot = b?.ScheduleSlot || {};
-          const ex = slot?.Experience || {};
-          const u = b?.User || {};
-          return {
-            id: b.id,
-            source: "booking",
-            code: `B-${String(b.id).padStart(6, "0")}`,
-            startTime: slot?.date || null,
-            experienceId: slot?.experienceId || null,
-            experienceName: ex?.name || null,
-            guestName: [u?.name, u?.surname].filter(Boolean).join(" ") || null,
-            guestEmail: u?.email || null,
-            guestPhone: u?.phone || null,
-            adults:
-              typeof b.numberOfPeople === "number" ? b.numberOfPeople : null,
-            kids: null,
-            totalAmount: null,
-            status: b?.status || "confirmed",
-            createdAt: b?.createdAt || null,
-          };
-        });
+        const { data: raw, error } = await bq;
+        if (error) throw error;
+        bookings = (raw || []).map(mapBookingRow);
       }
     }
 
-    // --- BOOKING DRAFT (draft/pending carts) ---
+    // ---- DRAFTS (in-progress / converted) ----
     let drafts = [];
     {
       let dq = supa
         .from("BookingDraft")
         .select(
-          `id, status, createdAt, totalAmount, counts, primary_contact, experienceId, scheduleSlotId,
-           ScheduleSlot:ScheduleSlot(id, date, experienceId, Experience:Experience(id, name))`
+          `
+          id, status, createdAt, totalAmount, counts, primary_contact, experienceId, scheduleSlotId,
+          ScheduleSlot:ScheduleSlot(id, date, experienceId, Experience:Experience(id, name))
+        `
         )
         .order("createdAt", { ascending: false })
         .limit(2000);
 
-      if (status) dq = dq.eq("status", status);
+      if (status) dq = dq.ilike("status", status);
+
       if (slotIds !== null) {
         if (slotIds.length === 0) {
           drafts = [];
         } else {
           dq = dq.in("scheduleSlotId", slotIds);
-          const { data: draftsRaw, error: draftsErr } = await dq;
-          if (draftsErr) throw draftsErr;
-          drafts = (draftsRaw || []).map((d) => mapDraft(d));
+          const { data: raw, error } = await dq;
+          if (error) throw error;
+          drafts = (raw || []).map(mapDraft);
         }
       } else {
-        const { data: draftsRaw, error: draftsErr } = await dq;
-        if (draftsErr) throw draftsErr;
-        drafts = (draftsRaw || []).map((d) => mapDraft(d));
+        const { data: raw, error } = await dq;
+        if (error) throw error;
+        drafts = (raw || []).map(mapDraft);
       }
     }
 
-    // Merge + client-side filtering for q
+    // merge + search
     let merged = [...bookings, ...drafts];
     if (q) {
       const like = (s) => (s || "").toString().toLowerCase().includes(q);
@@ -203,7 +169,7 @@ export async function GET(req) {
       );
     }
 
-    // Sort by startTime desc then createdAt desc
+    // sort by startTime desc then createdAt desc
     merged.sort((a, b) => {
       const at = a.startTime ? new Date(a.startTime).getTime() : 0;
       const bt = b.startTime ? new Date(b.startTime).getTime() : 0;
@@ -225,19 +191,54 @@ export async function GET(req) {
   }
 }
 
+/* ---------------------------- mappers ---------------------------- */
+
+function mapBookingRow(b) {
+  const slot = b?.ScheduleSlot || {};
+  const ex = slot?.Experience || {};
+  const u = b?.User || {};
+  const c = b?.counts || {};
+
+  const adults = isNum(b?.adultsCount)
+    ? b.adultsCount
+    : isNum(c?.adults)
+    ? c.adults
+    : isNum(b?.numberOfPeople)
+    ? b.numberOfPeople
+    : null;
+
+  const kids = isNum(b?.kidsCount)
+    ? b.kidsCount
+    : isNum(c?.kids)
+    ? c.kids
+    : null;
+
+  return {
+    id: b.id,
+    source: "booking",
+    code: `B-${String(b.id).padStart(6, "0")}`,
+    startTime: slot?.date || null,
+    experienceId: slot?.experienceId || null,
+    experienceName: ex?.name || null,
+    guestName: [u?.name, u?.surname].filter(Boolean).join(" ") || null,
+    guestEmail: u?.email || null,
+    guestPhone: u?.phone || null,
+    adults,
+    kids,
+    // 👇 show paid amount if present, else null (no fallback computed here)
+    totalAmount: isNum(b?.totalPaidAmount) ? b.totalPaidAmount : null,
+    status: b?.status || "confirmed",
+    createdAt: b?.createdAt || null,
+  };
+}
+
 function mapDraft(d) {
   const slot = d?.ScheduleSlot || {};
   const ex = slot?.Experience || {};
   const pc = d?.primary_contact || {};
   const cnt = d?.counts || {};
-  const adults = ["adults", "adult", "A", "people"].reduce(
-    (acc, k) => (typeof cnt?.[k] === "number" ? cnt[k] : acc),
-    null
-  );
-  const kids = ["kids", "children", "K"].reduce(
-    (acc, k) => (typeof cnt?.[k] === "number" ? cnt[k] : acc),
-    null
-  );
+  const adults = pickFirstNumber(cnt, ["adults", "adult", "A", "people"]);
+  const kids = pickFirstNumber(cnt, ["kids", "children", "K"]);
   return {
     id: d.id,
     source: "draft",
@@ -245,13 +246,30 @@ function mapDraft(d) {
     startTime: slot?.date || null,
     experienceId: slot?.experienceId || d?.experienceId || null,
     experienceName: ex?.name || null,
-    guestName: pc?.name || null,
-    guestEmail: pc?.email || null,
+    guestName:
+      pc?.name ??
+      pc?.fullName ??
+      ([pc?.firstName, pc?.lastName].filter(Boolean).join(" ").trim() || null),
+
+    guestEmail: pc?.email ?? null,
+
     guestPhone: pc?.phone || null,
     adults,
     kids,
-    totalAmount: typeof d.totalAmount === "number" ? d.totalAmount : null,
+    totalAmount: isNum(d?.totalAmount) ? d.totalAmount : null,
     status: d?.status || "draft",
     createdAt: d?.createdAt || null,
   };
+}
+
+/* ---------------------------- helpers ---------------------------- */
+function isNum(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+function pickFirstNumber(obj, keys) {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (isNum(v)) return v;
+  }
+  return null;
 }
