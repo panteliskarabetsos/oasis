@@ -252,7 +252,6 @@ function mapDraft(d) {
       ([pc?.firstName, pc?.lastName].filter(Boolean).join(" ").trim() || null),
 
     guestEmail: pc?.email ?? null,
-
     guestPhone: pc?.phone || null,
     adults,
     kids,

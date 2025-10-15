@@ -42,12 +42,11 @@ export default function AdminExperienceEditPage() {
   const [guestReviews, setGuestReviews] = useState([]); // array of strings (jsonb)
   const [slugTouched, setSlugTouched] = useState(false);
 
-  // Delete modal state
+  //delete modal state
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
-  // Load one experience (with graceful fallbacks)
   useEffect(() => {
     if (!id || loading) return;
 

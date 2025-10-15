@@ -21,13 +21,13 @@ export default function AdminHelpContactPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
-  // ---- environment (client-safe)
+
   const supportEmail =
     process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@yourdomain.com";
   const statusUrl = process.env.NEXT_PUBLIC_STATUS_URL || "";
   const supportPhone = process.env.NEXT_PUBLIC_SUPPORT_PHONE || "";
 
-  // ---- role gate (basic)
+
   const [dbRole, setDbRole] = useState(null);
   useEffect(() => {
     let alive = true;
