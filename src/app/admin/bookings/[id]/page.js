@@ -223,7 +223,7 @@ export default function ReservationDetailPage() {
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2 min-w-0">
             <button
-              onClick={() => router.push("/admin/reservations")}
+              onClick={() => router.push("/admin/bookings")}
               className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400"
             >
               <ArrowLeft className="h-4 w-4" /> Back

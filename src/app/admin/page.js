@@ -117,9 +117,9 @@ export default function AdminDashboardPage() {
             />
             <ActionCard
               icon={<CalendarDays size={22} />}
-              title="Manage Reservations"
+              title="Manage Bookings"
               desc="Review and organize client bookings."
-              onClick={() => go("/admin/reservations")}
+              onClick={() => go("/admin/bookings")}
             />
             <ActionCard
               icon={<Users size={22} />}

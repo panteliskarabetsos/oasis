@@ -886,7 +886,7 @@ export default function ReservationsPage() {
                       <div className="flex items-center justify-end gap-1">
                         <IconButton
                           onClick={() =>
-                            window.open(`/admin/reservations/${r.id}`, "_self")
+                            window.open(`/admin/bookings/${r.id}`, "_self")
                           }
                           title="View"
                           ariaLabel="View booking"
