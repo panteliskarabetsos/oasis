@@ -1,6 +1,6 @@
 // src/app/api/admin/schedule/slots/route.js
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic"; // disable static caching
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
@@ -8,6 +8,14 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
+
+// statuses that should count against capacity
+const COUNT_STATUSES = new Set([
+  "confirmed",
+  "completed",
+  "checked_in",
+  "paid",
+]);
 
 async function requireAdmin() {
   const supa = await createSupabaseServer();
@@ -53,10 +61,11 @@ export async function GET(req) {
     const from = (searchParams.get("from") || "").trim(); // YYYY-MM-DD
     const to = (searchParams.get("to") || "").trim();
 
+    // 1) Load slots in range
     let q = supa
       .from("ScheduleSlot")
       .select(
-        "id, date, totalSlots, bookedSlots, isCancelled, experienceId, Experience:Experience(id, name)"
+        "id, date, totalSlots, isCancelled, experienceId, Experience:Experience(id, name)"
       )
       .eq("isCancelled", false)
       .order("date", { ascending: true })
@@ -66,22 +75,101 @@ export async function GET(req) {
     if (from) q = q.gte("date", `${from}T00:00:00`);
     if (to) q = q.lte("date", `${to}T23:59:59.999`);
 
-    const { data, error } = await q;
-    if (error) throw error;
+    const { data: slots, error: slotsErr } = await q;
+    if (slotsErr) throw slotsErr;
 
-    const items = (data || []).map((s) => ({
-      id: s.id,
-      date: s.date,
-      experienceId: s.experienceId,
-      experienceName: s.Experience?.name || null,
-      totalSlots: s.totalSlots,
-      bookedSlots: s.bookedSlots,
-      available: Math.max(0, (s.totalSlots || 0) - (s.bookedSlots || 0)),
-    }));
+    if (!slots || slots.length === 0) {
+      return ok({ items: [] });
+    }
+
+    const slotIds = slots.map((s) => s.id);
+
+    // 2) Load confirmed/paid bookings for these slots
+    const { data: bRows, error: bErr } = await supa
+      .from("Booking")
+      .select("scheduleSlotId, status, numberOfPeople, counts")
+      .in("scheduleSlotId", slotIds);
+    if (bErr) throw bErr;
+
+    // Sum confirmed people per slot
+    const confirmedMap = new Map(); // slotId -> people
+    for (const b of bRows || []) {
+      const st = String(b?.status || "").toLowerCase();
+      if (!COUNT_STATUSES.has(st)) continue;
+      const np = peopleFromBooking(b);
+      if (!isNum(np)) continue;
+      confirmedMap.set(
+        b.scheduleSlotId,
+        (confirmedMap.get(b.scheduleSlotId) || 0) + np
+      );
+    }
+
+    // 3) Load active holds (drafts) for these slots
+    const { data: dRows, error: dErr } = await supa
+      .from("BookingDraft")
+      .select("scheduleSlotId, counts, status, expiresAt, convertedBookingId")
+      .in("scheduleSlotId", slotIds);
+    if (dErr) throw dErr;
+
+    const now = new Date();
+    const holdsMap = new Map(); // slotId -> held people
+    for (const d of dRows || []) {
+      const st = String(d?.status || "").toLowerCase();
+      const expAt = d?.expiresAt ? new Date(d.expiresAt) : null;
+      const isPaidUnconverted = st === "paid" && !d?.convertedBookingId;
+      const isActive =
+        isPaidUnconverted || (st !== "paid" && (!expAt || expAt > now));
+      if (!isActive) continue;
+
+      const ppl = peopleFromCounts(d?.counts);
+      if (!isNum(ppl)) continue;
+
+      holdsMap.set(
+        d.scheduleSlotId,
+        (holdsMap.get(d.scheduleSlotId) || 0) + ppl
+      );
+    }
+
+    // 4) Compose response with accurate availability
+    const items = (slots || []).map((s) => {
+      const confirmed = confirmedMap.get(s.id) || 0;
+      const held = holdsMap.get(s.id) || 0;
+      const total = Number(s.totalSlots || 0);
+      const available = Math.max(0, total - confirmed - held);
+
+      return {
+        id: s.id,
+        date: s.date,
+        experienceId: s.experienceId,
+        experienceName: s.Experience?.name || null,
+        totalSlots: total,
+        bookedSlots: confirmed, // confirmed/paid reservations only
+        // (optional) held, if you want to surface it for debugging:
+        // heldSlots: held,
+        available,
+      };
+    });
 
     return ok({ items });
   } catch (e) {
     console.error("[slots] error", e);
     return bad(e?.message || "Failed to load slots", 500);
   }
+}
+
+/* ---------------------------- helpers ---------------------------- */
+function isNum(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+function peopleFromCounts(cnt) {
+  if (!cnt || typeof cnt !== "object") return null;
+  const a = Number(cnt.adults || cnt.adult || 0) || 0;
+  const k = Number(cnt.kids || cnt.children || 0) || 0;
+  const t = Number(cnt.teens || cnt.teen || 0) || 0;
+  const sum = a + k + t;
+  return Number.isFinite(sum) ? sum : null;
+}
+function peopleFromBooking(b) {
+  if (isNum(b?.numberOfPeople)) return b.numberOfPeople;
+  return peopleFromCounts(b?.counts);
 }

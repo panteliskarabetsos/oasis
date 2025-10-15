@@ -13,51 +13,101 @@ const bad = (msg, status = 400) =>
 
 const isInt = (n) =>
   Number.isFinite(Number(n)) && Number(n) === Math.trunc(Number(n));
-const CONFIRMED_STATUSES = ["confirmed"]; // adjust if you treat other statuses as occupying capacity
 
-async function countConfirmedBookings(admin, slotId) {
-  const { count, error } = await admin
-    .from("Booking")
-    .select("id", { head: true, count: "exact" })
-    .eq("scheduleSlotId", slotId)
-    .in("status", CONFIRMED_STATUSES);
-  if (error) throw error;
-  return count ?? 0;
+// Treat these as occupying capacity
+const COUNT_STATUSES = new Set([
+  "confirmed",
+  "completed",
+  "checked_in",
+  "paid",
+]);
+
+/** Use public.User role (same as other admin routes) */
+async function requireAdmin() {
+  const supa = await createSupabaseServer();
+  if (!supa)
+    return { error: true, response: bad("Server not configured", 500) };
+
+  const { data, error } = await supa.auth.getUser();
+  const user = data?.user;
+  if (error || !user)
+    return { error: true, response: bad("Unauthorized", 401) };
+
+  const admin = createSupabaseAdmin();
+  if (!admin)
+    return { error: true, response: bad("Server not configured", 500) };
+
+  const { data: profile } = await admin
+    .from("User")
+    .select("id, role")
+    .eq("auth_user_id", user.id)
+    .single();
+
+  const role =
+    profile?.role ||
+    user?.app_metadata?.role ||
+    user?.user_metadata?.role ||
+    "user";
+
+  if (!["admin", "superadmin"].includes(role))
+    return { error: true, response: bad("Forbidden", 403) };
+
+  return { error: false, admin };
 }
 
+function isNum(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+function peopleFromCounts(cnt) {
+  if (!cnt || typeof cnt !== "object") return 0;
+  const a = Number(cnt.adults ?? cnt.adult ?? 0) || 0;
+  const k = Number(cnt.kids ?? cnt.children ?? 0) || 0;
+  const t = Number(cnt.teens ?? cnt.teen ?? 0) || 0;
+  return a + k + t;
+}
+function peopleFromBookingRow(b) {
+  if (isNum(b?.numberOfPeople)) return b.numberOfPeople;
+  return peopleFromCounts(b?.counts);
+}
+
+/** Sum numberOfPeople for confirmed/paid bookings in a slot */
+async function sumConfirmedPeople(admin, slotId) {
+  const { data, error } = await admin
+    .from("Booking")
+    .select("numberOfPeople, counts, status")
+    .eq("scheduleSlotId", slotId);
+  if (error) throw error;
+
+  let sum = 0;
+  for (const r of data || []) {
+    const st = String(r?.status || "").toLowerCase();
+    if (!COUNT_STATUSES.has(st)) continue;
+    sum += peopleFromBookingRow(r) || 0;
+  }
+  return sum;
+}
+
+/** Recompute and store bookedSlots as sum of confirmed/paid people */
 async function recomputeBookedSlots(admin, slotId, nowISO) {
-  const count = await countConfirmedBookings(admin, slotId);
+  const confirmed = await sumConfirmedPeople(admin, slotId);
   await admin
     .from("ScheduleSlot")
-    .update({ bookedSlots: count, updatedAt: nowISO })
+    .update({ bookedSlots: confirmed, updatedAt: nowISO })
     .eq("id", slotId);
-  return count;
+  return confirmed;
 }
 
 /* ---------------------------- main handler ---------------------------- */
-export async function PATCH(request, { params }) {
+export async function PATCH(request, ctx) {
   try {
-    const { id } = (await params) || {};
-    if (!isInt(id)) return bad("Invalid booking id", 400);
-    const entityId = Number(id);
+    const { id } = await ctx.params;
+    const idRaw = Array.isArray(id) ? id[0] : id;
+    if (!isInt(idRaw)) return bad("Invalid booking id", 400);
+    const entityId = Number(idRaw);
 
-    const supa = await createSupabaseServer();
-    if (!supa) return bad("Server not configured", 500);
-
-    // AuthN
-    const { data: userRes, error: userErr } = await supa.auth.getUser();
-    if (userErr || !userRes?.user) return bad("Unauthorized", 401);
-
-    // AuthZ
-    const role = (
-      userRes.user?.app_metadata?.role ||
-      userRes.user?.user_metadata?.role ||
-      ""
-    ).toLowerCase();
-    if (!["admin", "superadmin"].includes(role)) return bad("Forbidden", 403);
-
-    const admin = createSupabaseAdmin();
-    if (!admin) return bad("Server not configured", 500);
+    const auth = await requireAdmin();
+    if (auth.error) return auth.response;
+    const admin = auth.admin;
 
     // Parse body
     let payload;
@@ -66,41 +116,46 @@ export async function PATCH(request, { params }) {
     } catch {
       return bad("Invalid JSON body", 400);
     }
-
     const targetSlotId = Number(payload?.scheduleSlotId);
     if (!isInt(targetSlotId))
       return bad("Missing or invalid 'scheduleSlotId'", 400);
 
-    // Fetch target slot
+    // Try Booking first — we need its people count for capacity check
+    const { data: booking, error: bErr } = await admin
+      .from("Booking")
+      .select("id, scheduleSlotId, status, numberOfPeople, counts")
+      .eq("id", entityId)
+      .maybeSingle();
+    if (bErr) return bad(bErr.message || "Failed to load booking", 500);
+
+    // Fallback: BookingDraft (doesn't affect counters)
+    let draft = null;
+    if (!booking) {
+      const { data: d, error: dErr } = await admin
+        .from("BookingDraft")
+        .select("id, scheduleSlotId, status, counts")
+        .eq("id", entityId)
+        .maybeSingle();
+      if (dErr) return bad(dErr.message || "Failed to load draft", 500);
+      draft = d || null;
+      if (!draft)
+        return bad(`No Booking or BookingDraft found with id ${entityId}`, 404);
+    }
+
+    // Load target slot
     const { data: slot, error: slotErr } = await admin
       .from("ScheduleSlot")
-      .select("id, date, totalSlots, bookedSlots, isCancelled")
+      .select("id, date, totalSlots, isCancelled")
       .eq("id", targetSlotId)
       .single();
     if (slotErr || !slot) return bad("Selected slot not found", 404);
     if (slot.isCancelled) return bad("Selected slot is cancelled", 409);
 
-    // Capacity check uses only confirmed bookings
-    const targetConfirmed = await countConfirmedBookings(admin, targetSlotId);
-    if (
-      typeof slot.totalSlots === "number" &&
-      targetConfirmed >= slot.totalSlots
-    ) {
-      return bad("That slot is already full", 409);
-    }
-
-    // Try Booking first
-    const { data: bookingRows } = await admin
-      .from("Booking")
-      .select("id, scheduleSlotId, status, updatedAt")
-      .eq("id", entityId)
-      .limit(1);
-    const booking = bookingRows?.[0] || null;
-
     const nowISO = new Date().toISOString();
 
+    /* ---------- If this is a finalized Booking ---------- */
     if (booking) {
-      // If same slot, nothing to change but make sure counters are right
+      // No-op move to same slot: still recompute counters for good measure
       if (booking.scheduleSlotId === targetSlotId) {
         const newCount = await recomputeBookedSlots(
           admin,
@@ -118,7 +173,16 @@ export async function PATCH(request, { params }) {
         );
       }
 
-      const oldSlotId = booking.scheduleSlotId;
+      const thisPeople = peopleFromBookingRow(booking) || 0;
+
+      // Capacity check on target: sum confirmed/paid people + this booking's people
+      const targetConfirmed = await sumConfirmedPeople(admin, targetSlotId);
+      if (
+        isNum(slot.totalSlots) &&
+        targetConfirmed + thisPeople > Number(slot.totalSlots)
+      ) {
+        return bad("That slot doesn't have enough capacity", 409);
+      }
 
       // Move the booking
       const { data: updated, error: updErr } = await admin
@@ -129,7 +193,8 @@ export async function PATCH(request, { params }) {
         .single();
       if (updErr) return bad(updErr.message || "Failed to reschedule", 500);
 
-      // Recompute counters on both slots (confirmed bookings only)
+      // Recompute counters on both slots using the people-sum rule
+      const oldSlotId = booking.scheduleSlotId;
       const [oldCount, newCount] = await Promise.all([
         recomputeBookedSlots(admin, oldSlotId, nowISO),
         recomputeBookedSlots(admin, targetSlotId, nowISO),
@@ -146,19 +211,11 @@ export async function PATCH(request, { params }) {
       );
     }
 
-    // Then try BookingDraft (rescheduling drafts shouldn't affect counters)
-    const { data: draftRows } = await admin
-      .from("BookingDraft")
-      .select("id, scheduleSlotId, status, updatedAt")
-      .eq("id", entityId)
-      .limit(1);
-    const draft = draftRows?.[0] || null;
-
+    /* ---------- Otherwise, it's a BookingDraft ---------- */
     if (draft) {
       if (draft.scheduleSlotId === targetSlotId) {
         return ok({ success: true, draft, newStartTime: slot.date }, 200);
       }
-
       const { data: updated, error: updErr } = await admin
         .from("BookingDraft")
         .update({ scheduleSlotId: targetSlotId, updatedAt: nowISO })
@@ -167,13 +224,15 @@ export async function PATCH(request, { params }) {
         .single();
       if (updErr) return bad(updErr.message || "Failed to reschedule", 500);
 
+      // Note: drafts don't touch counters
       return ok(
         { success: true, draft: updated, newStartTime: slot.date },
         200
       );
     }
 
-    return bad(`No Booking or BookingDraft found with id ${entityId}`, 404);
+    // Shouldn't reach here
+    return bad("Unknown entity", 400);
   } catch (err) {
     console.error("[reschedule]", err);
     return bad("Unexpected error while rescheduling", 500);
@@ -181,6 +240,7 @@ export async function PATCH(request, { params }) {
 }
 
 export async function POST(request, ctx) {
+  // support POST as alias of PATCH
   return PATCH(request, ctx);
 }
 

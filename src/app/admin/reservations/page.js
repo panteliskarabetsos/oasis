@@ -14,17 +14,24 @@ import {
   XCircle as XCircleIcon,
   Loader2,
   Copy,
-  Phone,
-  Mail,
-  Users,
   ArrowLeft,
-  Info,
   ChevronDown,
   ChevronUp,
   ListFilter,
   SlidersHorizontal,
+  Info,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
+
+/* ------------------------------------------------------------------
+   Visual refresh goals
+   - Softer, more consistent cards and spacing
+   - Cleaner filters with mobile drawer + advanced section
+   - Subtle stat bar with total/paid/pending for the current result set
+   - Sticky table header, zebra rows, focus rings, better empty/skeleton
+   - Action buttons with tooltips and accessible labels
+   - Keeps ALL your data & fetch logic as-is
+------------------------------------------------------------------- */
 
 /* ---------------------------- helpers ---------------------------- */
 const LOCALE = "en-GB"; // UI in English; keep EUR
@@ -81,6 +88,7 @@ export default function ReservationsPage() {
   // UI polish
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [density, setDensity] = useState("compact"); // "cozy" | "compact"
+  const [filtersOpen, setFiltersOpen] = useState(false); // mobile drawer
 
   // Actions state
   const [selected, setSelected] = useState(null);
@@ -106,6 +114,26 @@ export default function ReservationsPage() {
     return [status, from, to, experienceId, query.trim()].filter(Boolean)
       .length;
   }, [status, from, to, experienceId, query]);
+
+  // Aggregate quick stats for current view (client-side)
+  const viewStats = useMemo(() => {
+    const s = {
+      paid: 0,
+      pending: 0,
+      cancelled: 0,
+      draft: 0,
+      total: 0,
+      revenue: 0,
+    };
+    for (const r of rows) {
+      const k = normalizeStatus(r.status);
+      if (k in s) s[k] += 1;
+      s.total += 1;
+      const t = rowTotal(r);
+      if (typeof t === "number" && k !== "cancelled") s.revenue += t;
+    }
+    return s;
+  }, [rows]);
 
   // Debounce query
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -246,7 +274,7 @@ export default function ReservationsPage() {
       "Phone",
       "Adults",
       "Kids",
-      "Total Paid", // <-- updated header
+      "Total Paid",
       "Status",
       "Created At",
     ];
@@ -261,7 +289,6 @@ export default function ReservationsPage() {
       r.guestPhone || "",
       r.adults ?? "",
       r.kids ?? "",
-      // prefer totalPaidAmount fallback to totalAmount
       r.totalPaidAmount ?? r.totalAmount ?? "",
       r.status || "",
       r.createdAt || "",
@@ -271,7 +298,7 @@ export default function ReservationsPage() {
       .map((row) =>
         row.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")
       )
-      .join("");
+      .join("\n");
 
     const blob = new Blob(["\uFEFF" + csv], {
       type: "text/csv;charset=utf-8;",
@@ -408,8 +435,8 @@ export default function ReservationsPage() {
   const pad = density === "compact" ? "py-2" : "py-3";
 
   return (
-    <div className="min-h-screen rounded-3xl bg-[radial-gradient(35%_50%_at_0%_0%,#f6f4f1,transparent),radial-gradient(35%_50%_at_100%_0%,#f3efe9,transparent)]">
-      <div className="mx-auto max-w-[1400px] p-6 sm:p-8">
+    <div className="min-h-screen rounded-3xl bg-[radial-gradient(35%_50%_at_0%_0%,#f7f5f2,transparent),radial-gradient(35%_50%_at_100%_0%,#f3efe9,transparent)]">
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 sm:py-8">
         {/* Header */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -436,8 +463,19 @@ export default function ReservationsPage() {
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="mb-4 rounded-2xl border bg-white/80 backdrop-blur shadow-sm">
+        {/* Stat bar (current view) */}
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <StatPill label="Results" value={viewStats.total} />
+          <StatPill label="Paid" value={viewStats.paid} tone="green" />
+          <StatPill label="Pending" value={viewStats.pending} tone="amber" />
+          <StatPill
+            label="Revenue (view)"
+            value={fmtMoney(viewStats.revenue)}
+          />
+        </div>
+
+        {/* Filters Card */}
+        <div className="mb-4 rounded-2xl border bg-white/80 shadow-sm backdrop-blur">
           <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
             <div className="flex items-center gap-2 text-sm text-neutral-700">
               <ListFilter className="h-4 w-4" /> Filters
@@ -479,7 +517,7 @@ export default function ReservationsPage() {
                 <SearchIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
                 <input
                   ref={searchRef}
-                  className="w-full rounded-xl border bg-white px-8 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#d9c6b8]"
+                  className="w-full rounded-xl border bg-white px-8 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-[#d9c6b8]"
                   placeholder="Name, email, phone or booking code… (/ to focus)"
                   value={query}
                   onChange={(e) => {
@@ -733,17 +771,7 @@ export default function ReservationsPage() {
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {loading && rows.length === 0 && (
-                  <>
-                    {Array.from({ length: 8 }).map((_, i) => (
-                      <tr key={i} className="animate-pulse">
-                        {Array.from({ length: 9 }).map((__, j) => (
-                          <td key={j} className="px-3 py-3">
-                            <div className="h-3 w-full max-w-[220px] rounded bg-neutral-100" />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </>
+                  <SkeletonRows columns={9} rows={8} />
                 )}
 
                 {!loading && rows.length === 0 && (
@@ -774,12 +802,11 @@ export default function ReservationsPage() {
                 {rows.map((r) => (
                   <tr
                     key={r.id}
-                    // onClick={() => router.push(`/admin/reservations/${r.id}`)}
                     className={cx(
-                      "group cursor-pointer transition-colors",
+                      "group cursor-pointer transition-colors odd:bg-neutral-50/40",
                       r.status === "cancelled"
                         ? "opacity-70"
-                        : "hover:bg-neutral-50/60"
+                        : "hover:bg-neutral-50/80"
                     )}
                   >
                     <Td className={pad + " font-mono"}>
@@ -822,7 +849,6 @@ export default function ReservationsPage() {
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           <span className="inline-flex items-center gap-1">
-                            <Mail className="h-3.5 w-3.5" />
                             {r.guestEmail || "-"}
                           </span>
                         </a>
@@ -853,39 +879,37 @@ export default function ReservationsPage() {
                     <Td className={pad + " text-right"}>
                       {fmtMoney(rowTotal(r))}
                     </Td>
-
                     <Td className={pad}>
                       <StatusBadge status={r.status} />
                     </Td>
-                    <Td className={pad} onClick={(e) => e.stopPropagation()}>
+                    <Td className={pad}>
                       <div className="flex items-center justify-end gap-1">
-                        <button
+                        <IconButton
                           onClick={() =>
-                            router.push(`/admin/reservations/${r.id}`)
+                            window.open(`/admin/reservations/${r.id}`, "_self")
                           }
-                          className="inline-flex items-center rounded-lg border p-1.5 hover:bg-neutral-50"
                           title="View"
-                          aria-label="View"
+                          ariaLabel="View booking"
                         >
                           <Eye className="h-4 w-4" />
-                        </button>
-                        <button
+                        </IconButton>
+                        <IconButton
                           onClick={() => openReschedule(r)}
-                          className="inline-flex items-center rounded-lg border p-1.5 hover:bg-amber-50"
                           title="Reschedule"
-                          aria-label="Reschedule"
+                          ariaLabel="Reschedule booking"
+                          tone="amber"
                         >
                           <CalendarClock className="h-4 w-4" />
-                        </button>
+                        </IconButton>
                         {r.status !== "cancelled" && (
-                          <button
+                          <IconButton
                             onClick={() => openCancel(r)}
-                            className="inline-flex items-center rounded-lg border p-1.5 hover:bg-red-50"
                             title="Cancel"
-                            aria-label="Cancel"
+                            ariaLabel="Cancel booking"
+                            tone="red"
                           >
                             <XCircleIcon className="h-4 w-4" />
-                          </button>
+                          </IconButton>
                         )}
                       </div>
                     </Td>
@@ -1121,6 +1145,46 @@ function Td({ children, className = "" }) {
     </td>
   );
 }
+function IconButton({ children, onClick, title, ariaLabel, tone }) {
+  const toneClass =
+    tone === "red"
+      ? "hover:bg-red-50"
+      : tone === "amber"
+      ? "hover:bg-amber-50"
+      : "hover:bg-neutral-50";
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.(e);
+      }}
+      className={cx(
+        "inline-flex items-center rounded-lg border p-1.5",
+        toneClass
+      )}
+      title={title}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SkeletonRows({ rows = 8, columns = 9 }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, i) => (
+        <tr key={i} className="animate-pulse">
+          {Array.from({ length: columns }).map((__, j) => (
+            <td key={j} className="px-3 py-3">
+              <div className="h-3 w-full max-w-[220px] rounded bg-neutral-100" />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
 
 function isNum(v) {
   return typeof v === "number" && Number.isFinite(v);
@@ -1235,6 +1299,22 @@ function QuickRange({ label, value, onClick }) {
       <SlidersHorizontal className="h-3.5 w-3.5" />
       {label}
     </button>
+  );
+}
+
+function StatPill({ label, value, tone }) {
+  const toneMap = {
+    green: "bg-green-50 text-green-900 border-green-100",
+    amber: "bg-amber-50 text-amber-900 border-amber-100",
+    red: "bg-red-50 text-red-900 border-red-100",
+    default: "bg-neutral-50 text-neutral-900 border-neutral-100",
+  };
+  const klass = tone ? toneMap[tone] : toneMap.default;
+  return (
+    <div className={cx("rounded-2xl border p-3", klass)}>
+      <p className="text-xs/5 text-neutral-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold">{String(value)}</p>
+    </div>
   );
 }
 

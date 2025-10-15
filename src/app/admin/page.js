@@ -179,8 +179,8 @@ export default function AdminDashboardPage() {
             onClick={() => go("/admin/experiences/new")}
           />
           <Shortcut
-            label="Pending Reservations"
-            onClick={() => go("/admin/reservations?status=pending")}
+            label="Reports & Analytics"
+            onClick={() => go("/admin/reports")}
           />
           <Shortcut label="All Users" onClick={() => go("/admin/users")} />
         </section>
