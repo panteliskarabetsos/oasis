@@ -70,7 +70,7 @@ export default function ReservationsPage() {
 
   // Filters & state
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("paid");
   const [from, setFrom] = useState(""); // YYYY-MM-DD
   const [to, setTo] = useState(""); // YYYY-MM-DD
   const [experienceId, setExperienceId] = useState("");

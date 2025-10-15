@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+const MAX_NOTES_LEN = 2000;
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const err = (msg, status = 500) =>
@@ -50,7 +51,7 @@ export async function GET() {
     const { data, error } = await admin
       .from("User")
       .select(
-        "id,auth_user_id,email,name,surname,phone,role,dateOfBirth,createdAt"
+        "id,auth_user_id,email,name,surname,phone,role,dateOfBirth,createdAt,notes"
       )
       .order("createdAt", { ascending: false });
 
@@ -83,6 +84,7 @@ export async function POST(req) {
     phone,
     role = "user",
     dateOfBirth,
+    notes,
   } = body;
 
   if (!email || !name || !surname) {
@@ -126,9 +128,9 @@ export async function POST(req) {
       role: role || "user",
       dateOfBirth: dobTs,
       updatedAt: new Date().toISOString(),
+      notes: notes?.trim() || null,
     };
 
-    // Prefer onConflict 'auth_user_id'; if not present, retry with 'email'
     let upsertErr = null;
     let upsertRes = await admin
       .from("User")
@@ -156,10 +158,8 @@ export async function POST(req) {
   }
 }
 
-/* ========================== PUT (Admin) ========================== *
- * Updates profile fields; syncs role to Auth app_metadata if changed.
- * Accepts: { id, email?, name?, surname?, phone?, role?, dateOfBirth? }
- */
+/* ========================== PUT (Admin) ========================== */
+
 export async function PUT(req) {
   const gate = await requireAdmin();
   if ("body" in gate) return gate;
@@ -168,7 +168,7 @@ export async function PUT(req) {
   const body = await req.json().catch(() => null);
   if (!body) return err("Invalid JSON", 400);
 
-  const { id, email, name, surname, phone, role, dateOfBirth } = body;
+  const { id, email, name, surname, phone, role, dateOfBirth, notes } = body;
   if (!id) return err("Missing user id", 400);
 
   try {
@@ -191,13 +191,16 @@ export async function PUT(req) {
     if (typeof role === "string") updates.role = role || "user";
     if (dateOfBirth !== undefined)
       updates.dateOfBirth = dateOfBirth ? `${dateOfBirth}T00:00:00` : null;
-
+    if (notes !== undefined) {
+      const t = typeof notes === "string" ? notes : String(notes ?? "");
+      updates.notes = t.trim() ? t.slice(0, MAX_NOTES_LEN) : null;
+    }
     const { data: updated, error: upErr } = await admin
       .from("User")
       .update(updates)
       .eq("id", Number(id))
       .select(
-        "id,auth_user_id,role,email,name,surname,phone,dateOfBirth,createdAt"
+        "id,auth_user_id,role,email,name,surname,phone,dateOfBirth,createdAt,notes"
       )
       .single();
     if (upErr) throw upErr;

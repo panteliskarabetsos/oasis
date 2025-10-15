@@ -8,7 +8,7 @@ import { createSupabaseAdmin } from "../../../../lib/supabase/admin";
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
-const HOLD_MINUTES = 30;
+const HOLD_MINUTES = 10;
 // statuses that count toward booked seats
 const COUNT_STATUSES = new Set(["confirmed", "completed", "checked_in"]);
 

@@ -15,17 +15,9 @@ import {
   ChevronRight,
   X,
   Check,
+  StickyNote,
 } from "lucide-react";
 
-/**
- * AdminClientsPage
- * - Design clean‑up with a calm “ambient” aesthetic
- * - Fixed column mismatch in the table header/body (removed stray Email header)
- * - Fixed Rows <Select> onChange bug (it was setting page incorrectly)
- * - Better empty state, skeletons, and toast styling
- * - Keyboard shortcuts: "/" to focus search, "r" to refresh, "Escape" to clear search
- * - Consistent components (Select, TextInput, Modal, Drawer, ConfirmDialog, ToastHost)
- */
 function AdminClientsPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -51,7 +43,8 @@ function AdminClientsPage() {
   const [showAddDrawer, setShowAddDrawer] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-
+  const [noteUser, setNoteUser] = useState(null);
+  const [noteText, setNoteText] = useState("");
   // feedback
   const [errorMessage, setErrorMessage] = useState("");
   const [toasts, setToasts] = useState([]);
@@ -110,16 +103,14 @@ function AdminClientsPage() {
     const t = setTimeout(() => setDebouncedTerm(searchTerm.trim()), 250);
     return () => clearTimeout(t);
   }, [searchTerm]);
-
+  const preview = (s, n = 17) =>
+    s && s.length > n ? `${s.slice(0, n)}...` : s || "";
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
-      } else if ((e.key === "r" || e.key === "R") && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        fetchUsers();
       } else if (e.key === "Escape") {
         setSearchTerm("");
       }
@@ -230,6 +221,31 @@ function AdminClientsPage() {
     }
   };
 
+  const handleSaveNote = async () => {
+    if (!noteUser) return;
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ id: noteUser.id, notes: noteText }),
+      });
+      if (res.ok) {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === noteUser.id ? { ...u, notes: noteText } : u
+          )
+        );
+        setNoteUser(null);
+        setNoteText("");
+        toast({ title: "Note saved", icon: Check });
+      } else {
+        toast({ title: "Failed to save note", type: "error" });
+      }
+    } catch {
+      toast({ title: "Network error saving note", type: "error" });
+    }
+  };
   const handleAddUser = async (e) => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -274,6 +290,7 @@ function AdminClientsPage() {
       phone: form.phone.value,
       // role is not editable here (client-only page)
       dateOfBirth: form.dateOfBirth.value || null,
+      notes: form.notes.value || null,
     };
     try {
       const res = await fetch("/api/admin/users", {
@@ -445,6 +462,7 @@ function AdminClientsPage() {
                     <Th>Client</Th>
                     <Th>Phone</Th>
                     <Th>DOB</Th>
+                    <Th>Notes</Th>
                     <Th>Joined</Th>
                     <Th className="text-right pr-4">Actions</Th>
                   </tr>
@@ -472,6 +490,25 @@ function AdminClientsPage() {
                       <Td className="text-[#3d3227]">{u.phone ?? "—"}</Td>
                       <Td className="text-[#3d3227]">
                         {u.dateOfBirth ? formatDate(u.dateOfBirth) : "—"}
+                      </Td>
+                      <Td className="text-[#3d3227] max-w-[280px]">
+                        <button
+                          onClick={() => {
+                            setNoteUser(u);
+                            setNoteText(u.notes ?? "");
+                          }}
+                          className="group inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-[#e6ded5] bg-white hover:bg-[#faf6ef] text-xs text-[#5a4a3f]"
+                          title={u.notes || "Add note"}
+                        >
+                          <StickyNote size={14} className="text-[#8b6f47]" />
+                          <span className="truncate max-w-[14rem]">
+                            {u.notes ? (
+                              preview(u.notes)
+                            ) : (
+                              <span className="text-[#a39587]">Add note…</span>
+                            )}
+                          </span>
+                        </button>
                       </Td>
                       <Td className="text-[#7d6c5e]">
                         {formatDate(u.createdAt)}
@@ -659,6 +696,43 @@ function AdminClientsPage() {
             setConfirmDeleteId(null);
           }}
         />
+      )}
+
+      {noteUser && (
+        <Modal
+          title={`Notes – ${
+            formatFullName(noteUser.name, noteUser.surname) || noteUser.email
+          }`}
+          onClose={() => setNoteUser(null)}
+        >
+          <div className="space-y-3">
+            <Textarea
+              name="notes"
+              placeholder="Write a private note about this customer…"
+              defaultValue={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              rows={8}
+              maxLength={2000}
+            />
+            <div className="flex items-center justify-between text-xs text-[#7a6a5f]">
+              <span>{noteText.length}/2000</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setNoteUser(null)}
+                  className="px-5 py-2 rounded-full bg-gray-200 text-[#5a4a3f] hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveNote}
+                  className="px-5 py-2 rounded-full bg-[#8b6f47] text-white hover:bg-[#a78b62]"
+                >
+                  Save Note
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Toasts */}
@@ -869,6 +943,27 @@ function TableSkeleton({ rows = 6 }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function Textarea({
+  name,
+  placeholder,
+  defaultValue,
+  onChange,
+  rows = 6,
+  maxLength,
+}) {
+  return (
+    <textarea
+      name={name}
+      rows={rows}
+      maxLength={maxLength}
+      defaultValue={defaultValue}
+      onChange={onChange}
+      placeholder={placeholder}
+      className="w-full px-4 py-3 rounded-xl border border-[#e0dcd4] bg-[#faf8f4] text-[#3d3227] placeholder-[#b3a89e] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]"
+    />
   );
 }
 

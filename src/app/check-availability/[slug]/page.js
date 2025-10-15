@@ -58,7 +58,6 @@ export default function CheckAvailabilityPage() {
   const [adults, setAdults] = useState(1);
 
   const [kids, setKids] = useState(0);
-  const totalPeople = adults + kids;
 
   const prices = useMemo(() => normalizePricing(experience), [experience]);
   const fromPrice = useMemo(() => {
@@ -214,21 +213,40 @@ export default function CheckAvailabilityPage() {
     [availableSlots, selectedSlotId]
   );
 
+  // Hard cap per booking
+  const MAX_PER_BOOKING = 8;
+
+  // Derive availability for the selected slot
   const availablePlaces = selectedSlot
     ? Math.max(
         0,
-        (selectedSlot.totalSlots ?? 0) - (selectedSlot.bookedSlots ?? 0)
+        // prefer API's computed `available` if present, else derive
+        selectedSlot.available ??
+          Number(selectedSlot.totalSlots || 0) -
+            Number(selectedSlot.bookedSlots || 0) // subtract holds if you have them
       )
     : 0;
 
-  // Business cap: max 8 per booking (and never exceed availability)
-  const bookingCap = Math.min(8, availablePlaces || 8);
+  const totalPeople = (Number(adults) || 0) + (Number(kids) || 0);
 
+  // What this booking is allowed to take right now
+  const bookingCap = Math.min(MAX_PER_BOOKING, availablePlaces);
+
+  // Clamp a counter so total never exceeds `bookingCap`
+  const clampGroup = (nextValue, min, _cap, _total, who) => {
+    const n = Math.max(min, Number(nextValue) || 0);
+    const others = who === "adults" ? Number(kids) || 0 : Number(adults) || 0;
+    // max this counter can be so that (this + others) <= bookingCap
+    const maxForThis = Math.max(min, bookingCap - others);
+    return Math.min(n, maxForThis);
+  };
+
+  // Optional: block continue when over cap
   const canContinue =
-    !pausedNow &&
     !!selectedSlotId &&
-    totalPeople > 0 &&
-    totalPeople <= (availablePlaces || 0);
+    totalPeople >= 1 &&
+    totalPeople <= bookingCap &&
+    !pausedNow;
 
   async function handleContinue() {
     if (!canContinue) {
@@ -272,7 +290,7 @@ export default function CheckAvailabilityPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
       {/* Top bar */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-20">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 ">
         <div className="flex items-center justify-between">
           <button
             onClick={() => router.back()}
@@ -614,7 +632,7 @@ export default function CheckAvailabilityPage() {
                         )
                       }
                       min={1}
-                      disabled={!selectedSlot || pausedNow}
+                      disabled={!selectedSlot || pausedNow || bookingCap === 0}
                     />
 
                     <Counter
@@ -625,16 +643,16 @@ export default function CheckAvailabilityPage() {
                           clampGroup(v, 0, bookingCap, totalPeople, "kids")
                         )
                       }
-                      disabled={!selectedSlot || pausedNow}
+                      disabled={!selectedSlot || pausedNow || bookingCap === 0}
                     />
                   </div>
 
                   {selectedSlot && (
                     <p className="mt-2 text-xs text-[#5a4a3f]">
                       {totalPeople} selected —{" "}
-                      {Math.max(0, availablePlaces - totalPeople)} of{" "}
-                      {availablePlaces} spots remain for this time. (Max 8 per
-                      booking)
+                      {Math.max(0, bookingCap - totalPeople)} of {bookingCap}{" "}
+                      allowed for this booking (max {MAX_PER_BOOKING}; limited
+                      by remaining availability).
                     </p>
                   )}
                 </div>

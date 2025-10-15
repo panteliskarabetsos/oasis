@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import {
   Calendar,
-  Clock,
   ChevronLeft,
   ChevronRight,
   Pencil,
@@ -102,7 +101,7 @@ export default function AdminSchedulePage() {
 
   // ---------- Fetch ----------
   useEffect(() => {
-    fetch("/api/admin/experiences")
+    fetch("/api/admin/experiences", { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => setExperiences(Array.isArray(data) ? data : []))
       .catch(() => toast.error("Failed to load experiences."));
@@ -118,14 +117,23 @@ export default function AdminSchedulePage() {
     setSelectedExperience(exp || null);
 
     setLoading(true);
-    fetch(`/api/admin/schedule?experienceId=${selectedExperienceId}`)
-      .then((res) => res.json())
+    fetch(
+      `/api/admin/schedule?experienceId=${selectedExperienceId}&withUsage=1`,
+      { cache: "no-store" }
+    )
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err?.error || "Failed to load slots.");
+        }
+        return res.json();
+      })
       .then((data) => {
         const arr = Array.isArray(data) ? data : [];
         arr.sort((a, b) => new Date(a.date) - new Date(b.date));
         setSlots(arr);
       })
-      .catch(() => toast.error("Failed to load slots."))
+      .catch((e) => toast.error(e.message || "Failed to load slots."))
       .finally(() => setLoading(false));
   }, [selectedExperienceId, experiences]);
 
@@ -136,7 +144,7 @@ export default function AdminSchedulePage() {
 
   const stats = useMemo(() => {
     const total = slots.reduce((n, s) => n + (s.totalSlots || 0), 0);
-    const booked = slots.reduce((n, s) => n + (s.bookedSlots || 0), 0);
+    const booked = slots.reduce((n, s) => n + (s.booked || 0), 0);
     const upcomingCount = slots.filter(
       (s) => new Date(s.date) >= new Date()
     ).length;
@@ -224,20 +232,29 @@ export default function AdminSchedulePage() {
 
     if (res.ok) {
       const newEntry = await res.json();
+      // Enrich with usage defaults so UI renders correctly
+      const enriched = {
+        ...newEntry,
+        booked: 0,
+        holds: 0,
+        available: Number(newEntry.totalSlots || 0),
+      };
       setSlots((prev) =>
-        [...prev, newEntry].sort((a, b) => new Date(a.date) - new Date(b.date))
+        [...prev, enriched].sort((a, b) => new Date(a.date) - new Date(b.date))
       );
       setNewSlot({ date, time: "", totalSlots: "" });
       toast.success("Slot added.");
     } else {
-      toast.error("Failed to add slot.");
+      const msg =
+        (await res.json().catch(() => ({})))?.error || "Failed to add slot.";
+      toast.error(msg);
     }
   };
 
   const handleEditClick = (slot) => {
     setEditingSlotId(slot.id);
     setEditedAvailableSlots(
-      String((slot.totalSlots || 0) - (slot.bookedSlots || 0))
+      String(Math.max((slot.totalSlots || 0) - (slot.booked || 0), 0))
     );
   };
 
@@ -307,26 +324,30 @@ export default function AdminSchedulePage() {
     if (!slot) return toast.error("Slot not found.");
 
     const available = Number(editedAvailableSlots);
-    if (Number.isNaN(available) || available < 0) {
+    if (!Number.isFinite(available) || available < 0) {
       toast.error("Available slots must be a non-negative number.");
       return;
     }
-    const totalSlots = available + (slot.bookedSlots || 0);
+    const totalSlots = available + (slot.booked || 0);
 
-    const res = await fetch(`/api/admin/schedule/${editingSlotId}`, {
+    const res = await fetch(`/api/admin/schedule`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ totalSlots }),
+      body: JSON.stringify({ id: editingSlotId, totalSlots }),
     });
 
     if (res.ok) {
       const updated = await res.json();
-      setSlots((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setSlots((prev) =>
+        prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s))
+      );
       setEditingSlotId(null);
       setEditedAvailableSlots("");
       toast.success("Slot updated.");
     } else {
-      toast.error("Failed to update slot.");
+      const msg =
+        (await res.json().catch(() => ({})))?.error || "Failed to update slot.";
+      toast.error(msg);
     }
   };
 
@@ -340,11 +361,28 @@ export default function AdminSchedulePage() {
     const res = await fetch(`/api/admin/schedule?id=${confirmDeleteId}`, {
       method: "DELETE",
     });
+
     if (res.ok) {
-      setSlots((prev) => prev.filter((s) => s.id !== confirmDeleteId));
-      toast.success("Slot (and related bookings) deleted.");
+      const payload = await res.json().catch(() => ({}));
+      const msg = payload?.message || "Done.";
+
+      if (payload?.slot) {
+        // soft-cancel: keep row, mark as cancelled and update timestamps
+        setSlots((prev) =>
+          prev.map((s) =>
+            s.id === payload.slot.id ? { ...s, ...payload.slot } : s
+          )
+        );
+      } else {
+        // hard delete: remove row
+        setSlots((prev) => prev.filter((s) => s.id !== confirmDeleteId));
+      }
+
+      toast.success(msg);
     } else {
-      toast.error("Failed to delete slot.");
+      const msg =
+        (await res.json().catch(() => ({})))?.error || "Failed to update slot.";
+      toast.error(msg);
     }
     setShowDeleteModal(false);
     setConfirmDeleteId(null);
@@ -370,9 +408,11 @@ export default function AdminSchedulePage() {
   }, [loadingGlobal, globalPause.bookingsPaused]);
 
   const SlotRow = ({ s }) => {
-    const booked = s.bookedSlots || 0;
+    const booked = s.booked || 0;
     const total = s.totalSlots || 0;
-    const available = Math.max(total - booked, 0);
+    const available = Number.isFinite(s.available)
+      ? s.available
+      : Math.max(total - booked, 0);
     const pct =
       total > 0 ? Math.min(100, Math.round((booked / total) * 100)) : 0;
     const isPast = new Date(s.date) < new Date();
@@ -380,7 +420,13 @@ export default function AdminSchedulePage() {
     const editing = editingSlotId === s.id;
 
     return (
-      <div className="rounded-xl border border-[#e8e2d8] bg-white p-4 shadow-sm">
+      <div
+        className={`rounded-xl border p-4 shadow-sm ${
+          s.isCancelled
+            ? "border-red-200 bg-red-50/40"
+            : "border-[#e8e2d8] bg-white"
+        }`}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col">
             <div className="text-sm text-[#5a4a3f] font-medium">
@@ -389,15 +435,22 @@ export default function AdminSchedulePage() {
             <div className="text-xs text-[#7a6a5f]">{fmtTimeShort(s.date)}</div>
           </div>
 
-          <span
-            className={`text-[10px] px-2 py-1 rounded-full border ${
-              isPast
-                ? "bg-[#f7f3ee] text-[#7a6a5f] border-[#e6ded4]"
-                : "bg-[#eaf4ea] text-[#1b5e20] border-[#cfe7d1]"
-            }`}
-          >
-            {isPast ? "Past" : "Upcoming"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-[10px] px-2 py-1 rounded-full border ${
+                isPast
+                  ? "bg-[#f7f3ee] text-[#7a6a5f] border-[#e6ded4]"
+                  : "bg-[#eaf4ea] text-[#1b5e20] border-[#cfe7d1]"
+              }`}
+            >
+              {isPast ? "Past" : "Upcoming"}
+            </span>
+            {s.isCancelled && (
+              <span className="text-[10px] px-2 py-1 rounded-full border border-[#f0dede] bg-[#fff7f7] text-[#8a3636]">
+                Cancelled
+              </span>
+            )}
+          </div>
         </div>
 
         {!editing ? (
@@ -407,12 +460,16 @@ export default function AdminSchedulePage() {
                 Booked <strong>{booked}</strong> / {total}{" "}
                 <span className="text-xs text-[#7a6a5f]">
                   • Available {available}
+                  {Number(s.holds || 0) > 0 && (
+                    <span className="ml-2">• Holds {s.holds}</span>
+                  )}
                 </span>
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => handleEditClick(s)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[#eadfd2] px-3 py-1.5 text-sm text-[#5a4a3f] hover:bg-[#faf7f1]"
+                  disabled={s.isCancelled}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#eadfd2] px-3 py-1.5 text-sm text-[#5a4a3f] hover:bg-[#faf7f1] disabled:opacity-50"
                 >
                   <Pencil size={14} /> Edit
                 </button>
@@ -600,14 +657,15 @@ export default function AdminSchedulePage() {
               Delete this slot?
             </h2>
             <p className="mt-2 text-center text-sm text-[#6b5e53]">
-              This will <strong>also delete all related bookings</strong>.
+              If the slot has bookings or active holds, it will be{" "}
+              <strong>marked as cancelled</strong> instead.
             </p>
             <div className="mt-5 flex justify-center gap-3">
               <button
                 onClick={confirmDelete}
                 className="rounded-full bg-red-600 px-4 py-2 text-white hover:bg-red-700"
               >
-                Yes, delete
+                Yes, continue
               </button>
               <button
                 onClick={() => {
@@ -648,8 +706,9 @@ export default function AdminSchedulePage() {
         <Stat icon={Users} label="Total Capacity" value={stats.totalSlots} />
         <Stat icon={Users} label="Total Booked" value={stats.booked} />
       </div>
+
+      {/* Global bookings switch */}
       <section className="mt-6 rounded-2xl border border-[#e3dcd2] bg-white p-0 shadow-sm overflow-hidden">
-        {/* Header / Toggle */}
         <button
           type="button"
           onClick={() => setIsGlobalOpen((v) => !v)}
@@ -666,7 +725,6 @@ export default function AdminSchedulePage() {
             </p>
           </div>
 
-          {/* Status pill */}
           <span
             className={`mr-2 inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${
               globalPause.bookingsPaused
@@ -691,7 +749,6 @@ export default function AdminSchedulePage() {
           />
         </button>
 
-        {/* Collapsible body */}
         <div
           className={`grid transition-all duration-300 ease-out ${
             isGlobalOpen
@@ -791,6 +848,7 @@ export default function AdminSchedulePage() {
           </div>
         </div>
       </section>
+
       {/* Step 1 — Experience selection */}
       <section className="mt-8 rounded-2xl border border-[#e3dcd2] bg-[#f8f6f1] p-6 shadow-sm">
         <p className="mb-2 text-xs font-semibold tracking-wider text-[#7a6a5f]">

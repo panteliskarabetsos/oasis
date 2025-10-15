@@ -253,7 +253,7 @@ export async function PUT(req) {
     .select()
     .maybeSingle();
 
-  if (status === 406) return bad("Experience not found", 404); // no row matched
+  if (status === 406) return bad("Experience not found", 404);
   if (error) {
     console.error("[admin/experiences] PUT error", error);
     if (error.code === "23505") return bad("Duplicate value", 409);
