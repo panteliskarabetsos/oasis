@@ -21,6 +21,7 @@ import {
   SlidersHorizontal,
   Info,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Link from "next/link";
@@ -56,7 +57,7 @@ const cx = (...xs) => xs.filter(Boolean).join(" ");
 
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
-  { value: "paid", label: "Paid" },
+  { value: "paid" || "Paid", label: "Paid" },
   { value: "confirmed", label: "Confirmed" },
   { value: "pending", label: "Pending" },
   { value: "cancelled", label: "Cancelled" },
@@ -71,7 +72,7 @@ export default function ReservationsPage() {
 
   // Filters & state
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("paid");
+  const [status, setStatus] = useState("");
   const [from, setFrom] = useState(""); // YYYY-MM-DD
   const [to, setTo] = useState(""); // YYYY-MM-DD
   const [experienceId, setExperienceId] = useState("");
@@ -95,13 +96,20 @@ export default function ReservationsPage() {
   const [selected, setSelected] = useState(null);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
-
+  const [deletingId, setDeletingId] = useState(null);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [forceDelete, setForceDelete] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [slotLoading, setSlotLoading] = useState(false);
   const [slots, setSlots] = useState([]);
   const [slotFrom, setSlotFrom] = useState(() => today());
   const [slotTo, setSlotTo] = useState(() => plusDays(60));
   const [targetSlotId, setTargetSlotId] = useState("");
+  const isPrivateBooking = (row) => !row?.scheduleSlotId; // no slot => private
+  const safeExperienceName = (row) =>
+    row?.experienceName || row?.customExperienceName || "Private booking";
 
   const controllerRef = useRef(null);
   const searchRef = useRef(null);
@@ -358,6 +366,46 @@ export default function ReservationsPage() {
     setSlotTo(toStr);
     loadSlots(r.experienceId, fromStr, toStr);
   }
+  function openDelete(row) {
+    setSelected(row); // reuse your existing `selected` state
+    setDeleteError("");
+    setForceDelete(row?.status !== "cancelled"); // default force if not cancelled
+    setShowDelete(true);
+  }
+
+  // submit
+  async function submitDelete() {
+    if (!selected?.id) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const res = await fetch(
+        `/api/admin/reservations/${selected.id}${
+          forceDelete ? "?force=1" : ""
+        }`,
+        { method: "DELETE" }
+      );
+      const j = await safeJson(res);
+      if (!res.ok) throw new Error(j?.error || "Failed to delete booking");
+
+      // optimistic remove
+      setRows((prev) => prev.filter((x) => x.id !== selected.id));
+      setTotal((t) => Math.max(0, t - 1));
+      setShowDelete(false);
+    } catch (e) {
+      setDeleteError(e?.message || "Something went wrong while deleting");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function safeJson(res) {
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
 
   async function loadSlots(expId, fromStr, toStr) {
     if (!expId) return setSlots([]);
@@ -479,6 +527,7 @@ export default function ReservationsPage() {
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <StatPill label="Results" value={viewStats.total} />
           <StatPill label="Paid" value={viewStats.paid} tone="green" />
+
           <StatPill label="Pending" value={viewStats.pending} tone="amber" />
           <StatPill
             label="Revenue (view)"
@@ -556,6 +605,7 @@ export default function ReservationsPage() {
                 {[
                   { v: "", l: "All" },
                   { v: "paid", l: "Paid" },
+                  { v: "confirmed", l: "Confirmed" },
                   { v: "pending", l: "Pending" },
                   { v: "cancelled", l: "Cancelled" },
                   { v: "draft", l: "Drafts" },
@@ -840,11 +890,20 @@ export default function ReservationsPage() {
                       </div>
                     </Td>
                     <Td className={pad}>{fmtDate(r.startTime || r.date)}</Td>
-                    <Td
-                      className={pad + " max-w-[260px] truncate"}
-                      title={r.experienceName}
-                    >
-                      {r.experienceName}
+                    <Td className={pad + " max-w-[260px] truncate"}>
+                      <div className="flex items-center gap-2 truncate">
+                        <span
+                          className="truncate"
+                          title={safeExperienceName(r)}
+                        >
+                          {safeExperienceName(r)}
+                        </span>
+                        {isPrivateBooking(r) && (
+                          <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                            Private
+                          </span>
+                        )}
+                      </div>
                     </Td>
                     <Td className={pad}>
                       <div className="flex flex-col">
@@ -883,10 +942,28 @@ export default function ReservationsPage() {
                       </a>
                     </Td>
                     <Td className={pad + " text-right"}>
-                      <span className="inline-flex items-center justify-end gap-1">
-                        {r.adults ?? 0}
-                        {typeof r.kids === "number" ? ` + ${r.kids}` : ""}
-                      </span>
+                      {(() => {
+                        const a =
+                          typeof r.adults === "number" ? r.adults : null;
+                        const k = typeof r.kids === "number" ? r.kids : null;
+                        if (a !== null || k !== null) {
+                          return (
+                            <span className="inline-flex items-center justify-end gap-1">
+                              {a ?? 0}
+                              {k !== null ? ` + ${k}` : ""}
+                            </span>
+                          );
+                        }
+                        const total =
+                          typeof r.numberOfPeople === "number"
+                            ? r.numberOfPeople
+                            : 0;
+                        return (
+                          <span className="inline-flex items-center justify-end">
+                            {total}
+                          </span>
+                        );
+                      })()}
                     </Td>
                     <Td className={pad + " text-right"}>
                       {fmtMoney(rowTotal(r))}
@@ -905,14 +982,16 @@ export default function ReservationsPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </IconButton>
-                        <IconButton
-                          onClick={() => openReschedule(r)}
-                          title="Reschedule"
-                          ariaLabel="Reschedule booking"
-                          tone="amber"
-                        >
-                          <CalendarClock className="h-4 w-4" />
-                        </IconButton>
+                        {r.status !== "cancelled" && (
+                          <IconButton
+                            onClick={() => openReschedule(r)}
+                            title="Reschedule"
+                            ariaLabel="Reschedule booking"
+                            tone="amber"
+                          >
+                            <CalendarClock className="h-4 w-4" />
+                          </IconButton>
+                        )}
                         {r.status !== "cancelled" && (
                           <IconButton
                             onClick={() => openCancel(r)}
@@ -921,6 +1000,29 @@ export default function ReservationsPage() {
                             tone="red"
                           >
                             <XCircleIcon className="h-4 w-4" />
+                          </IconButton>
+                        )}
+                        {r.status == "cancelled" && (
+                          <IconButton
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDelete(r);
+                            }}
+                            title="Delete"
+                            aria-label="Delete booking"
+                            className={cx(
+                              "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm",
+                              "border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
+                              deletingId === r.id && "opacity-60 cursor-wait"
+                            )}
+                          >
+                            {deletingId === r.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                            Delete
                           </IconButton>
                         )}
                       </div>
@@ -1026,6 +1128,72 @@ export default function ReservationsPage() {
                   onClick={submitCancel}
                 >
                   Cancel booking
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {showDelete && selected && (
+          <Modal onClose={() => setShowDelete(false)} title="Delete Booking">
+            <div className="space-y-4">
+              {/* Warning banner */}
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                This will permanently delete booking{" "}
+                <span className="font-mono">
+                  {selected.code || selected.id}
+                </span>{" "}
+                for{" "}
+                <span className="font-semibold">
+                  {selected.guestName || "-"}
+                </span>
+                {selected.startTime ? (
+                  <> on {fmtDate(selected.startTime)}</>
+                ) : null}
+                . This action cannot be undone.
+              </div>
+
+              {/* Extra option for non-cancelled */}
+              {selected.status !== "cancelled" && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={forceDelete}
+                    onChange={(e) => setForceDelete(e.target.checked)}
+                  />
+                  <span>
+                    Force delete (booking is <strong>{selected.status}</strong>)
+                  </span>
+                </label>
+              )}
+
+              {/* Error */}
+              {!!deleteError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+                  {deleteError}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  className="rounded-xl border px-3 py-2 text-sm"
+                  onClick={() => setShowDelete(false)}
+                  disabled={deleting}
+                >
+                  Close
+                </button>
+                <button
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-60"
+                  onClick={submitDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                  {deleting ? "Deleting…" : "Delete booking"}
                 </button>
               </div>
             </div>
@@ -1217,7 +1385,7 @@ function normalizeStatus(s) {
   const v = String(s || "")
     .toLowerCase()
     .trim();
-  if (v === "confirmed") return "paid"; // legacy synonym
+  // if (v === "confirmed") return "paid"; // legacy synonym
   if (v === "processing") return "pending";
   return v || "draft";
 }
@@ -1243,12 +1411,14 @@ function StatusBadge({ status }) {
     pending: "bg-amber-100 text-amber-800 border-amber-200",
     cancelled: "bg-red-100 text-red-800 border-red-200",
     draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
+    confirmed: "bg-blue-100 text-blue-800 border-blue-200",
   };
+
   return (
     <span
       className={cx(
         "inline-flex items-center rounded-full border px-2.5 py-1 text-xs",
-        map[k]
+        map[k] || "bg-neutral-100 text-neutral-700 border-neutral-200"
       )}
     >
       {labelStatus(k)}

@@ -59,38 +59,62 @@ export async function GET(req, ctx) {
       .from("Booking")
       .select(
         `*,
-         ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)),
-         User:User(id, email, name, surname, phone)`
+       ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)),
+        Experience:Experience!Booking_experienceId_fkey(id, name, location),
+        User:User(id, email, name, surname, phone)`
       )
       .eq("id", rid)
       .maybeSingle();
     if (bErr) throw bErr;
 
     if (b) {
-      const slot = b?.ScheduleSlot || {};
-      const ex = slot?.Experience || {};
+      const slot = b?.ScheduleSlot || null;
+      const exFromSlot = slot?.Experience || null;
+      const exDirect = b?.Experience || null;
       const u = b?.User || {};
-      const c = b?.counts || {};
 
-      const adults = isNum(b?.adultsCount)
-        ? b.adultsCount
-        : isNum(c?.adults)
-        ? c.adults
-        : isNum(b?.numberOfPeople)
-        ? b.numberOfPeople
-        : null;
-      const kids = isNum(b?.kidsCount)
-        ? b.kidsCount
-        : isNum(c?.kids)
-        ? c.kids
-        : null;
-      const teens = isNum(c?.teens) ? c.teens : null;
+      // jsonb fields (may come back as strings)
+      const countsRaw = parseJSON(b?.counts, null) || {};
+      const attendees = parseJSON(b?.attendees, []) || [];
+      const pc = parseJSON(b?.primary_contact, null);
 
+      const adults =
+        (isNum(b?.adultsCount) && b.adultsCount) ||
+        (isNum(countsRaw?.adults) && countsRaw.adults) ||
+        (isNum(b?.numberOfPeople) && b.numberOfPeople) ||
+        0;
+      const kids =
+        (isNum(b?.kidsCount) && b.kidsCount) ||
+        (isNum(countsRaw?.kids) && countsRaw.kids) ||
+        0;
+      const teens = isNum(countsRaw?.teens) ? countsRaw.teens : null;
+      const counts = {
+        adults,
+        kids,
+        teens,
+        total: isNum(countsRaw?.total)
+          ? countsRaw.total
+          : Math.max(0, adults + kids),
+      };
       const totalPaidAmount = isNum(b?.totalPaidAmount)
         ? b.totalPaidAmount
         : null;
       const currency = (b?.currency || "EUR").toString().toUpperCase();
+      const scheduleSlotId = b?.scheduleSlotId ?? slot?.id ?? null;
+      const startTime = slot?.date ?? b?.startTime ?? null;
+      const experienceId =
+        slot?.experienceId ?? b?.experienceId ?? exDirect?.id ?? null;
+      const experienceName =
+        exFromSlot?.name || exDirect?.name || b?.customExperienceName || null;
+      const experienceLocation =
+        exFromSlot?.location ?? exDirect?.location ?? null;
 
+      // guest: prefer joined user, fall back to primary_contact snapshot
+      const guestName =
+        [u?.name, u?.surname].filter(Boolean).join(" ").trim() ||
+        pc?.name ||
+        [pc?.firstName, pc?.lastName].filter(Boolean).join(" ").trim() ||
+        null;
       const item = {
         id: b.id,
         source: "booking",
@@ -101,9 +125,8 @@ export async function GET(req, ctx) {
         notes: b.notes ?? null,
 
         // People
-        counts: { adults, kids, teens },
-        attendees: Array.isArray(b?.attendees) ? b.attendees : [],
-
+        counts,
+        attendees,
         // Prices snapshot
         unitPrices: {
           adult: isNum(b?.unitPriceAdult) ? b.unitPriceAdult : null,
@@ -125,24 +148,33 @@ export async function GET(req, ctx) {
         },
 
         // Schedule / experience
-        scheduleSlotId: b.scheduleSlotId ?? null,
-        startTime: slot?.date ?? null,
+        scheduleSlotId,
+        startTime,
+        duration: isNum(b?.duration) ? b.duration : null,
         experience: {
-          id: slot?.experienceId ?? null,
-          name: ex?.name ?? null,
-          location: ex?.location ?? null,
-          slug: ex?.slug ?? null,
-          images: ex?.images ?? null,
+          id: experienceId,
+          name: experienceName,
+          location: experienceLocation,
+          // keep optional fields if your UI uses them
+          slug: exFromSlot?.slug ?? exDirect?.slug ?? null,
+          images: exFromSlot?.images ?? exDirect?.images ?? null,
         },
 
         // Guest (joined user) and snapshot saved on booking
         guest: {
           id: b?.userId ?? u?.id ?? null,
-          name: [u?.name, u?.surname].filter(Boolean).join(" ") || null,
-          email: u?.email ?? null,
-          phone: u?.phone ?? null,
+          name: guestName,
+          email: u?.email ?? pc?.email ?? null,
+          phone: u?.phone ?? pc?.phone ?? null,
         },
-        guestSnapshot: cleanEmpty(b?.primary_contact || null),
+        guestSnapshot: cleanEmpty(pc || null),
+
+        // useful raw fallbacks if your UI references them
+        currency: b?.currency ?? null,
+        unitPriceAdult: isNum(b?.unitPriceAdult) ? b.unitPriceAdult : null,
+        unitPriceKid: isNum(b?.unitPriceKid) ? b.unitPriceKid : null,
+        totalPaidAmount: totalPaidAmount,
+        customExperienceName: b?.customExperienceName ?? null,
       };
 
       return ok({ item });
@@ -159,8 +191,9 @@ export async function GET(req, ctx) {
 
     const slot = d?.ScheduleSlot || {};
     const ex = slot?.Experience || {};
-    const cnt = d?.counts || {};
-    const pc = d?.primary_contact || {};
+    const cnt = parseJSON(d?.counts, {}) || {};
+    const pc = parseJSON(d?.primary_contact, {}) || {};
+    const attendees = parseJSON(d?.attendees, []) || [];
 
     const item = {
       id: d.id,
@@ -177,7 +210,7 @@ export async function GET(req, ctx) {
         kids: pickFirstNumber(cnt, ["kids", "children", "K"]),
         teens: pickFirstNumber(cnt, ["teens", "teen", "T"]),
       },
-      attendees: Array.isArray(d?.attendees) ? d.attendees : [],
+      attendees,
 
       // Prices snapshot
       unitPrices: {
@@ -355,6 +388,50 @@ export async function OPTIONS() {
   return NextResponse.json({}, { status: 200 });
 }
 
+export async function DELETE(req, { params }) {
+  const auth = await requireAdmin();
+  if (auth.error) return auth.response;
+  const supa = auth.admin;
+
+  const id = Number(params?.id);
+  if (!Number.isInteger(id) || id <= 0) return bad("Invalid id", 400);
+
+  const url = new URL(req.url);
+  const force = url.searchParams.get("force") === "1";
+
+  try {
+    // Check exists + status
+    const { data: b, error: fetchErr } = await supa
+      .from("Booking")
+      .select("id, status")
+      .eq("id", id)
+      .single();
+    if (fetchErr) {
+      if (fetchErr.code === "PGRST116") return bad("Not found", 404);
+      throw fetchErr;
+    }
+
+    if (!force && b.status !== "cancelled") {
+      return bad(
+        "Only cancelled bookings can be deleted. Cancel first or pass ?force=1.",
+        409
+      );
+    }
+
+    const { error: delErr } = await supa
+      .from("Booking")
+      .delete()
+      .eq("id", id)
+      .single(); // ensures at most one row
+
+    if (delErr) throw delErr;
+
+    return ok({ id, deleted: true });
+  } catch (e) {
+    console.error(`/api/admin/reservations/${id} DELETE error`, e);
+    return bad(e?.message || "Failed to delete booking", 500);
+  }
+}
 /* ---------------------------- helpers ---------------------------- */
 function isNum(v) {
   return typeof v === "number" && Number.isFinite(v);
@@ -392,4 +469,13 @@ function deriveCode(row) {
   if (cands.length) return String(cands[0]);
   if (row?.id) return `B-${String(row.id).padStart(6, "0")}`;
   return null;
+}
+function parseJSON(v, fallback = null) {
+  if (v == null) return fallback;
+  if (typeof v === "object") return v;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return fallback;
+  }
 }

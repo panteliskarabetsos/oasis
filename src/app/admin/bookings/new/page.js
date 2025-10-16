@@ -582,44 +582,9 @@ export default function NewBookingPage() {
 
     setSubmitting(true);
     try {
-      let scheduleSlotId = selectedSlotId;
-
-      // Create private slot first if needed
-      if (privateBooking) {
-        const startsISO = new Date(
-          `${privateSlot.date}T${privateSlot.startTime || "00:00"}:00.000Z`
-        ).toISOString();
-        const body = {
-          experienceId,
-          date: startsISO, // matches ScheduleSlot.date
-          totalSlots: Number(privateSlot.capacity), // matches ScheduleSlot.totalSlots
-          isCancelled: false,
-          // you can forward note if your server stores it somewhere (optional)
-          note: privateSlot.note?.trim() || null,
-          // if you need "private" behavior, mark it via a separate flag/column on the server
-        };
-        const resSlot = await fetch("/api/admin/schedule-slots", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (!resSlot.ok) {
-          const j = await safeJson(resSlot);
-          throw new Error(j?.error || "Failed to create private slot");
-        }
-        const created = await resSlot.json();
-        scheduleSlotId = created?.id;
-        if (!scheduleSlotId) throw new Error("Private slot created without id");
-      }
-
-      // Now create booking
-      const payload = {
-        // userId: form.userId ? Number(form.userId) : null, // ⟵ remove or keep nullable if your API allows
-        scheduleSlotId: Number(scheduleSlotId),
-
-        status: form.status,
+      const common = {
+        status: String(form.status || "confirmed").toLowerCase(),
         notes: form.notes?.trim() || null,
-
         numberOfPeople,
         adultsCount: Number(form.adultsCount),
         kidsCount: Number(form.kidsCount),
@@ -628,7 +593,6 @@ export default function NewBookingPage() {
           kids: Number(form.kidsCount),
           total: numberOfPeople,
         },
-
         unitPriceAdult:
           form.unitPriceAdult === "" ? null : Number(priceAdult.toFixed(2)),
         unitPriceKid:
@@ -638,21 +602,43 @@ export default function NewBookingPage() {
             ? null
             : Number(parseFloat(form.totalPaidAmount).toFixed(2)),
         currency: form.currency || "EUR",
-
         primary_contact: {
-          name: (form.primary_contact?.name || "").trim(), // "First Last" (kept in sync)
+          name: (form.primary_contact?.name || "").trim(),
           firstName: (form.primary_contact?.firstName || "").trim(),
           lastName: (form.primary_contact?.lastName || "").trim(),
           email: (form.primary_contact?.email || "").trim().toLowerCase(),
           phone: (form.primary_contact?.phone || "").trim(),
         },
-
         attendees: form.attendees?.length ? form.attendees : null,
         stripeSessionId: form.stripeSessionId?.trim() || null,
         stripePaymentIntentId: form.stripePaymentIntentId?.trim() || null,
       };
 
-      const res = await fetch("/api/admin/reservations", {
+      // Route & payload depend on mode
+      const isPrivate = !!privateBooking;
+      const url = isPrivate
+        ? "/api/admin/private-reservations"
+        : "/api/admin/reservations";
+
+      const payload = isPrivate
+        ? {
+            ...common,
+            // private booking: NO scheduleSlotId, we pass explicit time
+            experienceId: experienceId ? Number(experienceId) : null, // optional
+            customExperienceName: (customExperienceName || "").trim(),
+            date: privateSlot.date, // "YYYY-MM-DD"
+            startTime: privateSlot.startTime, // "HH:mm"
+            // optional extras for your API if supported:
+            // durationMinutes: Number(privateSlot.durationMinutes) || 90,
+            // capacity: Number(privateSlot.capacity) || MAX_GROUP,
+          }
+        : {
+            ...common,
+            // public booking: uses existing slot
+            scheduleSlotId: Number(selectedSlotId),
+          };
+
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -660,12 +646,16 @@ export default function NewBookingPage() {
 
       if (!res.ok) {
         const j = await safeJson(res);
-        throw new Error(j?.error || "Failed to create booking");
+
+        throw new Error(
+          j?.error || `Failed to create ${isPrivate ? "private " : ""}booking`
+        );
       }
 
       const data = await res.json();
+      const item = data?.item || data; // both endpoints return { item }
       setSuccess("Booking created");
-      const id = data?.id || data?.booking?.id;
+      const id = item?.id;
       setTimeout(() => {
         router.push(id ? `/admin/bookings/${id}` : "/admin/bookings");
       }, 600);

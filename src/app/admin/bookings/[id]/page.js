@@ -97,7 +97,7 @@ export default function ReservationDetailPage() {
             (await res.json().catch(() => ({})))?.error || "Failed to load"
           );
         const { item } = await res.json();
-        setItem(item);
+        setItem(normalizeBooking(item));
       } catch (e) {
         setError(e.message);
       } finally {
@@ -124,7 +124,7 @@ export default function ReservationDetailPage() {
   }
 
   async function loadSlots() {
-    if (!item?.experience?.id) return setSlots([]);
+    if (!item || isPrivate || !item?.experience?.id) return setSlots([]);
     setSlotsLoading(true);
     try {
       const qs = new URLSearchParams({
@@ -146,6 +146,137 @@ export default function ReservationDetailPage() {
     } finally {
       setSlotsLoading(false);
     }
+  }
+  function normalizeBooking(raw) {
+    if (!raw || typeof raw !== "object") return null;
+
+    // ids & type
+    const scheduleSlotId = raw.scheduleSlotId ?? raw.slot?.id ?? null;
+    const isPrivate = !scheduleSlotId;
+
+    // time
+    const startTime =
+      raw.startTime ?? raw.date ?? raw.ScheduleSlot?.date ?? null;
+
+    // experience
+    const experienceId =
+      raw.experienceId ??
+      raw.slot?.experienceId ??
+      raw.Experience?.id ??
+      raw.experience?.id ??
+      null;
+
+    const experienceName =
+      raw.experienceName ??
+      raw.customExperienceName ??
+      raw.Experience?.name ??
+      raw.experience?.name ??
+      null;
+
+    // guest/contact
+    const u = raw.user || raw.User || {};
+    const pc =
+      raw.primary_contact || raw.primaryContact || raw.guestSnapshot || {};
+
+    const guestName =
+      [u?.name, u?.surname].filter(Boolean).join(" ").trim() ||
+      pc?.name ||
+      [pc?.firstName, pc?.lastName].filter(Boolean).join(" ").trim() ||
+      null;
+
+    const guest = {
+      name: guestName,
+      email: u?.email || pc?.email || null,
+      phone: u?.phone || pc?.phone || null,
+    };
+
+    // counts
+    const counts = raw.counts || {
+      adults:
+        (Number.isFinite(raw.adults) ? raw.adults : null) ??
+        (Number.isFinite(raw.adultsCount) ? raw.adultsCount : null) ??
+        0,
+      kids:
+        (Number.isFinite(raw.kids) ? raw.kids : null) ??
+        (Number.isFinite(raw.kidsCount) ? raw.kidsCount : null) ??
+        0,
+    };
+    if (!Number.isFinite(counts.total)) {
+      counts.total = (Number(counts.adults) || 0) + (Number(counts.kids) || 0);
+    }
+
+    // pricing & money
+    const unitPrices = {
+      adult: Number.isFinite(raw.unitPriceAdult) ? raw.unitPriceAdult : null,
+      kid: Number.isFinite(raw.unitPriceKid) ? raw.unitPriceKid : null,
+    };
+
+    const money = {
+      currency: raw.currency || "EUR",
+      totalPaidAmount: Number.isFinite(raw.totalPaidAmount)
+        ? raw.totalPaidAmount
+        : null,
+      totalAmount: Number.isFinite(raw.totalAmount) ? raw.totalAmount : null,
+    };
+
+    // payments
+    const payments = {
+      stripeSessionId: raw.stripeSessionId ?? null,
+      stripePaymentIntentId: raw.stripePaymentIntentId ?? null,
+    };
+
+    return {
+      // identity
+      id: raw.id,
+      code:
+        raw.code || (raw.id ? `B-${String(raw.id).padStart(6, "0")}` : null),
+
+      // status & meta
+      status: raw.status || "confirmed",
+      createdAt: raw.createdAt || raw.created_at || null,
+      updatedAt: raw.updatedAt || raw.updated_at || null,
+      notes: raw.notes ?? null,
+      source: raw.source || null,
+
+      // type
+      isPrivate,
+      scheduleSlotId,
+
+      // timing
+      startTime,
+      duration: raw.duration ?? null,
+
+      // experience (unified)
+      experience: {
+        id: experienceId,
+        name: experienceName || (isPrivate ? "Private booking" : null),
+        location: raw.experience?.location ?? null, // if your API includes it
+        isCustom: isPrivate || !experienceId,
+      },
+
+      // guest + snapshots
+      guest,
+      guestSnapshot: pc,
+
+      // counts & attendees
+      counts,
+      numberOfPeople: Number.isFinite(raw.numberOfPeople)
+        ? raw.numberOfPeople
+        : counts.total,
+      attendees: Array.isArray(raw.attendees) ? raw.attendees : [],
+
+      // pricing & money & payments
+      unitPrices,
+      money,
+      payments,
+
+      // raw fallbacks (kept for safety)
+      currency: raw.currency,
+      unitPriceAdult: raw.unitPriceAdult,
+      unitPriceKid: raw.unitPriceKid,
+      totalPaidAmount: raw.totalPaidAmount,
+      customExperienceName: raw.customExperienceName ?? null,
+    };
   }
 
   async function submitReschedule() {
@@ -172,6 +303,7 @@ export default function ReservationDetailPage() {
   // ------- derived UI state -------
   const statusNorm = String(item?.status || "").toLowerCase();
   const isCancelled = statusNorm === "cancelled";
+  const isPrivate = !!item?.isPrivate;
   const isPaid =
     statusNorm === "paid" ||
     statusNorm === "confirmed" ||
@@ -179,35 +311,24 @@ export default function ReservationDetailPage() {
     statusNorm === "checked_in";
 
   // ---- money & counts derived ----
-  const moneyCurrency = item?.money?.currency || item?.currency || "EUR";
+  const moneyCurrency = item?.money?.currency || "EUR";
 
   const paidTotal =
     typeof item?.money?.totalPaidAmount === "number"
       ? item.money.totalPaidAmount
       : Number(item?.money?.totalAmount) || 0;
 
-  const unitPriceAdult = Number(
-    item?.unitPrices?.adult ?? item?.unitPriceAdult ?? 0
-  );
-  const unitPriceKid = Number(item?.unitPrices?.kid ?? item?.unitPriceKid ?? 0);
-
-  const adults = Number(item?.counts?.adults ?? item?.adultsCount ?? 0);
-  const kids = Number(item?.counts?.kids ?? item?.kidsCount ?? 0);
+  const unitPriceAdult = Number(item?.unitPrices?.adult ?? 0);
+  const unitPriceKid = Number(item?.unitPrices?.kid ?? 0);
+  const adults = Number(item?.counts?.adults ?? 0);
+  const kids = Number(item?.counts?.kids ?? 0);
 
   const estimate = +(adults * unitPriceAdult + kids * unitPriceKid).toFixed(2);
   const balance = +(
     estimate - (Number.isFinite(paidTotal) ? paidTotal : 0)
   ).toFixed(2);
 
-  const guestName =
-    (item?.guest?.name || "").trim() ||
-    (item?.guestSnapshot &&
-      (item.guestSnapshot.name ??
-        item.guestSnapshot.fullName ??
-        [item.guestSnapshot.firstName, item.guestSnapshot.lastName]
-          .filter(Boolean)
-          .join(" "))) ||
-    "";
+  const guestName = (item?.guest?.name || "").trim() || "";
 
   const guestInitials = (guestName || "-")
     .split(" ")
@@ -216,20 +337,10 @@ export default function ReservationDetailPage() {
     .slice(0, 2)
     .join("");
 
-  const priceAdult =
-    item?.unitPrices?.adult ??
-    item?.unitPriceAdult ?? // legacy flat field (if any)
-    item?.experience?.priceAdult ??
-    null; // fallback if you also select it
+  const priceAdult = item?.unitPrices?.adult ?? null;
+  const priceKid = item?.unitPrices?.kid ?? null;
 
-  const priceKid =
-    item?.unitPrices?.kid ??
-    item?.unitPriceKid ??
-    item?.experience?.priceKid ??
-    null;
-
-  const currency = item?.money?.currency ?? item?.currency ?? "EUR";
-
+  const currency = moneyCurrency;
   // make sure your money() handles 0 correctly:
   function money(n, c = "EUR") {
     if (n === null || n === undefined) return "—";
@@ -304,7 +415,7 @@ export default function ReservationDetailPage() {
               onClick={() => setShowReschedule(true)}
               title="Reschedule"
               ariaLabel="Reschedule reservation"
-              disabled={isCancelled}
+              disabled={isCancelled || isPrivate}
               className="hover:bg-amber-50"
             >
               <CalendarClock className="h-4 w-4" />
@@ -427,6 +538,11 @@ export default function ReservationDetailPage() {
                             <Dot />
                             <Chip icon={<MapPin className="h-3.5 w-3.5" />}>
                               {item.experience?.name}
+                              {isPrivate && (
+                                <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                  Private
+                                </span>
+                              )}
                             </Chip>
                           </>
                         ) : null}
@@ -451,7 +567,14 @@ export default function ReservationDetailPage() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Card title="Reservation info">
                 <Row label="Date">{fmtDateLong(item.startTime)}</Row>
-                <Row label="Experience">{item.experience?.name || "-"}</Row>
+                <Row label="Experience">
+                  {item.experience?.name || "-"}
+                  {isPrivate && (
+                    <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                      Private
+                    </span>
+                  )}
+                </Row>
                 <Row
                   label={
                     <span className="inline-flex items-center gap-1">
@@ -461,6 +584,12 @@ export default function ReservationDetailPage() {
                 >
                   {item.experience?.location || "-"}
                 </Row>
+                <Row label="Duration">
+                  {Number.isFinite(item.duration)
+                    ? `${item.duration} min`
+                    : "-"}
+                </Row>
+
                 <Row label="Code" mono>
                   <Copyable value={item.code} empty="-" />
                 </Row>
@@ -690,6 +819,9 @@ export default function ReservationDetailPage() {
             <p className="text-sm text-neutral-600">
               Are you sure you want to cancel? This action will free up seats
               for this slot.
+              {isPrivate
+                ? " This will release the private time."
+                : " This action will free up seats for this slot."}
             </p>
             <label className="block text-sm">
               <span className="text-neutral-700">Reason (optional)</span>
@@ -718,7 +850,7 @@ export default function ReservationDetailPage() {
       )}
 
       {/* Reschedule modal */}
-      {showReschedule && (
+      {showReschedule && !isPrivate && (
         <Modal
           onClose={() => setShowReschedule(false)}
           title="Reschedule reservation"

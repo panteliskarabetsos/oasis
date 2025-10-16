@@ -97,15 +97,43 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
           ? null
           : Number.parseFloat(Number(n).toFixed(2));
 
+      const nz = (v) => {
+        const n = typeof v === "string" ? Number(v) : v;
+        return Number.isFinite(n) && n >= 0 ? n : 0;
+      };
+
+      const A = nz(adults);
+      const K = nz(kids);
+      const UA = nz(unitPriceAdult);
+      const UK = nz(unitPriceKid);
+
+      const estimate = +(A * UA + K * UK).toFixed(2);
+      const paidNum = totalPaidAmount === "" ? 0 : nz(totalPaidAmount);
+
+      const EPS = 0.005; // 0.5 cent tolerance for float rounding
+      const isCancelled = String(status).toLowerCase() === "cancelled";
+
+      let nextStatus = status;
+      if (!isCancelled && estimate > 0) {
+        if (Math.abs(paidNum - estimate) < EPS) {
+          nextStatus = "paid";
+        } else if (paidNum < estimate) {
+          nextStatus = "pending";
+        } else {
+          // overpaid (credit)
+          nextStatus = "paid";
+        }
+      }
+
       const payload = {
-        status,
+        status: nextStatus,
         currency,
         unitPriceAdult: to2(unitPriceAdult),
         unitPriceKid: to2(unitPriceKid),
-        totalPaidAmount: to2(totalPaidAmount), // allow paid > estimate (credit/overpayment)
+        totalPaidAmount: to2(totalPaidAmount),
       };
 
-      // basic validation: prices/paid must be ≥ 0 (balance may be < 0, that's fine)
+      // validate non-negativity
       for (const [k, v] of Object.entries(payload)) {
         if (["unitPriceAdult", "unitPriceKid", "totalPaidAmount"].includes(k)) {
           if (v !== null && !(Number.isFinite(v) && v >= 0)) {
@@ -122,6 +150,7 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || "Failed to save changes");
 
+      setStatus(nextStatus); // reflect auto-status change in UI
       setOk("Saved");
       onSaved?.(j?.item || j);
     } catch (e) {
