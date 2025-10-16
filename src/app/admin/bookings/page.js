@@ -20,9 +20,10 @@ import {
   ListFilter,
   SlidersHorizontal,
   Info,
+  Plus,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
-
+import Link from "next/link";
 /* ------------------------------------------------------------------
    Visual refresh goals
    - Softer, more consistent cards and spacing
@@ -447,19 +448,30 @@ export default function ReservationsPage() {
               Manage your bookings for all the experiences.
             </p>
           </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <ToolbarButton onClick={() => router.back()} icon={ArrowLeft}>
               Back
             </ToolbarButton>
+
             <ToolbarButton
               onClick={() => window.location.reload()}
               icon={RefreshCw}
             >
               Refresh
             </ToolbarButton>
+
             <ToolbarButton onClick={onExportCSV} icon={DownloadIcon}>
               Export CSV
             </ToolbarButton>
+
+            <Link
+              href="/admin/bookings/new"
+              className="ml-auto inline-flex items-center gap-2 rounded-full border border-transparent bg-[#a3845b] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#b79266]"
+            >
+              <Plus className="h-4 w-4" />
+              Add booking
+            </Link>
           </div>
         </div>
 

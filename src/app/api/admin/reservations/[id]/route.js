@@ -43,6 +43,7 @@ async function requireAdmin() {
   return { error: false, admin };
 }
 
+// GET
 export async function GET(req, ctx) {
   const auth = await requireAdmin();
   if (auth.error) return auth.response;
@@ -229,6 +230,129 @@ export async function GET(req, ctx) {
     console.error("/api/admin/reservations/[id] GET error", e);
     return bad(e?.message || "Failed to load reservation", 500);
   }
+}
+
+// PATCH
+export async function PATCH(req, ctx) {
+  const auth = await requireAdmin();
+  if (auth.error) return auth.response;
+  const supa = auth.admin;
+
+  const { id } = await ctx.params;
+  const rid = Number(Array.isArray(id) ? id[0] : id);
+  if (!Number.isFinite(rid) || rid <= 0) return bad("Invalid id", 400);
+
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return bad("Invalid JSON", 400);
+  }
+
+  // accept flat or nested payloads
+  const pickFirst = (...vals) =>
+    vals.find((v) => v !== undefined && v !== null);
+
+  const unitPriceAdult = pickFirst(
+    body.unitPriceAdult,
+    body?.unitPrices?.adult
+  );
+  const unitPriceKid = pickFirst(body.unitPriceKid, body?.unitPrices?.kid);
+
+  const totalPaidAmount = pickFirst(
+    body.totalPaidAmount,
+    body?.money?.totalPaidAmount
+  );
+  const totalAmount = pickFirst(body.totalAmount, body?.money?.totalAmount); // for drafts
+  const currency = pickFirst(body.currency, body?.money?.currency);
+  const statusRaw = pickFirst(body.status);
+  const status = typeof statusRaw === "string" ? statusRaw.trim() : undefined;
+
+  const numOrNull = (v) => {
+    if (v === "" || v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // ---- Is it a finalized Booking? ----
+  const { data: existsBooking, error: bExistsErr } = await supa
+    .from("Booking")
+    .select("id")
+    .eq("id", rid)
+    .maybeSingle();
+  if (bExistsErr) return bad("Failed to check booking", 500);
+
+  if (existsBooking?.id) {
+    const patch = {};
+    if (status) patch.status = status;
+    if (currency) patch.currency = String(currency).toUpperCase();
+    if (unitPriceAdult !== undefined)
+      patch.unitPriceAdult = numOrNull(unitPriceAdult);
+    if (unitPriceKid !== undefined)
+      patch.unitPriceKid = numOrNull(unitPriceKid);
+    if (totalPaidAmount !== undefined)
+      patch.totalPaidAmount = numOrNull(totalPaidAmount);
+
+    const { data, error } = await supa
+      .from("Booking")
+      .update(patch)
+      .eq("id", rid)
+      .select(
+        "id, unitPriceAdult, unitPriceKid, totalPaidAmount, currency, status, updatedAt"
+      )
+      .maybeSingle();
+
+    if (error) {
+      console.error("[reservations/:id PATCH] booking update error:", error);
+      return bad("Failed to update booking", 500);
+    }
+    return ok({ id: data.id, updated: data });
+  }
+
+  // ---- Otherwise it's a BookingDraft ----
+  const { data: draft, error: dExistsErr } = await supa
+    .from("BookingDraft")
+    .select("id, counts")
+    .eq("id", rid)
+    .maybeSingle();
+  if (dExistsErr) return bad("Failed to check draft", 500);
+  if (!draft?.id) return bad("Reservation not found", 404);
+
+  const dUpdate = {};
+  if (status) dUpdate.status = status;
+  if (unitPriceAdult !== undefined)
+    dUpdate.unitPriceAdult = numOrNull(unitPriceAdult);
+  if (unitPriceKid !== undefined)
+    dUpdate.unitPriceKid = numOrNull(unitPriceKid);
+
+  // drafts: compute totalAmount if prices change and not provided
+  if (totalAmount !== undefined) {
+    dUpdate.totalAmount = numOrNull(totalAmount);
+  } else if (dUpdate.unitPriceAdult != null || dUpdate.unitPriceKid != null) {
+    const cnt = draft.counts || {};
+    const A = Number.isFinite(Number(cnt.adults)) ? Number(cnt.adults) : 0;
+    const K = Number.isFinite(Number(cnt.kids)) ? Number(cnt.kids) : 0;
+    const ua = dUpdate.unitPriceAdult ?? 0;
+    const uk = dUpdate.unitPriceKid ?? 0;
+    dUpdate.totalAmount = +(A * ua + K * uk).toFixed(2);
+  }
+
+  const { data: dUpdated, error: dErr } = await supa
+    .from("BookingDraft")
+    .update(dUpdate)
+    .eq("id", rid)
+    .select("id, unitPriceAdult, unitPriceKid, totalAmount, status, updatedAt")
+    .maybeSingle();
+
+  if (dErr) {
+    console.error("[reservations/:id PATCH] draft update error:", dErr);
+    return bad("Failed to update draft", 500);
+  }
+  return ok({ id: dUpdated.id, updated: dUpdated });
+}
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { status: 200 });
 }
 
 /* ---------------------------- helpers ---------------------------- */

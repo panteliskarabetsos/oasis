@@ -17,8 +17,11 @@ import {
   Clock3,
   Users,
   Loader2,
+  DollarSign,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
+import { AnimatePresence, motion } from "framer-motion";
+import BookingPricingEditor from "../../components/BookingPricingEditor";
 
 /* ---------------------------- helpers ---------------------------- */
 const cx = (...xs) => xs.filter(Boolean).join(" ");
@@ -40,6 +43,7 @@ const fmtMoney = (n, currency = "EUR") =>
   typeof n === "number"
     ? n.toLocaleString("en-GB", { style: "currency", currency })
     : "-";
+
 function toDateInput(date) {
   const d = new Date(date);
   const y = d.getFullYear();
@@ -67,6 +71,7 @@ export default function ReservationDetailPage() {
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [showStripeSession, setShowStripeSession] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
 
   const [showReschedule, setShowReschedule] = useState(false);
   const [slots, setSlots] = useState([]);
@@ -173,13 +178,26 @@ export default function ReservationDetailPage() {
     statusNorm === "completed" ||
     statusNorm === "checked_in";
 
-  const moneyCurrency = (item?.money?.currency || "EUR").toUpperCase();
+  // ---- money & counts derived ----
+  const moneyCurrency = item?.money?.currency || item?.currency || "EUR";
+
   const paidTotal =
     typeof item?.money?.totalPaidAmount === "number"
       ? item.money.totalPaidAmount
-      : typeof item?.money?.totalAmount === "number"
-      ? item.money.totalAmount
-      : null;
+      : Number(item?.money?.totalAmount) || 0;
+
+  const unitPriceAdult = Number(
+    item?.unitPrices?.adult ?? item?.unitPriceAdult ?? 0
+  );
+  const unitPriceKid = Number(item?.unitPrices?.kid ?? item?.unitPriceKid ?? 0);
+
+  const adults = Number(item?.counts?.adults ?? item?.adultsCount ?? 0);
+  const kids = Number(item?.counts?.kids ?? item?.kidsCount ?? 0);
+
+  const estimate = +(adults * unitPriceAdult + kids * unitPriceKid).toFixed(2);
+  const balance = +(
+    estimate - (Number.isFinite(paidTotal) ? paidTotal : 0)
+  ).toFixed(2);
 
   const guestName =
     (item?.guest?.name || "").trim() ||
@@ -198,6 +216,26 @@ export default function ReservationDetailPage() {
     .slice(0, 2)
     .join("");
 
+  const priceAdult =
+    item?.unitPrices?.adult ??
+    item?.unitPriceAdult ?? // legacy flat field (if any)
+    item?.experience?.priceAdult ??
+    null; // fallback if you also select it
+
+  const priceKid =
+    item?.unitPrices?.kid ??
+    item?.unitPriceKid ??
+    item?.experience?.priceKid ??
+    null;
+
+  const currency = item?.money?.currency ?? item?.currency ?? "EUR";
+
+  // make sure your money() handles 0 correctly:
+  function money(n, c = "EUR") {
+    if (n === null || n === undefined) return "—";
+    const num = typeof n === "string" ? Number(n) : n;
+    return Number.isFinite(num) ? `${num.toFixed(2)} ${c}` : "—";
+  }
   const sourceBadge = item?.source ? (
     <span
       className={cx(
@@ -280,9 +318,65 @@ export default function ReservationDetailPage() {
             >
               <XCircle className="h-4 w-4" />
             </IconButton>
+            <IconButton
+              onClick={() => setShowPricing(true)}
+              title="Edit pricing"
+              ariaLabel="Edit pricing"
+              disabled={isCancelled}
+              className="hover:bg-emerald-50"
+            >
+              <DollarSign className="h-4 w-4" />
+            </IconButton>
           </div>
         </div>
       </div>
+      <AnimatePresence>
+        {showPricing && (
+          <motion.div
+            key="pricing-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setShowPricing(false)}
+          >
+            <motion.div
+              initial={{ y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 12, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 500, damping: 40 }}
+              className="w-full max-w-2xl rounded-2xl border border-black/10 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-[#111]"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Edit pricing & payment"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold uppercase tracking-wide opacity-70">
+                  Pricing & payment
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowPricing(false)}
+                  className="rounded-lg border border-black/10 px-3 py-1 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+                >
+                  Close
+                </button>
+              </div>
+
+              <BookingPricingEditor
+                bookingId={id} // <- whatever your page uses for the booking id
+                onClose={() => setShowPricing(false)}
+                onSaved={(updated) => {
+                  // optional: reflect changes in your local UI if you keep a booking state
+                  // setBooking((b) => ({ ...b, ...updated }));
+                  setShowPricing(false);
+                }}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="mx-auto max-w-5xl px-4">
         {loading ? (
@@ -370,6 +464,8 @@ export default function ReservationDetailPage() {
                 <Row label="Code" mono>
                   <Copyable value={item.code} empty="-" />
                 </Row>
+                <Row label="Price / adult">{money(priceAdult, currency)}</Row>
+                <Row label="Price / kid">{money(priceKid, currency)}</Row>
                 <Row label="Created">{fmtDateShort(item.createdAt)}</Row>
                 <Row label="Updated">{fmtDateShort(item.updatedAt)}</Row>
                 <Row label="Source" mono>
@@ -479,6 +575,15 @@ export default function ReservationDetailPage() {
                   mono
                 >
                   {fmtMoney(paidTotal, moneyCurrency)}
+                  {balance < 0 && (
+                    <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-400/20 dark:bg-amber-900/20 dark:text-amber-100">
+                      Overpaid by{" "}
+                      <strong>
+                        {fmtMoney(Math.abs(balance), moneyCurrency)}
+                      </strong>
+                      . Consider issuing a refund or keeping it as credit.
+                    </div>
+                  )}
                 </Row>
               </Card>
 

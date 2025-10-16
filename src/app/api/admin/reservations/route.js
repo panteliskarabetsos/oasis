@@ -225,7 +225,7 @@ function mapBookingRow(b) {
     guestPhone: u?.phone || null,
     adults,
     kids,
-    // 👇 show paid amount if present, else null (no fallback computed here)
+
     totalAmount: isNum(b?.totalPaidAmount) ? b.totalPaidAmount : null,
     status: b?.status || "confirmed",
     createdAt: b?.createdAt || null,
