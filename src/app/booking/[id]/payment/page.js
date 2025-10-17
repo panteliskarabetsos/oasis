@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertCircle,
   X,
+  Tag,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -36,6 +37,11 @@ export default function PaymentPage() {
   const [unitPrices, setUnitPrices] = useState({ adult: 0, teen: 0, kid: 0 });
   const [attendees, setAttendees] = useState([]);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [promoOpen, setPromoOpen] = useState(false);
+  const [promoInput, setPromoInput] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoError, setPromoError] = useState("");
+  const [promo, setPromo] = useState(null); // { code, discountType, discountValue, currency, endsAt? }
 
   useEffect(() => {
     if (!Number.isFinite(draftId) || draftId <= 0) {
@@ -112,7 +118,74 @@ export default function PaymentPage() {
     if (isDetailsOpen) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isDetailsOpen]);
+  function normalizePromo(p, fallbackCode) {
+    return {
+      code: (p?.code || fallbackCode || "").toString().toUpperCase(),
+      discountType: String(
+        p?.discountType || p?.type || "percent"
+      ).toLowerCase(), // "percent" | "fixed"
+      discountValue: Number(p?.discountValue ?? p?.value ?? 0),
+      currency: p?.currency || "EUR",
+      endsAt: p?.endsAt ? new Date(p.endsAt) : null,
+    };
+  }
 
+  async function validateAndApply(code) {
+    const c = code.trim();
+    if (!c) {
+      setPromoError("Enter a code.");
+      return;
+    }
+    setPromoLoading(true);
+    setPromoError("");
+    try {
+      const res = await fetch(
+        `/api/promotions/validate?code=${encodeURIComponent(
+          c
+        )}&draftId=${draftId}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) {
+        const msg =
+          (await res.json().catch(() => ({})))?.error || "Invalid code.";
+        throw new Error(msg);
+      }
+      const data = await res.json();
+      const next = normalizePromo(data, c);
+      if (next.endsAt && next.endsAt.getTime() < Date.now()) {
+        throw new Error("This code has expired.");
+      }
+      setPromo(next);
+      setPromoOpen(false);
+    } catch (e) {
+      setPromo(null);
+      setPromoError(e.message || "Invalid code.");
+    } finally {
+      setPromoLoading(false);
+    }
+  }
+
+  function applyPromo() {
+    validateAndApply(promoInput);
+  }
+
+  function removePromo() {
+    setPromo(null);
+    setPromoError("");
+    setPromoOpen(true);
+    setPromoInput("");
+  }
+
+  // Optional: auto-apply from ?promo=CODE
+  useEffect(() => {
+    const qp = qs?.get("promo");
+    if (qp && !promo && !promoLoading) {
+      setPromoOpen(true);
+      setPromoInput(qp);
+      validateAndApply(qp);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qs, promoLoading]);
   const when = useMemo(() => {
     if (!slot?.date) return null;
     const d =
@@ -122,31 +195,65 @@ export default function PaymentPage() {
 
   const breakdown = useMemo(() => {
     const A = Number(counts.adults || 0);
-    const T = Number(counts.teens || 0);
     const K = Number(counts.kids || 0);
-    const la = A * unitPrices.adult;
-    const lt = T * unitPrices.teen;
-    const lk = K * unitPrices.kid;
-    const total = la + lt + lk;
+
+    // cents helpers
+    const toC = (x) => Math.round((Number(x) || 0) * 100);
+    const fromC = (c) => c / 100;
+
+    const laC = toC(unitPrices.adult) * A; // adults line in cents
+    const lkC = toC(unitPrices.kid) * K; // kids line in cents
+    const subtotalC = laC + lkC;
+
+    // promo discount in cents (mirror server logic: floor for percent)
+    let discountC = 0;
+    if (promo && subtotalC > 0) {
+      if (String(promo.discountType).toLowerCase() === "percent") {
+        const pct = Math.min(
+          Math.max(Number(promo.discountValue || 0), 0),
+          100
+        );
+        discountC = Math.floor((subtotalC * pct) / 100);
+      } else {
+        const fixedC = Math.max(
+          Math.round(Number(promo.discountValue || 0) * 100),
+          0
+        );
+        discountC = Math.min(fixedC, subtotalC);
+      }
+    }
+
+    const finalC = Math.max(0, subtotalC - discountC);
+
+    const eur = (n) =>
+      new Intl.NumberFormat("el-GR", {
+        style: "currency",
+        currency: "EUR",
+      }).format(n);
+
     const lines = [
       A > 0 && {
         label: `Adults × ${A}`,
         value: eur(unitPrices.adult),
-        sum: eur(la),
-      },
-      T > 0 && {
-        label: `Teens × ${T}`,
-        value: eur(unitPrices.teen),
-        sum: eur(lt),
+        sum: eur(fromC(laC)),
       },
       K > 0 && {
         label: `Kids × ${K}`,
         value: eur(unitPrices.kid),
-        sum: eur(lk),
+        sum: eur(fromC(lkC)),
       },
     ].filter(Boolean);
-    return { lines, total: eur(total), totalRaw: total };
-  }, [counts, unitPrices]);
+
+    return {
+      lines,
+      subtotalRaw: fromC(subtotalC),
+      subtotal: eur(fromC(subtotalC)),
+      discountRaw: fromC(discountC),
+      discount: discountC > 0 ? `- ${eur(fromC(discountC))}` : null,
+      finalTotalRaw: fromC(finalC),
+      finalTotal: eur(fromC(finalC)),
+    };
+  }, [counts, unitPrices, promo]);
 
   const attendeesRows = useMemo(() => {
     if (Array.isArray(attendees) && attendees.length > 0) {
@@ -182,13 +289,23 @@ export default function PaymentPage() {
   async function handlePay() {
     try {
       setSubmitting(true);
+      setError("");
+
       const res = await fetch(`/api/bookings/drafts/${draftId}/checkout`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promoCode: promo?.code ?? null,
+        }),
       });
+
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.url)
+      if (!res.ok || !data?.url) {
         throw new Error(data?.error || "Could not start checkout.");
-      window.location.href = data.url; // Stripe Checkout redirect
+      }
+
+      // Redirect to Stripe Checkout
+      window.location.assign(data.url);
     } catch (e) {
       setError(e.message || "Something went wrong.");
       setSubmitting(false);
@@ -331,11 +448,32 @@ export default function PaymentPage() {
                     </div>
                   )}
 
-                  <div className="mt-4 border-t border-[#e5e0d8] pt-4 flex items-center justify-between">
-                    <span className="text-sm text-[#5a4a3f]">Total</span>
-                    <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                      {breakdown.total}
-                    </span>
+                  <div className="mt-4 border-t border-[#e5e0d8] pt-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-[#5a4a3f]">Subtotal</span>
+                      <span className="text-sm font-medium text-[#5a4a3f]">
+                        {breakdown.subtotal}
+                      </span>
+                    </div>
+                    {promo && breakdown.discountRaw > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[#5a4a3f]">
+                          Promo{" "}
+                          <span className="font-mono">({promo.code})</span>
+                        </span>
+                        <span className="text-sm font-semibold text-[#b14545]">
+                          {breakdown.discount}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between pt-2">
+                      <span className="text-sm text-[#5a4a3f]">
+                        {promo ? "Total after discount" : "Total"}
+                      </span>
+                      <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
+                        {breakdown.finalTotal}
+                      </span>
+                    </div>
                   </div>
 
                   <p className="mt-2 text-[11px] text-[#7a6a58]">
@@ -381,15 +519,16 @@ export default function PaymentPage() {
 
                 <button
                   onClick={handlePay}
-                  disabled={submitting || breakdown.totalRaw < 0}
+                  disabled={submitting || breakdown.finalTotalRaw <= 0}
                   className={`mt-6 w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40 focus:ring-offset-2
-                    ${
-                      submitting || breakdown.totalRaw < 0
-                        ? "bg-gray-300 text-white cursor-not-allowed"
-                        : "bg-gradient-to-b from-[#8b6f47] to-[#7a5f3a] text-white hover:from-[#7f643f] hover:to-[#6a5233]"
-                    }
-                  `}
+    ${
+      submitting || breakdown.finalTotalRaw < 0
+        ? "bg-gray-300 text-white cursor-not-allowed"
+        : "bg-gradient-to-b from-[#8b6f47] to-[#7a5f3a] text-white hover:from-[#7f643f] hover:to-[#6a5233]"
+    }
+  `}
                   aria-busy={submitting}
+                  aria-disabled={submitting || breakdown.finalTotalRaw < 0}
                 >
                   {submitting ? (
                     <>
@@ -399,14 +538,85 @@ export default function PaymentPage() {
                   ) : (
                     <>
                       Pay now{" "}
-                      {breakdown.totalRaw >= 0 && (
+                      {breakdown.finalTotalRaw >= 0 && (
                         <span className="text-base opacity-80">
-                          · {breakdown.total}
+                          · {breakdown.finalTotal}
                         </span>
                       )}
                     </>
                   )}
                 </button>
+
+                {/* Promo code */}
+                <div className="mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setPromoOpen((v) => !v)}
+                    className="w-full text-left inline-flex items-center justify-between rounded-xl border border-[#e8e5df] bg-[#fcf9f4] px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#faf7f2] transition"
+                    aria-expanded={promoOpen}
+                    aria-controls="promo-panel"
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Tag className="h-4 w-4 text-[#8b6f47]" />
+                      Do you have a promo code?
+                    </span>
+                    <span className="text-xs text-[#7a6a58]">
+                      {promo
+                        ? `Applied: ${promo.code}`
+                        : promoOpen
+                        ? "Hide"
+                        : "Apply"}
+                    </span>
+                  </button>
+
+                  {promoOpen && (
+                    <div id="promo-panel" className="mt-3">
+                      <div className="flex items-stretch gap-2">
+                        <input
+                          value={promoInput}
+                          onChange={(e) => setPromoInput(e.target.value)}
+                          inputMode="text"
+                          placeholder="Enter code"
+                          className="flex-1 rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                          aria-label="Promo code"
+                        />
+                        <button
+                          onClick={applyPromo}
+                          disabled={promoLoading || !promoInput.trim()}
+                          className={`rounded-lg px-4 py-2 text-sm font-semibold transition
+            ${
+              promoLoading || !promoInput.trim()
+                ? "bg-gray-300 text-white cursor-not-allowed"
+                : "bg-[#8b6f47] text-white hover:bg-[#7a5f3a]"
+            }`}
+                        >
+                          {promoLoading ? "Checking…" : "Apply"}
+                        </button>
+                      </div>
+                      {promoError && (
+                        <p className="mt-2 text-[11px] text-[#b14545]">
+                          {promoError}
+                        </p>
+                      )}
+                      {promo && (
+                        <div className="mt-2 text-xs text-[#5a4a3f]">
+                          <span className="font-medium">Applied</span>:{" "}
+                          <span className="font-mono">{promo.code}</span> —{" "}
+                          {promo.discountType === "percent"
+                            ? `${promo.discountValue}% off`
+                            : `${eur(promo.discountValue)} off`}
+                          <button
+                            type="button"
+                            onClick={removePromo}
+                            className="ml-2 rounded px-2 py-0.5 border border-[#e8e5df] text-[#7a6a58] hover:bg-[#f6f2ea]"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 <div className="mt-4 text-[11px] text-[#7a6a58]">
                   <div className="flex items-center gap-2">
