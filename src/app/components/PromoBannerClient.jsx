@@ -4,10 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { X, Copy, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 
 /**
- * Promo banner — ultra thin, centered carousel + fade
- * - One-line, very slim height
- * - Centers text; auto-rotates multiple promos
- * - Fade out → swap → fade in on slide change
+ * Promo banner — ultra thin, centered carousel
+ * - One-line, very slim height (tight padding + leading-none)
+ * - Centers all text; auto-rotates multiple promos
  * - Pauses on hover/focus; respects reduced motion
  * - Per-promo dismiss (persisted); copy-to-clipboard + countdown
  */
@@ -92,39 +91,16 @@ export default function PromoBannerClient({ codes = [], campaigns = [] }) {
     } catch {}
   }, []);
 
-  // Fade state
-  const [fading, setFading] = useState(false);
-  const fadeOutDuration = 180; // ms (first half)
-  const fadeTotalDuration = 360; // ms (out+in)
-
-  const goTo = (next) => {
-    if (next === index) return;
-    if (reduced) {
-      setIndex(next);
-      return;
-    }
-    setFading(true); // opacity → 0
-    // after fade-out, swap content then fade in
-    window.setTimeout(() => {
-      setIndex(next);
-      // allow DOM to paint the new content before fading back in
-      requestAnimationFrame(() => setFading(false));
-    }, fadeOutDuration);
-  };
-
-  const goPrev = () =>
-    goTo((index - 1 + visibleItems.length) % visibleItems.length);
-  const goNext = () => goTo((index + 1) % visibleItems.length);
-
-  // Auto-rotate (skip while fading)
+  // Auto-rotate
   const intervalMs = 7000;
   useEffect(() => {
     if (reduced || paused || visibleItems.length <= 1) return;
-    const id = setInterval(() => {
-      if (!fading) goNext();
-    }, intervalMs);
+    const id = setInterval(
+      () => setIndex((i) => (i + 1) % visibleItems.length),
+      intervalMs
+    );
     return () => clearInterval(id);
-  }, [reduced, paused, visibleItems.length, index, fading]);
+  }, [reduced, paused, visibleItems.length]);
 
   const current = visibleItems[index];
 
@@ -175,6 +151,10 @@ export default function PromoBannerClient({ codes = [], campaigns = [] }) {
         : `${it.discountValue} ${it.currency} off`
       : null;
 
+  const goPrev = () =>
+    setIndex((i) => (i - 1 + visibleItems.length) % visibleItems.length);
+  const goNext = () => setIndex((i) => (i + 1) % visibleItems.length);
+
   return (
     <div
       role="region"
@@ -189,28 +169,36 @@ export default function PromoBannerClient({ codes = [], campaigns = [] }) {
       <div className="mx-auto max-w-6xl px-3">
         <div className="relative py-2.5 flex items-center justify-center min-h-[1.75rem]">
           {/* Dismiss */}
-          <button
+          {/* <button
             onClick={dismiss}
-            className="absolute right-0.5 rounded-full p-0.5 text-[#7a6a58] transition hover:bg-[#eee7dd] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="absolute right-0.5  rounded-full p-0.5 text-[#7a6a58] transition hover:bg-[#eee7dd] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-zinc-300 dark:hover:bg-zinc-800"
             aria-label="Dismiss promotion"
           >
             <X className="h-3.5 w-3.5" />
-          </button>
-
-          {/* Prev/Next (optional; uncomment if needed) */}
-          {/* <button onClick={goPrev} className="absolute left-0 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-[#7a6a58] transition hover:bg-[#eee7dd] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-zinc-300 dark:hover:bg-zinc-800" aria-label="Previous promotion">
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button onClick={goNext} className="absolute right-6 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-[#7a6a58] transition hover:bg-[#eee7dd] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-zinc-300 dark:hover:bg-zinc-800" aria-label="Next promotion">
-            <ChevronRight className="h-4 w-4" />
           </button> */}
 
-          {/* One-line centered content with fade */}
-          <div
-            className={`flex items-center justify-center gap-2 overflow-hidden text-center text-[12px] leading-none transition-opacity ${
-              reduced ? "duration-0" : `duration-[${fadeTotalDuration}ms]`
-            } ${fading ? "opacity-0" : "opacity-100"}`}
-          >
+          {/* Prev/Next */}
+          {/* {visibleItems.length > 1 && (
+            <>
+              <button
+                onClick={goPrev}
+                className="absolute left-0 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-[#7a6a58] transition hover:bg-[#eee7dd] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                aria-label="Previous promotion"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                onClick={goNext}
+                className="absolute right-6 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-[#7a6a58] transition hover:bg-[#eee7dd] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                aria-label="Next promotion"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </>
+          )} */}
+
+          {/* One-line centered content */}
+          <div className="flex items-center justify-center gap-2 overflow-hidden text-center text-[12px] leading-none">
             <span
               aria-hidden
               className="inline-block h-1 w-1 rounded-full bg-[#8b6f47]"
@@ -266,7 +254,7 @@ export default function PromoBannerClient({ codes = [], campaigns = [] }) {
                 {visibleItems.map((_, i) => (
                   <button
                     key={i}
-                    onClick={() => goTo(i)}
+                    onClick={() => setIndex(i)}
                     className={`h-1 w-1 rounded-full transition ${
                       i === index
                         ? "bg-[#8b6f47]"

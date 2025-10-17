@@ -2,24 +2,32 @@ import { headers } from "next/headers";
 import PromoBannerClient from "./PromoBannerClient";
 
 export default async function PromoBannerServer() {
-  // Build absolute origin from headers (works on Vercel and locally)
+  // Always call dynamic APIs first (avoids hook count mismatches)
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host");
   const proto = h.get("x-forwarded-proto") ?? "http";
 
-  const origin =
-    process.env.NEXT_PUBLIC_SITE_URL /* e.g. https://oasis.example */ ||
-    (host ? `${proto}://${host}` : "http://localhost:3000");
+  const origin = process.env.NEXT_PUBLIC_SITE_URL
+    ? process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "")
+    : host
+    ? `${proto}://${host}`
+    : "http://localhost:3000";
 
-  const res = await fetch(`${origin}/api/promotions/active`, {
-    next: { revalidate: 120 },
-  });
-  if (!res.ok) return null; // ← remove the stray "{"
-  const data = await res.json();
+  // Fetch promos safely; never early-return from this server component
+  let codes = [];
+  let campaigns = [];
+  try {
+    const url = `${origin}/api/promotions/active`;
+    const res = await fetch(url, { next: { revalidate: 120 } });
+    if (res.ok) {
+      const data = await res.json();
+      codes = Array.isArray(data?.codes) ? data.codes : [];
+      campaigns = Array.isArray(data?.campaigns) ? data.campaigns : [];
+    }
+  } catch {
+    // swallow and let client render nothing
+  }
 
-  const codes = Array.isArray(data?.codes) ? data.codes : [];
-  const campaigns = Array.isArray(data?.campaigns) ? data.campaigns : [];
-  if (codes.length === 0 && campaigns.length === 0) return null;
-
+  // Always render the client; it will return null if there is nothing to show
   return <PromoBannerClient codes={codes} campaigns={campaigns} />;
 }
