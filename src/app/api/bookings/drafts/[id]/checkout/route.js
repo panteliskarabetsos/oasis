@@ -259,6 +259,10 @@ export async function POST(req, ctx) {
       finalTotalCents,
     });
   }
+  const currentTotalCents =
+    subtotalCents - Math.min(discountCents, subtotalCents);
+  const currentPromoCode = promo?.code ?? null;
+
   const idemKey = `checkout_draft_${draftId}_${currentTotalCents}_${
     currentPromoCode || ""
   }`;
@@ -330,11 +334,6 @@ export async function POST(req, ctx) {
       })
       .eq("id", draftId);
   }
-
-  // current totals derived from request/draft
-  const currentTotalCents =
-    subtotalCents - Math.min(discountCents, subtotalCents);
-  const currentPromoCode = promo?.code ?? null;
 
   // Decide whether we may reuse the old open session
   const storedTotalCents = Math.round(Number(draft.totalAmount || 0) * 100);
