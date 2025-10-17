@@ -26,6 +26,11 @@ import {
   UserPlus,
   UserMinus,
   UserCog,
+  Copy,
+  Edit,
+  PauseCircle,
+  Repeat2,
+  PlayCircle,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { Fragment } from "react";
@@ -272,6 +277,17 @@ export default function PromotionsPage() {
   const [editingAssigneeFor, setEditingAssigneeFor] = useState(null);
   const [assigneeDraft, setAssigneeDraft] = useState(null);
 
+  const [workingId, setWorkingId] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const [voucherOpen, setVoucherOpen] = useState(false);
+  const [voucherTarget, setVoucherTarget] = useState(null);
+
+  const [assignDraft, setAssignDraft] = useState(null); // { userId|null, email }
+  const [savingVoucher, setSavingVoucher] = useState(false);
+  const [voucherError, setVoucherError] = useState("");
+  const firstVoucherInputRef = useRef(null);
+
   function startReassign(v) {
     setEditingAssigneeFor(v.id);
     setAssigneeDraft({
@@ -427,28 +443,41 @@ export default function PromotionsPage() {
     active: true,
   });
 
-  const [voucherForm, setVoucherForm] = useState({
-    campaignId: "",
-    code: "",
-    assignedToUserId: "",
-    assignedToEmail: "",
-    discountType: "percent",
-    discountValue: "",
-    currency: "EUR",
-    maxRedemptions: 1,
-    perUserLimit: 1,
-    minSpend: "",
-    scope: "global",
-    experienceIds: [],
-    startsAt: "",
-    endsAt: "",
-    active: true,
-  });
+  // const [voucherForm, setVoucherForm] = useState({
+  //   campaignId: "",
+  //   code: "",
+  //   assignedToUserId: "",
+  //   assignedToEmail: "",
+  //   discountType: "percent",
+  //   discountValue: "",
+  //   currency: "EUR",
+  //   maxRedemptions: 1,
+  //   perUserLimit: 1,
+  //   minSpend: "",
+  //   scope: "global",
+  //   experienceIds: [],
+  //   startsAt: "",
+  //   endsAt: "",
+  //   active: true,
+  // });
 
   const [submitting, setSubmitting] = useState(false);
   const [codeAvail, setCodeAvail] = useState({ status: "idle", exists: false });
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
 
-  // put this near the top of the file
+  const firstInputRef = useRef(null);
+
+  const toLocalInput = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const off = d.getTimezoneOffset();
+    const local = new Date(d.getTime() - off * 60000);
+    return local.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm"
+  };
   const pickItems = (x) => {
     if (Array.isArray(x)) return x;
     if (Array.isArray(x?.items)) return x.items;
@@ -595,6 +624,130 @@ export default function PromotionsPage() {
     return null;
   };
 
+  const fromLocalInput = (s) => (s ? new Date(s).toISOString() : null);
+
+  function openVoucherModal(v) {
+    setVoucherTarget(v);
+    setVoucherError("");
+    setVoucherForm({
+      code: v.code || "",
+      discountType: v.discountType || "percent", // "percent" | "fixed"
+      discountValue: v.discountValue ?? 0,
+      currency: v.currency || "EUR",
+      maxRedemptions: v.maxRedemptions ?? null,
+      startsAt: toLocalInput(v.startsAt),
+      endsAt: toLocalInput(v.endsAt),
+      active: !!v.active,
+    });
+    setAssignDraft({
+      userId: v.assignedToUserId || null,
+      email: v.assignedToEmail || "",
+    });
+    setVoucherOpen(true);
+  }
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape") setVoucherOpen(false);
+    }
+    if (voucherOpen) {
+      window.addEventListener("keydown", onKey);
+      setTimeout(() => firstVoucherInputRef.current?.focus(), 0);
+    }
+    return () => window.removeEventListener("keydown", onKey);
+  }, [voucherOpen]);
+
+  function setVField(k, v) {
+    setVoucherForm((f) => ({ ...f, [k]: v }));
+  }
+
+  function randomCode(len = 10) {
+    const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no ambiguous
+    let out = "";
+    for (let i = 0; i < len; i++)
+      out += chars[Math.floor(Math.random() * chars.length)];
+    return out;
+  }
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      ...opts,
+    });
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {}
+    if (!res.ok)
+      throw new Error(data?.error || `Request failed (${res.status})`);
+    return data;
+  }
+
+  async function saveVoucher() {
+    if (!voucherTarget) return;
+    setSavingVoucher(true);
+    setVoucherError("");
+
+    const payload = {
+      code: voucherForm.code.trim().toUpperCase(),
+      discountType: voucherForm.discountType,
+      discountValue: Number(voucherForm.discountValue),
+      currency: (voucherForm.currency || "EUR").toUpperCase(),
+      maxRedemptions:
+        voucherForm.maxRedemptions == null || voucherForm.maxRedemptions === ""
+          ? null
+          : Number(voucherForm.maxRedemptions),
+      startsAt: fromLocalInput(voucherForm.startsAt),
+      endsAt: fromLocalInput(voucherForm.endsAt),
+      active: !!voucherForm.active,
+      // assignment
+      assignedToUserId: assignDraft?.userId ?? null,
+      assignedToEmail: assignDraft?.userId
+        ? ""
+        : (assignDraft?.email || "").trim(),
+    };
+
+    try {
+      // Adjust path to your real vouchers endpoint if different:
+      const { voucher: updated } = await api(
+        `/api/admin/promotions/vouchers/${voucherTarget.id}`,
+        { method: "PATCH", body: JSON.stringify(payload) }
+      );
+
+      // Update the list in-place
+      setVouchers((prev) =>
+        (prev || []).map((row) =>
+          row.id === voucherTarget.id ? { ...row, ...updated } : row
+        )
+      );
+
+      setVoucherOpen(false);
+    } catch (e) {
+      setVoucherError(e.message || "Could not save changes.");
+    } finally {
+      setSavingVoucher(false);
+    }
+  }
+
+  async function deleteVoucherFromModal() {
+    if (!voucherTarget) return;
+    if (
+      !confirm(`Delete voucher "${voucherTarget.code}"? This cannot be undone.`)
+    )
+      return;
+    try {
+      await api(`/api/admin/promotions/vouchers/${voucherTarget.id}`, {
+        method: "DELETE",
+      });
+      setVouchers((prev) =>
+        (prev || []).filter((r) => r.id !== voucherTarget.id)
+      );
+      setVoucherOpen(false);
+    } catch (e) {
+      setVoucherError(e.message || "Delete failed.");
+    }
+  }
   /* --------------------------- submissions --------------------------- */
   const submitCampaign = async () => {
     const err = validateCampaign();
@@ -748,7 +901,7 @@ export default function PromotionsPage() {
 
       if (!res.ok) {
         let msg = await parseApiError(res);
-        // nicer duplicate-code message (unique constraint)
+
         if (/duplicate|exists|23505/i.test(msg)) {
           msg =
             "This voucher code already exists. Try a different code or leave it blank for auto-generation.";
@@ -811,6 +964,36 @@ export default function PromotionsPage() {
       ))}
     </div>
   );
+  const EMPTY_VOUCHER_FORM = {
+    campaignId: "",
+
+    // discount
+    discountType: "percent", // or "fixed" (see note below)
+    discountValue: "", // keep as string in state for controlled inputs
+    currency: "EUR",
+
+    // assignment
+    assignedToUserId: null,
+    assignedToEmail: "",
+    _assigneeDisplay: "",
+
+    // limits
+    maxRedemptions: "",
+    perUserLimit: "",
+    minSpend: "",
+
+    // scope
+    scope: "global",
+    experienceIds: [],
+
+    // period
+    startsAt: "",
+    endsAt: "",
+
+    active: true,
+  };
+
+  const [voucherForm, setVoucherForm] = useState(EMPTY_VOUCHER_FORM);
 
   const Toolbar = () => (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -943,11 +1126,175 @@ export default function PromotionsPage() {
     );
   }
 
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      ...opts,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || "Request failed");
+    return data;
+  }
+
+  function optimisticUpdate(updater) {
+    // assumes you already have setCodes and codes in scope
+    setCodes((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      return updater(next) ?? next;
+    });
+  }
+
+  async function onToggleActive(c) {
+    setWorkingId(c.id);
+    const nextActive = !c.active;
+
+    // optimistic
+    optimisticUpdate((list) => {
+      const i = list.findIndex((x) => x.id === c.id);
+      if (i !== -1) list[i] = { ...list[i], active: nextActive };
+    });
+
+    try {
+      await api(`/api/admin/promotions/discount-codes/${c.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active: nextActive }),
+      });
+    } catch (e) {
+      // revert on error
+      optimisticUpdate((list) => {
+        const i = list.findIndex((x) => x.id === c.id);
+        if (i !== -1) list[i] = { ...list[i], active: c.active };
+      });
+      alert(e.message || "Could not update code.");
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
+  async function onDelete(c) {
+    if (!confirm(`Delete code "${c.code}"? This cannot be undone.`)) return;
+    setWorkingId(c.id);
+
+    // optimistic remove
+    const removed = codes;
+    optimisticUpdate((list) => list.filter((x) => x.id !== c.id));
+
+    try {
+      await api(`/api/admin/promotions/discount-codes/${c.id}`, {
+        method: "DELETE",
+      });
+    } catch (e) {
+      // revert
+      setCodes(removed);
+      alert(e.message || "Could not delete code.");
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
+  async function onCopy(c) {
+    try {
+      await navigator.clipboard.writeText(c.code);
+      setCopiedId(c.id);
+      setTimeout(() => setCopiedId(null), 1200);
+    } catch {
+      // fallback
+      const ta = document.createElement("textarea");
+      ta.value = c.code;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      setCopiedId(c.id);
+      setTimeout(() => setCopiedId(null), 1200);
+    }
+  }
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape") setEditOpen(false);
+    }
+    if (editOpen) {
+      window.addEventListener("keydown", onKey);
+      // focus first input
+      setTimeout(() => firstInputRef.current?.focus(), 0);
+    }
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editOpen]);
+
+  function onEdit(c) {
+    setEditTarget(c);
+    setEditError("");
+    setEditForm({
+      code: c.code || "",
+      discountType: c.discountType || "percent", // "percent" | "fixed"
+      discountValue: c.discountValue ?? 0,
+      currency: c.currency || "EUR",
+      maxRedemptions: c.maxRedemptions ?? "",
+      startsAt: toLocalInput(c.startsAt),
+      endsAt: toLocalInput(c.endsAt),
+      active: !!c.active,
+    });
+    setEditOpen(true);
+  }
+
+  function setField(k, v) {
+    setEditForm((f) => ({ ...f, [k]: v }));
+  }
+
+  async function saveEdit() {
+    if (!editTarget) return;
+    setSavingEdit(true);
+    setEditError("");
+
+    const payload = {
+      code: editForm.code.trim().toUpperCase(),
+      discountType: editForm.discountType,
+      discountValue: Number(editForm.discountValue),
+      currency: (editForm.currency || "EUR").toUpperCase(),
+      maxRedemptions:
+        editForm.maxRedemptions === "" ? null : Number(editForm.maxRedemptions),
+      startsAt: editForm.startsAt
+        ? new Date(editForm.startsAt).toISOString()
+        : null,
+      endsAt: editForm.endsAt ? new Date(editForm.endsAt).toISOString() : null,
+      active: !!editForm.active,
+    };
+
+    try {
+      const res = await fetch(
+        `/api/admin/promotions/discount-codes/${editTarget.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Failed to save changes");
+
+      // Update local list
+      setCodes((prev) =>
+        (prev || []).map((row) =>
+          row.id === editTarget.id ? { ...row, ...data.promo } : row
+        )
+      );
+
+      setEditOpen(false);
+    } catch (e) {
+      setEditError(e.message || "Could not save changes.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
   function IconButton({ title, onClick, kind = "copy" }) {
     const cls =
       "inline-flex items-center justify-center rounded-lg border border-[#e8e5df] bg-white p-2 text-[#5a4a3f] hover:bg-[#fcf9f4]";
     const icon =
-      kind === "delete" ? (
+      kind === "edit" ? (
+        <Pencil className="h-4 w-4" />
+      ) : kind === "delete" ? (
         <Trash2 className="h-4 w-4" />
       ) : kind === "on" ? (
         <Power className="h-4 w-4" />
@@ -1583,6 +1930,7 @@ export default function PromotionsPage() {
                         <th className="px-2 py-1">Redemptions</th>
                         <th className="px-2 py-1">Active</th>
                         <th className="px-2 py-1">Period</th>
+                        <th className="px-2 py-1 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1599,10 +1947,83 @@ export default function PromotionsPage() {
                             {c.redemptionCount}/{c.maxRedemptions ?? "∞"}
                           </td>
                           <td className="px-2 py-1">
-                            {c.active ? "Yes" : "No"}
+                            <span
+                              className={
+                                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 border " +
+                                (c.active
+                                  ? "border-[#e8e5df] text-[#5a4a3f] bg-[#faf7f2]"
+                                  : "border-[#e8e5df] text-[#b1a595] bg-white")
+                              }
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full bg-[#d6cfc4]" />
+                              {c.active ? "Yes" : "No"}
+                            </span>
                           </td>
                           <td className="px-2 py-1">
                             {fmtDate(c.startsAt)} — {fmtDate(c.endsAt)}
+                          </td>
+                          <td className="px-2 py-1">
+                            <div className="relative">
+                              <div className="flex justify-end gap-1">
+                                <button
+                                  onClick={() => onCopy(c)}
+                                  className="rounded-md px-2 py-1.5 border border-[#e8e5df] text-[#7a6a58] hover:bg-[#faf7f2]"
+                                  aria-label="Copy code"
+                                  title="Copy"
+                                  disabled={workingId === c.id}
+                                >
+                                  <Copy className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => onEdit(c)}
+                                  className="rounded-md px-2 py-1.5 border border-[#e8e5df] text-[#7a6a58] hover:bg-[#faf7f2]"
+                                  aria-label="Edit code"
+                                  title="Edit"
+                                  disabled={workingId === c.id}
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+
+                                <button
+                                  onClick={() => onToggleActive(c)}
+                                  className="rounded-md px-2 py-1.5 border border-[#e8e5df] text-[#7a6a58] hover:bg-[#faf7f2]"
+                                  aria-label={
+                                    c.active ? "Deactivate" : "Activate"
+                                  }
+                                  title={c.active ? "Deactivate" : "Activate"}
+                                  disabled={workingId === c.id}
+                                >
+                                  {c.active ? (
+                                    <PauseCircle className="w-4 h-4" />
+                                  ) : (
+                                    <PlayCircle className="w-4 h-4" />
+                                  )}
+                                </button>
+
+                                <button
+                                  onClick={() => onDelete(c)}
+                                  className="rounded-md px-2 py-1.5 border border-[#f3dfdb] text-[#7a4a4a] hover:bg-[#fff6f6]"
+                                  aria-label="Delete"
+                                  title="Delete"
+                                  disabled={workingId === c.id}
+                                >
+                                  {workingId === c.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-4 h-4" />
+                                  )}
+                                </button>
+                                {/* Optional compact menu instead of separate buttons */}
+                                {/* <button ...><MoreHorizontal /></button> */}
+                              </div>
+
+                              {/* little 'Copied!' chip */}
+                              {copiedId === c.id && (
+                                <span className="absolute -top-6 right-0 text-[11px] bg-[#f6f2ea] text-[#5a4a3f] border border-[#e8e5df] rounded px-2 py-0.5 shadow">
+                                  Copied!
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1622,7 +2043,7 @@ export default function PromotionsPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Campaign">
                     <select
-                      value={voucherForm.campaignId}
+                      value={voucherForm.campaignId ?? ""}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1648,7 +2069,7 @@ export default function PromotionsPage() {
                 <div className="grid gap-4 sm:grid-cols-3">
                   <Field label="Type" required>
                     <select
-                      value={voucherForm.discountType}
+                      value={voucherForm.discountType || "percent"}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1666,7 +2087,7 @@ export default function PromotionsPage() {
                       type="number"
                       min="1"
                       step="0.01"
-                      value={voucherForm.discountValue}
+                      value={voucherForm.discountValue ?? ""}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1679,7 +2100,7 @@ export default function PromotionsPage() {
                   {voucherForm.discountType === "amount" && (
                     <Field label="Currency" required>
                       <input
-                        value={voucherForm.currency}
+                        value={voucherForm.currency ?? "EUR"}
                         onChange={(e) =>
                           setVoucherForm({
                             ...voucherForm,
@@ -1719,7 +2140,7 @@ export default function PromotionsPage() {
                       disabled={!!voucherForm.assignedToUserId}
                       type="email"
                       placeholder="user@example.com"
-                      value={voucherForm.assignedToEmail}
+                      value={voucherForm.assignedToEmail ?? ""}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1736,7 +2157,7 @@ export default function PromotionsPage() {
                     <input
                       type="number"
                       min="1"
-                      value={voucherForm.maxRedemptions}
+                      value={voucherForm.maxRedemptions ?? ""}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1750,7 +2171,7 @@ export default function PromotionsPage() {
                     <input
                       type="number"
                       min="1"
-                      value={voucherForm.perUserLimit}
+                      value={voucherForm.perUserLimit ?? ""}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1765,7 +2186,7 @@ export default function PromotionsPage() {
                       type="number"
                       min="0"
                       step="0.01"
-                      value={voucherForm.minSpend}
+                      value={voucherForm.minSpend ?? ""}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1780,7 +2201,7 @@ export default function PromotionsPage() {
                 <div className="grid gap-4 sm:grid-cols-3">
                   <Field label="Scope" required>
                     <select
-                      value={voucherForm.scope}
+                      value={voucherForm.scope || "global"}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1813,7 +2234,7 @@ export default function PromotionsPage() {
                 {voucherForm.scope === "experience" && (
                   <Field label="Experiences" required>
                     <ExperienceMulti
-                      value={voucherForm.experienceIds}
+                      value={voucherForm.experienceIds || []}
                       onChange={(xs) =>
                         setVoucherForm({ ...voucherForm, experienceIds: xs })
                       }
@@ -1825,7 +2246,7 @@ export default function PromotionsPage() {
                   <Field label="Starts at" required>
                     <input
                       type="datetime-local"
-                      value={voucherForm.startsAt}
+                      value={voucherForm.startsAt || ""}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1838,7 +2259,7 @@ export default function PromotionsPage() {
                   <Field label="Ends at" required>
                     <input
                       type="datetime-local"
-                      value={voucherForm.endsAt}
+                      value={voucherForm.endsAt || ""}
                       onChange={(e) =>
                         setVoucherForm({
                           ...voucherForm,
@@ -1930,27 +2351,11 @@ export default function PromotionsPage() {
                                   onClick={() => toggleVoucherActive(v)}
                                   kind={v.active ? "off" : "on"}
                                 />
-
-                                {v.assignedToUserId || v.assignedToEmail ? (
-                                  <>
-                                    <IconButton
-                                      title="Reassign"
-                                      onClick={() => startReassign(v)}
-                                      kind="usercog"
-                                    />
-                                    <IconButton
-                                      title="Unassign"
-                                      onClick={() => unassignVoucher(v)}
-                                      kind="usermin"
-                                    />
-                                  </>
-                                ) : (
-                                  <IconButton
-                                    title="Assign"
-                                    onClick={() => startReassign(v)}
-                                    kind="userplus"
-                                  />
-                                )}
+                                <IconButton
+                                  title="Edit"
+                                  onClick={() => openVoucherModal(v)}
+                                  kind="edit"
+                                />
 
                                 <IconButton
                                   title="Delete"
@@ -2013,6 +2418,417 @@ export default function PromotionsPage() {
                 </div>
               )}
             </Card>
+          </div>
+        )}
+
+        {editOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-promo-title"
+            className="fixed inset-0 z-50"
+          >
+            <div
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              onClick={() => setEditOpen(false)}
+            />
+            <div className="relative mx-auto max-w-2xl mt-24 px-4">
+              <div className="relative rounded-2xl border border-[#e8e5df] bg-white shadow-lg">
+                <button
+                  onClick={() => setEditOpen(false)}
+                  className="absolute top-3 right-3 inline-flex items-center justify-center rounded-full p-1.5 hover:bg-[#f6f2ea]"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5 text-[#7a6a58]" />
+                </button>
+
+                <div className="p-6">
+                  <h2
+                    id="edit-promo-title"
+                    className="text-lg font-semibold text-[#5a4a3f]"
+                  >
+                    Edit discount code
+                  </h2>
+
+                  {editError && (
+                    <div className="mt-3 rounded-lg bg-[#fff6f6] border border-[#f1d7d7] px-3 py-2 text-sm text-[#7a4a4a]">
+                      {editError}
+                    </div>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="text-sm text-[#7a6a58]">
+                      Code
+                      <input
+                        ref={firstInputRef}
+                        value={editForm.code}
+                        onChange={(e) => setField("code", e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                        placeholder="SPRING25"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58]">
+                      Type
+                      <select
+                        value={editForm.discountType}
+                        onChange={(e) =>
+                          setField("discountType", e.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                      >
+                        <option value="percent">Percent</option>
+                        <option value="fixed">Fixed</option>
+                      </select>
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58]">
+                      Value
+                      <input
+                        type="number"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={editForm.discountValue}
+                        onChange={(e) =>
+                          setField("discountValue", e.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                        placeholder="10"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58]">
+                      Currency
+                      <input
+                        value={editForm.currency}
+                        onChange={(e) => setField("currency", e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                        placeholder="EUR"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58]">
+                      Max redemptions
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        value={editForm.maxRedemptions}
+                        onChange={(e) =>
+                          setField("maxRedemptions", e.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                        placeholder="Unlimited"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58] sm:col-span-1">
+                      Starts at
+                      <input
+                        type="datetime-local"
+                        value={editForm.startsAt}
+                        onChange={(e) => setField("startsAt", e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58] sm:col-span-1">
+                      Ends at
+                      <input
+                        type="datetime-local"
+                        value={editForm.endsAt}
+                        onChange={(e) => setField("endsAt", e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58] sm:col-span-2 inline-flex items-center gap-2 mt-1">
+                      <input
+                        type="checkbox"
+                        checked={editForm.active}
+                        onChange={(e) => setField("active", e.target.checked)}
+                        className="h-4 w-4 rounded border-[#e8e5df] text-[#8b6f47] focus:ring-[#8b6f47]/40"
+                      />
+                      Active
+                    </label>
+                  </div>
+                </div>
+
+                <div className="p-4 border-t border-[#eee9df] bg-[#fcf9f4] rounded-b-2xl flex justify-end gap-3">
+                  <button
+                    onClick={() => setEditOpen(false)}
+                    className="rounded-lg border border-[#e8e5df] px-4 py-2 text-sm text-[#5a4a3f] hover:bg-[#f6f2ea]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveEdit}
+                    disabled={savingEdit}
+                    className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
+                      savingEdit
+                        ? "bg-gray-300 cursor-not-allowed"
+                        : "bg-[#8b6f47] hover:bg-[#7a5f3a]"
+                    }`}
+                  >
+                    {savingEdit ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" /> Saving…
+                      </span>
+                    ) : (
+                      "Save changes"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {voucherOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="voucher-edit-title"
+            className="fixed inset-0 z-50"
+          >
+            <div
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              onClick={() => setVoucherOpen(false)}
+            />
+            <div className="relative mx-auto max-w-2xl mt-24 px-4">
+              <div className="relative rounded-2xl border border-[#e8e5df] bg-white shadow-lg">
+                <button
+                  onClick={() => setVoucherOpen(false)}
+                  className="absolute top-3 right-3 inline-flex items-center justify-center rounded-full p-1.5 hover:bg-[#f6f2ea]"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5 text-[#7a6a58]" />
+                </button>
+
+                <div className="p-6">
+                  <h2
+                    id="voucher-edit-title"
+                    className="text-lg font-semibold text-[#5a4a3f] flex items-center gap-2"
+                  >
+                    <Gift className="w-5 h-5 text-[#8b6f47]" />
+                    Manage voucher
+                  </h2>
+
+                  {voucherError && (
+                    <div className="mt-3 rounded-lg bg-[#fff6f6] border border-[#f1d7d7] px-3 py-2 text-sm text-[#7a4a4a]">
+                      {voucherError}
+                    </div>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="text-sm text-[#7a6a58]">
+                      Code
+                      <div className="mt-1 flex gap-2">
+                        <input
+                          ref={firstVoucherInputRef}
+                          value={voucherForm.code}
+                          onChange={(e) => setVField("code", e.target.value)}
+                          className="flex-1 rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                          placeholder="GFT-ABCD1234"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setVField("code", randomCode())}
+                          className="rounded-lg border border-[#e8e5df] px-3 py-2 text-xs text-[#5a4a3f] hover:bg-[#f6f2ea]"
+                          title="Generate"
+                        >
+                          Generate
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(
+                                voucherForm.code
+                              );
+                            } catch {}
+                          }}
+                          className="rounded-lg border border-[#e8e5df] px-3 py-2 text-xs text-[#5a4a3f] hover:bg-[#f6f2ea]"
+                          title="Copy"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58]">
+                      Type
+                      <select
+                        value={voucherForm.discountType}
+                        onChange={(e) =>
+                          setVField("discountType", e.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                      >
+                        <option value="percent">Percent</option>
+                        <option value="fixed">Fixed</option>
+                      </select>
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58]">
+                      Value
+                      <input
+                        type="number"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={voucherForm.discountValue}
+                        onChange={(e) =>
+                          setVField("discountValue", e.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                        placeholder="25"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58]">
+                      Currency
+                      <input
+                        value={voucherForm.currency}
+                        onChange={(e) => setVField("currency", e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                        placeholder="EUR"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58]">
+                      Max redemptions
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        value={voucherForm.maxRedemptions ?? ""}
+                        onChange={(e) =>
+                          setVField("maxRedemptions", e.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                        placeholder="Unlimited"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58] sm:col-span-1">
+                      Starts at
+                      <input
+                        type="datetime-local"
+                        value={voucherForm.startsAt}
+                        onChange={(e) => setVField("startsAt", e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58] sm:col-span-1">
+                      Ends at
+                      <input
+                        type="datetime-local"
+                        value={voucherForm.endsAt}
+                        onChange={(e) => setVField("endsAt", e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                      />
+                    </label>
+
+                    <label className="text-sm text-[#7a6a58] sm:col-span-2 inline-flex items-center gap-2 mt-1">
+                      <input
+                        type="checkbox"
+                        checked={!!voucherForm.active}
+                        onChange={(e) => setVField("active", e.target.checked)}
+                        className="h-4 w-4 rounded border-[#e8e5df] text-[#8b6f47] focus:ring-[#8b6f47]/40"
+                      />
+                      Active
+                    </label>
+
+                    {/* Assignee */}
+                    <div className="sm:col-span-2">
+                      <div className="text-sm text-[#7a6a58] mb-1">
+                        Assignee
+                      </div>
+                      <UserAssign
+                        value={{
+                          userId: assignDraft?.userId || null,
+                          email: assignDraft?.email || "",
+                          display:
+                            assignDraft?.email ||
+                            (assignDraft?.userId
+                              ? `User #${assignDraft.userId}`
+                              : ""),
+                        }}
+                        onChange={(val) => setAssignDraft(val)}
+                      />
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAssignDraft({ userId: null, email: "" })
+                          }
+                          className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-xs text-[#5a4a3f] hover:bg-[#fcf9f4]"
+                        >
+                          Clear assignee
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs text-[#7a6a58]">
+                        Pick an existing user or type an email. If a user is
+                        selected, the email will be cleared.
+                      </p>
+                    </div>
+
+                    {/* Read-only stats */}
+                    <div className="sm:col-span-2 grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-lg border border-[#e8e5df] bg-[#fcf9f4] p-3">
+                        <div className="text-[#7a6a58]">Redemptions</div>
+                        <div className="text-[#5a4a3f] font-semibold">
+                          {voucherTarget?.redemptionCount ?? 0} /{" "}
+                          {voucherTarget?.maxRedemptions ?? "∞"}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-[#e8e5df] bg-[#fcf9f4] p-3">
+                        <div className="text-[#7a6a58]">Assigned to</div>
+                        <div className="text-[#5a4a3f] font-semibold">
+                          {voucherTarget?.assignedToEmail ||
+                            (voucherTarget?.assignedToUserId
+                              ? `User #${voucherTarget.assignedToUserId}`
+                              : "—")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 border-t border-[#eee9df] bg-[#fcf9f4] rounded-b-2xl flex justify-between gap-3">
+                  <button
+                    onClick={deleteVoucherFromModal}
+                    className="inline-flex items-center gap-2 rounded-lg border border-[#f3dfdb] bg-white px-4 py-2 text-sm text-[#7a4a4a] hover:bg-[#fff6f6]"
+                  >
+                    <Trash2 className="w-4 h-4" /> Delete
+                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setVoucherOpen(false)}
+                      className="rounded-lg border border-[#e8e5df] px-4 py-2 text-sm text-[#5a4a3f] hover:bg-[#f6f2ea]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={saveVoucher}
+                      disabled={savingVoucher}
+                      className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
+                        savingVoucher
+                          ? "bg-gray-300 cursor-not-allowed"
+                          : "bg-[#8b6f47] hover:bg-[#7a5f3a]"
+                      }`}
+                    >
+                      {savingVoucher ? (
+                        <span className="inline-flex items-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Saving…
+                        </span>
+                      ) : (
+                        "Save changes"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

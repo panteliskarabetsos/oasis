@@ -140,20 +140,6 @@ export async function POST(req, ctx) {
     }
   }
 
-  // 5) Reuse existing open Stripe session if present
-  if (draft.status === "checkout" && draft.stripeSessionId) {
-    try {
-      const existing = await stripe.checkout.sessions.retrieve(
-        draft.stripeSessionId
-      );
-      if (existing && existing.status === "open" && existing.url) {
-        return ok({ url: existing.url, reused: true });
-      }
-    } catch (e) {
-      console.warn("[checkout] failed to reuse session", e?.message);
-    }
-  }
-
   // 6) Build base line items (before discount)
   const currency = "eur";
   const base = [];
