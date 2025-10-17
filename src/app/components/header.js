@@ -275,7 +275,7 @@ function PublicHeader() {
         Skip to content
       </a>
 
-      <div className="mx-auto max-w-6xl px-6 py-3 flex items-center justify-between">
+      <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
         {/* Brand */}
         <button
           onClick={() => go("/")}

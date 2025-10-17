@@ -22,8 +22,13 @@ import {
   Search,
   Mail,
   User2,
+  Clipboard,
+  UserPlus,
+  UserMinus,
+  UserCog,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
+import { Fragment } from "react";
 
 function UserAssign({ value, onChange }) {
   const [query, setQuery] = useState(value?.display || value?.email || "");
@@ -263,6 +268,136 @@ export default function PromotionsPage() {
   const [codes, setCodes] = useState([]);
   const [vouchers, setVouchers] = useState([]);
   const [tab, setTab] = useState("campaigns");
+  // state for inline reassign UI
+  const [editingAssigneeFor, setEditingAssigneeFor] = useState(null);
+  const [assigneeDraft, setAssigneeDraft] = useState(null);
+
+  function startReassign(v) {
+    setEditingAssigneeFor(v.id);
+    setAssigneeDraft({
+      userId: v.assignedToUserId || null,
+      email: v.assignedToEmail || "",
+      display:
+        v.assignedToEmail ||
+        (v.assignedToUserId ? `User #${v.assignedToUserId}` : ""),
+    });
+  }
+  function cancelReassign() {
+    setEditingAssigneeFor(null);
+    setAssigneeDraft(null);
+  }
+
+  async function saveReassign(v) {
+    try {
+      const patch = {
+        assignedToUserId: assigneeDraft?.userId
+          ? Number(assigneeDraft.userId)
+          : null,
+        assignedToEmail: assigneeDraft?.userId
+          ? null
+          : assigneeDraft?.email || null,
+      };
+      // optimistic
+      setVouchers((prev) =>
+        prev.map((x) => (x.id === v.id ? { ...x, ...patch } : x))
+      );
+      const res = await fetch(`/api/admin/promotions/vouchers/${v.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error("Failed to assign");
+      cancelReassign();
+    } catch (e) {
+      console.error(e);
+      alert("Failed to update assignment");
+      reload?.();
+    }
+  }
+
+  async function toggleVoucherActive(v) {
+    try {
+      const next = !v.active;
+      // optimistic
+      setVouchers((prev) =>
+        prev.map((x) => (x.id === v.id ? { ...x, active: next } : x))
+      );
+      const res = await fetch(`/api/admin/promotions/vouchers/${v.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: next }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (e) {
+      // revert
+      setVouchers((prev) =>
+        prev.map((x) => (x.id === v.id ? { ...x, active: v.active } : x))
+      );
+      alert("Failed to update status");
+    }
+  }
+
+  async function deleteVoucher(v) {
+    if (!confirm(`Delete voucher ${v.code}? This cannot be undone.`)) return;
+    try {
+      // optimistic
+      const prev = vouchers;
+      setVouchers((xs) => xs.filter((x) => x.id !== v.id));
+      const res = await fetch(`/api/admin/promotions/vouchers/${v.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (e) {
+      console.error(e);
+      alert("Failed to delete voucher");
+      reload?.();
+    }
+  }
+
+  async function unassignVoucher(v) {
+    try {
+      // optimistic
+      setVouchers((prev) =>
+        prev.map((x) =>
+          x.id === v.id
+            ? { ...x, assignedToUserId: null, assignedToEmail: null }
+            : x
+        )
+      );
+      const res = await fetch(`/api/admin/promotions/vouchers/${v.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedToUserId: null, assignedToEmail: null }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (e) {
+      console.error(e);
+      alert("Failed to unassign");
+      reload?.();
+    }
+  }
+
+  function copyVoucherCode(v) {
+    const text = v.code || "";
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => toast?.success?.("Copied") || console.log("copied"),
+        () => fallbackCopy(text)
+      );
+    } else {
+      fallbackCopy(text);
+    }
+  }
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } catch {}
+    document.body.removeChild(ta);
+  }
 
   // forms state
   const [campaignForm, setCampaignForm] = useState({
@@ -808,8 +943,7 @@ export default function PromotionsPage() {
     );
   }
 
-  // icon button
-  function IconButton({ title, onClick, kind = "edit" }) {
+  function IconButton({ title, onClick, kind = "copy" }) {
     const cls =
       "inline-flex items-center justify-center rounded-lg border border-[#e8e5df] bg-white p-2 text-[#5a4a3f] hover:bg-[#fcf9f4]";
     const icon =
@@ -819,8 +953,14 @@ export default function PromotionsPage() {
         <Power className="h-4 w-4" />
       ) : kind === "off" ? (
         <PowerOff className="h-4 w-4" />
+      ) : kind === "userplus" ? (
+        <UserPlus className="h-4 w-4" />
+      ) : kind === "usermin" ? (
+        <UserMinus className="h-4 w-4" />
+      ) : kind === "usercog" ? (
+        <UserCog className="h-4 w-4" />
       ) : (
-        <Pencil className="h-4 w-4" />
+        <Clipboard className="h-4 w-4" />
       );
     return (
       <button
@@ -1746,31 +1886,127 @@ export default function PromotionsPage() {
                         <th className="px-2 py-1">Redemptions</th>
                         <th className="px-2 py-1">Active</th>
                         <th className="px-2 py-1">Period</th>
+                        <th className="px-2 py-1 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {vouchers.map((v) => (
-                        <tr key={v.id} className="border-t border-[#f0ece6]">
-                          <td className="px-2 py-1 font-mono">{v.code}</td>
-                          <td className="px-2 py-1">
-                            {v.assignedToUserId || v.assignedToEmail || "—"}
-                          </td>
-                          <td className="px-2 py-1">{v.discountType}</td>
-                          <td className="px-2 py-1">
-                            {v.discountType === "percent"
-                              ? `${v.discountValue}%`
-                              : `${v.discountValue} ${v.currency || ""}`}
-                          </td>
-                          <td className="px-2 py-1">
-                            {v.redemptionCount}/{v.maxRedemptions}
-                          </td>
-                          <td className="px-2 py-1">
-                            {v.active ? "Yes" : "No"}
-                          </td>
-                          <td className="px-2 py-1">
-                            {fmtDate(v.startsAt)} — {fmtDate(v.endsAt)}
-                          </td>
-                        </tr>
+                        <Fragment key={v.id}>
+                          <tr className="border-t border-[#f0ece6]">
+                            <td className="px-2 py-1 font-mono">{v.code}</td>
+                            <td className="px-2 py-1">
+                              {v.assignedToUserId
+                                ? `User #${v.assignedToUserId}${
+                                    v.assignedToEmail
+                                      ? ` (${v.assignedToEmail})`
+                                      : ""
+                                  }`
+                                : v.assignedToEmail || "—"}
+                            </td>
+                            <td className="px-2 py-1">{v.discountType}</td>
+                            <td className="px-2 py-1">
+                              {v.discountType === "percent"
+                                ? `${v.discountValue}%`
+                                : `${v.discountValue} ${v.currency || ""}`}
+                            </td>
+                            <td className="px-2 py-1">
+                              {v.redemptionCount}/{v.maxRedemptions}
+                            </td>
+                            <td className="px-2 py-1">
+                              <StatusPill ok={!!v.active} />
+                            </td>
+                            <td className="px-2 py-1">
+                              {fmtDate(v.startsAt)} — {fmtDate(v.endsAt)}
+                            </td>
+                            <td className="px-2 py-1">
+                              <div className="flex items-center justify-end gap-2">
+                                <IconButton
+                                  title="Copy code"
+                                  onClick={() => copyVoucherCode(v)}
+                                  kind="copy"
+                                />
+                                <IconButton
+                                  title={v.active ? "Deactivate" : "Activate"}
+                                  onClick={() => toggleVoucherActive(v)}
+                                  kind={v.active ? "off" : "on"}
+                                />
+
+                                {v.assignedToUserId || v.assignedToEmail ? (
+                                  <>
+                                    <IconButton
+                                      title="Reassign"
+                                      onClick={() => startReassign(v)}
+                                      kind="usercog"
+                                    />
+                                    <IconButton
+                                      title="Unassign"
+                                      onClick={() => unassignVoucher(v)}
+                                      kind="usermin"
+                                    />
+                                  </>
+                                ) : (
+                                  <IconButton
+                                    title="Assign"
+                                    onClick={() => startReassign(v)}
+                                    kind="userplus"
+                                  />
+                                )}
+
+                                <IconButton
+                                  title="Delete"
+                                  onClick={() => deleteVoucher(v)}
+                                  kind="delete"
+                                />
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Inline reassignment row */}
+                          {editingAssigneeFor === v.id && (
+                            <tr className="border-t border-[#f0ece6] bg-[#fcf9f4]">
+                              <td className="px-2 py-2" colSpan={8}>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                  <div className="flex-1">
+                                    <UserAssign
+                                      value={
+                                        assigneeDraft || {
+                                          userId: v.assignedToUserId || null,
+                                          email: v.assignedToEmail || "",
+                                          display:
+                                            v.assignedToEmail ||
+                                            (v.assignedToUserId
+                                              ? `User #${v.assignedToUserId}`
+                                              : ""),
+                                        }
+                                      }
+                                      onChange={(val) => setAssigneeDraft(val)}
+                                    />
+                                    <p className="mt-1 text-xs text-[#7a6a58]">
+                                      Pick an existing user or type an email. If
+                                      a user is selected, email will be cleared.
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => saveReassign(v)}
+                                      className="inline-flex items-center gap-2 rounded-xl bg-[#463a30] px-3 py-2 text-xs font-semibold text-white hover:bg-[#3c3027]"
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={cancelReassign}
+                                      className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-xs text-[#5a4a3f] hover:bg-[#fcf9f4]"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
