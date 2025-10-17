@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Link from "next/link";
+import { is } from "date-fns/locale";
 /* ------------------------------------------------------------------
    Visual refresh goals
    - Softer, more consistent cards and spacing
@@ -527,7 +528,6 @@ export default function ReservationsPage() {
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <StatPill label="Results" value={viewStats.total} />
           <StatPill label="Paid" value={viewStats.paid} tone="green" />
-
           <StatPill label="Pending" value={viewStats.pending} tone="amber" />
           <StatPill
             label="Revenue (view)"
@@ -982,8 +982,9 @@ export default function ReservationsPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </IconButton>
-                        {r.status !== "cancelled" && (
+                        {r.status !== "cancelled" && !isPrivateBooking(r) && (
                           <IconButton
+                            disabled={isPrivateBooking(r)}
                             onClick={() => openReschedule(r)}
                             title="Reschedule"
                             ariaLabel="Reschedule booking"

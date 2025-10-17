@@ -81,7 +81,7 @@ export default function ReservationDetailPage() {
     toDateInput(plusDays(new Date(), 60))
   );
   const [targetSlotId, setTargetSlotId] = useState("");
-
+  const [rev, setRev] = useState(0);
   useEffect(() => {
     if (!id) return;
     (async () => {
@@ -105,6 +105,30 @@ export default function ReservationDetailPage() {
       }
     })();
   }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch(`/api/admin/reservations/${id}`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!res.ok)
+          throw new Error(
+            (await res.json().catch(() => ({})))?.error || "Failed to load"
+          );
+        const { item } = await res.json();
+        setItem(normalizeBooking(item));
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [id, rev]);
 
   /* ------------------------------ actions ------------------------------ */
   async function cancelBooking() {
@@ -476,12 +500,12 @@ export default function ReservationDetailPage() {
               </div>
 
               <BookingPricingEditor
-                bookingId={id} // <- whatever your page uses for the booking id
+                bookingId={id}
                 onClose={() => setShowPricing(false)}
                 onSaved={(updated) => {
-                  // optional: reflect changes in your local UI if you keep a booking state
-                  // setBooking((b) => ({ ...b, ...updated }));
                   setShowPricing(false);
+
+                  setRev((v) => v + 1);
                 }}
               />
             </motion.div>

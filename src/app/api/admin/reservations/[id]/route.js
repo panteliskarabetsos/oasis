@@ -393,45 +393,69 @@ export async function DELETE(req, { params }) {
   if (auth.error) return auth.response;
   const supa = auth.admin;
 
-  const id = Number(params?.id);
-  if (!Number.isInteger(id) || id <= 0) return bad("Invalid id", 400);
+  const { id } = await params; // params is async
+  const rid = Number(Array.isArray(id) ? id[0] : id);
+  if (!Number.isInteger(rid) || rid <= 0) return bad("Invalid id", 400);
 
   const url = new URL(req.url);
   const force = url.searchParams.get("force") === "1";
 
   try {
-    // Check exists + status
-    const { data: b, error: fetchErr } = await supa
+    // 1) Try Booking
+    const { data: b, error: bErr } = await supa
       .from("Booking")
       .select("id, status")
-      .eq("id", id)
-      .single();
-    if (fetchErr) {
-      if (fetchErr.code === "PGRST116") return bad("Not found", 404);
-      throw fetchErr;
+      .eq("id", rid)
+      .maybeSingle(); // ← don't auto-404
+
+    if (bErr) throw bErr;
+
+    if (b?.id) {
+      if (!force && String(b.status).toLowerCase() !== "cancelled") {
+        return bad(
+          "Only cancelled bookings can be deleted. Cancel first or pass ?force=1.",
+          409
+        );
+      }
+
+      const { error: delErr } = await supa
+        .from("Booking")
+        .delete()
+        .eq("id", rid)
+        .single();
+      if (delErr) throw delErr;
+
+      return ok({ id: rid, deleted: true, source: "booking" });
     }
 
-    if (!force && b.status !== "cancelled") {
-      return bad(
-        "Only cancelled bookings can be deleted. Cancel first or pass ?force=1.",
-        409
-      );
+    // 2) Try BookingDraft (allow delete regardless of status)
+    const { data: d, error: dErr } = await supa
+      .from("BookingDraft")
+      .select("id")
+      .eq("id", rid)
+      .maybeSingle();
+
+    if (dErr) throw dErr;
+
+    if (d?.id) {
+      const { error: delDErr } = await supa
+        .from("BookingDraft")
+        .delete()
+        .eq("id", rid)
+        .single();
+      if (delDErr) throw delDErr;
+
+      return ok({ id: rid, deleted: true, source: "draft" });
     }
 
-    const { error: delErr } = await supa
-      .from("Booking")
-      .delete()
-      .eq("id", id)
-      .single(); // ensures at most one row
-
-    if (delErr) throw delErr;
-
-    return ok({ id, deleted: true });
+    // 3) Not found anywhere
+    return bad("Not found", 404);
   } catch (e) {
-    console.error(`/api/admin/reservations/${id} DELETE error`, e);
+    console.error(`/api/admin/reservations/${rid} DELETE error`, e);
     return bad(e?.message || "Failed to delete booking", 500);
   }
 }
+
 /* ---------------------------- helpers ---------------------------- */
 function isNum(v) {
   return typeof v === "number" && Number.isFinite(v);

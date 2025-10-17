@@ -73,8 +73,8 @@ export default function AdminHeader({ displayName = "Admin" }) {
                 icon={Compass}
               />
               <NavLink
-                href="/admin/reservations"
-                label="Reservations"
+                href="/admin/bookings"
+                label="Bookings"
                 icon={CalendarDays}
               />
               <NavLink href="/admin/users" label="Users" icon={Users} />

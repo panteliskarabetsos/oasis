@@ -12,6 +12,11 @@ import {
   ShieldCheck,
   ArrowLeft,
   ChevronRight,
+  Settings,
+  FileBarChart2,
+  Tag,
+  CreditCard,
+  ReceiptText,
 } from "lucide-react";
 
 export default function AdminDashboardPage() {
@@ -86,90 +91,139 @@ export default function AdminDashboardPage() {
             <ArrowLeft size={16} /> Back
           </button>
 
-          <span className="inline-flex items-center gap-2 text-xs rounded-full px-3 py-1 border border-[#e8e2d9] bg-[#f6f4f0] text-[#5a4a3f]">
-            <ShieldCheck size={14} /> Admin access
-          </span>
+          <div className="flex items-center gap-2">
+            {/* Smaller Help button + room for more buttons */}
+            <button
+              onClick={() => router.push("/admin/help")}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-[#fdfaf5] text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
+              title="Help & Support"
+            >
+              <LifeBuoy size={14} /> Help
+            </button>
+            {/* Extra top-right buttons (add your routes as needed) */}
+            <button
+              onClick={() => go("/admin/settings")}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-white/70 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
+              title="Settings"
+            >
+              <Settings size={14} /> Settings
+            </button>
+            <button
+              onClick={() => go("/admin/reports")}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-white/70 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
+              title="Reports & Analytics"
+            >
+              <FileBarChart2 size={14} /> Reports
+            </button>
+            <span className="inline-flex items-center gap-1.5 text-xs rounded-full px-3 py-1 border border-[#e8e2d9] bg-[#f6f4f0] text-[#5a4a3f]">
+              <ShieldCheck size={14} /> Admin
+            </span>
+          </div>
         </div>
 
-        {/* Hero */}
-        <header className="mb-10 lg:mb-14">
-          <h1 className="text-4xl md:text-5xl font-serif tracking-tight leading-tight text-[#5a4a3f]">
-            <span className="opacity-70">Welcome to</span>{" "}
-            <span className="bg-gradient-to-r from-[#8b6f47] to-[#a78b62] bg-clip-text text-transparent">
-              Admin Dashboard
-            </span>
+        {/* Header */}
+        <header className="mb-6 lg:mb-8">
+          <h1 className="text-3xl md:text-4xl font-serif tracking-tight leading-tight text-[#5a4a3f]">
+            Admin Dashboard
           </h1>
-          <p className="mt-3 text-[#7a6a5f] max-w-2xl">
-            Manage experiences, reservations, and users—everything you need to
-            keep Oasis running smoothly.
+          <p className="mt-2 text-[#7a6a5f] max-w-2xl text-sm md:text-base">
+            Manage experiences, reservations, users and more.
           </p>
         </header>
 
-        {/* Primary actions */}
-        <section className="grid gap-8 lg:gap-12 lg:grid-cols-[1.25fr_1fr] items-stretch mb-12">
-          {/* Left: Big action grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <ActionCard
-              icon={<Compass size={22} />}
-              title="Manage Experiences"
-              desc="Create, edit and delete curated experiences."
-              onClick={() => go("/admin/experiences")}
-            />
-            <ActionCard
-              icon={<CalendarDays size={22} />}
-              title="Manage Bookings"
-              desc="Review and organize client bookings."
-              onClick={() => go("/admin/bookings")}
-            />
-            <ActionCard
-              icon={<Users size={22} />}
-              title="Manage Clients"
-              desc="View and manage registered users."
-              onClick={() => go("/admin/users")}
-            />
-            <ActionCard
-              icon={<Clock size={22} />}
-              title="Manage Schedule"
-              desc="Review and organize experiences schedule."
-              onClick={() => go("/admin/schedule")}
-            />
-          </div>
-
-          {/* Right: Quick tips / helper */}
-          <aside className="bg-white/80 backdrop-blur-lg border border-[#e0dcd4] rounded-3xl shadow-xl p-6 lg:p-8 flex flex-col justify-between">
-            <div>
-              <h2 className="text-xl font-serif text-[#5a4a3f] mb-2">
-                Quick Tips
-              </h2>
-              <ul className="space-y-3 text-sm text-[#5a4a3f]">
-                <li className="flex items-start gap-2">
-                  <span className="mt-0.5 inline-block h-2 w-2 rounded-full bg-[#8b6f47]" />
-                  Use “Manage Experiences” to keep the catalog fresh.
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="mt-0.5 inline-block h-2 w-2 rounded-full bg-[#8b6f47]" />
-                  Confirm or cancel pending reservations promptly.
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="mt-0.5 inline-block h-2 w-2 rounded-full bg-[#8b6f47]" />
-                  Keep client profiles up to date for faster checkouts.
-                </li>
-              </ul>
-            </div>
-
-            <div className="mt-6 pt-6 border-t border-[#eee8df]">
-              <button
-                onClick={() => router.push("/admin/help")}
-                className="inline-flex items-center gap-2 rounded-full px-4 py-2 border border-[#d8cfc3] bg-[#fdfaf5] text-[#5a4a3f] hover:bg-[#f1ede7] transition"
-              >
-                <LifeBuoy size={18} /> Help & Support
-              </button>
-            </div>
-          </aside>
+        {/* Toolbar: compact quick actions row */}
+        <section className="mb-8 flex flex-wrap items-center gap-2">
+          <ToolbarButton
+            label="Experiences"
+            icon={<Compass size={16} />}
+            onClick={() => go("/admin/experiences")}
+          />
+          <ToolbarButton
+            label="Bookings"
+            icon={<CalendarDays size={16} />}
+            onClick={() => go("/admin/bookings")}
+          />
+          <ToolbarButton
+            label="Clients"
+            icon={<Users size={16} />}
+            onClick={() => go("/admin/users")}
+          />
+          <ToolbarButton
+            label="Schedule"
+            icon={<Clock size={16} />}
+            onClick={() => go("/admin/schedule")}
+          />
+          <ToolbarButton
+            label="Payments"
+            icon={<CreditCard size={16} />}
+            onClick={() => go("/admin/payments")}
+          />
+          <ToolbarButton
+            label="Invoices"
+            icon={<ReceiptText size={16} />}
+            onClick={() => go("/admin/invoices")}
+          />
+          <ToolbarButton
+            label="Promos"
+            icon={<Tag size={16} />}
+            onClick={() => go("/admin/promotions")}
+          />
         </section>
 
-        {/* Secondary: Shortcuts row */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {/* Action tiles grid – compact to fit more */}
+        <section className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <ActionTile
+            icon={<Compass size={20} />}
+            title="Manage Experiences"
+            desc="Create, edit and publish experiences."
+            onClick={() => go("/admin/experiences")}
+          />
+          <ActionTile
+            icon={<CalendarDays size={20} />}
+            title="Manage Bookings"
+            desc="Review, confirm or cancel reservations."
+            onClick={() => go("/admin/bookings")}
+          />
+          <ActionTile
+            icon={<Users size={20} />}
+            title="Manage Clients"
+            desc="View, edit and segment users."
+            onClick={() => go("/admin/users")}
+          />
+          <ActionTile
+            icon={<Clock size={20} />}
+            title="Manage Schedule"
+            desc="Availability and slots."
+            onClick={() => go("/admin/schedule")}
+          />
+          <ActionTile
+            icon={<CreditCard size={20} />}
+            title="Payments"
+            desc="Capture, refunds, reconciliation."
+            onClick={() => go("/admin/payments")}
+          />
+          <ActionTile
+            icon={<ReceiptText size={20} />}
+            title="Invoices"
+            desc="Download and send invoices."
+            onClick={() => go("/admin/invoices")}
+          />
+          <ActionTile
+            icon={<Tag size={20} />}
+            title="Promotions"
+            desc="Discount codes and campaigns."
+            onClick={() => go("/admin/promotions")}
+          />
+          <ActionTile
+            icon={<Settings size={20} />}
+            title="Settings"
+            desc="Brand, email, access control."
+            onClick={() => go("/admin/settings")}
+          />
+        </section>
+
+        {/* Secondary shortcuts */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Shortcut
             label="Manage Administrators"
             onClick={() => go("/admin/accounts")}
@@ -184,6 +238,27 @@ export default function AdminDashboardPage() {
           />
           <Shortcut label="All Users" onClick={() => go("/admin/users")} />
         </section>
+
+        {/* Tips card moved under, stays compact; Help already on top-right */}
+        <aside className="mt-8 bg-white/80 backdrop-blur-lg border border-[#e0dcd4] rounded-2xl shadow-xl p-5">
+          <h2 className="text-base font-semibold text-[#5a4a3f] mb-2">
+            Quick Tips
+          </h2>
+          <ul className="space-y-2 text-sm text-[#5a4a3f]">
+            <li className="flex items-start gap-2">
+              <span className="mt-1 inline-block h-2 w-2 rounded-full bg-[#8b6f47]" />
+              Keep the experiences catalog fresh.
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-1 inline-block h-2 w-2 rounded-full bg-[#8b6f47]" />
+              Confirm or cancel pending reservations promptly.
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-1 inline-block h-2 w-2 rounded-full bg-[#8b6f47]" />
+              Keep client profiles up to date for faster checkouts.
+            </li>
+          </ul>
+        </aside>
       </div>
     </div>
   );
@@ -191,29 +266,41 @@ export default function AdminDashboardPage() {
 
 /* ---------------------------- Components ---------------------------- */
 
-function ActionCard({ icon, title, desc, onClick }) {
+function ActionTile({ icon, title, desc, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="group text-left rounded-2xl bg-[#fdfaf7] border border-[#d8cfc3] p-6 lg:p-7 shadow-lg transition-all hover:shadow-2xl hover:-translate-y-0.5 hover:bg-[#8b6f47] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47]"
+      className="group text-left rounded-xl bg-[#fdfaf7] border border-[#d8cfc3] p-5 shadow-md transition-all hover:shadow-lg hover:-translate-y-0.5 hover:bg-[#8b6f47] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47]"
     >
-      <div className="flex items-start gap-4">
-        <div className="shrink-0 h-10 w-10 rounded-xl border border-[#e0dcd4] bg-white/70 backdrop-blur flex items-center justify-center group-hover:bg-white/20 group-hover:text-white">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 h-9 w-9 rounded-lg border border-[#e0dcd4] bg-white/70 backdrop-blur flex items-center justify-center group-hover:bg-white/20 group-hover:text-white">
           {icon}
         </div>
         <div className="min-w-0">
-          <h3 className="text-lg font-semibold text-[#5a4a3f] group-hover:text-white">
+          <h3 className="text-base font-semibold text-[#5a4a3f] group-hover:text-white">
             {title}
           </h3>
-          <p className="mt-1 text-sm text-[#7a6a5f] group-hover:text-white/90">
+          <p className="mt-0.5 text-xs text-[#7a6a5f] group-hover:text-white/90">
             {desc}
           </p>
         </div>
         <ChevronRight
           className="ml-auto opacity-50 group-hover:opacity-100"
-          size={18}
+          size={16}
         />
       </div>
+    </button>
+  );
+}
+
+function ToolbarButton({ label, icon, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1.5 text-xs text-[#5a4a3f] hover:bg-[#f1ede7] transition"
+    >
+      {icon}
+      <span className="font-medium">{label}</span>
     </button>
   );
 }
@@ -236,9 +323,9 @@ function Skeleton() {
       <div className="mx-auto px-6 py-10 max-w-6xl xl:max-w-7xl">
         <div className="h-5 w-28 bg-[#e8e2d9] rounded mb-4" />
         <div className="h-10 w-72 bg-[#e8e2d9] rounded mb-8" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-36 bg-[#e8e2d9] rounded-2xl" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-28 bg-[#e8e2d9] rounded-xl" />
           ))}
         </div>
       </div>
