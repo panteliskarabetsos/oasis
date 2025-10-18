@@ -1,7 +1,7 @@
 // src/app/booking/[id]/confirmation/page.js
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import {
   CalendarDays,
@@ -29,12 +29,12 @@ export default function BookingConfirmationPage() {
   const [slot, setSlot] = useState(null);
   const [error, setError] = useState("");
   const [tries, setTries] = useState(0);
-
+  const timerRef = useRef(null);
   // NEW: store real booking code and DB status once we have them
   const [bookingCode, setBookingCode] = useState("");
   const [bookingDbStatus, setBookingDbStatus] = useState("");
   const [confirmedBookingId, setConfirmedBookingId] = useState(null);
-
+  const [confirming, setConfirming] = useState(false);
   // Utilities
   const deriveFallbackCode = (id) =>
     id ? `BK-${String(id).padStart(6, "0")}` : "";
@@ -66,43 +66,96 @@ export default function BookingConfirmationPage() {
     return deriveFallbackCode(id);
   }
 
-  // Fetch draft + related info; poll until converted (or shortly after pay)
+  useEffect(() => {
+    const pi = qs.get("payment_intent");
+    const sid = qs.get("session_id");
+
+    if (!Number.isFinite(draftId) || draftId <= 0) return;
+    if (!pi && !sid) return; // no identifiers → nothing to confirm
+
+    let alive = true;
+
+    (async () => {
+      try {
+        setConfirming(true);
+        setError("");
+        const res = await fetch(`/api/bookings/drafts/${draftId}/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            payment_intent: pi || undefined,
+            session_id: sid || undefined,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!alive) return;
+
+        if (!res.ok && res.status !== 202) {
+          throw new Error(data?.error || "Could not finalize booking");
+        }
+
+        // If converted right now, capture & stop early
+        if (data?.converted && data?.bookingId) {
+          setConfirmedBookingId(data.bookingId);
+          if (data.bookingCode) setBookingCode(data.bookingCode);
+        } else {
+          // otherwise we'll poll below
+        }
+      } catch (e) {
+        if (alive) setError(e.message || "Finalization failed");
+      } finally {
+        if (alive) setConfirming(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [draftId, qs]);
+
+  // 2) Fetch draft + related info; poll until converted (or shortly after pay)
   useEffect(() => {
     let alive = true;
+    const controller = new AbortController();
 
     async function load() {
       try {
         setLoading(true);
         const res = await fetch(`/api/bookings/drafts/${draftId}`, {
           cache: "no-store",
+          signal: controller.signal,
         });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error(j?.error || "Could not load booking");
-        }
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j?.error || "Could not load booking");
 
-        const data = await res.json();
         if (!alive) return;
 
-        const d = data?.draft || data; // support both {draft: {...}} and plain draft
+        const d = j?.draft || j; // support both {draft: {...}} and plain draft
         setDraft(d);
-        setExperience(data?.experience || d?.experience || null);
-        setSlot(data?.slot || d?.slot || null);
+        setExperience(j?.experience || d?.experience || null);
+        setSlot(j?.slot || d?.slot || null);
         setError("");
 
-        // If already converted, capture booking id and code (server or fallback)
         const convertedId = Number(d?.convertedBookingId) || null;
-        if (convertedId && !bookingCode) {
-          setConfirmedBookingId(convertedId);
-          const code = await tryFetchBookingCode(convertedId);
-          if (alive) setBookingCode(code);
+        const status = String(d?.status || "").toLowerCase();
+        const converted = !!convertedId || status === "converted";
+
+        if (converted) {
+          if (convertedId && !confirmedBookingId)
+            setConfirmedBookingId(convertedId);
+          if (convertedId && !bookingCode) {
+            const code = await tryFetchBookingCode(convertedId);
+            if (alive && code) setBookingCode(code);
+          }
+          return; // stop polling
         }
 
-        // keep polling while not finalized
-        const status = String(d?.status || "").toLowerCase();
-        const converted = !!d?.convertedBookingId || status === "converted";
-        if (!converted && tries < 12) {
-          setTimeout(() => setTries((t) => t + 1), 4000); // ~48s total
+        // keep polling while not finalized (up to ~48s)
+        if (tries < 12) {
+          timerRef.current = window.setTimeout(() => {
+            if (alive) setTries((t) => t + 1);
+          }, 4000);
         }
       } catch (e) {
         if (!alive) return;
@@ -113,8 +166,11 @@ export default function BookingConfirmationPage() {
     }
 
     if (Number.isFinite(draftId) && draftId > 0) load();
+
     return () => {
       alive = false;
+      controller.abort();
+      if (timerRef.current) window.clearTimeout(timerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, tries]);

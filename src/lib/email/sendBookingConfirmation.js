@@ -1,49 +1,34 @@
 // src/lib/email/sendBookingConfirmation.js
-// Sends a booking confirmation email (via Resend) and provides an HTML renderer.
-// Usage in your confirm route:
-//   import sendBookingConfirmation, { renderConfirmationHtml } from "@/lib/email/sendBookingConfirmation";
-//   await sendBookingConfirmation({ to, draft, session, experience: exp, slot });
-
+// Gmail (Nodemailer) version. Keeps the same call shape.
 import "server-only";
-import { Resend } from "resend";
 import { format } from "date-fns";
+import { getTransporter } from "./mailer";
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const EMAIL_FROM = process.env.EMAIL_FROM || "Bookings <no-reply@example.com>";
+const EMAIL_FROM = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 
-const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
-
-/**
- * Send a booking confirmation email.
- * @param {Object} opts
- * @param {string|string[]} [opts.to]                 - Recipient email(s). If omitted, tries draft.primary_contact.email then session.customer_details.email.
- * @param {Object} opts.draft                         - BookingDraft row (expects id, counts, primary_contact, experienceId, scheduleSlotId, unitPriceAdult/Kid, totalAmount).
- * @param {Object} opts.session                       - Stripe Checkout Session (expects amount_total, currency, id, payment_intent, customer_details.email).
- * @param {Object|null} [opts.experience]             - { name, location } (optional, will render if provided).
- * @param {Object|null} [opts.slot]                   - { date | startAt | start } (optional; used to render date/time).
- * @param {string} [opts.subject]                     - Optional custom subject line.
- * @returns {Promise<{sent?:boolean, skipped?:boolean, id?:string, error?:string}>}
- */
-export default async function sendBookingConfirmation(opts) {
+export default async function sendBookingConfirmation(opts = {}) {
   const {
+    to,
     draft,
     session,
     experience = null,
     slot = null,
+    bookingCode,
+    bookingId,
     subject: customSubject,
-  } = opts || {};
+  } = opts;
 
   if (!draft || !session) {
     return { skipped: true, error: "missing-draft-or-session" };
   }
 
-  // Resolve recipient
-  const resolvedTo = normalizeRecipients(
-    opts?.to ||
+  const recipients = normalizeRecipients(
+    to ||
       draft?.primary_contact?.email ||
-      session?.customer_details?.email
+      session?.customer_details?.email ||
+      session?.customer_email
   );
-  if (!resolvedTo.length) {
+  if (!recipients.length) {
     console.warn("[email] No recipient; skipping send");
     return { skipped: true, error: "no-recipient" };
   }
@@ -56,13 +41,31 @@ export default async function sendBookingConfirmation(opts) {
   const dateLabel = d ? format(d, "PPP") : "";
   const timeLabel = d ? format(d, "p") : "";
 
-  // Email pieces
+  // Amount & currency
+  const currency = String(
+    session?.currency || draft?.currency || "eur"
+  ).toUpperCase();
+
+  const amount =
+    typeof session?.amount_total === "number"
+      ? session.amount_total / 100
+      : Number(draft?.totalAmount ?? 0);
+
+  const amountLabel = new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency,
+  }).format(Number(amount || 0));
+
+  const reference =
+    bookingCode ||
+    (bookingId ? `BK-${String(bookingId).padStart(6, "0")}` : null) ||
+    (draft?.id ? `DRAFT-${String(draft.id).padStart(6, "0")}` : null);
+
   const subj =
     customSubject ||
     `Your booking is confirmed — ${experience?.name || "Reservation"}`;
+
   const attendees = deriveAttendeesFromDraft(draft, adults, kids);
-  const amount = (session?.amount_total ?? draft?.totalAmount ?? 0) / 100;
-  const currency = (session?.currency || "eur").toUpperCase();
 
   const html = renderConfirmationHtml({
     experienceName: experience?.name,
@@ -70,57 +73,46 @@ export default async function sendBookingConfirmation(opts) {
     dateLabel,
     timeLabel,
     attendees,
-    amount,
+    amountLabel,
     currency,
-    bookingRef: String(draft?.id ?? ""),
+    bookingRef: reference,
   });
+
   const text = renderTextFallback({
     experienceName: experience?.name,
     location: experience?.location,
     dateLabel,
     timeLabel,
     attendees,
-    amount,
+    amountLabel,
     currency,
-    bookingRef: String(draft?.id ?? ""),
+    bookingRef: reference,
   });
 
-  // Send
-  if (!resend) {
-    console.warn("[email] RESEND_API_KEY not set; logging preview instead.", {
-      to: resolvedTo,
+  try {
+    const transporter = getTransporter();
+    const info = await transporter.sendMail({
+      from: EMAIL_FROM,
+      to: recipients,
       subject: subj,
+      html,
+      text,
     });
-    console.info("[email][preview][text]\n" + text);
-    return { skipped: true, error: "no-api-key" };
+    return { sent: true, id: info?.messageId };
+  } catch (e) {
+    console.error("[email] Gmail send error:", e?.message);
+    return { sent: false, error: e?.message || "send-failed" };
   }
-
-  const result = await resend.emails.send({
-    from: EMAIL_FROM,
-    to: resolvedTo,
-    subject: subj,
-    html,
-    text,
-  });
-
-  if (result?.error) {
-    console.error("[email] send error", result.error);
-    return {
-      sent: false,
-      error: String(result.error?.message || result.error),
-    };
-  }
-  return { sent: true, id: result?.data?.id };
 }
 
-/** Render HTML body for confirmation email */
+/** --------- renderers (same as before, using preformatted amountLabel) --------- */
 export function renderConfirmationHtml({
   experienceName,
   location,
   dateLabel,
   timeLabel,
   attendees = [],
-  amount,
+  amountLabel,
   currency = "EUR",
   bookingRef,
 }) {
@@ -128,11 +120,14 @@ export function renderConfirmationHtml({
     ? attendees
         .map(
           (a, i) =>
-            `<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${
-              i + 1
-            }</td><td style="padding:6px 8px;border-bottom:1px solid #eee">${escapeHtml(
-              a?.name || "Guest"
-            )}</td></tr>`
+            `<tr>
+              <td style="padding:6px 8px;border-bottom:1px solid #eee">${
+                i + 1
+              }</td>
+              <td style="padding:6px 8px;border-bottom:1px solid #eee">${escapeHtml(
+                a?.name || "Guest"
+              )}</td>
+            </tr>`
         )
         .join("")
     : `<tr><td colspan="2" style="padding:8px 8px;color:#6b665d">No attendee names on file</td></tr>`;
@@ -140,9 +135,13 @@ export function renderConfirmationHtml({
   return `
   <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#2b2a28">
     <h2 style="margin:0 0 8px;font-size:18px">Booking confirmed</h2>
-    <p style="margin:0 0 16px;color:#6b665d">Thank you for your reservation$${
-      experienceName ? ` at <strong>${escapeHtml(experienceName)}</strong>` : ""
-    }.</p>
+    <p style="margin:0 0 16px;color:#6b665d">
+      Thank you for your reservation${
+        experienceName
+          ? ` at <strong>${escapeHtml(experienceName)}</strong>`
+          : ""
+      }.
+    </p>
 
     <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:#faf7f2;border:1px solid #efeae1;border-radius:12px;padding:12px">
       ${experienceName ? row("Experience", experienceName) : ""}
@@ -152,11 +151,7 @@ export function renderConfirmationHtml({
           ? row("Date", `${dateLabel}${timeLabel ? `, ${timeLabel}` : ""}`)
           : ""
       }
-      ${
-        amount != null
-          ? row("Total", `€${Number(amount).toFixed(2)} ${currency}`)
-          : ""
-      }
+      ${amountLabel ? row("Total", amountLabel) : ""}
       ${bookingRef ? row("Reference", bookingRef) : ""}
     </table>
 
@@ -181,7 +176,7 @@ function renderTextFallback({
   dateLabel,
   timeLabel,
   attendees = [],
-  amount,
+  amountLabel,
   currency = "EUR",
   bookingRef,
 }) {
@@ -192,7 +187,7 @@ function renderTextFallback({
     attendees?.length
       ? `Attendees: ${attendees.map((a) => a.name).join(", ")}`
       : "",
-    amount != null ? `Total: €${Number(amount).toFixed(2)} ${currency}` : "",
+    amountLabel ? `Total: ${amountLabel}` : "",
     bookingRef ? `Reference: ${bookingRef}` : "",
     "",
     "Thank you for your booking!",
@@ -200,7 +195,7 @@ function renderTextFallback({
   return lines.filter(Boolean).join("\n");
 }
 
-// ---------- helpers ----------
+/** ---------- small helpers ---------- */
 function row(label, value) {
   return `<tr><td style="padding:6px 8px"><strong>${escapeHtml(
     label
@@ -208,16 +203,16 @@ function row(label, value) {
     value || ""
   )}</td></tr>`;
 }
-
 function escapeHtml(s = "") {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
-
 function normalizeRecipients(to) {
   if (!to) return [];
   return Array.isArray(to) ? to.filter(Boolean) : [to];
 }
-
 function normalizeCounts(c = {}) {
   const n = (v) => (v == null ? 0 : Number(v) || 0);
   return {
@@ -234,10 +229,8 @@ function normalizeCounts(c = {}) {
     ),
   };
 }
-
 function deriveAttendeesFromDraft(draft, adults, kids) {
-  // Prefer named attendees if present
-  const arrs = [
+  const arrays = [
     draft?.attendees,
     draft?.guests,
     draft?.participants,
@@ -245,7 +238,7 @@ function deriveAttendeesFromDraft(draft, adults, kids) {
     draft?.slot?.attendees,
   ].filter(Array.isArray);
 
-  for (const arr of arrs) {
+  for (const arr of arrays) {
     if (arr.length) {
       if (typeof arr[0] === "string")
         return arr.map((name) => ({ name: String(name) }));
@@ -260,11 +253,9 @@ function deriveAttendeesFromDraft(draft, adults, kids) {
     }
   }
 
-  // Fallback to synthetic rows from counts
   const rows = [];
   for (let i = 0; i < adults; i++) rows.push({ name: `Adult ${i + 1}` });
   for (let i = 0; i < kids; i++) rows.push({ name: `Kid ${i + 1}` });
   return rows;
 }
-
 export { deriveAttendeesFromDraft };

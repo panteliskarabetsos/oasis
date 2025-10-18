@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import Stripe from "stripe";
 import { format } from "date-fns";
-import sendBookingConfirmation from "@/lib/email/sendConfirmationEmail";
+import sendBookingConfirmation from "@/lib/email/sendBookingConfirmation";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -15,29 +15,24 @@ const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 export async function POST(req, ctx) {
   const { id } = await ctx.params;
   const draftId = Number(id);
-  const url = new URL(req.url);
-  const sessionId = url.searchParams.get("session_id") || "";
-
   if (!Number.isFinite(draftId) || draftId <= 0) return bad("Invalid draft id");
-  if (!sessionId) return bad("Missing session_id");
+
+  // Accept both querystring AND JSON body
+  const url = new URL(req.url);
+  const qsSessionId = url.searchParams.get("session_id") || "";
+  const qsPI = url.searchParams.get("payment_intent") || "";
+  const body = (await req.json().catch(() => ({}))) || {};
+  const sessionId = body.session_id || qsSessionId;
+  const payment_intent = body.payment_intent || qsPI;
+
+  if (!sessionId && !payment_intent) {
+    return bad("Missing session_id or payment_intent");
+  }
 
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
 
-  // --- Stripe live/test guard
-  const key = process.env.STRIPE_SECRET_KEY || "";
-  const isTestKey = key.startsWith("sk_test_");
-  const isLiveKey = key.startsWith("sk_live_");
-  const isLiveSession = sessionId.startsWith("cs_live_");
-  const isTestSession = sessionId.startsWith("cs_test_");
-  if ((isLiveSession && !isLiveKey) || (isTestSession && !isTestKey)) {
-    return bad(
-      "Stripe mode mismatch: session_id and secret key don't match",
-      400
-    );
-  }
-
-  // --- Load draft
+  // Load draft
   const { data: draft, error: dErr } = await admin
     .from("BookingDraft")
     .select(
@@ -45,7 +40,7 @@ export async function POST(req, ctx) {
       id, status, counts, attendees, experienceId, scheduleSlotId,
       primary_contact, "unitPriceAdult", "unitPriceKid",
       "totalAmount", "stripeSessionId", "stripePaymentIntentId",
-      "convertedBookingId"
+      "convertedBookingId", currency
     `
     )
     .eq("id", draftId)
@@ -53,248 +48,272 @@ export async function POST(req, ctx) {
 
   if (dErr || !draft) return bad("Draft not found", 404);
 
+  // Already converted?
   if (draft.convertedBookingId) {
-    const bookingRow = await getBookingRow(admin, draft.convertedBookingId);
-    const bookingCode = deriveBookingCode(bookingRow);
     return ok({
-      status: bookingRow?.status || "Paid",
-      already: true,
+      converted: true,
       bookingId: draft.convertedBookingId,
-      bookingCode,
+      already: true,
     });
   }
 
-  // --- Retrieve Stripe session
+  const key = process.env.STRIPE_SECRET_KEY || "";
+  if (!key) return bad("Stripe not configured", 500);
   const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
-  let session;
-  try {
-    session = await stripe.checkout.sessions.retrieve(sessionId, {
+
+  // ----- Verify payment (handle both flows) -----
+  let paid = false;
+  let paidCents = 0;
+  let currency = (draft.currency || "eur").toLowerCase();
+  let stripeSessionId = draft.stripeSessionId || null;
+  let stripePaymentIntentId = draft.stripePaymentIntentId || null;
+  let emailForReceipt = draft?.primary_contact?.email || null;
+
+  // Keep references for later (email rendering)
+  let checkoutSession = null;
+  let intent = null;
+
+  if (sessionId) {
+    const s = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["payment_intent", "customer_details"],
     });
-  } catch (e) {
-    console.error("[confirm] retrieve session error:", e?.message);
-    return bad("Invalid session_id", 400);
+    checkoutSession = s;
+
+    stripeSessionId = s.id;
+    emailForReceipt =
+      emailForReceipt ||
+      s?.customer_details?.email ||
+      s?.customer_email ||
+      null;
+
+    paid =
+      s?.payment_status === "paid" ||
+      (s?.status === "complete" && s?.payment_intent?.status === "succeeded");
+    if (!paid) return ok({ status: "pending" }, 202);
+
+    paidCents = typeof s.amount_total === "number" ? s.amount_total : 0;
+    currency = (s.currency || currency).toLowerCase();
+    stripePaymentIntentId =
+      typeof s.payment_intent === "string"
+        ? s.payment_intent
+        : s.payment_intent?.id || stripePaymentIntentId;
+  } else if (payment_intent) {
+    const pi = await stripe.paymentIntents.retrieve(payment_intent);
+    intent = pi;
+
+    stripePaymentIntentId = pi.id;
+    emailForReceipt = emailForReceipt || pi?.receipt_email || null;
+    paid = pi.status === "succeeded" || pi.status === "processing";
+    if (!paid) return ok({ status: "pending" }, 202);
+
+    paidCents =
+      typeof pi.amount_received === "number"
+        ? pi.amount_received
+        : pi.amount || 0;
+    currency = (pi.currency || currency).toLowerCase();
   }
 
-  if (
-    session?.metadata?.draft_id &&
-    String(session.metadata.draft_id) !== String(draftId)
-  ) {
-    console.warn("[confirm] warning: session draft_id != route draftId", {
-      sessionDraftId: session.metadata.draft_id,
-      routeDraftId: draftId,
-    });
-  }
-
-  const paid =
-    session?.payment_status === "paid" ||
-    (session?.status === "complete" &&
-      session?.payment_intent?.status === "succeeded");
-
-  if (!paid) return ok({ status: "pending" }, 202);
-
-  const paymentIntentId =
-    typeof session.payment_intent === "string"
-      ? session.payment_intent
-      : session.payment_intent?.id || null;
-
-  // --- Mark draft as paid & store session ids
+  // Mark draft as paid (intermediate), store Stripe ids
   const nowIso = new Date().toISOString();
-  const baseUpdate = { status: "paid", updatedAt: nowIso };
-  let upd = await admin
+  await admin
     .from("BookingDraft")
     .update({
-      ...baseUpdate,
-      stripeSessionId: draft.stripeSessionId || session.id,
-      stripePaymentIntentId: paymentIntentId,
+      status: "paid",
+      updatedAt: nowIso,
+      stripeSessionId: stripeSessionId || null,
+      stripePaymentIntentId: stripePaymentIntentId || null,
+      totalAmount: paidCents / 100,
     })
     .eq("id", draftId);
 
-  if (upd.error) {
-    if (String(upd.error.code) === "42703") {
-      await admin.from("BookingDraft").update(baseUpdate).eq("id", draftId);
-    } else {
-      console.error("[confirm] update error", upd.error);
-      return bad("Could not mark draft as paid", 500);
-    }
+  // ----- Idempotency: reuse existing Booking if already created for these Stripe ids -----
+  let bookingId = null;
+  if (stripePaymentIntentId) {
+    const { data: bByPI } = await admin
+      .from("Booking")
+      .select("id")
+      .eq("stripePaymentIntentId", stripePaymentIntentId)
+      .maybeSingle();
+    bookingId = bByPI?.id || bookingId;
+  }
+  if (!bookingId && stripeSessionId) {
+    const { data: bByCS } = await admin
+      .from("Booking")
+      .select("id")
+      .eq("stripeSessionId", stripeSessionId)
+      .maybeSingle();
+    bookingId = bByCS?.id || bookingId;
   }
 
-  // --- Resolve/ensure correct user by email (never fall back to a random id)
-  const ensuredUserId = await ensureDraftUserId(admin, draft, session);
-  if (!ensuredUserId) {
-    console.error("[confirm] no valid User found/created to attach booking");
-    return ok({ status: "Paid", pending: true }, 202);
-  }
+  // Compute booking snapshot
+  const A = Number(draft.counts?.adults || 0);
+  const K = Number(draft.counts?.kids || 0);
+  const numberOfPeople = A + K;
+  const unitKid = draft.unitPriceKid ?? draft.unitPriceAdult;
 
-  // Sync primary_contact.userId on the draft
-  if (Number(draft?.primary_contact?.userId) !== ensuredUserId) {
-    const newPrimary = {
-      ...(draft.primary_contact || {}),
-      userId: ensuredUserId,
-    };
-    await admin
-      .from("BookingDraft")
-      .update({ primary_contact: newPrimary })
-      .eq("id", draftId);
-    draft.primary_contact = newPrimary;
-  }
+  const { data: slot } = await admin
+    .from("ScheduleSlot")
+    .select("date")
+    .eq("id", draft.scheduleSlotId)
+    .maybeSingle();
 
-  // --- Finalize to real Booking (DB-side capacity + idempotency)
-  const { data: bookingId, error: rpcErr } = await admin.rpc(
-    "finalize_booking",
-    {
-      p_draft_id: draftId,
-    }
+  // (Optional) resolve/attach a user to the booking
+  const ensuredUserId = await ensureDraftUserId(
+    admin,
+    draft,
+    checkoutSession || intent
   );
-  if (rpcErr || !bookingId) {
-    console.error("[confirm] finalize_booking error", rpcErr);
-    return ok({ status: "Paid", pending: true }, 202);
+
+  // ----- Insert booking if missing -----
+  if (!bookingId) {
+    const ins = await admin
+      .from("Booking")
+      .insert({
+        userId: ensuredUserId ?? null, // optional
+        scheduleSlotId: draft.scheduleSlotId,
+        experienceId: draft.experienceId,
+        status: "paid", // <- you wanted "paid"
+        numberOfPeople,
+        counts: draft.counts,
+        attendees: Array.isArray(draft.attendees) ? draft.attendees : [],
+        adultsCount: A || null,
+        kidsCount: K || null,
+        unitPriceAdult: draft.unitPriceAdult ?? null,
+        unitPriceKid: unitKid ?? null,
+        totalPaidAmount: (paidCents || 0) / 100,
+        currency: currency,
+        primary_contact: draft.primary_contact ?? null,
+        stripeSessionId: stripeSessionId || null,
+        stripePaymentIntentId: stripePaymentIntentId || null,
+        startTime: slot?.date || null,
+      })
+      .select("id")
+      .single();
+
+    if (ins.error) {
+      // race: try fetch by stripe ids again
+      const ref = stripePaymentIntentId
+        ? await admin
+            .from("Booking")
+            .select("id")
+            .eq("stripePaymentIntentId", stripePaymentIntentId)
+            .maybeSingle()
+        : stripeSessionId
+        ? await admin
+            .from("Booking")
+            .select("id")
+            .eq("stripeSessionId", stripeSessionId)
+            .maybeSingle()
+        : { data: null };
+      bookingId = ref?.data?.id || null;
+      if (!bookingId) {
+        console.error("[confirm] insert Booking failed", ins.error);
+        return ok({ status: "Paid", pending: true }, 202);
+      }
+    } else {
+      bookingId = ins.data.id;
+    }
+  } else if (ensuredUserId) {
+    // If we found an existing booking, we can still backfill userId once.
+    await admin
+      .from("Booking")
+      .update({ userId: ensuredUserId })
+      .eq("id", bookingId);
   }
 
-  // --- Patch Booking with identity + snapshots + payment info; force "Paid"
-
-  // --- Patch Booking with identity + snapshots + payment info; force "Paid"
-  try {
-    const A = Number(draft.counts?.adults || 0);
-    const K = Number(draft.counts?.kids || 0);
-    const numberOfPeople = A + K;
-
-    const { amount: paidAmount, currency } = extractPaidAmountAndCurrency(
-      session,
-      draft?.totalAmount
-    );
-
-    const paymentIntentId =
-      typeof session.payment_intent === "string"
-        ? session.payment_intent
-        : session.payment_intent?.id || null;
-
-    // Rich patch first (covers most schemas)
-    const fullPatch = {
-      userId: ensuredUserId,
-
-      // snapshots
-      counts: draft.counts,
-      attendees: Array.isArray(draft.attendees) ? draft.attendees : [],
-      adultsCount: A,
-      kidsCount: K,
-      unitPriceAdult: draft.unitPriceAdult ?? null,
-      unitPriceKid: draft.unitPriceKid ?? draft.unitPriceAdult ?? null,
-      primary_contact: draft.primary_contact ?? null,
-      numberOfPeople,
-
-      // payment
-      totalPaidAmount: paidAmount, // <-- WRITE IT HERE (0 is valid)
-      currency,
-      stripeSessionId: session.id,
-      stripePaymentIntentId: paymentIntentId,
-
-      status: "Paid",
+  // ----- Flip draft → converted and link booking -----
+  const upd2 = await admin
+    .from("BookingDraft")
+    .update({
+      status: "converted",
+      convertedBookingId: bookingId,
       updatedAt: nowIso,
-    };
+      stripeSessionId,
+      stripePaymentIntentId,
+      totalAmount: (paidCents || 0) / 100,
+    })
+    .eq("id", draftId);
 
-    let upd1 = await admin
+  if (upd2.error) {
+    console.error("[confirm] failed to set converted", upd2.error);
+  }
+
+  // Fetch booking row to derive a human code (if your schema has one)
+  const bookingRow = await getBookingRow(admin, bookingId);
+  const bookingCode =
+    deriveBookingCode(bookingRow) || `BK-${String(bookingId).padStart(6, "0")}`;
+
+  // Fetch Experience + Slot for email contents
+  const [{ data: expRow }, { data: slotRow }] = await Promise.all([
+    admin
+      .from("Experience")
+      .select("name,location")
+      .eq("id", draft.experienceId)
+      .maybeSingle(),
+    admin
+      .from("ScheduleSlot")
+      .select("date")
+      .eq("id", draft.scheduleSlotId)
+      .maybeSingle(),
+  ]);
+
+  // ----- Send confirmation email (idempotent) -----
+  try {
+    const { data: b } = await admin
       .from("Booking")
-      .update(fullPatch)
-      .eq("id", bookingId);
-
-    if (upd1.error && String(upd1.error.code) === "42703") {
-      // Minimal fallback if some columns don't exist in your schema
-      await admin
-        .from("Booking")
-        .update({
-          userId: ensuredUserId,
-          totalPaidAmount: paidAmount,
-          currency,
-          stripeSessionId: session.id,
-          stripePaymentIntentId: paymentIntentId,
-          status: "Paid",
-          updatedAt: nowIso,
-        })
-        .eq("id", bookingId);
-    } else if (upd1.error) {
-      console.error("[confirm] booking patch error", upd1.error);
-    }
-
-    // VERIFY the write and self-heal once if needed
-    const { data: verify } = await admin
-      .from("Booking")
-      .select(
-        "id,totalPaidAmount,currency,status,stripeSessionId,stripePaymentIntentId"
-      )
+      .select('id, "confirmationEmailSentAt"')
       .eq("id", bookingId)
       .maybeSingle();
 
-    const needsRepair =
-      !verify ||
-      (paidAmount != null &&
-        Number(verify.totalPaidAmount ?? NaN) !== Number(paidAmount)) ||
-      (verify?.currency || "").toUpperCase() !== currency ||
-      verify?.status !== "Paid" ||
-      !verify?.stripeSessionId ||
-      !verify?.stripePaymentIntentId;
+    if (!b?.confirmationEmailSentAt) {
+      // Choose best recipient
+      const toEmail =
+        emailForReceipt ||
+        checkoutSession?.customer_details?.email ||
+        checkoutSession?.customer_email ||
+        intent?.receipt_email ||
+        null;
 
-    if (needsRepair) {
-      await admin
-        .from("Booking")
-        .update({
-          totalPaidAmount: paidAmount,
-          currency,
-          status: "Paid",
-          stripeSessionId: session.id,
-          stripePaymentIntentId: paymentIntentId,
-          updatedAt: nowIso,
-        })
-        .eq("id", bookingId);
-    }
-  } catch (e) {
-    console.error("[confirm] booking patch failed", e?.message);
-  }
+      // Provide a "session-like" object if we don't have checkoutSession
+      const sessionLike =
+        checkoutSession &&
+        checkoutSession.amount_total != null &&
+        checkoutSession.currency
+          ? checkoutSession
+          : {
+              amount_total: paidCents,
+              currency: (currency || "EUR").toLowerCase(),
+            };
 
-  // --- Ensure the draft is marked converted and linked (if RPC didn’t)
-  try {
-    await admin
-      .from("BookingDraft")
-      .update({ status: "converted", convertedBookingId: bookingId })
-      .eq("id", draftId);
-  } catch (_) {}
-
-  // --- Load booking row to get the proper CODE/REFERENCE for display
-  const bookingRow = await getBookingRow(admin, bookingId);
-  const bookingCode = deriveBookingCode(bookingRow);
-
-  // --- Send confirmation email (best effort)
-  let emailed = false;
-  try {
-    const { to, subject, html, text } = await buildConfirmationEmailPayload(
-      admin,
-      {
-        draftId,
-        bookingId,
+      const sendRes = await sendBookingConfirmation({
+        to: toEmail,
+        draft, // BookingDraft row
+        session: sessionLike, // used only to format totals/currency
+        experience: expRow || null,
+        slot: slotRow || null,
         bookingCode,
-        experienceId: draft.experienceId,
-        scheduleSlotId: draft.scheduleSlotId,
-      },
-      session
-    );
-    if (to) {
-      await sendBookingConfirmation({ to, subject, html, text });
-      emailed = true;
-      const emailUpd = await admin
-        .from("BookingDraft")
-        .update({ emailSentAt: new Date().toISOString() })
-        .eq("id", draftId);
-      if (emailUpd.error && String(emailUpd.error.code) === "42703") {
-        console.warn("[confirm] emailSentAt column missing; skipping");
+        bookingId,
+      });
+      console.log("[confirm] email result:", sendRes);
+
+      if (sendRes?.sent) {
+        const stamp = await admin
+          .from("Booking")
+          .update({ confirmationEmailSentAt: new Date().toISOString() })
+          .eq("id", bookingId);
+
+        if (stamp.error && String(stamp.error.code) === "42703") {
+          console.warn(
+            "[confirm] confirmationEmailSentAt column missing; skipping timestamp"
+          );
+        }
       }
-    } else {
-      console.warn("[confirm] no email recipient found; skipping send");
     }
   } catch (e) {
-    console.error("[confirm] email send failed", e?.message);
+    console.error("[confirm] confirmation email failed:", e?.message);
   }
 
-  return ok({ status: "Paid", bookingId, bookingCode, emailed });
+  return ok({ converted: true, bookingId, bookingCode });
 }
 
 /* ---------------------------- helpers ---------------------------- */

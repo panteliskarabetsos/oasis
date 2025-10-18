@@ -84,12 +84,12 @@ export default function AdminDashboardPage() {
       <div className="relative mx-auto px-6 py-8 lg:py-12 max-w-6xl xl:max-w-7xl 2xl:max-w-[88rem]">
         {/* Top bar */}
         <div className="mb-6 flex items-center justify-between">
-          <button
+          {/* <button
             onClick={() => router.back()}
             className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#d8cfc3] px-4 py-2 rounded-full hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm"
           >
             <ArrowLeft size={16} /> Back
-          </button>
+          </button> */}
 
           <div className="flex items-center gap-2">
             {/* Smaller Help button + room for more buttons */}

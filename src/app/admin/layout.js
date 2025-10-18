@@ -17,6 +17,9 @@ export default async function AdminLayout({ children }) {
   } = await supa.auth.getUser();
 
   if (!user) redirect("/");
+  const isTest = (
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
+  ).startsWith("pk_test_");
 
   const { data: row } = await supa
     .from("User")
@@ -45,7 +48,14 @@ export default async function AdminLayout({ children }) {
       </a>
 
       <AdminHeader displayName={displayName} />
-
+      {isTest && (
+        <div className="mx-auto max-w-7xl px-6">
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 text-xs">
+            Stripe is in <strong>TEST MODE</strong>. Use test cards only;
+            charges are not real.
+          </div>
+        </div>
+      )}
       <main id="admin-content" className="relative mx-auto px-6 py-6 max-w-7xl">
         {children}
       </main>

@@ -19,6 +19,18 @@ import {
 import { format, parseISO } from "date-fns";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { loadStripe } from "@stripe/stripe-js";
+import {
+  Elements,
+  PaymentElement,
+  LinkAuthenticationElement,
+  useStripe,
+  useElements,
+} from "@stripe/react-stripe-js";
+
+const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
+);
 
 export default function PaymentPage() {
   const { id } = useParams();
@@ -42,6 +54,8 @@ export default function PaymentPage() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
   const [promo, setPromo] = useState(null); // { code, discountType, discountValue, currency, endsAt? }
+  const [clientSecret, setClientSecret] = useState("");
+  const [piInfo, setPiInfo] = useState({ amountCents: 0, currency: "eur" });
 
   useEffect(() => {
     if (!Number.isFinite(draftId) || draftId <= 0) {
@@ -312,6 +326,42 @@ export default function PaymentPage() {
     }
   }
 
+  useEffect(() => {
+    (async () => {
+      if (!Number.isFinite(draftId) || draftId <= 0) return;
+      try {
+        const res = await fetch(`/api/bookings/drafts/${draftId}/checkout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "elements",
+            promoCode: promo?.code ?? null,
+          }),
+        });
+        const data = await res.json();
+
+        // If already confirmed or paid, the server may respond 409 + redirectUrl
+        if (res.status === 409 && data?.redirectUrl) {
+          window.location.replace(data.redirectUrl);
+          return;
+        }
+
+        if (!res.ok || !data?.clientSecret) {
+          throw new Error(data?.error || "Failed to initialize payment.");
+        }
+
+        setClientSecret(data.clientSecret);
+        setPiInfo({
+          amountCents: data.amountCents || 0,
+          currency: (data.currency || "eur").toLowerCase(),
+        });
+      } catch (e) {
+        setError(e.message || "Could not initialize payment.");
+      }
+    })();
+    // re-init when promo changes
+  }, [draftId, promo?.code]);
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
       {/* Top bar / breadcrumbs */}
@@ -513,41 +563,43 @@ export default function PaymentPage() {
                   card
                 </h3>
                 <p className="text-xs text-[#7a6a58] mt-1">
-                  You’ll be redirected to Stripe to complete your payment
-                  securely.
+                  Secure, on-page payment via Stripe. We never store your card
+                  details.
                 </p>
 
-                <button
-                  onClick={handlePay}
-                  disabled={submitting || breakdown.finalTotalRaw <= 0}
-                  className={`mt-6 w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40 focus:ring-offset-2
-    ${
-      submitting || breakdown.finalTotalRaw < 0
-        ? "bg-gray-300 text-white cursor-not-allowed"
-        : "bg-gradient-to-b from-[#8b6f47] to-[#7a5f3a] text-white hover:from-[#7f643f] hover:to-[#6a5233]"
-    }
-  `}
-                  aria-busy={submitting}
-                  aria-disabled={submitting || breakdown.finalTotalRaw < 0}
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Redirecting…
-                    </>
-                  ) : (
-                    <>
-                      Pay now{" "}
-                      {breakdown.finalTotalRaw >= 0 && (
-                        <span className="text-base opacity-80">
-                          · {breakdown.finalTotal}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </button>
+                {!clientSecret ? (
+                  <div className="mt-6 text-sm text-[#7a6a58] flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Initializing
+                    payment…
+                  </div>
+                ) : (
+                  <Elements
+                    stripe={stripePromise}
+                    options={{
+                      clientSecret,
+                      appearance: {
+                        theme: "stripe",
+                        variables: {
+                          colorPrimary: "#8b6f47",
+                          colorText: "#2f2f2f",
+                          colorDanger: "#b14545",
+                          borderRadius: "10px",
+                        },
+                      },
+                    }}
+                  >
+                    <CheckoutForm
+                      draftId={draftId}
+                      amountLabel={new Intl.NumberFormat("el-GR", {
+                        style: "currency",
+                        currency: (piInfo.currency || "eur").toUpperCase(),
+                      }).format((piInfo.amountCents || 0) / 100)}
+                      onError={(msg) => setError(msg)}
+                    />
+                  </Elements>
+                )}
 
-                {/* Promo code */}
+                {/* Promo code (unchanged) */}
                 <div className="mt-6">
                   <button
                     type="button"
@@ -584,11 +636,11 @@ export default function PaymentPage() {
                           onClick={applyPromo}
                           disabled={promoLoading || !promoInput.trim()}
                           className={`rounded-lg px-4 py-2 text-sm font-semibold transition
-            ${
-              promoLoading || !promoInput.trim()
-                ? "bg-gray-300 text-white cursor-not-allowed"
-                : "bg-[#8b6f47] text-white hover:bg-[#7a5f3a]"
-            }`}
+                ${
+                  promoLoading || !promoInput.trim()
+                    ? "bg-gray-300 text-white cursor-not-allowed"
+                    : "bg-[#8b6f47] text-white hover:bg-[#7a5f3a]"
+                }`}
                         >
                           {promoLoading ? "Checking…" : "Apply"}
                         </button>
@@ -636,7 +688,7 @@ export default function PaymentPage() {
                 </div>
               </div>
 
-              {/* Small info note */}
+              {/* Small info note (unchanged) */}
               <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-4 shadow-sm text-xs text-[#7a6a58]">
                 <div className="flex items-start gap-2">
                   <Info className="h-4 w-4 text-[#8b6f47] mt-0.5" />
@@ -872,5 +924,76 @@ function Skeleton() {
         </div>
       </div>
     </div>
+  );
+}
+
+function CheckoutForm({ draftId, amountLabel, onError }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [email, setEmail] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+
+    setProcessing(true);
+    setMessage("");
+    onError?.("");
+
+    const { error: submitErr } = await elements.submit();
+    if (submitErr) {
+      setProcessing(false);
+      setMessage(submitErr.message || "Please check your details.");
+      onError?.(submitErr.message || "Submit error");
+      return;
+    }
+
+    const { error } = await stripe.confirmPayment({
+      elements,
+      confirmParams: {
+        return_url: `${window.location.origin}/booking/${draftId}/confirmation`,
+        receipt_email: email || undefined,
+      },
+    });
+
+    if (error) {
+      setMessage(error.message || "Payment failed. Try again.");
+      onError?.(error.message || "Payment failed");
+      setProcessing(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+      <LinkAuthenticationElement
+        onChange={(e) => setEmail(e?.value?.email || "")}
+        options={{ defaultValues: { email } }}
+      />
+      <PaymentElement />
+      <button
+        type="submit"
+        disabled={processing || !stripe || !elements}
+        className={`w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md
+          ${
+            processing
+              ? "bg-gray-300 text-white cursor-not-allowed"
+              : "bg-gradient-to-b from-[#8b6f47] to-[#7a5f3a] text-white hover:from-[#7f643f] hover:to-[#6a5233]"
+          }
+        `}
+      >
+        {processing ? (
+          <>
+            <Loader2 className="w-5 h-5 animate-spin" /> Processing…
+          </>
+        ) : (
+          <>Pay {amountLabel}</>
+        )}
+      </button>
+      {message ? (
+        <p className="text-[12px] text-[#b14545] mt-1">{message}</p>
+      ) : null}
+    </form>
   );
 }
