@@ -4,6 +4,7 @@ import Footer from "./components/footer";
 import { RouteLoader } from "./components/RouteLoader";
 import SessionWrapper from "./components/SessionWrapper";
 import PromoBannerGate from "./components/PromoBannerGate";
+import FooterGate from "./components/FooterGate";
 import { Toaster } from "react-hot-toast";
 export const metadata = {
   title: "Oasis – Agrotourism & Wellness",
@@ -22,14 +23,16 @@ export default function RootLayout({ children }) {
           type="text/javascript"
         ></script>
       </head>
-      <body className="flex min-h-screen flex-col  bg-[#f4f1ec] text-[#2f2f2f] antialiased">
+      <body className="flex min-h-screen flex-col bg-[#f4f1ec] text-[#2f2f2f] antialiased">
         <SessionWrapper>
           <RouteLoader>
             <Header />
             <PromoBannerGate />
             <Toaster position="top-right" />
             <main className="flex-1">{children}</main>
-            <Footer />
+            <FooterGate>
+              <Footer />
+            </FooterGate>
           </RouteLoader>
         </SessionWrapper>
       </body>

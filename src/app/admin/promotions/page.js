@@ -1015,12 +1015,23 @@ export default function PromotionsPage() {
           </button>
         ))}
       </div>
-      <button
-        onClick={reload}
-        className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-white px-3 py-1.5 text-sm text-[#5a4a3f] shadow-sm"
-      >
-        <RefreshCw className="h-4 w-4" /> Refresh
-      </button>
+
+      <div className="flex items-center gap-2">
+        <Link
+          href="/admin/promotions/email"
+          className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-[#5a4a3f] px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-95"
+        >
+          <Plus className="h-4 w-4" />
+          New email campaign
+        </Link>
+
+        <button
+          onClick={reload}
+          className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-white px-3 py-1.5 text-sm text-[#5a4a3f] shadow-sm"
+        >
+          <RefreshCw className="h-4 w-4" /> Refresh
+        </button>
+      </div>
     </div>
   );
 
