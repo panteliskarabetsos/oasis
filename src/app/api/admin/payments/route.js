@@ -8,15 +8,120 @@ import { NextResponse } from "next/server";
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
+/* ----------------------------- helpers ----------------------------- */
+const asId = (x) =>
+  typeof x === "string" ? x : x && typeof x === "object" && x.id ? x.id : null;
+
+const asObj = (x) => (x && typeof x === "object" ? x : null);
+
+const getChargeObj = (pi) => asObj(pi?.latest_charge) || null;
+
+const getCardFromPI = (pi, ch) =>
+  ch?.payment_method_details?.card ||
+  pi?.charges?.data?.[0]?.payment_method_details?.card ||
+  null;
+
+const getCustomerEmailFromPI = (pi, ch) => {
+  const cust = asObj(pi?.customer);
+  if (cust?.email) return cust.email;
+  // receipt_email at PI level (rare on Checkout, but just in case)
+  if (pi?.receipt_email) return pi.receipt_email;
+  return ch?.billing_details?.email || null;
+};
+
+const getCustomerNameFromPI = (pi, ch) => {
+  const cust = asObj(pi?.customer);
+  if (cust?.name) return cust.name;
+  return ch?.billing_details?.name || null;
+};
+
+const cents = (v) => (typeof v === "number" ? v : null);
+
+/* ------------------------------ mappers ----------------------------- */
+function mapPI(pi) {
+  const ch = getChargeObj(pi);
+  const card = getCardFromPI(pi, ch);
+
+  return {
+    id: pi.id,
+    created: pi.created, // unix seconds
+    status: pi.status, // 'succeeded' | 'requires_payment_method' | ...
+    amount: cents(pi.amount), // intended amount in cents
+    amount_received: cents(pi.amount_received), // captured amount in cents
+    currency: pi.currency, // e.g. 'eur'
+
+    customer: {
+      id: asId(pi.customer), // string | null
+      email: getCustomerEmailFromPI(pi, ch), // string | null
+      name: getCustomerNameFromPI(pi, ch), // string | null
+    },
+
+    method: ch?.payment_method_details?.type || "card",
+    card_brand: card?.brand || null,
+    card_last4: card?.last4 || null,
+
+    latest_charge: asId(pi.latest_charge), // string | null
+    receipt_url: ch?.receipt_url || null,
+
+    metadata: pi.metadata || {},
+
+    refunds:
+      ch?.refunds?.data?.map((r) => ({
+        id: r.id,
+        amount: cents(r.amount),
+        status: r.status,
+        created: r.created,
+      })) || [],
+  };
+}
+
+function mapCharge(c) {
+  const cust = asObj(c.customer);
+  const card = c.payment_method_details?.card || null;
+
+  return {
+    id: c.payment_intent || c.id, // prefer PI id; fall back to charge id
+    created: c.created, // unix seconds
+    status: c.status, // charge status
+    amount: cents(c.amount),
+    amount_received: cents(c.amount_captured ?? c.amount),
+    currency: c.currency,
+
+    customer: {
+      id: asId(c.customer),
+      email: c.billing_details?.email || cust?.email || null,
+      name: c.billing_details?.name || cust?.name || null,
+    },
+
+    method: c.payment_method_details?.type || "card",
+    card_brand: card?.brand || null,
+    card_last4: card?.last4 || null,
+
+    latest_charge: c.id,
+    receipt_url: c.receipt_url || null,
+
+    metadata: c.metadata || {},
+
+    refunds:
+      c.refunds?.data?.map((r) => ({
+        id: r.id,
+        amount: cents(r.amount),
+        status: r.status,
+        created: r.created,
+      })) || [],
+  };
+}
+
+/* -------------------------------- route ----------------------------- */
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
-    const q = (searchParams.get("q") || "").trim();
-    const status = searchParams.get("status") || "any";
+    const q = (searchParams.get("q") || "").trim(); // free-text for Search API
+    const status = searchParams.get("status") || "any"; // e.g. 'succeeded', 'processing', 'requires_payment_method', 'any'
     const date_from = searchParams.get("date_from"); // YYYY-MM-DD
     const date_to = searchParams.get("date_to"); // YYYY-MM-DD
     const starting_after = searchParams.get("starting_after") || undefined;
-    const stripe_account = searchParams.get("stripe_account") || undefined; // optional Connect acct_
+    const stripe_account = searchParams.get("stripe_account") || undefined; // Connect acct_*
 
     const key = process.env.STRIPE_SECRET_KEY || "";
     if (!key)
@@ -25,7 +130,7 @@ export async function GET(req) {
     const Stripe = (await import("stripe")).default;
     const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
 
-    // Build created range only if user provided dates
+    // Build created range (only if provided)
     let created;
     if (date_from || date_to) {
       const gte = date_from
@@ -37,16 +142,17 @@ export async function GET(req) {
       created = { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) };
     }
 
-    // Options for Connect (if used)
+    // Connect request options (platform vs connected account)
     const opt = stripe_account ? { stripeAccount: stripe_account } : undefined;
 
-    // ---- Primary: PaymentIntents ----
+    // ---- Primary: PaymentIntents (search or list) ----
     let out;
     if (q) {
-      // Search API (note: has slight read-after-write delay)
+      // Search API — note slight read-after-write delay
       const clauses = [`"${q}"`];
       if (status !== "any") clauses.push(`status:"${status}"`);
       const query = clauses.join(" AND ");
+
       out = await stripe.paymentIntents.search(
         {
           query,
@@ -62,7 +168,7 @@ export async function GET(req) {
     } else {
       const listParams = {
         limit: 50,
-        ...(created ? { created } : {}), // only apply date if provided
+        ...(created ? { created } : {}),
         ...(starting_after ? { starting_after } : {}),
         expand: [
           "data.customer",
@@ -70,25 +176,49 @@ export async function GET(req) {
           "data.latest_charge.refunds",
         ],
       };
+
       out = await stripe.paymentIntents.list(listParams, opt);
-      if (status !== "any")
+
+      // Optional client-side filter by status (Stripe list doesn't filter by status directly)
+      if (status !== "any") {
         out.data = out.data.filter((pi) => pi.status === status);
+      }
     }
 
-    let items = out.data.map(mapPI);
+    // Map results (resilient to unexpected shapes)
+    let items = out.data
+      .map((pi) => {
+        try {
+          return mapPI(pi);
+        } catch (e) {
+          console.error("[payments:list] mapPI error for", pi?.id, e);
+          return null;
+        }
+      })
+      .filter(Boolean);
 
-    // ---- Fallback: Charges (older flows / edge cases) ----
+    // ---- Fallback: Charges (older flows / non-PI payments) ----
     if (!q && items.length === 0) {
-      const listChargesParams = {
+      const chargesParams = {
         limit: 50,
         ...(created ? { created } : {}),
         ...(starting_after ? { starting_after } : {}),
         expand: ["data.refunds", "data.balance_transaction", "data.customer"],
       };
-      const charges = await stripe.charges.list(listChargesParams, opt);
-      items = charges.data.map(mapCharge);
+      const charges = await stripe.charges.list(chargesParams, opt);
+      const chargeItems = charges.data
+        .map((c) => {
+          try {
+            return mapCharge(c);
+          } catch (e) {
+            console.error("[payments:list] mapCharge error for", c?.id, e);
+            return null;
+          }
+        })
+        .filter(Boolean);
+
       return ok({
-        items,
+        items: chargeItems,
         has_more: charges.has_more,
         next_cursor:
           charges.has_more && charges.data.length
@@ -98,6 +228,7 @@ export async function GET(req) {
       });
     }
 
+    // ---- Normal PaymentIntent response ----
     return ok({
       items,
       has_more: out.has_more,
@@ -108,80 +239,8 @@ export async function GET(req) {
       source: "payment_intents",
     });
   } catch (e) {
-    // Bubble up a helpful error message for UI
     const msg = e?.raw?.message || e?.message || "Failed to list payments";
     console.error("[payments:list] error:", e);
     return bad(msg, 500);
   }
-}
-
-function mapPI(pi) {
-  const ch = typeof pi.latest_charge === "object" ? pi.latest_charge : null;
-  const card =
-    ch?.payment_method_details?.card ||
-    pi.charges?.data?.[0]?.payment_method_details?.card;
-  return {
-    id: pi.id,
-    created: pi.created,
-    status: pi.status,
-    amount: pi.amount ?? null,
-    amount_received: pi.amount_received ?? null,
-    currency: pi.currency,
-    customer: {
-      id: typeof pi.customer === "object" ? pi.customer.id : pi.customer,
-      email:
-        (typeof pi.customer === "object" ? pi.customer.email : null) ||
-        ch?.billing_details?.email ||
-        null,
-      name:
-        (typeof pi.customer === "object" ? pi.customer.name : null) ||
-        ch?.billing_details?.name ||
-        null,
-    },
-    method: ch?.payment_method_details?.type || "card",
-    card_brand: card?.brand || null,
-    card_last4: card?.last4 || null,
-    latest_charge: ch?.id || null,
-    metadata: pi.metadata || {},
-    refunds:
-      ch?.refunds?.data?.map((r) => ({
-        id: r.id,
-        amount: r.amount,
-        status: r.status,
-        created: r.created,
-      })) || [],
-  };
-}
-
-function mapCharge(c) {
-  const card = c.payment_method_details?.card;
-  return {
-    id: c.payment_intent || c.id,
-    created: c.created,
-    status: c.status, // charge status
-    amount: c.amount,
-    amount_received: c.amount_captured || c.amount,
-    currency: c.currency,
-    customer: {
-      id: typeof c.customer === "object" ? c.customer.id : c.customer,
-      email:
-        c.billing_details?.email ||
-        (typeof c.customer === "object" ? c.customer.email : null),
-      name:
-        c.billing_details?.name ||
-        (typeof c.customer === "object" ? c.customer.name : null),
-    },
-    method: c.payment_method_details?.type || "card",
-    card_brand: card?.brand || null,
-    card_last4: card?.last4 || null,
-    latest_charge: c.id,
-    metadata: c.metadata || {},
-    refunds:
-      c.refunds?.data?.map((r) => ({
-        id: r.id,
-        amount: r.amount,
-        status: r.status,
-        created: r.created,
-      })) || [],
-  };
 }

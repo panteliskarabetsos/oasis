@@ -241,6 +241,44 @@ export default function BookingConfirmationPage() {
   const lineKid = K * unit.kid;
   const total = lineAdult + lineTeen + lineKid;
 
+  // Prefer totals coming from the API if present (so discounts can be reflected)
+  const apiPricing = draft?.pricing || null;
+  /**
+   * Expectation if you add it on the API:
+   * draft.pricing = {
+   *   subtotal: number,
+   *   discountAmount: number,     // positive value (e.g. 12.50)
+   *   discountLabel: string,      // e.g. "SUMMER10 (−10%)"
+   *   total: number               // subtotal - discountAmount
+   * }
+   */
+  const subtotal = Number(apiPricing?.subtotal ?? total);
+
+  // Try to detect a discount even if no pricing object is present:
+  // - If API exposes total after discount (e.g. draft.totalAmountFinal), prefer it
+  // - Else if it only has totalAmount (may be before discount), fall back to subtotal
+  const apiTotalMaybeFinal = Number.isFinite(Number(draft?.totalAmountFinal))
+    ? Number(draft.totalAmountFinal)
+    : Number.isFinite(Number(draft?.totalAmount))
+    ? Number(draft.totalAmount)
+    : subtotal;
+
+  // If the API gave us an explicit discount, use it.
+  // Otherwise infer it as the difference between subtotal and apiTotalMaybeFinal (clamped ≥ 0).
+  const discountAmount = Number(
+    apiPricing?.discountAmount ?? Math.max(0, subtotal - apiTotalMaybeFinal)
+  );
+
+  // Label for the discount line
+  const discountLabel =
+    apiPricing?.discountLabel ||
+    (draft?.appliedPromoCode
+      ? `Promo code ${draft.appliedPromoCode}`
+      : "Discount");
+
+  // Final total to display
+  const finalTotal = Number(apiPricing?.total ?? subtotal - discountAmount);
+
   const durationMinutes = Number(draft?.durationMinutes || 90);
 
   function eur(n) {
@@ -470,6 +508,7 @@ export default function BookingConfirmationPage() {
                 </div>
 
                 {/* Price breakdown */}
+                {/* Price breakdown */}
                 <div className="mt-4 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner">
                   <div className="space-y-1 text-sm text-[#5a4a3f]">
                     {A > 0 && (
@@ -497,10 +536,27 @@ export default function BookingConfirmationPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* Subtotal */}
+                  <div className="mt-3 flex items-center justify-between text-sm text-[#5a4a3f]">
+                    <span className="opacity-80">Subtotal</span>
+                    <span className="font-medium">{eur(subtotal)}</span>
+                  </div>
+
+                  {/* Discount (only if > 0) */}
+                  {discountAmount > 0 && (
+                    <div className="mt-1 flex items-center justify-between text-sm text-[#5a4a3f]">
+                      <span className="opacity-80">{discountLabel}</span>
+                      <span className="font-medium">
+                        −{eur(discountAmount)}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="mt-3 border-t border-[#e5e0d8] pt-3 flex items-center justify-between">
                     <span className="text-sm text-[#5a4a3f]">Total</span>
                     <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                      {eur(total)}
+                      {eur(finalTotal)}
                     </span>
                   </div>
                 </div>
