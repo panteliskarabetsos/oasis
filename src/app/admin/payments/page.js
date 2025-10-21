@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -183,7 +184,6 @@ export default function PaymentsPage() {
     return `${f} → ${t}`;
   }, [dateFrom, dateTo]);
 
-  // Map API item → row for table
   function mapToRow(p) {
     const amountReceived =
       typeof p.amount_received === "number" ? p.amount_received : 0;
@@ -191,20 +191,24 @@ export default function PaymentsPage() {
       ? p.refunds.reduce((s, r) => s + (r.amount || 0), 0)
       : 0;
 
-    // derive refund statuses for display
     let displayStatus = p.status;
-    if (amountReceived > 0 && refundsTotal >= amountReceived) {
+    if (amountReceived > 0 && refundsTotal >= amountReceived)
       displayStatus = "refunded";
-    } else if (refundsTotal > 0 && refundsTotal < amountReceived) {
+    else if (refundsTotal > 0 && refundsTotal < amountReceived)
       displayStatus = "partially_refunded";
-    }
+
+    // NEW: compute a fallback name from email if name is missing
+    const apiName = p.customer?.name ?? null;
+    const apiEmail = p.customer?.email ?? null;
+    const fallbackName = apiEmail ? apiEmail.split("@")[0] : null;
+    const customer_name = apiName || fallbackName; // ← use fallback
 
     return {
       id: p.id,
       created_at: (p.created || 0) * 1000,
-      customer_name: p.customer?.name ?? null,
-      customer_email: p.customer?.email ?? null,
-      booking_id: null, // enrich later on API if you have PI->booking map
+      customer_name,
+      customer_email: apiEmail,
+      booking_id: p.booking_id ?? null,
       amount_cents: amountReceived || p.amount || 0,
       currency: (p.currency || "eur").toUpperCase(),
       method: p.method || "card",
@@ -514,7 +518,7 @@ export default function PaymentsPage() {
                     <td className="px-4 py-3">
                       {p.booking_id ? (
                         <Link
-                          href={`/admin/reservations/${p.booking_id}`}
+                          href={`/admin/bookings/${p.booking_id}`}
                           className="inline-flex items-center gap-1 text-[#3f342c] underline-offset-2 hover:underline"
                         >
                           #{p.booking_id}

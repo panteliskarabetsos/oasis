@@ -113,6 +113,64 @@ export async function POST(req, ctx) {
     currency = (pi.currency || currency).toLowerCase();
   }
 
+  const meta =
+    (checkoutSession?.payment_intent &&
+      typeof checkoutSession.payment_intent === "object" &&
+      checkoutSession.payment_intent.metadata) ||
+    intent?.metadata ||
+    {};
+
+  const promoCode = (meta.promo_code || "").trim();
+  const discountCents = Number(meta.discount_cents || 0) || 0;
+  const promoCurrency = (
+    meta.promo_currency ||
+    draft.currency ||
+    "eur"
+  ).toUpperCase();
+  const promoType = (meta.promo_type || "").toLowerCase(); // "percent" | "amount" | ""
+  const promoValue = meta.promo_value != null ? String(meta.promo_value) : null;
+  const isFinalPaid =
+    (checkoutSession && checkoutSession.payment_status === "paid") ||
+    (intent && intent.status === "succeeded");
+
+  const promoFromPI = promoCode
+    ? {
+        code: promoCode,
+        discountType: promoType || undefined,
+        discountValue: promoValue != null ? Number(promoValue) : undefined,
+        currency: promoCurrency,
+        // keep the raw cents too
+        discountCents,
+        source: meta.source || undefined, // (set in checkout if you added it)
+      }
+    : null;
+
+  // Merge with any promo already on the draft (from checkout step)
+  const mergedPromo =
+    promoFromPI ||
+    (draft?.promoJson
+      ? {
+          ...draft.promoJson,
+          code: draft.appliedPromoCode || draft.promoJson.code,
+        }
+      : null);
+  const mergedDiscountAmount =
+    promoFromPI?.discountCents != null
+      ? promoFromPI.discountCents / 100
+      : Number(draft?.discountAmount || 0);
+
+  // Persist onto the draft so it’s always visible in DB
+  try {
+    await admin
+      .from("BookingDraft")
+      .update({
+        appliedPromoCode: mergedPromo?.code ?? null,
+        discountAmount: mergedDiscountAmount || 0,
+        promoJson: mergedPromo ?? null,
+      })
+      .eq("id", draftId);
+  } catch {}
+
   // Mark draft as paid (intermediate), store Stripe ids
   const nowIso = new Date().toISOString();
   await admin
@@ -169,10 +227,10 @@ export async function POST(req, ctx) {
     const ins = await admin
       .from("Booking")
       .insert({
-        userId: ensuredUserId ?? null, // optional
+        userId: ensuredUserId ?? null,
         scheduleSlotId: draft.scheduleSlotId,
         experienceId: draft.experienceId,
-        status: "paid", // <- you wanted "paid"
+        status: "paid",
         numberOfPeople,
         counts: draft.counts,
         attendees: Array.isArray(draft.attendees) ? draft.attendees : [],
@@ -186,6 +244,17 @@ export async function POST(req, ctx) {
         stripeSessionId: stripeSessionId || null,
         stripePaymentIntentId: stripePaymentIntentId || null,
         startTime: slot?.date || null,
+        notes: [
+          draft?.notes || null,
+          mergedPromo
+            ? `[PROMO] code=${mergedPromo.code}; type=${mergedPromo.discountType}; value=${mergedPromo.discountValue}; discount=${mergedDiscountAmount}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        appliedPromoCode: mergedPromo?.code ?? null,
+        discountAmount: mergedDiscountAmount || 0,
+        promoJson: mergedPromo ?? null,
       })
       .select("id")
       .single();
@@ -257,6 +326,20 @@ export async function POST(req, ctx) {
       .maybeSingle(),
   ]);
 
+  // ----- Increment promo usage ONCE when payment is final-success -----
+  try {
+    if (isFinalPaid && promoCode) {
+      await incrementPromoUsageOnce(admin, {
+        draftId,
+        bookingId,
+        promoCode,
+        nowIso,
+      });
+    }
+  } catch (e) {
+    console.warn("[confirm] promo usage increment failed:", e?.message || e);
+  }
+
   // ----- Send confirmation email (idempotent) -----
   try {
     const { data: b } = await admin
@@ -311,6 +394,25 @@ export async function POST(req, ctx) {
     }
   } catch (e) {
     console.error("[confirm] confirmation email failed:", e?.message);
+  }
+
+  // ----- Redeem promo/voucher (idempotent) -----
+  try {
+    if (isFinalPaid && promoCode) {
+      await redeemPromoOnce(admin, {
+        promoCode,
+        bookingId,
+        draftId,
+        amountOffCents: discountCents,
+        currency: promoCurrency,
+        promoType,
+        promoValue,
+        customerEmail: emailForReceipt,
+        stripePaymentIntentId,
+      });
+    }
+  } catch (e) {
+    console.warn("[confirm] redeem promo failed:", e?.message || e);
   }
 
   return ok({ converted: true, bookingId, bookingCode });
@@ -388,6 +490,35 @@ async function ensureDraftUserId(admin, draft, session) {
       .eq("id", id)
       .maybeSingle();
     return data || null;
+  }
+
+  /**
+   * Stamp BookingDraft.promoJson so we don't increment twice.
+   */
+  async function stampDraftRedeemed(admin, draftId, payload) {
+    const { data: prev } = await admin
+      .from("BookingDraft")
+      .select("promoJson")
+      .eq("id", draftId)
+      .maybeSingle();
+
+    const merged = {
+      ...(prev?.promoJson && typeof prev.promoJson === "object"
+        ? prev.promoJson
+        : {}),
+      redeemedAt: payload.at,
+      redeemedOnTable: payload.table,
+      redeemedCode: payload.code,
+      redeemedBookingId: payload.bookingId ?? null,
+      skipped: !!payload.skipped,
+      reason: payload.reason || null,
+      newCount: payload.newCount ?? null,
+    };
+
+    await admin
+      .from("BookingDraft")
+      .update({ promoJson: merged })
+      .eq("id", draftId);
   }
 
   async function getUserByEmail(email) {
@@ -469,6 +600,310 @@ async function ensureDraftUserId(admin, draft, session) {
 
   const pc = await getUserById(pcId);
   return pc?.id ?? null;
+}
+/**
+ * Increment redemptionCount for a promo code in DiscountCode or Voucher
+ * exactly once per draft/payment. Idempotent via BookingDraft.promoJson.redeemedAt.
+ */
+async function incrementPromoUsageOnce(
+  admin,
+  { draftId, bookingId, promoCode, nowIso }
+) {
+  const code = String(promoCode || "").trim();
+  if (!code) return;
+
+  // Idempotency: bail if we've already stamped
+  const { data: draftRow, error: draftErr } = await admin
+    .from("BookingDraft")
+    .select("promoJson, appliedPromoCode")
+    .eq("id", draftId)
+    .maybeSingle();
+
+  if (draftErr || !draftRow) return;
+  if (draftRow?.promoJson?.redeemedAt) return;
+
+  // Prefer DiscountCode, then Voucher
+  const where = (tbl) =>
+    admin
+      .from(tbl)
+      .select(
+        "id, code, active, startsAt, endsAt, maxRedemptions, redemptionCount"
+      )
+      .ilike("code", code)
+      .maybeSingle();
+
+  let found = null;
+  let table = null;
+
+  {
+    const { data } = await where("DiscountCode");
+    if (data) {
+      found = data;
+      table = "DiscountCode";
+    }
+  }
+  if (!found) {
+    const { data } = await where("Voucher");
+    if (data) {
+      found = data;
+      table = "Voucher";
+    }
+  }
+  if (!found || !table) {
+    await stampDraftRedeemed(admin, draftId, {
+      code,
+      table: null,
+      skipped: true,
+      reason: "code_not_found",
+      at: nowIso,
+      bookingId,
+    });
+    return;
+  }
+
+  // Basic validity checks (soft)
+  const now = new Date();
+  const active = found.active !== false;
+  const withinWindow =
+    (!found.startsAt || new Date(found.startsAt) <= now) &&
+    (!found.endsAt || new Date(found.endsAt) >= now);
+  const underCap =
+    found.maxRedemptions == null ||
+    (Number(found.redemptionCount) || 0) < Number(found.maxRedemptions);
+
+  if (!active || !withinWindow || !underCap) {
+    await stampDraftRedeemed(admin, draftId, {
+      code,
+      table,
+      skipped: true,
+      reason: !active
+        ? "inactive"
+        : !withinWindow
+        ? "outside_window"
+        : "over_cap",
+      at: nowIso,
+      bookingId,
+    });
+    return;
+  }
+
+  // Increment redemptionCount (optimistic; low race risk in this flow)
+  const nextCount = (Number(found.redemptionCount) || 0) + 1;
+
+  const upd = await admin
+    .from(table)
+    .update({ redemptionCount: nextCount, updatedAt: nowIso })
+    .eq("id", found.id)
+    .select("id, redemptionCount")
+    .maybeSingle();
+
+  if (upd.error) {
+    console.warn(`[promo] increment ${table} failed`, upd.error);
+    await stampDraftRedeemed(admin, draftId, {
+      code,
+      table,
+      skipped: true,
+      reason: "increment_failed",
+      at: nowIso,
+      bookingId,
+    });
+    return;
+  }
+
+  await stampDraftRedeemed(admin, draftId, {
+    code,
+    table,
+    skipped: false,
+    at: nowIso,
+    bookingId,
+    newCount: upd.data?.redemptionCount ?? nextCount,
+  });
+}
+async function redeemPromoOnce(
+  admin,
+  {
+    promoCode,
+    bookingId,
+    draftId,
+    amountOffCents,
+    currency,
+    promoType,
+    promoValue,
+    customerEmail,
+    stripePaymentIntentId,
+  }
+) {
+  // 0) Normalize code
+  const code = String(promoCode).trim();
+  if (!code) return;
+
+  // 1) If you already logged a redemption for this booking/draft, bail (idempotency)
+  // Try common redemption tables
+  const redemptionTables = [
+    "DiscountRedemption",
+    "VoucherRedemption",
+    "PromoRedemption",
+  ];
+  for (const tbl of redemptionTables) {
+    const { data, error } = await admin
+      .from(tbl)
+      .select("id")
+      .or(
+        [
+          bookingId ? `bookingId.eq.${bookingId}` : null,
+          draftId ? `draftId.eq.${draftId}` : null,
+          stripePaymentIntentId
+            ? `stripePaymentIntentId.eq.${stripePaymentIntentId}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(",")
+      )
+      .limit(1)
+      .maybeSingle();
+
+    // If table doesn't exist, Postgres code 42P01 (undefined table) will surface later on insert.
+    if (!error && data?.id) {
+      // already redeemed for this booking/draft
+      return;
+    }
+  }
+
+  // 2) Find the code row in any of the likely tables
+  const codeTables = ["DiscountCode", "Voucher", "PromoCode"];
+  let found = null;
+  let foundTable = null;
+
+  for (const tbl of codeTables) {
+    const { data, error } = await admin
+      .from(tbl)
+      .select("*")
+      .ilike("code", code) // case-insensitive match; adjust to eq if required
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) {
+      found = data;
+      foundTable = tbl;
+      break;
+    }
+  }
+
+  if (!found || !foundTable) {
+    // No table / row found; nothing to update
+    return;
+  }
+
+  // 3) Optional: check basic constraints if columns exist
+  // We won't fail if columns don't exist; just best-effort checks.
+  try {
+    const tooMany =
+      typeof found.maxRedemptions === "number" &&
+      typeof found.redeemedCount === "number" &&
+      found.maxRedemptions > 0 &&
+      found.redeemedCount >= found.maxRedemptions;
+
+    if (tooMany) {
+      console.warn("[promo] max redemptions reached; skipping update");
+      return;
+    }
+
+    if (found.expiresAt && new Date(found.expiresAt) < new Date()) {
+      console.warn("[promo] code expired; skipping update");
+      return;
+    }
+
+    if (
+      found.isActive === false ||
+      found.active === false ||
+      found.status === "inactive"
+    ) {
+      console.warn("[promo] code inactive; skipping update");
+      // still log redemption? usually no; choose to skip.
+      return;
+    }
+  } catch {
+    // columns may not exist; ignore
+  }
+
+  // 4) Try to insert a redemption log if a redemption table exists
+  let redemptionLogged = false;
+  for (const tbl of redemptionTables) {
+    try {
+      const ins = await admin
+        .from(tbl)
+        .insert({
+          code, // keep the raw code for audit
+          codeId: found.id || null,
+          bookingId: bookingId || null,
+          draftId: draftId || null,
+          amountOff: (amountOffCents || 0) / 100,
+          amountOffCents: amountOffCents || 0,
+          currency: currency || null,
+          promoType: promoType || null,
+          promoValue: promoValue || null,
+          customerEmail: customerEmail || null,
+          stripePaymentIntentId: stripePaymentIntentId || null,
+          redeemedAt: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      if (!ins.error && ins.data?.id) {
+        redemptionLogged = true;
+        break;
+      }
+    } catch (e) {
+      // Table may not exist (42P01) or column mismatch (42703); try next one
+      if (String(e?.code) !== "42P01") {
+        // Console for visibility, but non-fatal
+        console.warn(`[promo] insert into ${tbl} failed`, e?.message || e);
+      }
+    }
+  }
+
+  // 5) If no redemption table, fall back to incrementing a counter on the code row
+  if (!redemptionLogged) {
+    try {
+      // Try common counter column names
+      const counters = ["redeemedCount", "redemptions", "timesUsed"];
+      let next = null;
+      for (const c of counters) {
+        if (typeof found[c] === "number") {
+          next = { col: c, val: found[c] + 1 };
+          break;
+        }
+      }
+
+      const patch = {
+        lastRedeemedAt: new Date().toISOString(),
+        ...(next ? { [next.col]: next.val } : {}),
+        // If you track lastBookingId/lastDraftId, set them conditionally:
+        ...(bookingId ? { lastBookingId: bookingId } : {}),
+        ...(draftId ? { lastDraftId: draftId } : {}),
+      };
+
+      // Update by id if present, else by code
+      let q = admin.from(foundTable).update(patch);
+      if (found.id) q = q.eq("id", found.id);
+      else q = q.ilike("code", code);
+      const res = await q.limit(1);
+
+      if (res.error && String(res.error.code) === "42703") {
+        // Some columns missing; try minimal patch
+        await admin
+          .from(foundTable)
+          .update(next ? { [next.col]: next.val } : {})
+          .eq(found.id ? "id" : "code", found.id || code)
+          .limit(1);
+      }
+    } catch (e) {
+      console.warn(
+        `[promo] update ${foundTable} counter failed`,
+        e?.message || e
+      );
+    }
+  }
 }
 
 async function buildConfirmationEmailPayload(admin, ids, session) {

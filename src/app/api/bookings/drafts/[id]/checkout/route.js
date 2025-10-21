@@ -361,6 +361,17 @@ export async function POST(req, ctx) {
       return bad(e?.message || "Stripe error creating payment intent", 400);
     }
 
+    await admin
+      .from("BookingDraft")
+      .update({
+        totalAmount: finalTotalCents / 100,
+        appliedPromoCode: promo?.code ?? null, // works for voucher or discount
+        discountAmount: promo ? discountCents / 100 : 0,
+        promoJson: promo ?? null,
+        updatedAt: new Date().toISOString(),
+      })
+      .eq("id", draftId);
+
     return ok({
       mode: "elements",
       clientSecret: pi.client_secret,
@@ -426,26 +437,45 @@ export async function POST(req, ctx) {
 
   let session;
   try {
-    session = await stripe.checkout.sessions.create(
+    // Build promo metadata once so we can reuse it
+    const promoMeta = {
+      draft_id: String(draftId),
+      schedule_slot_id: String(draft.scheduleSlotId),
+      experience_id: String(draft.experienceId),
+      subtotal_cents: String(subtotalCents),
+      discount_cents: String(discountCents),
+      final_total_cents: String(finalTotalCents),
+      promo_code: promo?.code ?? "",
+      promo_type: promo?.discountType ?? "",
+      promo_value:
+        promo?.discountValue != null ? String(promo.discountValue) : "",
+      promo_currency: (promo?.currency ?? "").toUpperCase(),
+      source: promo?.source ?? "",
+    };
+
+    const customerEmail = draft.primary_contact?.email ?? undefined;
+
+    const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
         line_items,
         success_url: successUrl,
         cancel_url: cancelUrl,
-        customer_email: draft.primary_contact?.email ?? undefined,
+
+        // This pre-fills the email in Checkout
+        customer_email: customerEmail,
+
         client_reference_id: String(draftId),
-        metadata: {
-          draft_id: String(draftId),
-          schedule_slot_id: String(draft.scheduleSlotId),
-          experience_id: String(draft.experienceId),
-          subtotal_cents: String(subtotalCents),
-          discount_cents: String(discountCents),
-          final_total_cents: String(finalTotalCents),
-          promo_code: promo?.code ?? "",
-          promo_type: promo?.discountType ?? "",
-          promo_value:
-            promo?.discountValue != null ? String(promo.discountValue) : "",
-          promo_currency: promo?.currency ?? "",
+
+        // Keep it on the Session (handy for debugging)
+        metadata: promoMeta,
+
+        // IMPORTANT: also put it on the PaymentIntent and set receipt email
+        payment_intent_data: {
+          // lets Stripe send the charge receipt automatically (ensure receipts are enabled in Dashboard)
+          receipt_email: customerEmail,
+          // copy promo metadata so your confirm route can read it from the PI reliably
+          metadata: promoMeta,
         },
       },
       { idempotencyKey: idemKey }

@@ -56,6 +56,11 @@ export default function PaymentPage() {
   const [promo, setPromo] = useState(null); // { code, discountType, discountValue, currency, endsAt? }
   const [clientSecret, setClientSecret] = useState("");
   const [piInfo, setPiInfo] = useState({ amountCents: 0, currency: "eur" });
+  const sanitizePromo = (raw) =>
+    raw
+      .toUpperCase()
+      .replace(/[\s_]/g, "-") // turn spaces/underscores into hyphens (optional)
+      .replace(/[^A-Z0-9-]/g, ""); // allow only A–Z, 0–9, and -
 
   useEffect(() => {
     if (!Number.isFinite(draftId) || draftId <= 0) {
@@ -610,7 +615,7 @@ export default function PaymentPage() {
                   >
                     <span className="inline-flex items-center gap-2">
                       <Tag className="h-4 w-4 text-[#8b6f47]" />
-                      Do you have a promo code?
+                      Do you have a promo code or voucher?
                     </span>
                     <span className="text-xs text-[#7a6a58]">
                       {promo
@@ -626,11 +631,24 @@ export default function PaymentPage() {
                       <div className="flex items-stretch gap-2">
                         <input
                           value={promoInput}
-                          onChange={(e) => setPromoInput(e.target.value)}
+                          onChange={(e) =>
+                            setPromoInput(sanitizePromo(e.target.value))
+                          }
+                          onPaste={(e) => {
+                            e.preventDefault();
+                            const text = e.clipboardData?.getData("text") || "";
+                            setPromoInput(sanitizePromo(text));
+                          }}
                           inputMode="text"
-                          placeholder="Enter code"
-                          className="flex-1 rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                          autoCapitalize="characters"
+                          autoComplete="off"
+                          spellCheck={false}
+                          placeholder="ENTER CODE"
+                          pattern="[A-Z0-9-]{3,32}" // adjust length as needed
+                          title="Use capitals, numbers, and hyphens only"
+                          className="flex-1 rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40 uppercase tracking-wider font-voucher" // ← voucher font + uppercase UI
                           aria-label="Promo code"
+                          data-lpignore="true"
                         />
                         <button
                           onClick={applyPromo}

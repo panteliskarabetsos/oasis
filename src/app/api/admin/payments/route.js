@@ -7,6 +7,11 @@ import { NextResponse } from "next/server";
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
+// small null-safe helpers
+const asId = (x) =>
+  typeof x === "string" ? x : x && typeof x === "object" && x.id ? x.id : null;
+const asObj = (x) => (x && typeof x === "object" ? x : null);
+
 export async function GET(req) {
   try {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -36,6 +41,7 @@ export async function GET(req) {
 
     const opt = stripe_account ? { stripeAccount: stripe_account } : undefined;
 
+    // Fetch PaymentIntents (expand to get charge + refunds + customer)
     const res = await stripe.paymentIntents.list(
       {
         limit: 50,
@@ -45,48 +51,159 @@ export async function GET(req) {
           "data.customer",
           "data.latest_charge",
           "data.latest_charge.refunds",
+          "data.payment_method",
+          "data.charges.data",
         ],
       },
       opt
     );
 
-    // optional status filter
+    // Build a lookup of PI id -> booking id from your DB (best-effort)
+    const piIds = (res.data || []).map((pi) => pi.id).filter(Boolean);
+    const bookingByPiId = new Map();
+
+    try {
+      // Lazy import your Supabase admin helper (adjust path if needed)
+      const mod = await import("@/lib/supabase/admin").catch(() => null);
+      const createSupabaseAdmin = mod?.createSupabaseAdmin;
+      if (createSupabaseAdmin && piIds.length) {
+        const admin = createSupabaseAdmin();
+
+        // Look up bookings by stripePaymentIntentId
+        const { data: bookings, error: bErr } = await admin
+          .from("Booking")
+          .select("id, stripePaymentIntentId")
+          .in("stripePaymentIntentId", piIds);
+
+        if (!bErr && Array.isArray(bookings)) {
+          for (const b of bookings) {
+            if (b.stripePaymentIntentId) {
+              bookingByPiId.set(b.stripePaymentIntentId, b.id);
+            }
+          }
+        }
+
+        // Optional: if drafts retain the PI before conversion, fill gaps from there
+        const { data: drafts, error: dErr } = await admin
+          .from("BookingDraft")
+          .select("convertedBookingId, stripePaymentIntentId")
+          .in("stripePaymentIntentId", piIds)
+          .not("convertedBookingId", "is", null);
+
+        if (!dErr && Array.isArray(drafts)) {
+          for (const d of drafts) {
+            if (d.stripePaymentIntentId && d.convertedBookingId) {
+              if (!bookingByPiId.has(d.stripePaymentIntentId)) {
+                bookingByPiId.set(
+                  d.stripePaymentIntentId,
+                  d.convertedBookingId
+                );
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[payments:list] booking enrichment failed:",
+        e?.message || e
+      );
+      // Non-fatal: we still return payments without booking_id if enrichment fails
+    }
+
+    // Map to the shape your frontend expects
     const items = res.data
       .filter((pi) => (status === "any" ? true : pi.status === status))
-      .map((pi) => ({
-        id: pi.id,
-        created: pi.created,
-        status: pi.status,
-        amount: pi.amount,
-        amount_received: pi.amount_received,
-        currency: pi.currency,
-        customer: {
-          id:
-            typeof pi.customer === "string"
-              ? pi.customer
-              : pi.customer?.id ?? null,
-          email:
-            (typeof pi.customer === "object" ? pi.customer?.email : null) ||
-            (typeof pi.latest_charge === "object"
-              ? pi.latest_charge?.billing_details?.email
-              : null) ||
-            null,
-          name:
-            (typeof pi.customer === "object" ? pi.customer?.name : null) ||
-            (typeof pi.latest_charge === "object"
-              ? pi.latest_charge?.billing_details?.name
-              : null) ||
-            null,
-        },
-        latest_charge:
-          typeof pi.latest_charge === "string"
-            ? pi.latest_charge
-            : pi.latest_charge?.id ?? null,
-        receipt_url:
-          typeof pi.latest_charge === "object"
-            ? pi.latest_charge?.receipt_url ?? null
-            : null,
-      }));
+      .map((pi) => {
+        const ch =
+          typeof pi.latest_charge === "object" ? pi.latest_charge : null;
+        const pm =
+          typeof pi.payment_method === "object" ? pi.payment_method : null;
+        const firstCharge = pi?.charges?.data?.[0] || null;
+
+        // ---- CUSTOMER EMAIL / NAME fallbacks ----
+        const customerObj =
+          typeof pi.customer === "object" ? pi.customer : null;
+
+        const email =
+          customerObj?.email ||
+          ch?.billing_details?.email ||
+          firstCharge?.billing_details?.email ||
+          pm?.billing_details?.email ||
+          null;
+
+        const name =
+          customerObj?.name ||
+          ch?.billing_details?.name ||
+          firstCharge?.billing_details?.name ||
+          pm?.billing_details?.name ||
+          null;
+
+        // ---- METHOD + CARD INFO fallbacks ----
+        // method: prefer details on latest charge; fall back to attached PM type; then PI’s declared types
+        const method =
+          ch?.payment_method_details?.type ||
+          pm?.type ||
+          (Array.isArray(pi.payment_method_types)
+            ? pi.payment_method_types[0]
+            : null) ||
+          "card";
+
+        // card details: prefer the object that actually has card fields
+        const cardObj =
+          ch?.payment_method_details?.card ||
+          firstCharge?.payment_method_details?.card ||
+          pm?.card ||
+          null;
+
+        const card_brand = cardObj?.brand || null;
+        const card_last4 = cardObj?.last4 || null;
+
+        // ---- BOOKING ID (DB first, then metadata) ----
+        let booking_id =
+          bookingByPiId.get(pi.id) ??
+          pi?.metadata?.booking_id ??
+          pi?.metadata?.bookingId ??
+          null;
+
+        if (booking_id != null && !Number.isNaN(Number(booking_id))) {
+          booking_id = Number(booking_id);
+        }
+
+        return {
+          id: pi.id,
+          created: pi.created, // unix seconds
+          status: pi.status,
+          amount: pi.amount ?? null,
+          amount_received: pi.amount_received ?? null,
+          currency: pi.currency,
+          customer: {
+            id:
+              typeof pi.customer === "string"
+                ? pi.customer
+                : customerObj?.id ?? null,
+            email,
+            name,
+          },
+          method,
+          card_brand,
+          card_last4,
+          latest_charge:
+            typeof pi.latest_charge === "string"
+              ? pi.latest_charge
+              : ch?.id ?? null,
+          receipt_url: ch?.receipt_url || null,
+          metadata: pi.metadata || {},
+          refunds:
+            ch?.refunds?.data?.map((r) => ({
+              id: r.id,
+              amount: r.amount,
+              status: r.status,
+              created: r.created,
+            })) || [],
+          booking_id,
+        };
+      });
 
     return ok({
       items,
