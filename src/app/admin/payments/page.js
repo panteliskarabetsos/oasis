@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -15,9 +15,7 @@ import {
   ExternalLink,
   Receipt,
   CreditCard,
-  DollarSign,
   AlertCircle,
-  Undo2,
   Copy as CopyIcon,
 } from "lucide-react";
 
@@ -26,30 +24,20 @@ import {
 /* -------------------------------------------------------------------------- */
 
 const ATHENS_TZ = "Europe/Athens";
-const PAGE_SIZE = 20;
+
+// Stripe-native PaymentIntent statuses (plus derived refund labels)
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
   { value: "succeeded", label: "Succeeded" },
-  { value: "refunded", label: "Refunded" },
-  { value: "partially_refunded", label: "Partially refunded" },
-  { value: "pending", label: "Pending" },
+  { value: "processing", label: "Processing" },
   { value: "requires_action", label: "Requires action" },
-  { value: "failed", label: "Failed" },
-  { value: "cancelled", label: "Cancelled" },
-];
-const METHOD_OPTIONS = [
-  { value: "", label: "All methods" },
-  { value: "card", label: "Card" },
-  { value: "cash", label: "Cash" },
-  { value: "bank_transfer", label: "Bank transfer" },
-  { value: "pos", label: "POS" },
-  { value: "stripe", label: "Stripe" },
-];
-const SORT_OPTIONS = [
-  { value: "created_at.desc", label: "Newest first" },
-  { value: "created_at.asc", label: "Oldest first" },
-  { value: "amount_cents.desc", label: "Amount (high → low)" },
-  { value: "amount_cents.asc", label: "Amount (low → high)" },
+  { value: "requires_payment_method", label: "Requires payment method" },
+  { value: "requires_confirmation", label: "Requires confirmation" },
+  { value: "requires_capture", label: "Requires capture" },
+  { value: "canceled", label: "Canceled" },
+  // derived client-side from refunds:
+  { value: "refunded", label: "Refunded (derived)" },
+  { value: "partially_refunded", label: "Partially refunded (derived)" },
 ];
 
 function formatMoney(amountCents = 0, currency = "EUR") {
@@ -69,10 +57,14 @@ function formatMoney(amountCents = 0, currency = "EUR") {
 }
 
 function formatDate(d) {
-  if (!d) return "-";
+  if (!d && d !== 0) return "-";
   try {
     const date =
-      typeof d === "string" || typeof d === "number" ? new Date(d) : d;
+      typeof d === "number"
+        ? new Date(d)
+        : typeof d === "string"
+        ? new Date(d)
+        : d;
     return date.toLocaleString("en-GB", {
       timeZone: ATHENS_TZ,
       year: "numeric",
@@ -93,10 +85,8 @@ function classNames(...xs) {
 function downloadCSV(filename, rows) {
   const processValue = (v) => {
     if (v === null || v === undefined) return "";
-    // Escape quotes and commas
     const s = String(v).replaceAll('"', '""');
-    if (s.includes(",") || s.includes("\n") || s.includes('"'))
-      return '"' + s + '"';
+    if (s.includes(",") || s.includes("\n") || s.includes('"')) return `"${s}"`;
     return s;
   };
   const csv = rows.map((r) => r.map(processValue).join(",")).join("\n");
@@ -121,24 +111,6 @@ async function copyToClipboard(text) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               Data interfaces                              */
-/* -------------------------------------------------------------------------- */
-
-/** @typedef {Object} Payment */
-/** @property {number} id */
-/** @property {string} created_at */
-/** @property {number} amount_cents */
-/** @property {string} currency */
-/** @property {string} status */
-/** @property {string} method */
-/** @property {string | null} customer_name */
-/** @property {string | null} customer_email */
-/** @property {number | null} booking_id */
-/** @property {string | null} stripe_payment_intent_id */
-/** @property {string | null} receipt_url */
-/** @property {string | null} notes */
-
-/* -------------------------------------------------------------------------- */
 /*                                   Page                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -146,24 +118,27 @@ export default function PaymentsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Filters & state
+  // Filters
   const [q, setQ] = useState(searchParams.get("q") || "");
   const [status, setStatus] = useState(searchParams.get("status") || "");
-  const [method, setMethod] = useState(searchParams.get("method") || "");
   const [dateFrom, setDateFrom] = useState(searchParams.get("from") || "");
   const [dateTo, setDateTo] = useState(searchParams.get("to") || "");
-  const [sort, setSort] = useState(
-    searchParams.get("sort") || "created_at.desc"
-  );
 
-  const [page, setPage] = useState(Number(searchParams.get("page") || 1));
+  // Cursor-based pagination
+  const [pageIndex, setPageIndex] = useState(
+    Math.max(0, Number(searchParams.get("page") || 1) - 1)
+  );
+  const [cursorStack, setCursorStack] = useState([null]); // per-page starting_after cursor
+
+  // Data state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [rows, setRows] = useState(/** @type {Payment[]} */ ([]));
-  const [total, setTotal] = useState(0);
-  const [auth, setAuth] = useState({ loading: true, ok: true });
+  const [rows, setRows] = useState([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
 
-  // Gate: require auth
+  // Auth gate
+  const [auth, setAuth] = useState({ loading: true, ok: true });
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -179,17 +154,16 @@ export default function PaymentsPage() {
     };
   }, []);
 
+  // Build query string for URL (shareable filters)
   const paramsString = useMemo(() => {
     const p = new URLSearchParams();
     if (q) p.set("q", q);
     if (status) p.set("status", status);
-    if (method) p.set("method", method);
     if (dateFrom) p.set("from", dateFrom);
     if (dateTo) p.set("to", dateTo);
-    if (sort) p.set("sort", sort);
-    if (page && page !== 1) p.set("page", String(page));
+    if (pageIndex > 0) p.set("page", String(pageIndex + 1));
     return p.toString();
-  }, [q, status, method, dateFrom, dateTo, sort, page]);
+  }, [q, status, dateFrom, dateTo, pageIndex]);
 
   // Push filters to URL
   useEffect(() => {
@@ -199,40 +173,7 @@ export default function PaymentsPage() {
     router.replace(url);
   }, [paramsString, router]);
 
-  // Fetch
-  useEffect(() => {
-    let ignore = false;
-    const ctrl = new AbortController();
-    setLoading(true);
-    setError("");
-    (async () => {
-      try {
-        const qs = paramsString ? `?${paramsString}` : "";
-        const res = await fetch(`/api/admin/payments${qs}`, {
-          method: "GET",
-          cache: "no-store",
-          signal: ctrl.signal,
-        });
-        if (!res.ok) throw new Error(`Failed to load payments (${res.status})`);
-        const data = await res.json();
-        if (ignore) return;
-        setRows(Array.isArray(data.payments) ? data.payments : []);
-        setTotal(Number(data.total || 0));
-      } catch (e) {
-        if (ignore) return;
-        setError(e?.message || "Failed to load payments");
-        setRows([]);
-        setTotal(0);
-      } finally {
-        if (!ignore) setLoading(false);
-      }
-    })();
-    return () => {
-      ignore = true;
-      ctrl.abort();
-    };
-  }, [paramsString]);
-
+  // Label for date range
   const fromToLabel = useMemo(() => {
     if (!dateFrom && !dateTo) return "Any time";
     const from = dateFrom ? new Date(dateFrom) : null;
@@ -242,13 +183,108 @@ export default function PaymentsPage() {
     return `${f} → ${t}`;
   }, [dateFrom, dateTo]);
 
-  const pageCount = Math.max(1, Math.ceil((total || 0) / PAGE_SIZE));
-  const startIdx = (page - 1) * PAGE_SIZE + 1;
-  const endIdx = Math.min(total, page * PAGE_SIZE);
+  // Map API item → row for table
+  function mapToRow(p) {
+    const amountReceived =
+      typeof p.amount_received === "number" ? p.amount_received : 0;
+    const refundsTotal = Array.isArray(p.refunds)
+      ? p.refunds.reduce((s, r) => s + (r.amount || 0), 0)
+      : 0;
+
+    // derive refund statuses for display
+    let displayStatus = p.status;
+    if (amountReceived > 0 && refundsTotal >= amountReceived) {
+      displayStatus = "refunded";
+    } else if (refundsTotal > 0 && refundsTotal < amountReceived) {
+      displayStatus = "partially_refunded";
+    }
+
+    return {
+      id: p.id,
+      created_at: (p.created || 0) * 1000,
+      customer_name: p.customer?.name ?? null,
+      customer_email: p.customer?.email ?? null,
+      booking_id: null, // enrich later on API if you have PI->booking map
+      amount_cents: amountReceived || p.amount || 0,
+      currency: (p.currency || "eur").toUpperCase(),
+      method: p.method || "card",
+      status: displayStatus,
+      stripe_payment_intent_id: p.id || null,
+      receipt_url: p.receipt_url || null,
+      notes: null,
+    };
+  }
+
+  // Fetch current page using cursorStack[pageIndex] as starting_after
+  useEffect(() => {
+    let ignore = false;
+    const ctrl = new AbortController();
+
+    (async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const qs = new URLSearchParams();
+        if (q) qs.set("q", q);
+        if (status) qs.set("status", status);
+        if (dateFrom) qs.set("date_from", dateFrom);
+        if (dateTo) qs.set("date_to", dateTo);
+        const startingAfter = cursorStack[pageIndex];
+        if (startingAfter) qs.set("starting_after", startingAfter);
+
+        const res = await fetch(`/api/admin/payments?${qs.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+          signal: ctrl.signal,
+        });
+        if (!res.ok) throw new Error(`Failed to load payments (${res.status})`);
+        const data = await res.json();
+
+        if (ignore) return;
+        const items = Array.isArray(data.items) ? data.items : [];
+        setRows(items.map(mapToRow));
+        setHasMore(!!data.has_more);
+        setNextCursor(data.next_cursor || null);
+      } catch (e) {
+        if (ignore) return;
+        setError(e?.message || "Failed to load payments");
+        setRows([]);
+        setHasMore(false);
+        setNextCursor(null);
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    })();
+
+    return () => {
+      ignore = true;
+      ctrl.abort();
+    };
+  }, [q, status, dateFrom, dateTo, pageIndex, cursorStack]);
+
+  const goReset = () => {
+    setQ("");
+    setStatus("");
+    setDateFrom("");
+    setDateTo("");
+    setPageIndex(0);
+    setCursorStack([null]);
+  };
+
+  const goNext = () => {
+    if (!hasMore || !nextCursor) return;
+    setCursorStack((stk) => [...stk.slice(0, pageIndex + 1), nextCursor]);
+    setPageIndex((i) => i + 1);
+  };
+
+  const goPrev = () => {
+    if (pageIndex <= 0) return;
+    setPageIndex((i) => Math.max(0, i - 1));
+    // cursorStack remains; pageIndex chooses the cursor to use
+  };
 
   const exportCSV = () => {
     const headers = [
-      "ID",
       "Date (Athens)",
       "Customer",
       "Email",
@@ -259,10 +295,8 @@ export default function PaymentsPage() {
       "Status",
       "Stripe PI",
       "Receipt URL",
-      "Notes",
     ];
     const data = rows.map((p) => [
-      p.id,
       formatDate(p.created_at),
       p.customer_name || "",
       p.customer_email || "",
@@ -273,7 +307,6 @@ export default function PaymentsPage() {
       p.status || "",
       p.stripe_payment_intent_id || "",
       p.receipt_url || "",
-      p.notes || "",
     ]);
     downloadCSV(`payments_${Date.now()}.csv`, [headers, ...data]);
   };
@@ -335,15 +368,7 @@ export default function PaymentsPage() {
             <Download className="h-4 w-4" /> Export CSV
           </button>
           <button
-            onClick={() => {
-              setPage(1);
-              setQ("");
-              setStatus("");
-              setMethod("");
-              setDateFrom("");
-              setDateTo("");
-              setSort("created_at.desc");
-            }}
+            onClick={goReset}
             className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#faf8f5]"
           >
             <RefreshCcw className="h-4 w-4" /> Reset
@@ -352,14 +377,15 @@ export default function PaymentsPage() {
       </div>
 
       {/* Filters */}
-      <div className="mt-6 grid grid-cols-1 gap-3 rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className="mt-6 grid grid-cols-1 gap-3 rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
         <div className="col-span-2 flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3">
           <Search className="h-4 w-4 text-[#7a6a58]" />
           <input
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
-              setPage(1);
+              setPageIndex(0);
+              setCursorStack([null]);
             }}
             placeholder="Search name, email, booking, PI…"
             className="h-10 w-full bg-transparent text-sm outline-none placeholder:text-[#a09386]"
@@ -372,7 +398,8 @@ export default function PaymentsPage() {
             value={dateFrom}
             onChange={(e) => {
               setDateFrom(e.target.value);
-              setPage(1);
+              setPageIndex(0);
+              setCursorStack([null]);
             }}
             className="h-10 w-full bg-transparent text-sm outline-none"
           />
@@ -384,7 +411,8 @@ export default function PaymentsPage() {
             value={dateTo}
             onChange={(e) => {
               setDateTo(e.target.value);
-              setPage(1);
+              setPageIndex(0);
+              setCursorStack([null]);
             }}
             className="h-10 w-full bg-transparent text-sm outline-none"
           />
@@ -395,45 +423,12 @@ export default function PaymentsPage() {
             value={status}
             onChange={(e) => {
               setStatus(e.target.value);
-              setPage(1);
+              setPageIndex(0);
+              setCursorStack([null]);
             }}
             className="h-10 w-full bg-transparent text-sm outline-none"
           >
             {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3">
-          <CreditCard className="h-4 w-4 text-[#7a6a58]" />
-          <select
-            value={method}
-            onChange={(e) => {
-              setMethod(e.target.value);
-              setPage(1);
-            }}
-            className="h-10 w-full bg-transparent text-sm outline-none"
-          >
-            {METHOD_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3">
-          <ChevronDown className="h-4 w-4 text-[#7a6a58]" />
-          <select
-            value={sort}
-            onChange={(e) => {
-              setSort(e.target.value);
-              setPage(1);
-            }}
-            className="h-10 w-full bg-transparent text-sm outline-none"
-          >
-            {SORT_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
@@ -446,12 +441,9 @@ export default function PaymentsPage() {
       <div className="mt-6 rounded-2xl border border-[#e8e5df] bg-white">
         <div className="flex items-center justify-between border-b border-[#eeeae3] px-4 py-3 text-sm text-[#7a6a58]">
           <p>
-            Showing{" "}
-            <span className="font-medium text-[#3f342c]">
-              {startIdx}-{endIdx}
-            </span>{" "}
-            of <span className="font-medium text-[#3f342c]">{total}</span>{" "}
-            payments
+            Page{" "}
+            <span className="font-medium text-[#3f342c]">{pageIndex + 1}</span>
+            {hasMore ? "" : " (end)"}
           </p>
           <p className="hidden sm:block">Date range: {fromToLabel}</p>
         </div>
@@ -501,12 +493,7 @@ export default function PaymentsPage() {
                               const ok = await copyToClipboard(
                                 p.stripe_payment_intent_id || ""
                               );
-                              if (ok) {
-                                // eslint-disable-next-line no-alert
-                                window.alert(
-                                  "Payment Intent ID copied to clipboard"
-                                );
-                              }
+                              if (ok) window.alert("Copied");
                             }}
                             className="ml-1 inline-flex items-center rounded p-0.5 hover:bg-[#f1ebe3]"
                             title="Copy"
@@ -583,15 +570,15 @@ export default function PaymentsPage() {
         {/* Footer / Pagination */}
         <div className="flex items-center justify-between border-t border-[#eeeae3] px-4 py-3 text-sm">
           <div className="text-[#7a6a58]">
-            Page {page} of {pageCount}
+            Page {pageIndex + 1} {hasMore ? "" : "(end)"}
           </div>
           <div className="flex items-center gap-2">
             <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={pageIndex <= 0}
+              onClick={goPrev}
               className={classNames(
                 "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5",
-                page <= 1
+                pageIndex <= 0
                   ? "cursor-not-allowed border-[#eeeae3] text-[#c1b8ae]"
                   : "border-[#e8e5df] text-[#5a4a3f] hover:bg-[#faf8f5]"
               )}
@@ -599,11 +586,11 @@ export default function PaymentsPage() {
               Prev
             </button>
             <button
-              disabled={page >= pageCount}
-              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              disabled={!hasMore}
+              onClick={goNext}
               className={classNames(
                 "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5",
-                page >= pageCount
+                !hasMore
                   ? "cursor-not-allowed border-[#eeeae3] text-[#c1b8ae]"
                   : "border-[#e8e5df] text-[#5a4a3f] hover:bg-[#faf8f5]"
               )}
@@ -643,24 +630,38 @@ function StatusBadge({ status }) {
       text: "Partially refunded",
       cls: "bg-sky-50 text-sky-700 border-sky-200",
     },
-    pending: {
-      text: "Pending",
+    processing: {
+      text: "Processing",
       cls: "bg-amber-50 text-amber-800 border-amber-200",
     },
     requires_action: {
       text: "Requires action",
       cls: "bg-amber-50 text-amber-800 border-amber-200",
     },
-    failed: { text: "Failed", cls: "bg-rose-50 text-rose-700 border-rose-200" },
-    cancelled: {
-      text: "Cancelled",
+    requires_payment_method: {
+      text: "Requires payment method",
+      cls: "bg-amber-50 text-amber-800 border-amber-200",
+    },
+    requires_confirmation: {
+      text: "Requires confirmation",
+      cls: "bg-amber-50 text-amber-800 border-amber-200",
+    },
+    requires_capture: {
+      text: "Requires capture",
+      cls: "bg-amber-50 text-amber-800 border-amber-200",
+    },
+    canceled: {
+      text: "Canceled",
       cls: "bg-zinc-50 text-zinc-700 border-zinc-200",
     },
+    failed: { text: "Failed", cls: "bg-rose-50 text-rose-700 border-rose-200" },
   };
+
   const meta = map[status] || {
     text: String(status || "Unknown"),
     cls: "bg-zinc-50 text-zinc-700 border-zinc-200",
   };
+
   return (
     <span
       className={classNames(
