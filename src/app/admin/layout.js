@@ -111,7 +111,7 @@ function MobileBottomNav() {
             </a>
           </li>
           <li>
-            <a href="/admin/reservations" className={itemCls}>
+            <a href="/admin/bookings" className={itemCls}>
               <svg
                 className={iconCls}
                 viewBox="0 0 24 24"
@@ -128,7 +128,7 @@ function MobileBottomNav() {
                 />
                 <path d="M16 2v4M8 2v4M3 10h18" strokeWidth="2" />
               </svg>
-              Reservations
+              Bookings
             </a>
           </li>
           <li>
