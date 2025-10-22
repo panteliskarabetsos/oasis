@@ -18,7 +18,15 @@ export const metadata = {
     statusBarStyle: "black-translucent",
     title: "Oasis Admin",
   },
+  icons: {
+    apple: "/icons/admin-128.png", // iOS home screen icon
+    icon: [
+      { url: "/icons/admin-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icons/admin-512.png", type: "image/png", sizes: "512x512" },
+    ],
+  },
 };
+
 export default async function AdminLayout({ children }) {
   const supa = await createSupabaseServer();
   const {
