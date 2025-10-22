@@ -2,14 +2,23 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import AdminHeader from "@/app/admin/components/header";
+import SwRegister from "@/app/admin/components/SwRegister";
+import InstallPrompt from "@/app/admin/components/InstallPrompt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const metadata = {
   title: "Admin • Oasis",
   robots: { index: false, follow: false },
+  applicationName: "Oasis Admin",
+  manifest: "/manifest.webmanifest",
+  themeColor: "#8b6f47",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Oasis Admin",
+  },
 };
-
 export default async function AdminLayout({ children }) {
   const supa = await createSupabaseServer();
   const {
@@ -74,7 +83,9 @@ export default async function AdminLayout({ children }) {
       </main>
 
       {/* Bottom tab bar (mobile only) */}
+      <InstallPrompt />
       <MobileBottomNav />
+      <SwRegister />
     </div>
   );
 }
@@ -132,21 +143,27 @@ function MobileBottomNav() {
             </a>
           </li>
           <li>
-            <a href="/admin/invoices" className={itemCls}>
+            <a href="/admin/experiences" className={itemCls}>
               <svg
                 className={iconCls}
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
+                aria-hidden="true"
               >
+                {/* Map-pin icon */}
                 <path
-                  d="M9 17h6M9 13h6M13 9h2M7 3h10a2 2 0 012 2v14l-3-2-3 2-3-2-3 2V5a2 2 0 012-2z"
+                  d="M12 21c-3.5-3.5-6-7-6-10a6 6 0 1 1 12 0c0 3-2.5 6.5-6 10z"
                   strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                 />
+                <circle cx="12" cy="11" r="2" strokeWidth="2" />
               </svg>
-              Invoices
+              Experiences
             </a>
           </li>
+
           <li>
             <a href="/admin/settings" className={itemCls}>
               <svg
