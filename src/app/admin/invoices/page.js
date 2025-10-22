@@ -375,7 +375,7 @@ export default async function InvoicesPage({ searchParams }) {
                       >
                         View
                       </a>
-                      <form action={sendInvoice} method="POST">
+                      <form action={sendInvoice}>
                         <input type="hidden" name="id" value={r.id} />
                         <button
                           type="submit"
@@ -490,7 +490,7 @@ export default async function InvoicesPage({ searchParams }) {
                             >
                               View
                             </a>
-                            <form action={sendInvoice} method="POST">
+                            <form action={sendInvoice}>
                               <input type="hidden" name="id" value={r.id} />
                               <button
                                 type="submit"

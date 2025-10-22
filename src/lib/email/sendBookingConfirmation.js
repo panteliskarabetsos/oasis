@@ -2,13 +2,13 @@
 import "server-only";
 import { format } from "date-fns";
 import { getTransporter } from "./mailer";
-
+import Stripe from "stripe";
 /**
  * Env
  */
 const EMAIL_FROM = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 const REPLY_TO = process.env.EMAIL_REPLY_TO || EMAIL_FROM;
-
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 /**
  * Send a booking confirmation email with optional calendar invite.
  *
@@ -35,6 +35,8 @@ export default async function sendBookingConfirmation(opts = {}) {
     to,
     draft,
     session,
+    stripeSessionId: _stripeSessionId, // optional overrides
+    stripePaymentIntentId: _stripePaymentIntentId,
     experience = null,
     slot = null,
     bookingCode,
@@ -172,6 +174,92 @@ export default async function sendBookingConfirmation(opts = {}) {
     });
   }
 
+  /** -------------------- Stripe invoice PDF + receipt URL -------------------- */
+  let receiptUrl = null;
+  let hasInvoicePdf = false;
+  // Collect Stripe identifiers from any source available
+  const ssId =
+    (session && session.id) ||
+    _stripeSessionId ||
+    draft?.stripeSessionId ||
+    null;
+  const piId =
+    (session &&
+      (typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id)) ||
+    _stripePaymentIntentId ||
+    draft?.stripePaymentIntentId ||
+    null;
+
+  try {
+    const {
+      invoicePdfBuffer,
+      invoiceFilename,
+      receiptUrl: rUrl,
+    } = await getStripeArtifacts({
+      stripeSessionId: ssId,
+      stripePaymentIntentId: piId,
+    });
+    receiptUrl = rUrl || null;
+    if (invoicePdfBuffer) {
+      attachments.push({
+        filename:
+          invoiceFilename ||
+          `Invoice-${String(bookingId ?? draft?.id ?? "").padStart(
+            6,
+            "0"
+          )}.pdf`,
+        content: invoicePdfBuffer, // Buffer
+        contentType: "application/pdf",
+      });
+      hasInvoicePdf = true;
+    }
+    console.log("[email] artifacts:", {
+      stripeSessionId: ssId,
+      stripePaymentIntentId: piId,
+      hasInvoicePdf,
+      hasReceipt: Boolean(receiptUrl),
+    });
+  } catch (e) {
+    console.warn("[email] stripe artifacts error:", e?.message || e);
+  }
+
+  // Re-render HTML and text with receipt link / invoice note info
+  const htmlFinal = renderConfirmationHtml({
+    brand,
+    logoUrl,
+    preheaderText,
+    experienceName: experience?.name,
+    location: experience?.location,
+    dateLabel,
+    timeLabel,
+    attendees,
+    amountLabel,
+    currency,
+    bookingRef: reference,
+    promoCode: promo?.code || null,
+    discountLabel,
+    subtotalLabel,
+    receiptUrl,
+    hasInvoicePdf,
+  });
+
+  const textFinal = renderTextFallback({
+    experienceName: experience?.name,
+    location: experience?.location,
+    dateLabel,
+    timeLabel,
+    attendees,
+    amountLabel,
+    currency,
+    bookingRef: reference,
+    promoCode: promo?.code || null,
+    discountLabel,
+    subtotalLabel,
+    receiptUrl,
+    hasInvoicePdf,
+  });
   /** -------------------- send -------------------- */
   try {
     const transporter = getTransporter();
@@ -186,8 +274,8 @@ export default async function sendBookingConfirmation(opts = {}) {
         "X-Booking-ID": String(bookingId ?? ""),
         "X-Experience-ID": String(draft?.experienceId ?? ""),
       },
-      html,
-      text,
+      html: htmlFinal,
+      text: textFinal,
       attachments,
     });
     return { sent: true, id: info?.messageId };
@@ -198,6 +286,82 @@ export default async function sendBookingConfirmation(opts = {}) {
 }
 
 /** =========================== renderers =========================== */
+
+async function fetchPdfBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`PDF fetch failed: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Look up Stripe artifacts by ID(s).
+ * Returns: { invoicePdfBuffer?, invoiceFilename?, receiptUrl? }
+ */
+async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
+  if (!STRIPE_SECRET_KEY) {
+    console.warn("[email] STRIPE_SECRET_KEY missing; skipping Stripe lookups");
+    return {};
+  }
+  const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+
+  // Always re-fetch the session to expand what we need
+  let sess = null;
+  if (stripeSessionId) {
+    try {
+      sess = await stripe.checkout.sessions.retrieve(stripeSessionId, {
+        expand: ["invoice", "payment_intent.latest_charge"],
+      });
+    } catch (e) {
+      console.warn("[email] retrieve session failed:", e?.message || e);
+    }
+  }
+  // Hosted receipt URL from PI/Charge
+  let receiptUrl = null;
+  async function receiptFromPI(idOrObj) {
+    const pi =
+      typeof idOrObj === "string"
+        ? await stripe.paymentIntents.retrieve(idOrObj, {
+            expand: ["latest_charge"],
+          })
+        : idOrObj;
+    if (!pi) return null;
+    if (pi.latest_charge) {
+      const ch =
+        typeof pi.latest_charge === "string"
+          ? await stripe.charges.retrieve(pi.latest_charge)
+          : pi.latest_charge;
+      return ch?.receipt_url || null;
+    }
+    return pi?.charges?.data?.[0]?.receipt_url || null;
+  }
+
+  if (sess?.payment_intent) {
+    receiptUrl = await receiptFromPI(sess.payment_intent);
+  }
+  if (!receiptUrl && stripePaymentIntentId) {
+    try {
+      receiptUrl = await receiptFromPI(stripePaymentIntentId);
+    } catch (e) {
+      console.warn("[email] retrieve PI failed:", e?.message || e);
+    }
+  }
+
+  // Invoice PDF (if you enabled invoice_creation at Checkout)
+  let invoicePdfBuffer = null;
+  let invoiceFilename = null;
+  if (sess?.invoice) {
+    const inv =
+      typeof sess.invoice === "string"
+        ? await stripe.invoices.retrieve(sess.invoice)
+        : sess.invoice;
+    if (inv?.invoice_pdf) {
+      invoicePdfBuffer = await fetchPdfBuffer(inv.invoice_pdf);
+      invoiceFilename = inv?.number ? `${inv.number}.pdf` : undefined;
+    }
+  }
+
+  return { invoicePdfBuffer, invoiceFilename, receiptUrl };
+}
 
 export function renderConfirmationHtml({
   brand,
@@ -214,6 +378,8 @@ export function renderConfirmationHtml({
   promoCode,
   discountLabel,
   subtotalLabel,
+  receiptUrl,
+  hasInvoicePdf,
 }) {
   const {
     text = "#2b2a28",
@@ -383,9 +549,20 @@ export function renderConfirmationHtml({
             <!-- Helper / footer -->
             <tr>
               <td style="padding:4px 20px 18px;">
-                <p style="margin:12px 0 0;color:${subtext};font-size:13px;">
-                  A calendar invite (.ics) is attached. For any questions, just reply to this email.
-                </p>
+                  ${
+                    receiptUrl
+                      ? `<div style="margin:12px 0 10px;">
+                        <a href="${receiptUrl}"
+                           style="display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid ${border};background:${panel};text-decoration:none;color:${text};font-weight:600;">
+                           View Stripe Receipt →
+                        </a>
+                       </div>`
+                      : ""
+                  }
+               <p style="margin:12px 0 0;color:${subtext};font-size:13px;">
+                A calendar invite (.ics) is attached.${
+                  hasInvoicePdf ? " We’ve also attached your invoice PDF." : ""
+                } For any questions, just reply to this email. </p>
                 ${
                   location
                     ? `<div style="margin-top:12px;">
@@ -422,6 +599,8 @@ function renderTextFallback({
   promoCode,
   discountLabel,
   subtotalLabel,
+  receiptUrl,
+  hasInvoicePdf,
 }) {
   const lines = [
     `${experienceName || "Your reservation"} — confirmed`,
@@ -435,11 +614,14 @@ function renderTextFallback({
     discountLabel ? `Discount: ${discountLabel}` : "",
     amountLabel ? `Total: ${amountLabel}` : "",
     bookingRef ? `Reference: ${bookingRef}` : "",
+    receiptUrl ? `Receipt: ${receiptUrl}` : "",
     attendees?.length
       ? `Attendees: ${attendees.map((a) => a.name).join(", ")}`
       : "",
     "",
-    "A calendar invite (.ics) is attached. We look forward to seeing you!",
+    `A calendar invite (.ics) is attached.${
+      hasInvoicePdf ? " Invoice PDF attached." : ""
+    } We look forward to seeing you!`,
   ];
   return lines.filter(Boolean).join("\n");
 }
