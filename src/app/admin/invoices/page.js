@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
+import React from "react";
 import "server-only";
 import { format } from "date-fns";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
@@ -22,6 +22,13 @@ import { redirect } from "next/navigation";
  * - Better pagination with number buttons + ellipses that preserve filters
  */
 
+function Row({ className = "", children }) {
+  const kids = [];
+  React.Children.forEach(children, (child) => {
+    if (React.isValidElement(child)) kids.push(child); // drop whitespace/text nodes
+  });
+  return <tr className={className}>{kids}</tr>;
+}
 // ======================== SERVER ACTION: SEND INVOICE ========================
 export async function sendInvoice(formData) {
   "use server";
@@ -370,11 +377,13 @@ export default async function InvoicesPage({ searchParams }) {
                     </div>
                     <div className="flex items-center gap-2">
                       <a
-                        href={`/admin/reservations/${r.id}`}
+                        href={`/api/admin/invoices/${r.id}/download`}
                         className="inline-flex items-center rounded-lg border border-[#e8e5df] px-3 py-1.5 text-xs text-[#3f382f] hover:bg-[#fcfbf8]"
+                        download
                       >
-                        View
+                        Download
                       </a>
+
                       <form action={sendInvoice}>
                         <input type="hidden" name="id" value={r.id} />
                         <button
@@ -402,7 +411,7 @@ export default async function InvoicesPage({ searchParams }) {
             <div className="relative max-h-[70vh] overflow-auto">
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-[#fcfbf8] text-[#7a6a58] shadow-sm">
-                  <tr className="border-b border-[#efeae1]">
+                  <Row className="border-b border-[#efeae1]">
                     <Th className="w-[120px]">#</Th>
                     <Th>Created</Th>
                     <Th>Start</Th>
@@ -412,7 +421,7 @@ export default async function InvoicesPage({ searchParams }) {
                     <Th>Stripe PI</Th>
                     <Th>Email</Th> {/* new */}
                     <Th className="text-right">Action</Th>
-                  </tr>
+                  </Row>
                 </thead>
                 <tbody className="divide-y divide-[#efeae1]">
                   {rows.map((r) => {
