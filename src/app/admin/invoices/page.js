@@ -30,80 +30,6 @@ function Row({ className = "", children }) {
   return <tr className={className}>{kids}</tr>;
 }
 // ======================== SERVER ACTION: SEND INVOICE ========================
-export async function sendInvoice(formData) {
-  "use server";
-  const id = Number(formData.get("id"));
-  if (!Number.isFinite(id)) return redirect("/admin/invoices?err=bad_id");
-
-  const admin = createSupabaseAdmin();
-  if (!admin) return redirect("/admin/invoices?err=no_admin");
-
-  const { data: b, error } = await admin
-    .from("Booking")
-    .select(
-      "id, createdAt, startTime, status, numberOfPeople, totalPaidAmount, currency, primary_contact, duration, stripePaymentIntentId, stripeSessionId"
-    )
-    .eq("id", id)
-    .single();
-
-  if (error || !b) return redirect(`/admin/invoices?err=not_found&id=${id}`);
-
-  const to = emailFromPrimary(b.primary_contact);
-  if (!to) return redirect(`/admin/invoices?err=no_email&id=${id}`);
-
-  // Build your HTML
-  let html = renderInvoiceEmail(b);
-
-  // Try to get a Stripe asset to attach or link
-  let attachments = [];
-  try {
-    const asset = await getStripeAssetForBooking(b);
-    if (asset && asset.type === "invoice" && asset.pdfUrl) {
-      const pdfBuffer = await fetchPdfBuffer(asset.pdfUrl);
-      attachments.push({
-        filename: asset.filename || `Invoice-${formatInv(b.id)}.pdf`,
-        content: pdfBuffer, // Buffer is safest with Resend
-        contentType: "application/pdf",
-      });
-      if (asset.hostedUrl) {
-        html += `
-          <p style="font-size:12px;color:#6b7280;margin-top:12px;">
-            View on Stripe: <a href="${asset.hostedUrl}">${asset.hostedUrl}</a>
-          </p>`;
-      }
-    } else if (asset && asset.type === "receipt" && asset.url) {
-      html += `
-        <p style="font-size:12px;color:#6b7280;margin-top:12px;">
-          Stripe receipt: <a href="${asset.url}">${asset.url}</a>
-        </p>`;
-    }
-  } catch (e) {
-    console.warn("[sendInvoice] Stripe asset fetch skipped:", e?.message || e);
-    // continue without attachment
-  }
-
-  try {
-    await sendMail({
-      to,
-      subject: `Invoice ${formatInv(b.id)} · ${brandName()}`,
-      html,
-      attachments, // 👈 new
-    });
-
-    try {
-      await admin
-        .from("Booking")
-        .update({ invoiceEmailSentAt: new Date().toISOString() })
-        .eq("id", id);
-    } catch {}
-  } catch (e) {
-    console.error("sendInvoice failed", e);
-    return redirect(`/admin/invoices?err=send_fail&id=${id}`);
-  }
-
-  revalidatePath("/admin/invoices");
-  return redirect(`/admin/invoices?sent=${id}`);
-}
 
 async function sendMail({ to, subject, html, attachments }) {
   const apiKey = process.env.RESEND_API_KEY;
@@ -223,6 +149,7 @@ export default async function InvoicesPage({ searchParams }) {
   const perPage = clamp(Number(get("per") || 25), 5, 200);
   const sent = (get("sent") || "").toString();
   const err = (get("err") || "").toString();
+  const updated = (get("updated") || "").toString();
 
   // ---------- build base query ----------
   const baseSelect =
@@ -299,46 +226,175 @@ export default async function InvoicesPage({ searchParams }) {
 
   const initial = { q, status, from, to, perPage, page };
 
+  // ---------------- UI helpers ----------------
+  // Minimal, accessible icon-only button
+  function IconButton({
+    as = "button",
+    href,
+    title,
+    disabled,
+    onClick,
+    type,
+    download,
+    children,
+    className = "",
+  }) {
+    const base =
+      "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#e8e5df] text-[#3f382f] shadow-sm transition hover:bg-[#fcfbf8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 focus-visible:ring-offset-1 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-50";
+
+    if (as === "a") {
+      return (
+        <a
+          href={href}
+          title={title}
+          aria-label={title}
+          className={`${base} ${className}`}
+          download={download}
+        >
+          {children}
+        </a>
+      );
+    }
+    return (
+      <button
+        type={type}
+        title={title}
+        aria-label={title}
+        disabled={disabled}
+        onClick={onClick}
+        className={`${base} ${className}`}
+      >
+        {children}
+      </button>
+    );
+  }
+
+  // lazy import-friendly icons (lucide-react) — adjust to your setup
+  const Eye = (props) => (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+  const DownloadIcon = (props) => (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M12 15V3" />
+    </svg>
+  );
+  const SendIcon = (props) => (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M22 2L11 13" />
+      <path d="M22 2l-7 20-4-9-9-4 20-7Z" />
+    </svg>
+  );
+  const Pencil = (props) => (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+
   // ---------- render ----------
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-8">
+    <div className="relative mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 isolate before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(1200px_600px_at_50%_-50%,rgba(139,111,71,0.06),transparent_60%)] after:absolute after:inset-x-0 after:top-0 after:-z-10 after:h-24 after:bg-[linear-gradient(to_bottom,rgba(252,251,248,0.85),transparent)]">
+      <h1 className="sr-only">Invoices</h1>
       <Header />
 
-      <AlertBar sent={sent} err={err} />
+      {/* notices (supports ?sent= & ?updated=) */}
+      <div aria-live="polite" aria-atomic="true">
+        <AlertBar sent={sent} err={err} updated={updated} />
+      </div>
 
-      <FiltersBar initial={initial} />
+      {/* Filters card – clearer structure, subtle glassy surface */}
+      <section
+        aria-label="Filters"
+        className="rounded-2xl border border-[#e8e5df] bg-white/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur p-4 shadow-[0_1px_0_rgba(0,0,0,0.04)] md:p-5"
+      >
+        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-start">
+          <FiltersBar initial={initial} />
+          <div className="md:pl-3">
+            <QuickRanges initial={initial} />
+          </div>
+        </div>
+      </section>
 
-      <QuickRanges initial={initial} />
-
-      <StatsBar
-        count={rows?.length || 0}
-        pageTotal={pageTotal}
-        avgInvoice={avgInvoice}
-        guestsTotal={guestsTotal}
-        currency={guessCurrency(rows)}
-        totalAll={total}
-        page={page}
-        perPage={perPage}
-      />
+      {/* KPIs */}
+      <div className="mt-5">
+        <StatsBar
+          count={rows?.length || 0}
+          pageTotal={pageTotal}
+          avgInvoice={avgInvoice}
+          guestsTotal={guestsTotal}
+          currency={guessCurrency(rows)}
+          totalAll={total}
+          page={page}
+          perPage={perPage}
+        />
+      </div>
 
       {!rows || rows.length === 0 ? (
         <EmptyState initial={initial} />
       ) : (
         <>
-          {/* Mobile Cards */}
-          <ul className="mt-4 space-y-3 md:hidden">
+          {/* Mobile cards – compact icon actions */}
+          <ul
+            role="list"
+            aria-label="Invoices list"
+            className="mt-6 space-y-3 md:hidden"
+          >
             {rows.map((r) => {
               const canSend = Boolean(emailFromPrimary(r.primary_contact));
               const sentAt = r.invoiceEmailSentAt;
-              const sendLabel = sentAt ? "Resend" : "Send";
               return (
                 <li
                   key={r.id}
-                  className="rounded-2xl border border-[#e8e5df] bg-white p-4"
+                  className="rounded-2xl border border-[#e8e5df] bg-white p-4 shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-colors hover:bg-[#faf7f2]/60"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-[#3f382f]">
+                      <div className="text-sm font-semibold text-[#3f382f] tracking-wide tabular-nums">
                         {formatInv(r.id)}
                       </div>
                       <div className="mt-1 text-xs text-[#7a6a58]">
@@ -351,13 +407,13 @@ export default async function InvoicesPage({ searchParams }) {
                   <div className="mt-3 text-sm text-[#3f382f]">
                     {nameFromPrimary(r.primary_contact)}
                   </div>
-                  <div className="text-xs text-[#7a6a58]">
+                  <div className="text-xs text-[#7a6a58] break-all">
                     {emailFromPrimary(r.primary_contact)}
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between">
+                  <div className="mt-3 flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-[#3f382f]">
+                      <div className="text-base font-semibold text-[#3f382f] tabular-nums">
                         {fmtMoney(r.totalPaidAmount, r.currency)}
                       </div>
                       <div className="text-[11px] text-[#7a6a58]">
@@ -375,29 +431,50 @@ export default async function InvoicesPage({ searchParams }) {
                         )}
                       </div>
                     </div>
+
                     <div className="flex items-center gap-2">
-                      <a
+                      {/* Edit (icon style) — ensure your EditDetails supports className/variant="icon" */}
+                      <EditDetails
+                        id={r.id}
+                        pc={r.primary_contact}
+                        variant="icon"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#e8e5df] text-[#3f382f] shadow-sm transition hover:bg-[#fcfbf8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 focus-visible:ring-offset-1 focus-visible:ring-offset-white"
+                      >
+                        <Pencil />
+                        <span className="sr-only">Edit</span>
+                      </EditDetails>
+
+                      <IconButton
+                        as="a"
                         href={`/api/admin/invoices/${r.id}/download`}
-                        className="inline-flex items-center rounded-lg border border-[#e8e5df] px-3 py-1.5 text-xs text-[#3f382f] hover:bg-[#fcfbf8]"
+                        title="Download PDF"
                         download
                       >
-                        Download
-                      </a>
+                        <DownloadIcon />
+                        <span className="sr-only">Download</span>
+                      </IconButton>
 
-                      <form action={sendInvoice}>
+                      <IconButton
+                        as="a"
+                        href={`/admin/reservations/${r.id}`}
+                        title="View reservation"
+                      >
+                        <Eye />
+                        <span className="sr-only">View</span>
+                      </IconButton>
+
+                      <form action="/api/admin/invoices/send" method="POST">
                         <input type="hidden" name="id" value={r.id} />
-                        <button
+                        <input type="hidden" name="mode" value="custom" />
+                        <IconButton
+                          as="button"
                           type="submit"
                           disabled={!canSend}
                           title={canSend ? "Send invoice" : "No customer email"}
-                          className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs shadow-sm transition ${
-                            canSend
-                              ? "border border-[#e8e5df] text-[#3f382f] hover:bg-[#fcfbf8]"
-                              : "border border-[#eee] text-[#aaa] cursor-not-allowed"
-                          }`}
                         >
-                          {sendLabel}
-                        </button>
+                          <SendIcon />
+                          <span className="sr-only">Send</span>
+                        </IconButton>
                       </form>
                     </div>
                   </div>
@@ -406,134 +483,185 @@ export default async function InvoicesPage({ searchParams }) {
             })}
           </ul>
 
-          {/* Desktop Table */}
-          <div className="mt-4 hidden overflow-hidden rounded-2xl border border-[#e8e5df] bg-white md:block">
-            <div className="relative max-h-[70vh] overflow-auto">
-              <table className="min-w-full text-sm">
-                <thead className="sticky top-0 z-10 bg-[#fcfbf8] text-[#7a6a58] shadow-sm">
-                  <Row className="border-b border-[#efeae1]">
-                    <Th className="w-[120px]">#</Th>
-                    <Th>Created</Th>
-                    <Th>Start</Th>
-                    <Th>Customer</Th>
-                    <Th className="text-right">Amount</Th>
-                    <Th>Status</Th>
-                    <Th>Stripe PI</Th>
-                    <Th>Email</Th> {/* new */}
-                    <Th className="text-right">Action</Th>
-                  </Row>
-                </thead>
-                <tbody className="divide-y divide-[#efeae1]">
-                  {rows.map((r) => {
-                    const canSend = Boolean(
-                      emailFromPrimary(r.primary_contact)
-                    );
-                    const sentAt = r.invoiceEmailSentAt;
-                    const sendLabel = sentAt ? "Resend" : "Send";
-                    return (
-                      <tr
-                        key={r.id}
-                        className="odd:bg-white even:bg-[#fcfbf8]/40 hover:bg-[#faf7f2]/70"
-                      >
-                        <Td>
-                          <div className="font-medium text-[#3f382f] tracking-wide tabular-nums">
-                            {formatInv(r.id)}
-                          </div>
-                          <div className="text-[11px] text-[#7a6a58]">
-                            ID: {r.id}
-                          </div>
-                        </Td>
-                        <Td>{fmtDate(r.createdAt)}</Td>
-                        <Td>{fmtDateTime(r.startTime)}</Td>
-                        <Td>
-                          <div className="text-[#3f382f]">
-                            {nameFromPrimary(r.primary_contact)}
-                          </div>
-                          <div className="text-[11px] text-[#7a6a58]">
-                            {emailFromPrimary(r.primary_contact)}
-                          </div>
-                        </Td>
-                        <Td className="text-right">
-                          <div className="font-semibold text-[#3f382f]">
-                            {fmtMoney(r.totalPaidAmount, r.currency)}
-                          </div>
-                          <div className="text-[11px] text-[#7a6a58]">
-                            {r.numberOfPeople || 1} guest(s)
-                          </div>
-                        </Td>
-                        <Td>
-                          <StatusPill status={r.status} />
-                        </Td>
-                        <Td>
-                          {r.stripePaymentIntentId ? (
-                            <a
-                              href={stripeDashboardUrl(r.stripePaymentIntentId)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[#6b5a48] underline decoration-dotted underline-offset-4 hover:text-[#8b6f47]"
-                            >
-                              {shorten(r.stripePaymentIntentId)}
-                            </a>
-                          ) : (
-                            <span className="text-[#7a6a58]">—</span>
-                          )}
-                        </Td>
-                        <Td>
-                          {sentAt ? (
-                            <div className="flex items-center gap-1 text-emerald-700">
-                              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px]">
+          {/* Desktop table – sticky first & last columns, compact icon action bar */}
+          <div className="mt-6 hidden md:block">
+            <div className="overflow-hidden rounded-2xl border border-[#e8e5df] bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+              <div className="relative max-h-[70vh] overflow-auto [scrollbar-gutter:stable_both-edges]">
+                <table className="min-w-full table-fixed text-sm">
+                  <thead className="sticky top-0 z-10 bg-[#fcfbf8]/95 backdrop-blur supports-[backdrop-filter]:backdrop-blur text-[#7a6a58] shadow-[0_1px_0_#efeae1]">
+                    <Row>
+                      <Th className="w-[160px] sticky left-0 z-20 bg-[#fcfbf8]/95 backdrop-blur supports-[backdrop-filter]:backdrop-blur shadow-[1px_0_0_#efeae1]">
+                        #
+                      </Th>
+                      <Th>Created</Th>
+                      <Th>Start</Th>
+                      <Th>Customer</Th>
+                      <Th className="text-right">Amount</Th>
+                      <Th>Status</Th>
+                      <Th>Stripe PI</Th>
+                      <Th>Email</Th>
+                      <Th className="text-right sticky right-0 z-20 pr-4 bg-[#fcfbf8]/95 backdrop-blur supports-[backdrop-filter]:backdrop-blur shadow-[-1px_0_0_#efeae1] w-[168px]">
+                        Actions
+                      </Th>
+                    </Row>
+                  </thead>
+                  <tbody className="divide-y divide-[#efeae1]">
+                    {rows.map((r) => {
+                      const canSend = Boolean(
+                        emailFromPrimary(r.primary_contact)
+                      );
+                      const sentAt = r.invoiceEmailSentAt;
+                      return (
+                        <tr
+                          key={r.id}
+                          className="group odd:bg-white even:bg-[#fcfbf8]/40 hover:bg-[#faf7f2]/70 transition-colors"
+                        >
+                          <Td className="sticky left-0 z-10 bg-white group-hover:bg-[#faf7f2]/70 shadow-[1px_0_0_#efeae1]">
+                            <div className="font-medium text-[#3f382f] tracking-wide tabular-nums">
+                              {formatInv(r.id)}
+                            </div>
+                            <div className="text-[11px] text-[#7a6a58] truncate">
+                              ID: {r.id}
+                            </div>
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            {fmtDate(r.createdAt)}
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            {fmtDateTime(r.startTime)}
+                          </Td>
+                          <Td>
+                            <div className="text-[#3f382f]">
+                              {nameFromPrimary(r.primary_contact)}
+                            </div>
+                            <div className="text-[11px] text-[#7a6a58] truncate max-w-[240px]">
+                              {emailFromPrimary(r.primary_contact)}
+                            </div>
+                          </Td>
+                          <Td className="text-right">
+                            <div className="font-semibold text-[#3f382f] tabular-nums">
+                              {fmtMoney(r.totalPaidAmount, r.currency)}
+                            </div>
+                            <div className="text-[11px] text-[#7a6a58]">
+                              {r.numberOfPeople || 1} guest(s)
+                            </div>
+                          </Td>
+                          <Td>
+                            <StatusPill status={r.status} />
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            {r.stripePaymentIntentId ? (
+                              <a
+                                href={stripeDashboardUrl(
+                                  r.stripePaymentIntentId
+                                )}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Open in Stripe"
+                                className="text-[#6b5a48] underline decoration-dotted underline-offset-4 hover:text-[#8b6f47] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/30 rounded focus-visible:ring-offset-1 focus-visible:ring-offset-white"
+                              >
+                                {shorten(r.stripePaymentIntentId)}
+                              </a>
+                            ) : (
+                              <span className="text-[#7a6a58]">—</span>
+                            )}
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            {sentAt ? (
+                              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">
                                 ✓ Sent · {fmtDateTime(sentAt)}
                               </span>
-                            </div>
-                          ) : (
-                            <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[11px] text-neutral-700">
-                              Not sent
-                            </span>
-                          )}
-                        </Td>
-                        <Td className="text-right pr-4">
-                          <div className="inline-flex items-center gap-2">
-                            <a
-                              href={`/admin/reservations/${r.id}`}
-                              className="inline-flex items-center rounded-lg border border-[#e8e5df] px-3 py-1.5 text-xs text-[#3f382f] hover:bg-[#fcfbf8]"
-                            >
-                              View
-                            </a>
-                            <form action={sendInvoice}>
-                              <input type="hidden" name="id" value={r.id} />
-                              <button
-                                type="submit"
-                                disabled={!canSend}
-                                title={
-                                  canSend ? "Send invoice" : "No customer email"
-                                }
-                                className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs shadow-sm transition ${
-                                  canSend
-                                    ? "border border-[#e8e5df] text-[#3f382f] hover:bg-[#fcfbf8]"
-                                    : "border border-[#eee] text-[#aaa] cursor-not-allowed"
-                                }`}
+                            ) : (
+                              <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[11px] text-neutral-700">
+                                Not sent
+                              </span>
+                            )}
+                          </Td>
+                          <Td className="text-right sticky right-0 z-10 pr-4 bg-white group-hover:bg-[#faf7f2]/70 shadow-[-1px_0_0_#efeae1]">
+                            <div className="inline-flex items-center gap-2">
+                              {/* Edit */}
+                              <EditDetails
+                                id={r.id}
+                                pc={r.primary_contact}
+                                variant="icon"
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#e8e5df] text-[#3f382f] shadow-sm transition hover:bg-[#fcfbf8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 focus-visible:ring-offset-1 focus-visible:ring-offset-white"
                               >
-                                {sendLabel}
-                              </button>
-                            </form>
-                          </div>
-                        </Td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                                <Pencil />
+                                <span className="sr-only">Edit</span>
+                              </EditDetails>
+
+                              {/* Download */}
+                              <IconButton
+                                as="a"
+                                href={`/api/admin/invoices/${r.id}/download`}
+                                title="Download PDF"
+                                download
+                              >
+                                <DownloadIcon />
+                                <span className="sr-only">Download</span>
+                              </IconButton>
+
+                              {/* View */}
+                              {/* <IconButton
+                                as="a"
+                                href={`/admin/reservations/${r.id}`}
+                                title="View reservation"
+                              >
+                                <Eye />
+                                <span className="sr-only">View</span>
+                              </IconButton> */}
+
+                              {/* Send */}
+                              <form
+                                action="/api/admin/invoices/send"
+                                method="POST"
+                              >
+                                <input type="hidden" name="id" value={r.id} />
+                                <input
+                                  type="hidden"
+                                  name="mode"
+                                  value="custom"
+                                />
+                                <IconButton
+                                  as="button"
+                                  type="submit"
+                                  disabled={!canSend}
+                                  title={
+                                    canSend
+                                      ? "Send invoice"
+                                      : "No customer email"
+                                  }
+                                >
+                                  <SendIcon />
+                                  <span className="sr-only">Send</span>
+                                </IconButton>
+                              </form>
+                            </div>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </>
       )}
 
-      <Pagination
-        page={page}
-        perPage={perPage}
-        total={total}
-        initial={initial}
-      />
+      {/* Sticky footer pagination on long lists */}
+      <div className="mt-6 md:sticky md:bottom-3 md:z-30">
+        <div className="rounded-2xl border border-[#e8e5df] bg-white/85 backdrop-blur supports-[backdrop-filter]:backdrop-blur shadow-[0_4px_20px_rgba(0,0,0,0.06)]">
+          <div className="p-3">
+            <Pagination
+              page={page}
+              perPage={perPage}
+              total={total}
+              initial={initial}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -543,225 +671,6 @@ async function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("Missing STRIPE_SECRET_KEY");
   return new Stripe(key, { apiVersion: "2024-06-20" });
-}
-
-async function fetchPdfBuffer(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-function toMinor(currency, amount) {
-  const zero = [
-    "BIF",
-    "CLP",
-    "DJF",
-    "GNF",
-    "JPY",
-    "KMF",
-    "KRW",
-    "MGA",
-    "PYG",
-    "RWF",
-    "UGX",
-    "VND",
-    "VUV",
-    "XAF",
-    "XOF",
-    "XPF",
-  ];
-  const isZero = zero.includes(String(currency || "EUR").toUpperCase());
-  return Math.round(Number(amount || 0) * (isZero ? 1 : 100));
-}
-
-async function ensureStripeCustomer(stripe, { email, name }) {
-  if (!email) throw new Error("Customer email required");
-  const list = await stripe.customers.list({ email, limit: 1 });
-  if (list?.data?.length) return list.data[0].id;
-  const c = await stripe.customers.create({ email, name });
-  return c.id;
-}
-
-function invoiceLineDescription(b) {
-  const when = fmtDateTimePlain(b.startTime);
-  const guests = b.numberOfPeople || 1;
-  return `${brandName()} booking ${formatInv(
-    b.id
-  )} — ${guests} guest(s) — ${when}`;
-}
-
-/**
- * Reuse an existing Stripe invoice if present (via Checkout session),
- * otherwise create a new invoice that mirrors the booking, finalize it,
- * and mark it paid_out_of_band to avoid charging again.
- * Returns the invoice object (with .invoice_pdf and .number).
- */
-async function ensureStripeInvoice(b) {
-  const stripe = await getStripe();
-
-  // Prefer an existing invoice on the Checkout session (if you used invoice_creation)
-  if (b.stripeSessionId) {
-    try {
-      const session = await stripe.checkout.sessions.retrieve(
-        b.stripeSessionId,
-        {
-          expand: ["invoice"],
-        }
-      );
-      if (session?.invoice) {
-        const inv =
-          typeof session.invoice === "string"
-            ? await stripe.invoices.retrieve(session.invoice)
-            : session.invoice;
-        if (inv?.invoice_pdf) return inv;
-      }
-    } catch (e) {
-      console.warn(
-        "[ensureStripeInvoice] no invoice on session:",
-        e?.message || e
-      );
-    }
-  }
-
-  // No invoice exists — create one for record-keeping (won’t charge the customer)
-  const email = emailFromPrimary(b.primary_contact);
-  const name = nameFromPrimary(b.primary_contact);
-  const customer = await ensureStripeCustomer(stripe, { email, name });
-
-  const currency = (b.currency || "EUR").toLowerCase();
-
-  // 1) Create a draft invoice that will be sent via email (we’ll still attach the PDF ourselves)
-  const invoice = await stripe.invoices.create({
-    customer,
-    collection_method: "send_invoice",
-    days_until_due: 7,
-    currency,
-    metadata: {
-      bookingId: String(b.id),
-      statusAtIssue: b.status || "paid",
-    },
-  });
-
-  // 2) Add a single line item for this booking
-  await stripe.invoiceItems.create({
-    customer,
-    invoice: invoice.id,
-    amount: toMinor(currency, b.totalPaidAmount),
-    currency,
-    description: invoiceLineDescription(b),
-    metadata: { bookingId: String(b.id) },
-  });
-
-  // 3) Finalize the invoice so Stripe generates the PDF
-  const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
-
-  // 4) Mark as paid out-of-band (booking already paid in your system)
-  await stripe.invoices.pay(finalized.id, { paid_out_of_band: true });
-
-  // 5) Retrieve the latest invoice (should now have invoice_pdf)
-  const inv = await stripe.invoices.retrieve(finalized.id);
-  return inv;
-}
-
-/**
- * Returns:
- *  - { type: 'invoice', pdfUrl, filename? }
- *  - { type: 'receipt', url }
- *  - null
- */
-async function getStripeAssetForBooking(b) {
-  // We’ll try hard to produce a Stripe invoice PDF.
-  // Need at least a customer email to bind a Stripe Customer.
-  const customerEmail = emailFromPrimary(b.primary_contact);
-  if (!customerEmail) return null;
-  const stripe = await getStripe();
-
-  // Prefer a true invoice PDF if available (e.g. Checkout with invoice_creation)
-  if (b.stripeSessionId) {
-    try {
-      const session = await stripe.checkout.sessions.retrieve(
-        b.stripeSessionId,
-        {
-          expand: ["invoice", "payment_intent"],
-        }
-      );
-      if (session?.invoice) {
-        const inv =
-          typeof session.invoice === "string"
-            ? await stripe.invoices.retrieve(session.invoice)
-            : session.invoice;
-        if (inv?.invoice_pdf) {
-          return {
-            type: "invoice",
-            pdfUrl: inv.invoice_pdf,
-            filename: inv.number ? `${inv.number}.pdf` : undefined,
-            hostedUrl: inv.hosted_invoice_url,
-          };
-        }
-      }
-      // Fall back to receipt via PaymentIntent
-      if (session?.payment_intent) {
-        const pi =
-          typeof session.payment_intent === "string"
-            ? await stripe.paymentIntents.retrieve(session.payment_intent, {
-                expand: ["latest_charge"],
-              })
-            : session.payment_intent;
-        const chargeId = pi?.latest_charge || pi?.charges?.data?.[0]?.id;
-        if (chargeId) {
-          const ch = await stripe.charges.retrieve(chargeId);
-          if (ch?.receipt_url) return { type: "receipt", url: ch.receipt_url };
-        }
-      }
-    } catch (e) {
-      console.warn(
-        "[getStripeAssetForBooking] session lookup failed:",
-        e?.message || e
-      );
-    }
-  }
-
-  // Or just try the PaymentIntent directly
-  if (b.stripePaymentIntentId) {
-    try {
-      const pi = await stripe.paymentIntents.retrieve(b.stripePaymentIntentId, {
-        expand: ["latest_charge"],
-      });
-      const chargeId = pi?.latest_charge || pi?.charges?.data?.[0]?.id;
-      if (chargeId) {
-        const ch = await stripe.charges.retrieve(chargeId);
-        if (ch?.receipt_url) return { type: "receipt", url: ch.receipt_url };
-      }
-    } catch (e) {
-      console.warn(
-        "[getStripeAssetForBooking] PI lookup failed:",
-        e?.message || e
-      );
-    }
-  }
-
-  // Last resort: create/finalize a Stripe Invoice (won’t re-charge), then attach its PDF
-  try {
-    // Optionally only do this for "paid/confirmed/completed"
-    const okStatuses = new Set(["paid", "confirmed", "completed"]);
-    if (!b.status || okStatuses.has(b.status)) {
-      const inv = await ensureStripeInvoice(b);
-      if (inv?.invoice_pdf) {
-        return {
-          type: "invoice",
-          pdfUrl: inv.invoice_pdf,
-          filename: inv.number ? `${inv.number}.pdf` : undefined,
-          hostedUrl: inv.hosted_invoice_url,
-        };
-      }
-    }
-  } catch (e) {
-    console.warn(
-      "[getStripeAssetForBooking] ensureStripeInvoice failed:",
-      e?.message || e
-    );
-  }
-  return null;
 }
 
 /* ============================== UI bits ============================== */
@@ -780,7 +689,15 @@ function Header() {
   );
 }
 
-function AlertBar({ sent, err }) {
+function AlertBar({ sent, err, updated }) {
+  if (updated) {
+    return (
+      <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        Saved changes for{" "}
+        <span className="font-semibold">Invoice {formatInv(updated)}</span>.
+      </div>
+    );
+  }
   if (!sent && !err) return null;
   if (sent) {
     return (
@@ -798,16 +715,21 @@ function AlertBar({ sent, err }) {
   };
   return (
     <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-      {messages[err] || "Failed to send invoice."}
+      {messages[err] || "Failed to process request."}
     </div>
   );
 }
 
 function FiltersBar({ initial }) {
   const { q, status, from, to, perPage } = initial || {};
+
   const hasActiveFilters = Boolean(
     q || from || to || (status && status !== "paid")
   );
+  const activeCount = [q, from, to, status && status !== "paid"].filter(
+    Boolean
+  ).length;
+
   const clearHref = qsFromInitial(initial, {
     q: "",
     from: "",
@@ -817,77 +739,268 @@ function FiltersBar({ initial }) {
   });
 
   return (
-    <form className="grid grid-cols-1 gap-3 rounded-2xl border border-[#e8e5df] bg-[#fcfbf8] p-4 md:grid-cols-12">
-      <div className="md:col-span-4">
-        <label className="block text-xs text-[#7a6a58]">Search</label>
-        <input
-          name="q"
-          defaultValue={q}
-          placeholder="Name, email, PI id, booking id..."
-          className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#3f382f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-        />
-      </div>
-      <div className="md:col-span-2">
-        <label className="block text-xs text-[#7a6a58]">Status</label>
-        <select
-          name="status"
-          defaultValue={status || "paid"}
-          className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#3f382f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-        >
-          <option value="paid">paid</option>
-          <option value="confirmed">confirmed</option>
-          <option value="completed">completed</option>
-          <option value="checked_in">checked_in</option>
-          <option value="cancelled">cancelled</option>
-          <option value="all">All</option>
-        </select>
-      </div>
-      <div className="md:col-span-2">
-        <label className="block text-xs text-[#7a6a58]">From</label>
-        <input
-          type="date"
-          name="from"
-          defaultValue={dateInput(from)}
-          className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#3f382f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-        />
-      </div>
-      <div className="md:col-span-2">
-        <label className="block text-xs text-[#7a6a58]">To</label>
-        <input
-          type="date"
-          name="to"
-          defaultValue={dateInput(to)}
-          className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#3f382f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-        />
-      </div>
-      <div className="md:col-span-1">
-        <label className="block text-xs text-[#7a6a58]">Per page</label>
-        <select
-          name="per"
-          defaultValue={String(perPage || 25)}
-          className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#3f382f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-        >
-          <option>10</option>
-          <option>25</option>
-          <option>50</option>
-          <option>100</option>
-        </select>
-      </div>
-      <div className="md:col-span-1 flex items-end justify-end gap-2">
+    <form
+      method="GET"
+      className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end"
+      aria-labelledby="filters-legend"
+    >
+      {/* group: Search */}
+      <fieldset className="md:col-span-4">
+        <legend id="filters-legend" className="sr-only">
+          Invoice filters
+        </legend>
+        <label className="block text-xs text-[#7a6a58]" htmlFor="f-q">
+          Search
+        </label>
+        <div className="relative mt-1">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+            {/* magnifier */}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M21 21l-4.35-4.35"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+              <circle
+                cx="11"
+                cy="11"
+                r="7"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+            </svg>
+          </span>
+          <input
+            id="f-q"
+            type="search"
+            name="q"
+            defaultValue={q}
+            placeholder="Name, email, PI id, booking id…"
+            enterKeyHint="search"
+            className="w-full rounded-lg border border-[#e8e5df] bg-white pl-9 pr-3 py-2 text-sm text-[#3f382f] placeholder:text-[#b1a595] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40"
+          />
+        </div>
+      </fieldset>
+
+      {/* group: Status */}
+      <fieldset className="md:col-span-2">
+        <label className="block text-xs text-[#7a6a58]" htmlFor="f-status">
+          Status
+        </label>
+        <div className="relative mt-1">
+          <select
+            id="f-status"
+            name="status"
+            defaultValue={status || "paid"}
+            className="w-full appearance-none rounded-lg border border-[#e8e5df] bg-white px-3 py-2 pr-8 text-sm text-[#3f382f] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40"
+          >
+            <option value="paid">paid</option>
+            <option value="confirmed">confirmed</option>
+            <option value="completed">completed</option>
+            <option value="checked_in">checked_in</option>
+            <option value="cancelled">cancelled</option>
+            <option value="all">All</option>
+          </select>
+          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+            {/* chevron */}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M6 9l6 6 6-6"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </div>
+      </fieldset>
+
+      {/* group: From */}
+      <fieldset className="md:col-span-2">
+        <label className="block text-xs text-[#7a6a58]" htmlFor="f-from">
+          From
+        </label>
+        <div className="relative mt-1">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+            {/* calendar */}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <rect
+                x="3"
+                y="5"
+                width="18"
+                height="16"
+                rx="2"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <path
+                d="M16 3v4M8 3v4M3 10h18"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+          <input
+            id="f-from"
+            type="date"
+            name="from"
+            defaultValue={dateInput(from)}
+            max={dateInput(to) || undefined}
+            className="w-full rounded-lg border border-[#e8e5df] bg-white pl-9 pr-3 py-2 text-sm text-[#3f382f] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40"
+          />
+        </div>
+      </fieldset>
+
+      {/* group: To */}
+      <fieldset className="md:col-span-2">
+        <label className="block text-xs text-[#7a6a58]" htmlFor="f-to">
+          To
+        </label>
+        <div className="relative mt-1">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+            {/* calendar */}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <rect
+                x="3"
+                y="5"
+                width="18"
+                height="16"
+                rx="2"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <path
+                d="M16 3v4M8 3v4M3 10h18"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+          <input
+            id="f-to"
+            type="date"
+            name="to"
+            defaultValue={dateInput(to)}
+            min={dateInput(from) || undefined}
+            className="w-full rounded-lg border border-[#e8e5df] bg-white pl-9 pr-3 py-2 text-sm text-[#3f382f] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40"
+          />
+        </div>
+      </fieldset>
+
+      {/* group: Per page */}
+      <fieldset className="md:col-span-1">
+        <label className="block text-xs text-[#7a6a58]" htmlFor="f-per">
+          Rows/page
+        </label>
+        <div className="relative mt-1">
+          <select
+            id="f-per"
+            name="per"
+            defaultValue={String(perPage || 25)}
+            className="w-full appearance-none rounded-lg border border-[#e8e5df] bg-white px-3 py-2 pr-8 text-sm text-[#3f382f] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40"
+          >
+            <option>10</option>
+            <option>25</option>
+            <option>50</option>
+            <option>100</option>
+          </select>
+          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M6 9l6 6 6-6"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </div>
+      </fieldset>
+
+      {/* Actions */}
+      <div
+        role="toolbar"
+        className="md:col-span-2 flex flex-col sm:flex-row items-stretch sm:items-end justify-end gap-2 flex-wrap"
+      >
         {hasActiveFilters ? (
           <a
             href={clearHref}
-            className="inline-flex items-center rounded-lg border border-[#e8e5df] bg-white px-4 py-2 text-sm text-[#3f382f] hover:bg-[#fcfbf8]"
+            className="inline-flex items-center justify-center rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#3f382f] shadow-sm transition hover:bg-[#fcfbf8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 shrink-0 whitespace-nowrap w-full sm:w-auto"
           >
             Clear
           </a>
         ) : null}
         <button
           type="submit"
-          className="inline-flex items-center rounded-lg bg-[#3f382f] px-4 py-2 text-sm text-white shadow hover:bg-[#2f2922]"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#3f382f] px-4 py-2 text-sm text-white shadow transition hover:bg-[#2f2922] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 shrink-0 whitespace-nowrap w-full sm:w-auto"
         >
+          {/* search icon */}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M21 21l-4.35-4.35"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+            <circle
+              cx="11"
+              cy="11"
+              r="7"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+          </svg>
           Apply
         </button>
+      </div>
+
+      {/* Active counter (a11y) */}
+      <div
+        className="col-span-full text-[11px] text-[#7a6a58]"
+        aria-live="polite"
+      >
+        {hasActiveFilters ? `Filters active: ${activeCount}` : null}
       </div>
     </form>
   );
@@ -950,6 +1063,124 @@ function StatCard({ label, value }) {
         {value}
       </div>
     </div>
+  );
+}
+
+function EditDetails({ id, pc }) {
+  return (
+    <details className="relative inline-block">
+      <summary className="inline-flex cursor-pointer select-none items-center rounded-lg border border-[#e8e5df] px-3 py-1.5 text-xs text-[#3f382f] shadow-sm hover:bg-[#fcfbf8]">
+        Edit
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 w-[380px] rounded-xl border border-[#e8e5df] bg-white p-4 text-left shadow-lg">
+        <form
+          action="/api/admin/invoices/update"
+          method="POST"
+          className="space-y-3"
+        >
+          <input type="hidden" name="id" value={id} />
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-[#7a6a58]">Full name</label>
+              <input
+                name="fullName"
+                defaultValue={nameFromPrimary(pc)}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#7a6a58]">Email</label>
+              <input
+                name="email"
+                defaultValue={emailFromPrimary(pc)}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#7a6a58]">Phone</label>
+              <input
+                name="phone"
+                defaultValue={pc?.phone || ""}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#7a6a58]">Business</label>
+              <input
+                name="businessName"
+                defaultValue={pc?.businessName || ""}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#7a6a58]">Tax number</label>
+              <input
+                name="taxNumber"
+                defaultValue={pc?.taxNumber || ""}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="col-span-2">
+              <label className="block text-xs text-[#7a6a58]">
+                Address line 1
+              </label>
+              <input
+                name="addressLine1"
+                defaultValue={pc?.address?.line1 || ""}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs text-[#7a6a58]">
+                Address line 2
+              </label>
+              <input
+                name="addressLine2"
+                defaultValue={pc?.address?.line2 || ""}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#7a6a58]">City</label>
+              <input
+                name="city"
+                defaultValue={pc?.address?.city || ""}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#7a6a58]">
+                Postal code
+              </label>
+              <input
+                name="postalCode"
+                defaultValue={pc?.address?.postalCode || ""}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#7a6a58]">Country</label>
+              <input
+                name="country"
+                defaultValue={pc?.address?.country || "GR"}
+                className="mt-1 w-full rounded-lg border border-[#e8e5df] px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button
+              type="submit"
+              className="inline-flex items-center rounded-lg bg-[#3f382f] px-3 py-1.5 text-xs text-white shadow hover:bg-[#2f2922]"
+            >
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </details>
   );
 }
 
@@ -1310,30 +1541,4 @@ function addDays(date, n) {
   const d = new Date(date);
   d.setDate(d.getDate() + n);
   return d;
-}
-
-export async function sendFromStripe(formData) {
-  "use server";
-  const id = Number(formData.get("id"));
-  if (!Number.isFinite(id)) return redirect("/admin/invoices?err=bad_id");
-
-  const admin = createSupabaseAdmin();
-  const { data: b } = await admin
-    .from("Booking")
-    .select(
-      "id, status, numberOfPeople, totalPaidAmount, currency, primary_contact, startTime, stripeSessionId, stripePaymentIntentId"
-    )
-    .eq("id", id)
-    .single();
-
-  const inv = await ensureStripeInvoice(b);
-  const stripe = await getStripe();
-  await stripe.invoices.sendInvoice(inv.id); // comes from Stripe, includes PDF
-  await admin
-    .from("Booking")
-    .update({ invoiceEmailSentAt: new Date().toISOString() })
-    .eq("id", id);
-
-  revalidatePath("/admin/invoices");
-  return redirect(`/admin/invoices?sent=${id}`);
 }
