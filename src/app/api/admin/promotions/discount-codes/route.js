@@ -21,7 +21,13 @@ export async function GET() {
 export async function POST(req) {
   const body = await req.json();
 
-  const required = ["discountType", "discountValue", "startsAt", "endsAt"];
+  const required = [
+    "discountType",
+    "discountValue",
+    "startsAt",
+    "endsAt",
+    "minSpend",
+  ];
 
   for (const k of required)
     if (body[k] === undefined || body[k] === null || body[k] === "")
