@@ -7,7 +7,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, PlusIcon } from "lucide-react";
 
 /**
  * Admin → Invoices (SSR, no TypeScript)
@@ -280,7 +280,7 @@ export default async function InvoicesPage({ searchParams }) {
       {/* Filters card – clearer structure, subtle glassy surface */}
       <section
         aria-label="Filters"
-        className="rounded-3xl rounded-2xl border border-[var(--border)] bg-white/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur p-4 shadow-[0_1px_0_rgba(0,0,0,0.04)] md:p-5"
+        className="rounded-2xl border border-[var(--border)] bg-white/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur p-4 shadow-[0_1px_0_rgba(0,0,0,0.04)] md:p-5"
       >
         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-start">
           <FiltersBar initial={initial} />
@@ -620,6 +620,14 @@ function Header() {
         >
           <ArrowLeft className="h-4 w-4" />
           <span className="hidden sm:inline">Back to dashboard</span>
+        </Link>
+        <Link
+          href="/admin/invoices/new"
+          aria-label="+ Create Invoice"
+          className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-[#8c7147] px-3 py-2 text-sm text-[#ffffff] hover:bg-[#d3aa68] shadow-sm"
+        >
+          <PlusIcon className="h-4 w-4" />
+          <span className="hidden sm:inline">Create Invoice</span>
         </Link>
       </div>
     </div>

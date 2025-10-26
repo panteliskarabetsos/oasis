@@ -5,6 +5,8 @@ export const dynamic = "force-dynamic";
 import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import Stripe from "stripe";
 
 const ok = (d, s = 200, headers = {}) =>
   new NextResponse(JSON.stringify(d), {
@@ -152,6 +154,171 @@ export async function GET(req) {
   });
 }
 
+/* ============================== POST: Create Stripe Invoice ============================== */
+/**
+ * POST /api/admin/invoices
+ * Body:
+ * {
+ *   customer: { email: string, name?: string },
+ *   items: [{ description: string, amount: number, quantity?: number }],
+ *   currency?: "eur"|"usd"|... (default "eur"),
+ *   memo?: string,
+ *   collection_method?: "send_invoice" | "charge_automatically" (default "send_invoice"),
+ *   days_until_due?: number (used only when send_invoice)
+ * }
+ *
+ * Response: { id, number, status, hosted_invoice_url, invoice_pdf, customer_id, collection_method }
+ */
+export async function POST(req) {
+  // Gate with user session + role=admin
+  const gate = await requireAdmin();
+  if (gate?.error) return gate.response;
+
+  const secret = process.env.STRIPE_SECRET_KEY || "";
+  if (!secret) return bad("Stripe is not configured", 500);
+  const stripe = new Stripe(secret, { apiVersion: "2024-06-20" });
+
+  // zero-decimal currencies (no cents)
+  const ZERO_DECIMAL = new Set([
+    "bif",
+    "clp",
+    "djf",
+    "gnf",
+    "jpy",
+    "kmf",
+    "krw",
+    "mga",
+    "pyg",
+    "rwf",
+    "ugx",
+    "vnd",
+    "vuv",
+    "xaf",
+    "xof",
+    "xpf",
+  ]);
+  const toMinor = (amountMajor, ccy) =>
+    ZERO_DECIMAL.has(String(ccy || "").toLowerCase())
+      ? Math.round(Number(amountMajor || 0))
+      : Math.round(Number(amountMajor || 0) * 100);
+
+  let draftId;
+
+  try {
+    const body = await req.json();
+    const {
+      customer,
+      items = [],
+      currency = "eur",
+      memo,
+      collection_method = "send_invoice",
+      days_until_due,
+    } = body || {};
+
+    if (!customer?.email) return bad("Customer email is required");
+
+    // normalize items: require > 0 amount and qty
+    const lineItems = items
+      .map((it) => ({
+        description: (it?.description || "Item").trim(),
+        qty: Math.max(1, Number(it?.quantity || 1)),
+        unitMinor: toMinor(it?.amount, currency),
+      }))
+      .filter((it) => it.unitMinor > 0 && it.qty > 0);
+
+    if (lineItems.length === 0) {
+      return bad("At least one valid line item (amount > 0) is required");
+    }
+
+    // Extended customer details from the form
+    const details = {
+      business_name: customer.business_name,
+      contact_name: customer.type === "business" ? customer.name : undefined,
+      phone: customer.phone,
+      address: customer.address,
+      tax_id: customer.tax_id,
+      tax_id_type: customer.tax_id_type, // e.g. "eu_vat"
+    };
+
+    // Create or update Stripe Customer with full details
+    const cust = await findOrCreateCustomer(
+      stripe,
+      customer.email,
+      customer.name,
+      details
+    );
+
+    // Optional extra info to show on PDF
+    const custom_fields = [];
+    if (details.business_name)
+      custom_fields.push({ name: "Business", value: details.business_name });
+    if (details.tax_id)
+      custom_fields.push({ name: "Tax ID", value: details.tax_id });
+    if (details.phone)
+      custom_fields.push({ name: "Phone", value: details.phone });
+
+    // 1) Create DRAFT invoice first
+    const draft = await stripe.invoices.create({
+      customer: cust.id,
+      collection_method,
+      ...(collection_method === "send_invoice"
+        ? {
+            days_until_due:
+              typeof days_until_due === "number" ? days_until_due : 7,
+          }
+        : {}),
+      description: memo || undefined,
+      ...(custom_fields.length ? { custom_fields } : {}),
+      metadata: {
+        customer_type: customer.type || "individual",
+        contact_name: details.contact_name || "",
+        business_name: details.business_name || "",
+      },
+      auto_advance: false,
+    });
+    draftId = draft.id;
+
+    // 2) Attach each item directly to THIS invoice
+    for (const it of lineItems) {
+      const totalMinor = it.unitMinor * it.qty;
+      await stripe.invoiceItems.create({
+        invoice: draft.id, // tie to the draft invoice
+        customer: cust.id,
+        amount: totalMinor, // total line amount (unit * qty)
+        currency,
+        description:
+          it.qty > 1
+            ? `${it.description} — ${it.qty} × ${(
+                it.unitMinor / (ZERO_DECIMAL.has(currency) ? 1 : 100)
+              ).toFixed(2)} ${currency.toUpperCase()}`
+            : it.description,
+      });
+    }
+
+    // 3) Finalize to compute totals and generate links
+    const finalized = await stripe.invoices.finalizeInvoice(draft.id);
+
+    return ok({
+      id: finalized.id,
+      number: finalized.number,
+      status: finalized.status,
+      hosted_invoice_url: finalized.hosted_invoice_url,
+      invoice_pdf: finalized.invoice_pdf,
+      customer_id: cust.id,
+      collection_method,
+    });
+  } catch (e) {
+    // clean up draft if something failed after creation
+    if (draftId) {
+      try {
+        await stripe.invoices.voidInvoice(draftId);
+      } catch {}
+    }
+    console.error(e);
+    return bad(e?.message || "Invoice create failed", 500);
+  }
+}
+
 /* ============================== helpers ============================== */
 function clamp(n, min, max) {
   if (!Number.isFinite(n)) return min;
@@ -259,4 +426,77 @@ function toCsv(rows) {
     lines.push(line);
   }
   return lines.join("\n");
+}
+
+/* ---- admin gating + stripe helpers for POST ---- */
+async function requireAdmin() {
+  const supa = await createSupabaseServer();
+  const {
+    data: { user },
+  } = await supa.auth.getUser();
+  if (!user) return { error: true, response: bad("Unauthorized", 401) };
+
+  const { data: row, error } = await supa
+    .from("User")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  if (error || (row?.role ?? "user") !== "admin")
+    return { error: true, response: bad("Forbidden", 403) };
+
+  return { error: false };
+}
+
+async function findOrCreateCustomer(stripe, email, name, details = {}) {
+  // Try to find existing customer by email
+  const list = await stripe.customers.list({ email, limit: 1 });
+  let cust = list.data?.[0] || null;
+
+  const base = {
+    email,
+    // Prefer the provided name; if “business” we’ve already passed business name into name from the UI
+    name: name || details.business_name || undefined,
+    phone: details.phone || undefined,
+    address: sanitizeAddress(details.address),
+  };
+
+  if (cust) {
+    await stripe.customers.update(cust.id, base);
+  } else {
+    cust = await stripe.customers.create(base);
+  }
+
+  // Attach tax ID if provided (and not already present)
+  if (details.tax_id) {
+    try {
+      const existing = await stripe.customers.listTaxIds(cust.id, {
+        limit: 20,
+      });
+      const hasSame = existing.data?.some((t) => t.value === details.tax_id);
+      if (!hasSame) {
+        await stripe.customers.createTaxId(cust.id, {
+          type: details.tax_id_type || "eu_vat",
+          value: details.tax_id,
+        });
+      }
+    } catch {
+      // don’t block invoice creation on tax id errors
+    }
+  }
+
+  return cust;
+}
+
+function sanitizeAddress(addr) {
+  if (!addr) return undefined;
+  const out = {
+    line1: addr.line1 || undefined,
+    line2: addr.line2 || undefined,
+    city: addr.city || undefined,
+    state: addr.state || undefined,
+    postal_code: addr.postal_code || undefined,
+    country: addr.country || undefined,
+  };
+  return Object.values(out).every((v) => !v) ? undefined : out;
 }
