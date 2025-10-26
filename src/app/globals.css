@@ -120,3 +120,35 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ---- Admin full-bleed override (scoped) ---- */
+.admin-root .container,
+.admin-root .max-w-screen-xl,
+.admin-root .max-w-screen-2xl,
+.admin-root .max-w-7xl,
+.admin-root .max-w-6xl,
+.admin-root .max-w-5xl {
+  max-width: 100% !important;
+  width: 100% !important; /* ensures full span even with mx-auto */
+}
+
+/* If any bars/wrappers use a nested “container” */
+.admin-root header .container,
+.admin-root nav .container,
+.admin-root main .container {
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
+/* Optional: neutralize auto-centering when width becomes 100% */
+.admin-root .mx-auto {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+.admin-root .max-w-7xl,
+.admin-root .max-w-screen-xl,
+.admin-root .container {
+  max-width: 100% !important;
+  width: 100% !important;
+}

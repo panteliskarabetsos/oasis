@@ -1856,7 +1856,7 @@ export default function PromotionsPage() {
                       className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
                     />
                   </Field>
-                  <Field label="Ends at" required>
+                  <Field label="Ends at">
                     <input
                       type="datetime-local"
                       value={codeForm.endsAt}

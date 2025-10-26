@@ -21,13 +21,7 @@ export async function GET() {
 export async function POST(req) {
   const body = await req.json();
 
-  const required = [
-    "discountType",
-    "discountValue",
-    "startsAt",
-    "endsAt",
-    "minSpend",
-  ];
+  const required = ["discountType", "discountValue", "startsAt", "minSpend"];
 
   for (const k of required)
     if (body[k] === undefined || body[k] === null || body[k] === "")
@@ -46,7 +40,7 @@ export async function POST(req) {
     scope: body.scope || "global",
     experienceIds: body.experienceIds || [],
     startsAt: body.startsAt,
-    endsAt: body.endsAt,
+    endsAt: body.endsAt || null,
     stackable: !!body.stackable,
     active: body.active !== false,
   };

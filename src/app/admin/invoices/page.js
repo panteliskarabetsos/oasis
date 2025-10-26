@@ -6,6 +6,8 @@ import { format } from "date-fns";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 
 /**
  * Admin → Invoices (SSR, no TypeScript)
@@ -253,7 +255,7 @@ export default async function InvoicesPage({ searchParams }) {
   // ---------- render ----------
   return (
     <div
-      className="relative mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 isolate before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(1200px_600px_at_50%_-50%,rgba(139,111,71,0.06),transparent_60%)] after:absolute after:inset-x-0 after:top-0 after:-z-10 after:h-24 after:bg-[linear-gradient(to_bottom,rgba(252,251,248,0.85),transparent)]"
+      className=" relative mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 isolate before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(1200px_600px_at_50%_-50%,rgba(139,111,71,0.06),transparent_60%)] after:absolute after:inset-x-0 after:top-0 after:-z-10 after:h-24 after:bg-[linear-gradient(to_bottom,rgba(252,251,248,0.85),transparent)]"
       style={{
         // design tokens
         ["--surface"]: "#ffffff",
@@ -278,7 +280,7 @@ export default async function InvoicesPage({ searchParams }) {
       {/* Filters card – clearer structure, subtle glassy surface */}
       <section
         aria-label="Filters"
-        className="rounded-2xl border border-[var(--border)] bg-white/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur p-4 shadow-[0_1px_0_rgba(0,0,0,0.04)] md:p-5"
+        className="rounded-3xl rounded-2xl border border-[var(--border)] bg-white/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur p-4 shadow-[0_1px_0_rgba(0,0,0,0.04)] md:p-5"
       >
         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-start">
           <FiltersBar initial={initial} />
@@ -597,9 +599,10 @@ async function getStripe() {
 }
 
 /* ============================== UI bits ============================== */
+
 function Header() {
   return (
-    <div className="mb-6 flex items-center justify-between gap-4">
+    <div className=" mb-6 flex items-center justify-between gap-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--ink)]">
           Invoices
@@ -607,6 +610,17 @@ function Header() {
         <p className="mt-1 text-sm text-[var(--muted-ink)]">
           Review and search customer invoices generated from paid bookings.
         </p>
+      </div>
+
+      <div className="shrink-0">
+        <Link
+          href="/admin"
+          aria-label="Back to dashboard"
+          className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#fcf9f4] shadow-sm"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span className="hidden sm:inline">Back to dashboard</span>
+        </Link>
       </div>
     </div>
   );
