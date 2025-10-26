@@ -84,7 +84,7 @@ export default function AdminHeader({ displayName = "Admin" }) {
             {/* Right cluster */}
             <div className="flex items-center gap-2">
               {/* Create CTA (desktop / sm+) */}
-              <Link
+              {/* <Link
                 href="/admin/experiences/new"
                 prefetch
                 className="hidden sm:inline-flex items-center gap-2 rounded-full bg-[#8b6f47] px-3 py-2 text-sm text-white shadow-sm hover:bg-[#7a5f3a] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/60 transition"
@@ -92,7 +92,7 @@ export default function AdminHeader({ displayName = "Admin" }) {
               >
                 <Plus size={16} aria-hidden />
                 Create
-              </Link>
+              </Link> */}
 
               {/* User menu (desktop only) */}
               <div className="hidden md:block">
