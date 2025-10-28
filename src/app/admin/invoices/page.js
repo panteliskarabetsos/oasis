@@ -151,74 +151,91 @@ export default async function InvoicesPage({ searchParams }) {
   const page = Math.max(1, Number(get("p") || 1));
   const perPage = clamp(Number(get("per") || 25), 5, 200);
   const density = (get("density") || "cozy").toString(); // NEW: compact|cozy|spacious
+  const source = (get("source") || "bookings").toString(); // "stripe" | "bookings"
   const sent = (get("sent") || "").toString();
   const err = (get("err") || "").toString();
   const updated = (get("updated") || "").toString();
   const edit = (get("edit") || "").toString();
 
   // ---------- build base query ----------
-  const baseSelect =
-    "id, createdAt, startTime, status, numberOfPeople, totalPaidAmount, currency, primary_contact, stripePaymentIntentId, stripeSessionId, invoiceEmailSentAt";
-  let listQ = admin
-    .from("Booking")
-    .select(baseSelect)
-    .order("createdAt", { ascending: false });
+  // ---------- fetch rows (stripe OR bookings) ----------
+  let rows = [];
+  let total = null;
 
-  let countQ = admin
-    .from("Booking")
-    .select("id", { count: "exact", head: true });
+  if (source === "stripe") {
+    const stripe = await getStripe();
+    const toUnix = (iso) => (iso ? Math.floor(new Date(iso).getTime() / 1000) : undefined);
+    const createdGte = from ? toUnix(normalizeDateStart(from)) : undefined;
+    const createdLte = to ? toUnix(normalizeDateEnd(to)) : undefined;
 
-  // status filter (default: paid)
-  if (status && status !== "all") {
-    listQ = listQ.eq("status", status);
-    countQ = countQ.eq("status", status);
-  }
+    // Prefer the Search API for better filtering + total_count
+    const terms = [];
+    if (status && status !== "all") terms.push(`status:"${status}"`); // open|paid|draft|void|uncollectible
+   if (createdGte) terms.push(`created>=${createdGte}`);
+    if (createdLte) terms.push(`created<=${createdLte}`);
+    if (q) terms.push(`(number~"${q}" OR id:"${q}" OR customer_email~"${q}")`);
+    const query = terms.length ? terms.join(" AND ") : 'status:"paid"';
 
-  // date window on createdAt
-  if (from) {
-    const fromIso = normalizeDateStart(from);
-    if (fromIso) {
-      listQ = listQ.gte("createdAt", fromIso);
-      countQ = countQ.gte("createdAt", fromIso);
+    const resp = await stripe.invoices.search({
+      query,
+      limit: perPage,
+      // NOTE: for real paging, add page token (you can store in URL as pageToken)
+      expand: ["data.customer", "data.payment_intent"],
+    });
+    rows = resp.data.map(mapStripeInvoiceToRow);
+    total = resp.total_count ?? null;
+  } else {
+    // ----- existing Supabase path (unchanged logic) -----
+    const baseSelect =
+      "id, createdAt, startTime, status, numberOfPeople, totalPaidAmount, currency, primary_contact, stripePaymentIntentId, stripeSessionId, invoiceEmailSentAt";
+    let listQ = admin
+      .from("Booking")
+      .select(baseSelect)
+      .order("createdAt", { ascending: false });
+    let countQ = admin.from("Booking").select("id", { count: "exact", head: true });
+
+    if (status && status !== "all") {
+      listQ = listQ.eq("status", status);
+      countQ = countQ.eq("status", status);
     }
-  }
-  if (to) {
-    const toIso = normalizeDateEnd(to);
-    if (toIso) {
-      listQ = listQ.lte("createdAt", toIso);
-      countQ = countQ.lte("createdAt", toIso);
+    if (from) {
+      const fromIso = normalizeDateStart(from);
+      if (fromIso) {
+        listQ = listQ.gte("createdAt", fromIso);
+        countQ = countQ.gte("createdAt", fromIso);
+      }
     }
+    if (to) {
+      const toIso = normalizeDateEnd(to);
+      if (toIso) {
+        listQ = listQ.lte("createdAt", toIso);
+        countQ = countQ.lte("createdAt", toIso);
+      }
+    }
+    if (q) {
+      const like = `%${q}%`;
+      const ors = [
+        `stripePaymentIntentId.ilike.${like}`,
+        `stripeSessionId.ilike.${like}`,
+        `primary_contact->>email.ilike.${like}`,
+        `primary_contact->>fullName.ilike.${like}`,
+        `primary_contact->>firstName.ilike.${like}`,
+        `primary_contact->>lastName.ilike.${like}`,
+      ];
+      const asNum = Number(q);
+      if (Number.isFinite(asNum)) ors.push(`id.eq.${asNum}`);
+      listQ = listQ.or(ors.join(","));
+      countQ = countQ.or(ors.join(","));
+    }
+    const fromIdx = (page - 1) * perPage;
+    const toIdx = fromIdx + perPage - 1;
+    listQ = listQ.range(fromIdx, toIdx);
+
+   const [{ data, error: listErr }, { count, error: countErr }] = await Promise.all([listQ, countQ]);
+    if (listErr) return renderError(listErr.message || "Failed to load invoices");
+    rows = data || [];
+    total = countErr ? null : Number(count || 0);
   }
-
-  // search across id / customer / stripe ids
-  if (q) {
-    const like = `%${q}%`;
-    const ors = [
-      `stripePaymentIntentId.ilike.${like}`,
-      `stripeSessionId.ilike.${like}`,
-      `primary_contact->>email.ilike.${like}`,
-      `primary_contact->>fullName.ilike.${like}`,
-      `primary_contact->>firstName.ilike.${like}`,
-      `primary_contact->>lastName.ilike.${like}`,
-    ];
-    const asNum = Number(q);
-    if (Number.isFinite(asNum)) ors.push(`id.eq.${asNum}`);
-    listQ = listQ.or(ors.join(","));
-    countQ = countQ.or(ors.join(","));
-  }
-
-  // pagination
-  const fromIdx = (page - 1) * perPage;
-  const toIdx = fromIdx + perPage - 1;
-  listQ = listQ.range(fromIdx, toIdx);
-
-  // run queries
-  const [{ data: rows, error: listErr }, { count, error: countErr }] =
-    await Promise.all([listQ, countQ]);
-
-  if (listErr) return renderError(listErr.message || "Failed to load invoices");
-  const total = countErr ? null : Number(count || 0);
-
   const pageTotal = (rows || []).reduce(
     (s, r) => s + (Number(r?.totalPaidAmount || 0) || 0),
     0
@@ -229,7 +246,7 @@ export default async function InvoicesPage({ searchParams }) {
   );
   const avgInvoice = rows?.length ? pageTotal / rows.length : 0;
 
-  const initial = { q, status, from, to, perPage, page, density };
+  const initial = { q, status, from, to, perPage, page, density,source };
 
   // modal edit support via query param (?edit=<id>)
   const editId = Number(edit) || null;
@@ -377,12 +394,12 @@ export default async function InvoicesPage({ searchParams }) {
                         <span className="sr-only">Edit</span>
                       </a>
 
-                      <IconButton
-                        as="a"
-                        href={`/api/admin/invoices/${r.id}/download`}
-                        title="Download PDF"
-                        download
-                      >
+                    <IconButton
+   as="a"
+   href={r.__stripe?.pdf || `/api/admin/invoices/${r.id}/download`}
+  title="Download PDF"
+   download
+ >
                         <DownloadIcon />
                         <span className="sr-only">Download</span>
                       </IconButton>
@@ -396,19 +413,32 @@ export default async function InvoicesPage({ searchParams }) {
                         <span className="sr-only">View</span>
                       </IconButton>
 
-                      <form action="/api/admin/invoices/send" method="POST">
-                        <input type="hidden" name="id" value={r.id} />
-                        <input type="hidden" name="mode" value="custom" />
-                        <IconButton
-                          as="button"
-                          type="submit"
-                          disabled={!canSend}
-                          title={canSend ? "Send invoice" : "No customer email"}
-                        >
-                          <SendIcon />
-                          <span className="sr-only">Send</span>
-                        </IconButton>
-                      </form>
+                     {r.kind === "stripe" ? (
+   <form action="/api/admin/stripe-invoices/send" method="POST">
+     <input type="hidden" name="invoice_id" value={r.__stripe?.id} />
+    <IconButton
+       as="button"
+      type="submit"
+       disabled={!canSend}
+       title={canSend ? "Send from Stripe" : "No customer email"}
+     >
+       <SendIcon /><span className="sr-only">Send</span>
+     </IconButton>
+   </form>
+ ) : (
+   <form action="/api/admin/invoices/send" method="POST">
+     <input type="hidden" name="id" value={r.id} />
+     <input type="hidden" name="mode" value="custom" />
+     <IconButton
+       as="button"
+       type="submit"
+       disabled={!canSend}
+       title={canSend ? "Send invoice" : "No customer email"}
+     >
+       <SendIcon /><span className="sr-only">Send</span>
+    </IconButton>
+   </form>
+ )}
                     </div>
                   </div>
                 </li>
@@ -535,30 +565,32 @@ export default async function InvoicesPage({ searchParams }) {
                               </IconButton>
 
                               {/* Send */}
-                              <form
-                                action="/api/admin/invoices/send"
-                                method="POST"
-                              >
-                                <input type="hidden" name="id" value={r.id} />
-                                <input
-                                  type="hidden"
-                                  name="mode"
-                                  value="custom"
-                                />
-                                <IconButton
-                                  as="button"
-                                  type="submit"
-                                  disabled={!canSend}
-                                  title={
-                                    canSend
-                                      ? "Send invoice"
-                                      : "No customer email"
-                                  }
-                                >
-                                  <SendIcon />
-                                  <span className="sr-only">Send</span>
-                                </IconButton>
-                              </form>
+                         {r.kind === "stripe" ? (
+  <form action="/api/admin/stripe-invoices/send" method="POST">
+     <input type="hidden" name="invoice_id" value={r.__stripe?.id} />
+    <IconButton
+       as="button"
+       type="submit"
+       disabled={!canSend}
+      title={canSend ? "Send from Stripe" : "No customer email"}
+     >
+       <SendIcon /><span className="sr-only">Send</span>
+     </IconButton>
+   </form>
+ ) : (
+   <form action="/api/admin/invoices/send" method="POST">
+     <input type="hidden" name="id" value={r.id} />
+     <input type="hidden" name="mode" value="custom" />
+     <IconButton
+       as="button"
+       type="submit"
+       disabled={!canSend}
+       title={canSend ? "Send invoice" : "No customer email"}
+     >
+       <SendIcon /><span className="sr-only">Send</span>
+     </IconButton>
+   </form>
+ )}
                             </div>
                           </Td>
                         </tr>
@@ -597,6 +629,37 @@ async function getStripe() {
   if (!key) throw new Error("Missing STRIPE_SECRET_KEY");
   return new Stripe(key, { apiVersion: "2024-06-20" });
 }
+
+// Map Stripe invoice → your row shape
+function mapStripeInvoiceToRow(inv) {
+  return {
+     kind: "stripe",
+    id: inv.number || inv.id, // shown as INV-000123 in your UI; keep raw here
+    createdAt: new Date(inv.created * 1000).toISOString(),
+    startTime: null,
+    status: inv.status, // open/paid/draft/void/uncollectible
+    numberOfPeople: 1,
+    totalPaidAmount: inv.total / 100,
+    currency: (inv.currency || "eur").toUpperCase(),
+    primary_contact: {
+      fullName: inv.customer?.name || "",
+      email: inv.customer_email || inv.customer?.email || "",
+    },
+    stripePaymentIntentId:
+      typeof inv.payment_intent === "object" ? inv.payment_intent?.id : inv.payment_intent || null,
+    stripeSessionId: null,
+    invoiceEmailSentAt: inv.status_transitions?.paid_at
+      ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
+      : null,
+    __stripe: {
+      id: inv.id,
+      hosted: inv.hosted_invoice_url,
+      pdf: inv.invoice_pdf,
+      number: inv.number,
+    },
+  };
+}
+
 
 /* ============================== UI bits ============================== */
 
@@ -663,6 +726,11 @@ function AlertBar({ sent, err, updated }) {
     not_found: "Booking not found.",
     no_email: "This booking has no customer email.",
     send_fail: "Email provider error while sending invoice.",
+    mail_restricted:
+     "Email blocked by provider: verify your sending domain or use Stripe email.",
+   not_sendable:
+     "This Stripe invoice can’t be emailed in its current state (not open/send_invoice).",
+ 
   };
   return (
     <div
@@ -675,22 +743,56 @@ function AlertBar({ sent, err, updated }) {
 }
 
 function FiltersBar({ initial }) {
-  const { q, status, from, to, perPage, density } = initial || {};
+  const {
+    q,
+    status,
+    from,
+    to,
+    perPage,
+    density,
+    source: initialSource,
+  } = initial || {};
 
-  const hasActiveFilters = Boolean(
-    q || from || to || (status && status !== "paid")
-  );
-  const activeCount = [q, from, to, status && status !== "paid"].filter(
-    Boolean
-  ).length;
+  const source = initialSource || "bookings";
+  const isStripe = source === "stripe";
+
+  // Status options depend on data source
+  const STATUS_BOOKINGS = [
+    { value: "paid", label: "paid" },
+    { value: "confirmed", label: "confirmed" },
+    { value: "completed", label: "completed" },
+    { value: "checked_in", label: "checked_in" },
+    { value: "cancelled", label: "cancelled" },
+    { value: "all", label: "All" },
+  ];
+  const STATUS_STRIPE = [
+    { value: "paid", label: "paid" },
+    { value: "open", label: "open" },
+    { value: "draft", label: "draft" },
+    { value: "void", label: "void" },
+    { value: "uncollectible", label: "uncollectible" },
+    { value: "all", label: "All" },
+  ];
+  const statusOptions = isStripe ? STATUS_STRIPE : STATUS_BOOKINGS;
+  const safeStatus = statusOptions.some((o) => o.value === status)
+    ? status
+    : "paid";
+
+  const hasActiveFilters = Boolean(q || from || to || (safeStatus && safeStatus !== "paid"));
+  const activeCount = [q, from, to, safeStatus && safeStatus !== "paid"].filter(Boolean).length;
 
   const clearHref = qsFromInitial(initial, {
     q: "",
     from: "",
     to: "",
     status: "paid",
+    source, // preserve current source on clear
     p: 1,
   });
+
+  const searchPlaceholder = isStripe
+    ? "Invoice #, Stripe ID, email…"
+    : "Name, email, PI id, booking id…";
 
   return (
     <form
@@ -698,6 +800,9 @@ function FiltersBar({ initial }) {
       className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end"
       aria-labelledby="filters-legend"
     >
+      {/* ensure we reset paging on Apply */}
+      <input type="hidden" name="p" value="1" />
+
       {/* group: Search */}
       <fieldset className="md:col-span-4">
         <legend id="filters-legend" className="sr-only">
@@ -709,26 +814,9 @@ function FiltersBar({ initial }) {
         <div className="relative mt-1">
           <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
             {/* magnifier */}
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M21 21l-4.35-4.35"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <circle
-                cx="11"
-                cy="11"
-                r="7"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.5" />
             </svg>
           </span>
           <input
@@ -736,51 +824,59 @@ function FiltersBar({ initial }) {
             type="search"
             name="q"
             defaultValue={q}
-            placeholder="Name, email, PI id, booking id…"
+            placeholder={searchPlaceholder}
             enterKeyHint="search"
             className="w-full rounded-lg border border-[var(--border)] bg-white pl-9 pr-3 py-2 text-sm text-[var(--ink)] placeholder:text-[#b1a595] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40"
           />
         </div>
       </fieldset>
 
-      {/* group: Status */}
+      {/* group: Data source */}
       <fieldset className="md:col-span-2">
-        <label
-          className="block text-xs text-[var(--muted-ink)]"
-          htmlFor="f-status"
-        >
+        <label className="block text-xs text-[var(--muted-ink)]" htmlFor="f-source">
+          Data source
+        </label>
+        <div className="relative mt-1">
+          <select
+            id="f-source"
+            name="source"
+            defaultValue={source}
+            className="w-full appearance-none rounded-lg border border-[var(--border)] bg-white px-3 py-2 pr-8 text-sm text-[var(--ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40"
+          >
+            <option value="bookings">Bookings Invoices</option>
+            <option value="stripe">Manual Invoices</option>
+          </select>
+          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+            {/* chevron */}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+        </div>
+      </fieldset>
+
+      {/* group: Status (options depend on source) */}
+      <fieldset className="md:col-span-2">
+        <label className="block text-xs text-[var(--muted-ink)]" htmlFor="f-status">
           Status
         </label>
         <div className="relative mt-1">
           <select
             id="f-status"
             name="status"
-            defaultValue={status || "paid"}
+            defaultValue={safeStatus || "paid"}
             className="w-full appearance-none rounded-lg border border-[var(--border)] bg-white px-3 py-2 pr-8 text-sm text-[var(--ink)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40"
           >
-            <option value="paid">paid</option>
-            <option value="confirmed">confirmed</option>
-            <option value="completed">completed</option>
-            <option value="checked_in">checked_in</option>
-            <option value="cancelled">cancelled</option>
-            <option value="all">All</option>
+            {statusOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
           </select>
           <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
             {/* chevron */}
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M6 9l6 6 6-6"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
         </div>
@@ -788,37 +884,15 @@ function FiltersBar({ initial }) {
 
       {/* group: From */}
       <fieldset className="md:col-span-2">
-        <label
-          className="block text-xs text-[var(--muted-ink)]"
-          htmlFor="f-from"
-        >
+        <label className="block text-xs text-[var(--muted-ink)]" htmlFor="f-from">
           From
         </label>
         <div className="relative mt-1">
           <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
             {/* calendar */}
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <rect
-                x="3"
-                y="5"
-                width="18"
-                height="16"
-                rx="2"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-              <path
-                d="M16 3v4M8 3v4M3 10h18"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M16 3v4M8 3v4M3 10h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </span>
           <input
@@ -840,28 +914,9 @@ function FiltersBar({ initial }) {
         <div className="relative mt-1">
           <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
             {/* calendar */}
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <rect
-                x="3"
-                y="5"
-                width="18"
-                height="16"
-                rx="2"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-              <path
-                d="M16 3v4M8 3v4M3 10h18"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M16 3v4M8 3v4M3 10h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </span>
           <input
@@ -877,10 +932,7 @@ function FiltersBar({ initial }) {
 
       {/* group: Per page */}
       <fieldset className="md:col-span-1">
-        <label
-          className="block text-xs text-[var(--muted-ink)]"
-          htmlFor="f-per"
-        >
+        <label className="block text-xs text-[var(--muted-ink)]" htmlFor="f-per">
           Rows/page
         </label>
         <div className="relative mt-1">
@@ -896,20 +948,8 @@ function FiltersBar({ initial }) {
             <option>100</option>
           </select>
           <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M6 9l6 6 6-6"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
         </div>
@@ -917,10 +957,7 @@ function FiltersBar({ initial }) {
 
       {/* group: Density */}
       <fieldset className="md:col-span-3">
-        <label
-          className="block text-xs text-[var(--muted-ink)]"
-          htmlFor="f-density"
-        >
+        <label className="block text-xs text-[var(--muted-ink)]" htmlFor="f-density">
           Density
         </label>
         <div className="mt-1 grid grid-cols-3 overflow-hidden rounded-lg border border-[var(--border)]">
@@ -960,41 +997,22 @@ function FiltersBar({ initial }) {
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--ink)] px-4 py-2 text-sm text-white shadow transition hover:bg-[#2f2922] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 shrink-0 whitespace-nowrap w-full sm:w-auto"
         >
           {/* search icon */}
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M21 21l-4.35-4.35"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <circle
-              cx="11"
-              cy="11"
-              r="7"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.5" />
           </svg>
           Apply
         </button>
       </div>
 
       {/* Active counter (a11y) */}
-      <div
-        className="col-span-full text-[11px] text-[var(--muted-ink)]"
-        aria-live="polite"
-      >
+      <div className="col-span-full text-[11px] text-[var(--muted-ink)]" aria-live="polite">
         {hasActiveFilters ? `Filters active: ${activeCount}` : null}
       </div>
     </form>
   );
 }
+
 
 function QuickRanges({ initial }) {
   const presets = buildPresets();

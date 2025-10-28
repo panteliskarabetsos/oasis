@@ -13,17 +13,14 @@ const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 async function requireAdmin() {
   const supa = await createSupabaseServer();
-  if (!supa)
-    return { error: true, response: bad("Server not configured", 500) };
+  if (!supa) return { error: true, response: bad("Server not configured", 500) };
 
   const { data, error } = await supa.auth.getUser();
   const user = data?.user;
-  if (error || !user)
-    return { error: true, response: bad("Unauthorized", 401) };
+  if (error || !user) return { error: true, response: bad("Unauthorized", 401) };
 
   const admin = createSupabaseAdmin();
-  if (!admin)
-    return { error: true, response: bad("Server not configured", 500) };
+  if (!admin) return { error: true, response: bad("Server not configured", 500) };
 
   const { data: profile } = await admin
     .from("User")
@@ -59,9 +56,9 @@ export async function GET(req, ctx) {
       .from("Booking")
       .select(
         `*,
-       ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)),
-        Experience:Experience!Booking_experienceId_fkey(id, name, location),
-        User:User(id, email, name, surname, phone)`
+         ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)),
+         Experience:Experience!Booking_experienceId_fkey(id, name, location),
+         User:User(id, email, name, surname, phone)`
       )
       .eq("id", rid)
       .maybeSingle();
@@ -88,26 +85,21 @@ export async function GET(req, ctx) {
         (isNum(countsRaw?.kids) && countsRaw.kids) ||
         0;
       const teens = isNum(countsRaw?.teens) ? countsRaw.teens : null;
+
       const counts = {
         adults,
         kids,
         teens,
-        total: isNum(countsRaw?.total)
-          ? countsRaw.total
-          : Math.max(0, adults + kids),
+        total: isNum(countsRaw?.total) ? countsRaw.total : Math.max(0, adults + kids),
       };
-      const totalPaidAmount = isNum(b?.totalPaidAmount)
-        ? b.totalPaidAmount
-        : null;
+
+      const totalPaidAmount = isNum(b?.totalPaidAmount) ? b.totalPaidAmount : null;
       const currency = (b?.currency || "EUR").toString().toUpperCase();
       const scheduleSlotId = b?.scheduleSlotId ?? slot?.id ?? null;
       const startTime = slot?.date ?? b?.startTime ?? null;
-      const experienceId =
-        slot?.experienceId ?? b?.experienceId ?? exDirect?.id ?? null;
-      const experienceName =
-        exFromSlot?.name || exDirect?.name || b?.customExperienceName || null;
-      const experienceLocation =
-        exFromSlot?.location ?? exDirect?.location ?? null;
+      const experienceId = slot?.experienceId ?? b?.experienceId ?? exDirect?.id ?? null;
+      const experienceName = exFromSlot?.name || exDirect?.name || b?.customExperienceName || null;
+      const experienceLocation = exFromSlot?.location ?? exDirect?.location ?? null;
 
       // guest: prefer joined user, fall back to primary_contact snapshot
       const guestName =
@@ -115,6 +107,18 @@ export async function GET(req, ctx) {
         pc?.name ||
         [pc?.firstName, pc?.lastName].filter(Boolean).join(" ").trim() ||
         null;
+
+      // unit prices snapshot
+      const unitPrices = {
+        adult: isNum(b?.unitPriceAdult) ? b.unitPriceAdult : null,
+        kid: isNum(b?.unitPriceKid) ? b.unitPriceKid : null,
+        teen: isNum(b?.unitPriceTeen) ? b.unitPriceTeen : null,
+      };
+
+      // Promo/discount
+      const promoExtract = extractPromoFromRow(b, unitPrices, counts);
+      const promoPayload = buildPromoPayload(promoExtract);
+
       const item = {
         id: b.id,
         source: "booking",
@@ -127,17 +131,14 @@ export async function GET(req, ctx) {
         // People
         counts,
         attendees,
+
         // Prices snapshot
-        unitPrices: {
-          adult: isNum(b?.unitPriceAdult) ? b.unitPriceAdult : null,
-          kid: isNum(b?.unitPriceKid) ? b.unitPriceKid : null,
-          teen: isNum(b?.unitPriceTeen) ? b.unitPriceTeen : null, // tolerated if present
-        },
+        unitPrices,
 
         // Money (mirror totalPaidAmount into totalAmount for UI compatibility)
         money: {
           totalPaidAmount,
-          totalAmount: totalPaidAmount, // ← mirror for consumers expecting "totalAmount"
+          totalAmount: totalPaidAmount,
           currency,
         },
 
@@ -155,7 +156,6 @@ export async function GET(req, ctx) {
           id: experienceId,
           name: experienceName,
           location: experienceLocation,
-          // keep optional fields if your UI uses them
           slug: exFromSlot?.slug ?? exDirect?.slug ?? null,
           images: exFromSlot?.images ?? exDirect?.images ?? null,
         },
@@ -168,6 +168,9 @@ export async function GET(req, ctx) {
           phone: u?.phone ?? pc?.phone ?? null,
         },
         guestSnapshot: cleanEmpty(pc || null),
+
+        // Promo/discount normalized
+        ...promoPayload,
 
         // useful raw fallbacks if your UI references them
         currency: b?.currency ?? null,
@@ -195,6 +198,25 @@ export async function GET(req, ctx) {
     const pc = parseJSON(d?.primary_contact, {}) || {};
     const attendees = parseJSON(d?.attendees, []) || [];
 
+    const counts = {
+      adults: pickFirstNumber(cnt, ["adults", "adult", "A", "people"]) || 0,
+      kids: pickFirstNumber(cnt, ["kids", "children", "K"]) || 0,
+      teens: pickFirstNumber(cnt, ["teens", "teen", "T"]),
+    };
+
+    const unitPrices = {
+      adult: isNum(d?.unitPriceAdult) ? d.unitPriceAdult : null,
+      kid: isNum(d?.unitPriceKid) ? d.unitPriceKid : null,
+      teen: isNum(d?.unitPriceTeen) ? d.unitPriceTeen : null,
+    };
+
+    // Promo/discount (draft)
+    const promoExtractDraft = extractPromoFromRow(d, unitPrices, counts);
+    const promoPayloadDraft = buildPromoPayload(promoExtractDraft);
+
+    // Clean notes (strip promo lines so UI doesn't duplicate)
+    const notesClean = stripPromoFromNotes(d?.notes ?? null);
+
     const item = {
       id: d.id,
       source: "draft",
@@ -202,27 +224,19 @@ export async function GET(req, ctx) {
       status: d.status,
       createdAt: d.createdAt ?? null,
       updatedAt: d.updatedAt ?? null,
-      notes: d?.notes ?? null,
+      notes: notesClean,
 
       // People
-      counts: {
-        adults: pickFirstNumber(cnt, ["adults", "adult", "A", "people"]),
-        kids: pickFirstNumber(cnt, ["kids", "children", "K"]),
-        teens: pickFirstNumber(cnt, ["teens", "teen", "T"]),
-      },
+      counts,
       attendees,
 
       // Prices snapshot
-      unitPrices: {
-        adult: isNum(d?.unitPriceAdult) ? d.unitPriceAdult : null,
-        kid: isNum(d?.unitPriceKid) ? d.unitPriceKid : null,
-        teen: isNum(d?.unitPriceTeen) ? d.unitPriceTeen : null,
-      },
+      unitPrices,
 
       // Money (draft uses totalAmount)
       money: {
         totalAmount: isNum(d?.totalAmount) ? d.totalAmount : null,
-        currency: "EUR",
+        currency: (d?.currency || "EUR").toString().toUpperCase(),
       },
 
       // Stripe
@@ -248,11 +262,13 @@ export async function GET(req, ctx) {
         name:
           (pc?.name ??
             pc?.fullName ??
-            [pc?.firstName, pc?.lastName].filter(Boolean).join(" ")) ||
-          null,
+            [pc?.firstName, pc?.lastName].filter(Boolean).join(" ")) || null,
         email: pc?.email ?? null,
         phone: pc?.phone ?? null,
       },
+
+      // Promo/discount normalized
+      ...promoPayloadDraft,
 
       convertedBookingId: d?.convertedBookingId ?? null,
       expiresAt: d?.expiresAt ?? null,
@@ -265,7 +281,7 @@ export async function GET(req, ctx) {
   }
 }
 
-// PATCH
+// PATCH (unchanged behavior)
 export async function PATCH(req, ctx) {
   const auth = await requireAdmin();
   if (auth.error) return auth.response;
@@ -283,19 +299,12 @@ export async function PATCH(req, ctx) {
   }
 
   // accept flat or nested payloads
-  const pickFirst = (...vals) =>
-    vals.find((v) => v !== undefined && v !== null);
+  const pickFirst = (...vals) => vals.find((v) => v !== undefined && v !== null);
 
-  const unitPriceAdult = pickFirst(
-    body.unitPriceAdult,
-    body?.unitPrices?.adult
-  );
+  const unitPriceAdult = pickFirst(body.unitPriceAdult, body?.unitPrices?.adult);
   const unitPriceKid = pickFirst(body.unitPriceKid, body?.unitPrices?.kid);
 
-  const totalPaidAmount = pickFirst(
-    body.totalPaidAmount,
-    body?.money?.totalPaidAmount
-  );
+  const totalPaidAmount = pickFirst(body.totalPaidAmount, body?.money?.totalPaidAmount);
   const totalAmount = pickFirst(body.totalAmount, body?.money?.totalAmount); // for drafts
   const currency = pickFirst(body.currency, body?.money?.currency);
   const statusRaw = pickFirst(body.status);
@@ -319,20 +328,15 @@ export async function PATCH(req, ctx) {
     const patch = {};
     if (status) patch.status = status;
     if (currency) patch.currency = String(currency).toUpperCase();
-    if (unitPriceAdult !== undefined)
-      patch.unitPriceAdult = numOrNull(unitPriceAdult);
-    if (unitPriceKid !== undefined)
-      patch.unitPriceKid = numOrNull(unitPriceKid);
-    if (totalPaidAmount !== undefined)
-      patch.totalPaidAmount = numOrNull(totalPaidAmount);
+    if (unitPriceAdult !== undefined) patch.unitPriceAdult = numOrNull(unitPriceAdult);
+    if (unitPriceKid !== undefined) patch.unitPriceKid = numOrNull(unitPriceKid);
+    if (totalPaidAmount !== undefined) patch.totalPaidAmount = numOrNull(totalPaidAmount);
 
     const { data, error } = await supa
       .from("Booking")
       .update(patch)
       .eq("id", rid)
-      .select(
-        "id, unitPriceAdult, unitPriceKid, totalPaidAmount, currency, status, updatedAt"
-      )
+      .select("id, unitPriceAdult, unitPriceKid, totalPaidAmount, currency, status, updatedAt")
       .maybeSingle();
 
     if (error) {
@@ -353,10 +357,8 @@ export async function PATCH(req, ctx) {
 
   const dUpdate = {};
   if (status) dUpdate.status = status;
-  if (unitPriceAdult !== undefined)
-    dUpdate.unitPriceAdult = numOrNull(unitPriceAdult);
-  if (unitPriceKid !== undefined)
-    dUpdate.unitPriceKid = numOrNull(unitPriceKid);
+  if (unitPriceAdult !== undefined) dUpdate.unitPriceAdult = numOrNull(unitPriceAdult);
+  if (unitPriceKid !== undefined) dUpdate.unitPriceKid = numOrNull(unitPriceKid);
 
   // drafts: compute totalAmount if prices change and not provided
   if (totalAmount !== undefined) {
@@ -502,4 +504,150 @@ function parseJSON(v, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+/** Parse promo hints from freeform notes (legacy) */
+function parsePromoFromNotes(notes) {
+  if (!notes) return null;
+  const s = String(notes);
+
+  const code =
+    s.match(/\bcode\s*=\s*([A-Z0-9_-]+)/i)?.[1] ||
+    s.match(/\bpromo(?:\s*code)?[:\s-]+([A-Z0-9_-]+)/i)?.[1] ||
+    null;
+
+  const type =
+    s.match(/\btype\s*=\s*([a-z_]+)/i)?.[1] ||
+    (/\bpercent/.test(s) ? "percent" : /\bamount/.test(s) ? "amount" : null);
+
+  const valueStr =
+    s.match(/\bvalue\s*=\s*([0-9]+(?:\.[0-9]+)?)/i)?.[1] ||
+    s.match(/\bdiscount\s*=\s*([0-9]+(?:\.[0-9]+)?)/i)?.[1] ||
+    null;
+
+  const value = valueStr != null ? Number(valueStr) : null;
+  const out = {};
+  if (code) out.code = code;
+  if (type) out.discountType = type;
+  if (Number.isFinite(value)) {
+    out.discountValue = value;
+    if (/discount\s*=/.test(s)) out.discountAmount = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** Remove promo lines from notes so UI doesn't show raw code twice */
+function stripPromoFromNotes(notes) {
+  if (!notes) return notes;
+  const s = String(notes);
+  return (
+    s
+      // full “[PROMO] …” lines
+      .replace(/^\s*\[PROMO\][^\n]*\n?/gim, "")
+      // generic “Promo code …” lines
+      .replace(/^\s*(promo(?:\s*code)?|discount)\b[^\n]*\n?/gim, "")
+      .trim() || null
+  );
+}
+
+/** Compute discount amount from promo json when explicit amount isn't stored */
+function computeDiscountFromPromoJson(pj, unitPrices, counts) {
+  if (!pj || typeof pj !== "object") return null;
+  const type = pj.discountType || pj.type || null;
+  const value = Number(pj.discountValue ?? pj.value);
+  if (!type || !Number.isFinite(value)) return null;
+
+  // base total from snapshot unit prices × counts
+  const A = Number(counts?.adults || 0);
+  const K = Number(counts?.kids || 0);
+  const ua = Number(unitPrices?.adult || 0);
+  const uk = Number(unitPrices?.kid || 0);
+  const base = A * ua + K * uk;
+  if (!Number.isFinite(base) || base <= 0) return null;
+
+  if (String(type).includes("percent")) {
+    return +(base * (value / 100)).toFixed(2);
+  }
+  if (String(type).includes("amount")) {
+    return +Math.min(base, value).toFixed(2);
+  }
+  return null;
+}
+
+/** Extract promo bits from a DB row (Booking or BookingDraft) */
+function extractPromoFromRow(row, unitPrices, counts) {
+  try {
+    const pj =
+      parseJSON(row?.promoJson, null) ||
+      parseJSON(row?.promo_json, null) ||
+      null;
+
+    // code: prefer explicit column, then json
+    let code =
+      (row?.appliedPromoCode && String(row.appliedPromoCode).trim()) ||
+      (pj?.code && String(pj.code).trim()) ||
+      null;
+
+    // amounts
+    let discountAmount = Number(row?.discountAmount);
+    if (!Number.isFinite(discountAmount) || discountAmount <= 0) {
+      const calc = computeDiscountFromPromoJson(pj, unitPrices, counts);
+      if (Number.isFinite(calc)) discountAmount = calc;
+    }
+    if (!Number.isFinite(discountAmount)) discountAmount = 0;
+
+    // metadata
+    let discountType = pj?.discountType ?? pj?.type ?? null;
+    let discountValue = Number(pj?.discountValue ?? pj?.value);
+    if (!Number.isFinite(discountValue)) discountValue = null;
+
+    // fallback parse from legacy notes
+    if ((!code || (!discountAmount && discountValue == null)) && row?.notes) {
+      const parsed = parsePromoFromNotes(row.notes);
+      if (parsed) {
+        if (!code && parsed.code) code = parsed.code;
+        if (!discountType && parsed.discountType) discountType = parsed.discountType;
+        if (discountValue == null && parsed.discountValue != null) {
+          discountValue = parsed.discountValue;
+        }
+        if ((!discountAmount || discountAmount <= 0) && parsed.discountAmount != null) {
+          discountAmount = parsed.discountAmount;
+        }
+      }
+    }
+
+    if (!code && !discountAmount && discountValue == null) return null;
+
+    return { code: code || null, discountAmount, discountType, discountValue };
+  } catch {
+    return null;
+  }
+}
+
+/** Build the normalized promo payload the UI expects */
+function buildPromoPayload(extracted) {
+  if (!extracted) {
+    return {
+      promo: null,
+      appliedPromoCode: null,
+      discountAmount: null,
+      promoJson: null,
+    };
+  }
+  const { code, discountAmount, discountType, discountValue } = extracted;
+
+  const pj = cleanEmpty({
+    code: code || null,
+    discountType: discountType || null,
+    type: discountType || null, // alias
+    discountValue: Number.isFinite(discountValue) ? discountValue : null,
+    value: Number.isFinite(discountValue) ? discountValue : null, // alias
+  });
+
+  return {
+    promo: code || pj ? { code: code || null, json: pj || null } : null,
+    appliedPromoCode: code || null,
+    discountAmount: Number.isFinite(discountAmount) ? discountAmount : null,
+    promoJson: pj || null,
+  };
 }

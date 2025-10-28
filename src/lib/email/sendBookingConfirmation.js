@@ -380,6 +380,9 @@ export function renderConfirmationHtml({
   subtotalLabel,
   receiptUrl,
   hasInvoicePdf,
+  // NEW (optional):
+  calendarUrl,   // e.g. a Google Calendar template link
+  manageUrl,     // e.g. “Manage booking” link in your app
 }) {
   const {
     text = "#2b2a28",
@@ -390,95 +393,73 @@ export function renderConfirmationHtml({
     primary = "#8b6f47",
   } = brand || {};
 
-  // Build attendees rows (zebra style)
+  const dateTime = dateLabel
+    ? `${escapeHtml(dateLabel)}${timeLabel ? `, ${escapeHtml(timeLabel)}` : ""}`
+    : "";
+
+  const headKpis = [
+    dateTime ? { label: "When", value: dateTime } : null,
+    attendees?.length ? { label: "Guests", value: String(attendees.length) } : null,
+    location ? {
+      label: "Location",
+      value: `<a href="https://maps.google.com/?q=${encodeURIComponent(location)}" style="color:${primary};text-decoration:none;border-bottom:1px solid ${primary}">${escapeHtml(location)}</a>`
+    } : null,
+  ].filter(Boolean);
+
   const attendeesHtml = (attendees || []).length
     ? attendees
         .map((a, i) => {
           const zebra = i % 2 === 1 ? `background:${panel};` : "";
           return `
             <tr>
-              <td style="padding:8px 10px;border-bottom:1px solid ${border};${zebra}">${
-            i + 1
-          }</td>
-              <td style="padding:8px 10px;border-bottom:1px solid ${border};${zebra}">${escapeHtml(
-            a?.name || "Guest"
-          )}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid ${border};${zebra}">${i + 1}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid ${border};${zebra}">${escapeHtml(a?.name || "Guest")}</td>
             </tr>`;
         })
         .join("")
     : `<tr><td colspan="2" style="padding:10px;color:${subtext}">No attendee names on file</td></tr>`;
 
-  // Promo/discount block with clearer hierarchy
-  const promoRows =
-    promoCode || discountLabel || subtotalLabel
-      ? `
+  const totalsRows = (promoCode || discountLabel || subtotalLabel)
+    ? `
       ${row("Promo code", promoCode || "-", border)}
       ${row("Subtotal", subtotalLabel || amountLabel || "", border)}
       ${row("Discount", discountLabel || "€0.00", border)}
       <tr>
         <td style="padding:10px;border-top:1px solid ${border}"><strong>Total</strong></td>
-        <td style="padding:10px;border-top:1px solid ${border}"><strong>${escapeHtml(
-          amountLabel || ""
-        )}</strong></td>
+        <td style="padding:10px;border-top:1px solid ${border}"><strong>${escapeHtml(amountLabel || "")}</strong></td>
       </tr>
     `
-      : `
-      ${row("Total", amountLabel || "", border)}
-    `;
+    : row("Total", amountLabel || "", border);
 
-  // Google Maps link for location (if present)
-  const locationRow = location
-    ? rowHtml(
-        "Location",
-        `<a href="https://maps.google.com/?q=${encodeURIComponent(
-          location
-        )}" style="color:${primary};text-decoration:none;border-bottom:1px solid ${primary};">${escapeHtml(
-          location
-        )}</a>`,
-        border
-      )
-    : "";
-
-  // Date/time combined line
-  const dateTime = dateLabel
-    ? `${escapeHtml(dateLabel)}${timeLabel ? `, ${escapeHtml(timeLabel)}` : ""}`
-    : "";
-
-  // Outer wrapper with centered container
   return `
   <div style="margin:0;padding:0;background:${bg};color:${text};font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-    <!-- Preheader (hidden) -->
+    <!-- Preheader -->
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">
       ${escapeHtml(preheaderText || "Your booking is confirmed")}
     </div>
 
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${bg};margin:0;padding:0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${bg};margin:0;padding:0;">
       <tr>
         <td align="center" style="padding:24px 12px;">
-          <!-- Container -->
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background:#ffffff;border:1px solid ${border};border-radius:14px;overflow:hidden;">
-            <!-- Top accent -->
-            <tr>
-              <td style="height:4px;background:${primary};"></td>
-            </tr>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border:1px solid ${border};border-radius:14px;overflow:hidden;">
+            <!-- Accent -->
+            <tr><td style="height:4px;background:${primary};"></td></tr>
 
             <!-- Header -->
             <tr>
-              <td style="padding:16px 20px;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <td style="padding:16px 20px;border-bottom:1px solid ${border}">
+                <table role="presentation" width="100%">
                   <tr>
-                    <td align="left" style="vertical-align:middle;">
+                    <td align="left">
                       ${
                         logoUrl
-                          ? `<img src="${escapeHtml(
-                              logoUrl
-                            )}" alt="" height="28" style="display:block;line-height:1;border:0;outline:none;">`
+                          ? `<img src="${escapeHtml(logoUrl)}" alt="" height="28" style="display:block;border:0;outline:none;">`
                           : `<span style="font-weight:700;font-size:16px;color:${text};">Booking Confirmation</span>`
                       }
                     </td>
-                    <td align="right" style="vertical-align:middle;">
-                      <span style="display:inline-block;padding:6px 10px;border-radius:9999px;background:${panel};color:${primary};font-weight:600;font-size:12px;letter-spacing:.3px;text-transform:uppercase;">
-                        Confirmed
+                    <td align="right">
+                      <span style="display:inline-block;padding:6px 10px;border-radius:9999px;background:${panel};color:${primary};font-weight:700;font-size:12px;letter-spacing:.3px;text-transform:uppercase;">
+                        ✓ Confirmed
                       </span>
                     </td>
                   </tr>
@@ -486,59 +467,87 @@ export function renderConfirmationHtml({
               </td>
             </tr>
 
-            <!-- Hero -->
+            <!-- Title -->
             <tr>
-              <td style="padding:12px 20px 0;">
-                <h2 style="margin:0 0 4px;font-size:20px;line-height:1.25;">${
-                  experienceName
-                    ? escapeHtml(experienceName)
-                    : "Your reservation"
-                }</h2>
-                ${
-                  dateTime
-                    ? `<p style="margin:0 0 2px;color:${subtext};font-size:14px;">🗓️ ${dateTime}</p>`
-                    : ""
-                }
-                ${
-                  location
-                    ? `<p style="margin:0 0 12px;color:${subtext};font-size:14px;">📍 ${escapeHtml(
-                        location
-                      )}</p>`
-                    : ""
-                }
+              <td style="padding:16px 20px 8px;">
+                <h1 style="margin:0 0 4px;font-size:20px;line-height:1.25;color:${text};">${
+                  experienceName ? escapeHtml(experienceName) : "Your reservation"
+                }</h1>
+                ${bookingRef ? `<div style="color:${subtext};font-size:13px;">Ref: ${escapeHtml(bookingRef)}</div>` : ""}
               </td>
             </tr>
 
-            <!-- Summary card -->
-            <tr>
-              <td style="padding:12px 20px 20px;">
-                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${bg};border:1px solid ${border};border-radius:12px;">
+            <!-- Key details bar -->
+            ${
+              headKpis.length
+                ? `
                   <tr>
-                    <td style="padding:10px 12px;border-bottom:1px solid ${border};font-weight:600;color:${subtext};" colspan="2">
-                      Order summary
+                    <td style="padding:8px 20px 4px;">
+                      <table role="presentation" width="100%" style="border:1px solid ${border};border-radius:10px;background:${panel};">
+                        ${headKpis.map(k => `
+                          <tr>
+                            <td style="width:120px;padding:10px 12px;border-bottom:1px solid ${border};color:${subtext};font-size:12px;">${k.label}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid ${border};font-size:14px;color:${text};">${k.value}</td>
+                          </tr>
+                        `).join("").replace(/<\/tr>\s*$/,"</tr>")}
+                      </table>
                     </td>
+                  </tr>`
+                : ""
+            }
+
+            <!-- Summary -->
+            <tr>
+              <td style="padding:12px 20px 8px;">
+                <table role="presentation" width="100%" style="border:1px solid ${border};border-radius:12px;overflow:hidden;">
+                  <tr>
+                    <td colspan="2" style="padding:10px 12px;background:${panel};color:${subtext};font-weight:700;">Order summary</td>
                   </tr>
-                  ${
-                    experienceName
-                      ? row("Experience", experienceName, border)
-                      : ""
-                  }
-                  ${locationRow}
+                  ${experienceName ? row("Experience", experienceName, border) : ""}
+                  ${location ? rowHtml("Location",
+                    `<a href="https://maps.google.com/?q=${encodeURIComponent(location)}" style="color:${primary};text-decoration:none;border-bottom:1px solid ${primary}">${escapeHtml(location)}</a>`, border) : ""}
                   ${dateTime ? row("Date", dateTime, border) : ""}
-                  ${promoRows}
-                  ${bookingRef ? row("Reference", bookingRef, border) : ""}
+                  ${totalsRows}
                 </table>
               </td>
             </tr>
 
+            <!-- CTAs -->
+            ${
+              calendarUrl || receiptUrl || manageUrl
+                ? `
+                <tr>
+                  <td style="padding:4px 20px 14px;">
+                    ${calendarUrl ? cta(calendarUrl, "Add to calendar", primary) : ""}
+                    ${receiptUrl ? cta(receiptUrl, "View Stripe receipt", "#3f382f", border, panel) : ""}
+                    ${manageUrl ? cta(manageUrl, "Manage booking", "#3f382f", border, panel) : ""}
+                    <div style="margin-top:8px;color:${subtext};font-size:12px;">
+                      A calendar invite (.ics) is attached.${
+                        hasInvoicePdf ? " We\u2019ve also attached your invoice PDF." : ""
+                      }
+                    </div>
+                  </td>
+                </tr>`
+                : `
+                <tr>
+                  <td style="padding:4px 20px 14px;">
+                    <div style="color:${subtext};font-size:12px;">
+                      A calendar invite (.ics) is attached.${
+                        hasInvoicePdf ? " We\u2019ve also attached your invoice PDF." : ""
+                      }
+                    </div>
+                  </td>
+                </tr>`
+            }
+
             <!-- Attendees -->
             <tr>
-              <td style="padding:0 20px 20px;">
-                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ${border};border-radius:12px;overflow:hidden;">
+              <td style="padding:0 20px 18px;">
+                <table role="presentation" width="100%" style="border:1px solid ${border};border-radius:12px;overflow:hidden;">
                   <thead>
                     <tr style="background:${panel};color:${subtext};">
-                      <th align="left" scope="col" style="padding:8px 10px;border-bottom:1px solid ${border};font-size:13px;">#</th>
-                      <th align="left" scope="col" style="padding:8px 10px;border-bottom:1px solid ${border};font-size:13px;">Name</th>
+                      <th align="left" style="padding:8px 10px;border-bottom:1px solid ${border};font-size:13px;">#</th>
+                      <th align="left" style="padding:8px 10px;border-bottom:1px solid ${border};font-size:13px;">Name</th>
                     </tr>
                   </thead>
                   <tbody>${attendeesHtml}</tbody>
@@ -546,46 +555,46 @@ export function renderConfirmationHtml({
               </td>
             </tr>
 
-            <!-- Helper / footer -->
+            <!-- Footer -->
             <tr>
-              <td style="padding:4px 20px 18px;">
-                  ${
-                    receiptUrl
-                      ? `<div style="margin:12px 0 10px;">
-                        <a href="${receiptUrl}"
-                           style="display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid ${border};background:${panel};text-decoration:none;color:${text};font-weight:600;">
-                           View Stripe Receipt →
-                        </a>
-                       </div>`
-                      : ""
-                  }
-               <p style="margin:12px 0 0;color:${subtext};font-size:13px;">
-                A calendar invite (.ics) is attached.${
-                  hasInvoicePdf ? " We’ve also attached your invoice PDF." : ""
-                } For any questions, just reply to this email. </p>
-                ${
-                  location
-                    ? `<div style="margin-top:12px;">
-                        <a href="https://maps.google.com/?q=${encodeURIComponent(
-                          location
-                        )}"
-                          style="display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid ${border};background:${panel};text-decoration:none;color:${text};font-weight:600;">
-                          Get directions →
-                        </a>
-                      </div>`
-                    : ""
-                }
-                <div style="height:2px;background:${primary};opacity:.2;margin:18px 0 0;border-radius:2px;"></div>
+              <td style="padding:14px 20px;border-top:1px solid ${border}">
+                <div style="color:${subtext};font-size:12px;line-height:18px;">
+                  Questions? Reply to this email.
+                  <br/>© ${new Date().getFullYear()} ${
+                    escapeHtml((experienceName || "Our venue").replace(/<[^>]*>/g,""))
+                  }.
+                </div>
               </td>
             </tr>
-
           </table>
-          <!-- /Container -->
         </td>
       </tr>
     </table>
   </div>`;
 }
+
+/* small helpers used above */
+function row(label, value, border = "#efeae1") {
+  return `<tr>
+    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(label)}</strong></td>
+    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${escapeHtml(value || "")}</td>
+  </tr>`;
+}
+function rowHtml(label, html, border = "#efeae1") {
+  return `<tr>
+    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(label)}</strong></td>
+    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${html || ""}</td>
+  </tr>`;
+}
+function cta(href, label, bg = "#8b6f47", border = "transparent", fgPanel) {
+  const styles = `display:inline-block;margin:6px 8px 0 0;padding:11px 16px;border-radius:10px;border:1px solid ${border};background:${bg};color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;line-height:20px;`;
+  const onPanel = fgPanel ? `background:${fgPanel};color:#2b2a28;` : "";
+  return `<a href="${href}" target="_blank" style="${fgPanel ? styles.replace(`background:${bg};color:#ffffff;`, onPanel + `border:1px solid ${border};`) : styles}">${escapeHtml(label)} →</a>`;
+}
+function escapeHtml(s = "") {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
 
 function renderTextFallback({
   experienceName,
@@ -628,31 +637,31 @@ function renderTextFallback({
 
 /** =========================== helpers =========================== */
 
-function row(label, value, border = "#efeae1") {
-  return `<tr><td style="padding:10px;border-bottom:1px solid ${border}"><strong>${escapeHtml(
-    label
-  )}</strong></td><td style="padding:10px;border-bottom:1px solid ${border}">${escapeHtml(
-    value || ""
-  )}</td></tr>`;
-}
+// function row(label, value, border = "#efeae1") {
+//   return `<tr><td style="padding:10px;border-bottom:1px solid ${border}"><strong>${escapeHtml(
+//     label
+//   )}</strong></td><td style="padding:10px;border-bottom:1px solid ${border}">${escapeHtml(
+//     value || ""
+//   )}</td></tr>`;
+// }
 
-function rowHtml(label, html, border = "#efeae1") {
-  return `<tr>
-    <td style="padding:10px;border-bottom:1px solid ${border};"><strong>${escapeHtml(
-    label
-  )}</strong></td>
-    <td style="padding:10px;border-bottom:1px solid ${border};">${
-    html || ""
-  }</td>
-  </tr>`;
-}
+// function rowHtml(label, html, border = "#efeae1") {
+//   return `<tr>
+//     <td style="padding:10px;border-bottom:1px solid ${border};"><strong>${escapeHtml(
+//     label
+//   )}</strong></td>
+//     <td style="padding:10px;border-bottom:1px solid ${border};">${
+//     html || ""
+//   }</td>
+//   </tr>`;
+// }
 
-function escapeHtml(s = "") {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+// function escapeHtml(s = "") {
+//   return String(s)
+//     .replace(/&/g, "&amp;")
+//     .replace(/</g, "&lt;")
+//     .replace(/>/g, "&gt;");
+// }
 
 function normalizeRecipients(to) {
   const arr = Array.isArray(to) ? to : [to];

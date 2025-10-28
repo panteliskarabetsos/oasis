@@ -39,10 +39,20 @@ const fmtDateShort = (d) =>
         timeStyle: "short",
       })
     : "-";
-const fmtMoney = (n, currency = "EUR") =>
-  typeof n === "number"
-    ? n.toLocaleString("en-GB", { style: "currency", currency })
-    : "-";
+
+    const fractionDigits = (curr = "EUR") =>
+  new Intl.NumberFormat("en-GB", { style: "currency", currency: curr })
+    .resolvedOptions().maximumFractionDigits;
+
+const minorToMajor = (minor, curr = "EUR") => {
+  const fd = fractionDigits(curr);
+  return (Number(minor) || 0) / 10 ** fd;
+};
+
+const fmtMoney = (n, currency = "EUR") => {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return "-";
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(Number(n));
+};
 
 function toDateInput(date) {
   const d = new Date(date);
@@ -66,6 +76,13 @@ export default function ReservationDetailPage() {
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+const piId = useMemo(
+  () =>
+    item?.payments?.stripePaymentIntentId ||
+    item?.stripePaymentIntentId ||
+    null,
+  [item]
+);
 
   // Modal state
   const [showCancel, setShowCancel] = useState(false);
@@ -82,6 +99,12 @@ export default function ReservationDetailPage() {
   );
   const [targetSlotId, setTargetSlotId] = useState("");
   const [rev, setRev] = useState(0);
+
+  // Stripe state for summary on this page
+const [stripe, setStripe] = useState(null);
+const [stripeLoading, setStripeLoading] = useState(false);
+const [stripeErr, setStripeErr] = useState("");
+
   useEffect(() => {
     if (!id) return;
     (async () => {
@@ -106,29 +129,79 @@ export default function ReservationDetailPage() {
     })();
   }, [id]);
 
+  
+
+  // Fetch Stripe PI when present, and when pricing editor saves (rev++)
   useEffect(() => {
-    if (!id) return;
-    (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const res = await fetch(`/api/admin/reservations/${id}`, {
-          cache: "no-store",
-          credentials: "include",
-        });
-        if (!res.ok)
-          throw new Error(
-            (await res.json().catch(() => ({})))?.error || "Failed to load"
-          );
-        const { item } = await res.json();
-        setItem(normalizeBooking(item));
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
+  if (!piId) {
+    setStripe(null);
+    setStripeErr("");
+    return;
+  }
+  let aborted = false;
+
+  (async () => {
+    try {
+      setStripeLoading(true);
+      setStripeErr("");
+      const res = await fetch(`/api/admin/payments/${piId}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || "Failed to load payment");
+      if (!aborted) setStripe(j?.item || j);
+    } catch (e) {
+      if (!aborted) {
+        setStripe(null);
+        setStripeErr(e?.message || "Failed to load payment");
       }
-    })();
-  }, [id, rev]);
+    } finally {
+      if (!aborted) setStripeLoading(false);
+    }
+  })();
+
+  return () => {
+    aborted = true;
+  };
+}, [piId, rev]); // include rev so it re-fetches after edits
+
+
+  useEffect(() => {
+    if (!showPricing) return;
+
+    // lock body scroll (works well across desktop & mobile)
+    const scrollY = window.scrollY;
+    const original = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width,
+      overflow: document.documentElement.style.overflow,
+      paddingRight: document.documentElement.style.paddingRight,
+    };
+
+    // prevent layout shift when scrollbar disappears
+    const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
+    if (scrollbarW > 0) {
+      document.documentElement.style.paddingRight = `${scrollbarW}px`;
+    }
+
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.position = original.position;
+      document.body.style.top = original.top;
+      document.body.style.width = original.width;
+      document.documentElement.style.overflow = original.overflow;
+      document.documentElement.style.paddingRight = original.paddingRight;
+
+      // restore scroll position
+      window.scrollTo(0, scrollY);
+    };
+  }, [showPricing]);
 
   /* ------------------------------ actions ------------------------------ */
   async function cancelBooking() {
@@ -171,6 +244,7 @@ export default function ReservationDetailPage() {
       setSlotsLoading(false);
     }
   }
+
   function normalizeBooking(raw) {
     if (!raw || typeof raw !== "object") return null;
 
@@ -241,7 +315,14 @@ export default function ReservationDetailPage() {
         ? raw.totalPaidAmount
         : null,
       totalAmount: Number.isFinite(raw.totalAmount) ? raw.totalAmount : null,
+      // keep raw discount too (optional)
+      discountAmount: Number.isFinite(raw.discountAmount)
+        ? raw.discountAmount
+        : null,
     };
+
+    // promo info (code + discount)
+    const promo = extractPromoFromRaw(raw, unitPrices, counts);
 
     // payments
     const payments = {
@@ -294,6 +375,9 @@ export default function ReservationDetailPage() {
       money,
       payments,
 
+      // promo (new)
+      promo,
+
       // raw fallbacks (kept for safety)
       currency: raw.currency,
       unitPriceAdult: raw.unitPriceAdult,
@@ -301,6 +385,91 @@ export default function ReservationDetailPage() {
       totalPaidAmount: raw.totalPaidAmount,
       customExperienceName: raw.customExperienceName ?? null,
     };
+  }
+
+  useEffect(() => {
+  const pi = item?.payments?.stripePaymentIntentId;
+  if (!pi) {
+    setStripe(null);
+    setStripeErr("");
+    return;
+  }
+  let aborted = false;
+  (async () => {
+    try {
+      setStripeLoading(true);
+      setStripeErr("");
+      const res = await fetch(`/api/admin/payments/${pi}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || "Failed to load payment");
+      if (!aborted) setStripe(j?.item || j);
+    } catch (e) {
+      if (!aborted) {
+        setStripe(null);
+        setStripeErr(e?.message || "Failed to load payment");
+      }
+    } finally {
+      if (!aborted) setStripeLoading(false);
+    }
+  })();
+  return () => {
+    aborted = true;
+  };
+}, [item?.payments?.stripePaymentIntentId]);
+
+
+  // Pull out likely promo fields and compute discount if needed
+  function extractPromoFromRaw(raw, unitPrices, counts) {
+    try {
+      const pj =
+        raw.promoJson || raw.promo_json || raw.promo || raw.discount || null;
+
+      // Collect possible code(s)
+      const codeList = []
+        .concat(raw.appliedPromoCode || [])
+        .concat(raw.promoCodes || [])
+        .concat(raw.promoCode || [])
+        .concat((pj && pj.code) || []);
+      const flat = codeList.flat
+        ? codeList.flat()
+        : [].concat(...codeList.map((x) => (Array.isArray(x) ? x : [x])));
+      const codes = [
+        ...new Set(
+          flat
+            .filter(Boolean)
+            .map((x) => String(x).trim())
+            .filter(Boolean)
+        ),
+      ];
+      const code = codes.length ? codes.join(" + ") : null;
+
+      // Prefer a precomputed discountAmount from DB if present
+      let discountAmount = Number(raw.discountAmount);
+      // If not present, attempt a simple compute from pj
+      if (!Number.isFinite(discountAmount) || discountAmount <= 0) {
+        const type = String(pj?.discountType || pj?.type || "").toLowerCase();
+        const val = Number(pj?.discountValue ?? pj?.value);
+        if (type && Number.isFinite(val)) {
+          const subtotal =
+            (Number(counts?.adults || 0) * (Number(unitPrices?.adult) || 0)) +
+            (Number(counts?.kids || 0) * (Number(unitPrices?.kid) || 0));
+          if (type.includes("percent") || type === "percentage") {
+            discountAmount = Math.max(0, Math.round(subtotal * (val / 100) * 100) / 100);
+          } else if (type.includes("fixed") || type === "amount") {
+            discountAmount = Math.max(0, val);
+          }
+        }
+      }
+      if (!Number.isFinite(discountAmount) || discountAmount < 0)
+        discountAmount = 0;
+
+      return { code, discountAmount };
+    } catch {
+      return { code: null, discountAmount: 0 };
+    }
   }
 
   async function submitReschedule() {
@@ -348,8 +517,13 @@ export default function ReservationDetailPage() {
   const kids = Number(item?.counts?.kids ?? 0);
 
   const estimate = +(adults * unitPriceAdult + kids * unitPriceKid).toFixed(2);
+
+  // NEW: use discount from extracted promo for balance math
+  const promoCode = item?.promo?.code || null;
+  const discountValue = Number(item?.promo?.discountAmount || 0);
+  const grandTotal = Math.max(0, +(estimate - discountValue).toFixed(2));
   const balance = +(
-    estimate - (Number.isFinite(paidTotal) ? paidTotal : 0)
+    grandTotal - (Number.isFinite(paidTotal) ? paidTotal : 0)
   ).toFixed(2);
 
   const guestName = (item?.guest?.name || "").trim() || "";
@@ -365,12 +539,149 @@ export default function ReservationDetailPage() {
   const priceKid = item?.unitPrices?.kid ?? null;
 
   const currency = moneyCurrency;
-  // make sure your money() handles 0 correctly:
   function money(n, c = "EUR") {
     if (n === null || n === undefined) return "—";
     const num = typeof n === "string" ? Number(n) : n;
     return Number.isFinite(num) ? `${num.toFixed(2)} ${c}` : "—";
   }
+
+  
+  // ---------- Stripe derived (collected/refunded/net) ----------
+  const normalizeStripeSummary = (raw, fallbackCurrency) => {
+   const empty = {
+      currency: (fallbackCurrency || "EUR").toUpperCase(),
+      collectedCents: 0,
+      refundedCents: 0,
+      netCents: 0,
+      refunds: [],
+    };
+    if (!raw) return empty;
+
+    // Unwrap common shapes
+    const unwrapPI = (x) => {
+      if (!x || typeof x !== "object") return null;
+      if (x.object === "payment_intent") return x;
+      if (x.payment_intent && typeof x.payment_intent === "object") return x.payment_intent;
+      if (x.paymentIntent && typeof x.paymentIntent === "object") return x.paymentIntent;
+      if (x.item && typeof x.item === "object") return unwrapPI(x.item);
+      if (x.data && x.data.object) return unwrapPI(x.data.object);
+      return x; // hope it's PI-like
+    };
+    const pi = unwrapPI(raw);
+
+    const baseCurrency = (
+      pi?.currency ||
+      raw?.currency ||
+      raw?.charges?.data?.[0]?.currency ||
+      fallbackCurrency ||
+      "EUR"
+    ).toUpperCase();
+
+    const charges = Array.isArray(pi?.charges?.data)
+      ? pi.charges.data
+      : Array.isArray(raw?.charges?.data)
+      ? raw.charges.data
+      : [];
+
+    // Collected
+    let collectedCents = Number(pi?.amount_received) || 0;
+    if (!collectedCents && charges.length) {
+      collectedCents = charges.reduce(
+        (sum, c) => sum + Number(c?.amount_captured ?? c?.amount ?? 0),
+        0
+      );
+    }
+
+    // Build refund objects from any available place.
+    let refundObjs = [];
+    if (Array.isArray(raw?.refunds?.data)) refundObjs = raw.refunds.data;
+    else if (Array.isArray(pi?.refunds?.data)) refundObjs = pi.refunds.data;
+    else if (Array.isArray(raw?.refunds)) refundObjs = raw.refunds;
+
+    // Also scan charges. If refunds list not expanded, synthesize from amount_refunded.
+    if (charges.length) {
+      charges.forEach((c) => {
+        const rs = Array.isArray(c?.refunds?.data)
+          ? c.refunds.data
+          : Array.isArray(c?.refunds)
+          ? c.refunds
+          : [];
+        if (rs.length) {
+          refundObjs.push(...rs);
+        } else if (Number(c?.amount_refunded) > 0) {          refundObjs.push({
+            id: `${c.id}-refund`,
+            amount: Number(c.amount_refunded),
+            currency: (c.currency || baseCurrency).toUpperCase(),
+            created: Number(c.created || 0),
+            status: "succeeded",
+            reason: "",
+            _synthetic: true,
+          });
+        }
+      });
+    }
+
+    // If still none but charges report refunds, synthesize a single row.
+    if (!refundObjs.length && charges.length) {
+      const sumRef = charges.reduce((s, c) => s + Number(c?.amount_refunded || 0), 0);
+      if (sumRef > 0) {
+        refundObjs.push({
+          id: "refund-total",
+          amount: sumRef,
+          currency: baseCurrency,
+          created: Number(pi?.created || charges[0]?.created || 0),
+          status: "succeeded",
+          reason: "Refund (summary)",
+          _synthetic: true,
+        });
+      }
+    }
+
+    const refundedCents = refundObjs.reduce((s, r) => s + Number(r?.amount || 0), 0);
+    const netCents = Math.max(0, collectedCents - refundedCents);
+
+    const refunds = refundObjs
+      .map((r) => ({
+        id: r.id,
+        amount: Number(r.amount || 0),
+        currency: (r.currency || baseCurrency).toUpperCase(),
+        created: Number(r.created || 0),
+        status: r.status || (r._synthetic ? "succeeded" : ""),
+        reason: r.reason || r?.metadata?.reason || (r._synthetic ? "Refund (summary)" : ""),
+      }))
+      .sort((a, b) => b.created - a.created);
+
+    return { currency: baseCurrency, collectedCents, refundedCents, netCents, refunds };
+  };
+
+const stripeSummary = useMemo(
+  () => normalizeStripeSummary(stripe, item?.money?.currency || "EUR"),
+  [stripe, item?.money?.currency]
+);
+const { currency: stripeCurrency, collectedCents, refundedCents, netCents, refunds } =
+  stripeSummary;
+
+const fmtTs = (sec) =>
+  sec
+    ? new Date(sec * 1000).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
+    : "-";
+
+
+  // Value shown in the hero: prefer Stripe net (after refunds) if PI exists
+  const hasPI = Boolean(item?.payments?.stripePaymentIntentId);
+  const heroPaidAmount =
+    hasPI && stripe
+      ? stripeNetPaidCents / 100
+      : hasPI && stripeLoading
+      ? null
+      : paidTotal;
+  const heroPaidCurrency = hasPI && stripe ? stripeCurrency : moneyCurrency;
+  const heroPaidLabel = hasPI
+    ? "Net via Stripe (after refunds)"
+    : typeof item?.money?.totalPaidAmount === "number"
+    ? "Total paid"
+    : "Total";
+
   const sourceBadge = item?.source ? (
     <span
       className={cx(
@@ -472,7 +783,7 @@ export default function ReservationDetailPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 overflow-y-auto overscroll-contain"
             onClick={() => setShowPricing(false)}
           >
             <motion.div
@@ -480,7 +791,7 @@ export default function ReservationDetailPage() {
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 12, opacity: 0 }}
               transition={{ type: "spring", stiffness: 500, damping: 40 }}
-              className="w-full max-w-2xl rounded-2xl border border-black/10 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-[#111]"
+              className="w-full max-w-2xl rounded-2xl border border-black/10 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-[#111] max-h-[85vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
               role="dialog"
               aria-modal="true"
@@ -502,11 +813,7 @@ export default function ReservationDetailPage() {
               <BookingPricingEditor
                 bookingId={id}
                 onClose={() => setShowPricing(false)}
-                onSaved={(updated) => {
-                  setShowPricing(false);
-
-                  setRev((v) => v + 1);
-                }}
+                onSaved={() => setRev((v) => v + 1)}
               />
             </motion.div>
           </motion.div>
@@ -574,14 +881,26 @@ export default function ReservationDetailPage() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-2xl font-semibold text-neutral-900">
-                      {fmtMoney(paidTotal, moneyCurrency)}
-                    </div>
-                    <div className="text-xs text-neutral-500">
-                      {typeof item?.money?.totalPaidAmount === "number"
-                        ? "Total paid"
-                        : "Total"}
-                    </div>
+                   {(() => {
+  const hasPI = Boolean(item?.payments?.stripePaymentIntentId);
+  const showLoading = hasPI && stripeLoading;
+ const value = hasPI && stripe ? minorToMajor(netCents, stripeCurrency) : paidTotal;
+  const ccy = hasPI && stripe ? stripeCurrency : moneyCurrency;
+  const label = hasPI
+    ? "Net via Stripe (after refunds)"
+    : typeof item?.money?.totalPaidAmount === "number"
+    ? "Total paid"
+    : "Total";
+  return (
+    <>
+      <div className="text-2xl font-semibold text-neutral-900">
+        {showLoading ? "…" : fmtMoney(value, ccy)}
+      </div>
+      <div className="text-xs text-neutral-500">{label}</div>
+    </>
+  );
+})()}
+
                   </div>
                 </div>
               </div>
@@ -683,6 +1002,19 @@ export default function ReservationDetailPage() {
                     <StatusBadge status={statusNorm} />
                   </div>
                 </Row>
+
+                {/* NEW: Promo details */}
+                {promoCode ? (
+                  <Row label="Promo code" mono>
+                    {promoCode}
+                  </Row>
+                ) : null}
+                {discountValue > 0 ? (
+                  <Row label="Discount" mono>
+                    −{fmtMoney(discountValue, moneyCurrency)}
+                  </Row>
+                ) : null}
+
                 <Row
                   label={
                     <span className="inline-flex items-center gap-1">
@@ -699,7 +1031,6 @@ export default function ReservationDetailPage() {
                       >
                         Show
                       </Button>
-                      {/* <Copyable value={item.payments.stripeSessionId} /> */}
                     </div>
                   ) : (
                     "-"
@@ -719,10 +1050,70 @@ export default function ReservationDetailPage() {
                     empty="-"
                   />
                 </Row>
+
+                {/* Stripe collected/refunded/net */}
+                {hasPI ? (
+                  <>
+                    <Row label="Stripe collected" mono>
+                     {stripeLoading ? "…" : fmtMoney(minorToMajor(collectedCents, stripeCurrency), stripeCurrency)}
+                    </Row>
+                    <Row label="Stripe refunded" mono>
+                        {stripeLoading ? "…" : fmtMoney(minorToMajor(refundedCents, stripeCurrency), stripeCurrency)}
+                 
+                    </Row>
+                    <Row label="Stripe net (after refunds)" mono>
+                      {stripeLoading ? "…" : fmtMoney(minorToMajor(netCents, stripeCurrency), stripeCurrency)}
+                
+                    </Row>
+
+                    {/* Refunds list */}
+                    {refunds.length > 0 && (
+                      <div className="mt-2 rounded-xl border bg-neutral-50/60 p-3">
+                        <div className="mb-1 text-xs font-semibold text-neutral-700">
+                          Refunds
+                        </div>
+                        <ul className="divide-y">
+                          {refunds.map((r) => (
+                            <li
+                              key={r.id}
+                              className="py-1.5 text-xs flex items-center justify-between gap-3"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-neutral-600">
+                                  <code className="rounded bg-white px-1 py-0.5">
+                                    {r.id}
+                                  </code>
+                                  <span className="mx-1">•</span>
+                                  <span className="capitalize">
+                                    {r.status || "unknown"}
+                                  </span>
+                                  {r.reason ? (
+                                    <span className="opacity-70">
+                                      {" "}
+                                      — {r.reason}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="opacity-70">
+                                  {fmtTs(r.created)}
+                                </div>
+                              </div>
+                            <div className="font-semibold text-rose-700">
+    -{fmtMoney(minorToMajor(r.amount, r.currency), r.currency)}
+  </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                ) : null}
+
+                {/* Legacy/editor paid total (non-stripe or as reference) */}
                 <Row
                   label={
                     typeof item?.money?.totalPaidAmount === "number"
-                      ? "Total paid"
+                      ? "Total paid (editor)"
                       : "Total"
                   }
                   mono
@@ -739,6 +1130,7 @@ export default function ReservationDetailPage() {
                   )}
                 </Row>
               </Card>
+
 
               {/* Optional attendees list if present */}
               {Array.isArray(item?.attendees) && item.attendees.length > 0 && (

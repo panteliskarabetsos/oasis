@@ -438,26 +438,82 @@ function renderInvoiceEmail(b) {
 }
 
 /* --------------------------------- route --------------------------------- */
+// app/api/admin/invoices/send/route.js
 export async function POST(req) {
   try {
     // Accept form-encoded or JSON
     const ctype = req.headers.get("content-type") || "";
-    let id, mode;
+    let id, mode, invoiceId, source;
     if (ctype.includes("application/json")) {
       const body = await req.json();
-      id = Number(body?.id);
+      id = body?.id != null ? Number(body.id) : undefined;
       mode = String(body?.mode || "custom").toLowerCase();
+      invoiceId = body?.invoice_id ? String(body.invoice_id) : undefined;
+      source = body?.source ? String(body.source) : undefined;
     } else {
       const fd = await req.formData();
-      id = Number(fd.get("id"));
+      id = fd.has("id") ? Number(fd.get("id")) : undefined;
       mode = String(fd.get("mode") || "custom").toLowerCase();
+      invoiceId = fd.get("invoice_id") ? String(fd.get("invoice_id")) : undefined;
+      source = fd.get("source") ? String(fd.get("source")) : undefined;
     }
 
-    const redirect = (qs) =>
-      NextResponse.redirect(new URL(`/admin/invoices${qs}`, req.url));
+    // Helper that preserves ?source=... if provided
+    const redirect = (qs) => {
+      const url = new URL(`/admin/invoices${qs}`, req.url);
+      if (source && !url.searchParams.has("source")) {
+        url.searchParams.set("source", source);
+      }
+      return NextResponse.redirect(url);
+    };
 
-    if (!Number.isFinite(id)) return redirect("?err=bad_id");
+    // If neither a booking id nor a Stripe invoice id is provided -> error
+    if (!Number.isFinite(id) && !invoiceId) return redirect("?err=bad_id");
 
+    /* ------------------------------------------------------------------ */
+    /*  A) Manual Stripe invoices: send via Stripe and return immediately */
+    /* ------------------------------------------------------------------ */
+    if (invoiceId) {
+      try {
+        const stripe = await getStripe();
+        // Retrieve invoice and ensure we have an email to send to
+        let inv = await stripe.invoices.retrieve(invoiceId, { expand: ["customer"] });
+        const email = inv.customer_email || inv.customer?.email || "";
+        if (!email) return redirect("?err=no_email");
+
+        // Finalize drafts so they become sendable
+        if (inv.status === "draft") {
+          inv = await stripe.invoices.finalizeInvoice(inv.id);
+        }
+        // Only send invoices that are "send_invoice" and currently "open"
+        if (inv.collection_method === "send_invoice" && inv.status === "open") {
+          await stripe.invoices.sendInvoice(inv.id);
+        }
+
+        // Optional: if the Stripe invoice has a bookingId in metadata, update it
+        const bookingId = Number(inv.metadata?.bookingId);
+        if (Number.isFinite(bookingId)) {
+          const adminOpt = createSupabaseAdmin();
+          if (adminOpt) {
+            await adminOpt
+              .from("Booking")
+              .update({ invoiceEmailSentAt: new Date().toISOString() })
+              .eq("id", bookingId);
+          }
+        }
+
+        revalidatePath("/admin/invoices");
+        const sentToken = encodeURIComponent(inv.number || inv.id);
+        return redirect(`?sent=${sentToken}`);
+      } catch (e) {
+        console.error("[invoices/send] stripe manual send error", e);
+        return redirect("?err=send_fail");
+      }
+    }
+
+    /* -------------------------------------------------------------- */
+    /*  B) Booking-based flow (your existing logic, unchanged mostly) */
+    /* -------------------------------------------------------------- */
     const admin = createSupabaseAdmin();
     if (!admin) return redirect("?err=no_admin");
 
@@ -484,11 +540,12 @@ export async function POST(req) {
           pc.address?.country
       );
 
-    // --- Mode: ask Stripe to send their invoice email (uses fresh invoice when needed)
+    // Mode: ask Stripe to send their invoice email (uses fresh invoice when needed)
     if (mode === "stripe") {
       const inv = await ensureStripeInvoice(b, { preferNew: hasBillingEdits });
       const stripe = await getStripe();
       await stripe.invoices.sendInvoice(inv.id);
+
       await admin
         .from("Booking")
         .update({ invoiceEmailSentAt: new Date().toISOString() })
@@ -498,21 +555,19 @@ export async function POST(req) {
       return redirect(`?sent=${id}`);
     }
 
-    // --- Default: send our custom email (attach invoice PDF or link a receipt)
+    // Default: send our custom email (attach invoice PDF or link a receipt)
     const to = emailFromPrimary(b.primary_contact);
     if (!to) return redirect(`?err=no_email&id=${id}`);
 
     let html = renderInvoiceEmail(b);
-    const subject = `Invoice ${formatInv(b.id)} · ${brandName()}`; // ✅ define subject
+    const subject = `Invoice ${formatInv(b.id)} · ${brandName()}`;
     const attachments = [];
 
     try {
       // Try to fetch an existing asset first (may be an invoice PDF or a receipt URL)
-      let asset = await getStripeAssetForBooking(b, {
-        preferNew: hasBillingEdits,
-      });
+      let asset = await getStripeAssetForBooking(b, { preferNew: hasBillingEdits });
 
-      // If we need the updated billing fields but only got a receipt (or nothing), mint a fresh invoice now
+      // If we need updated billing fields but only got a receipt (or nothing), mint a fresh invoice now
       if (!asset || (hasBillingEdits && asset.type !== "invoice")) {
         try {
           const inv = await ensureStripeInvoice(b, { preferNew: true });
@@ -525,10 +580,7 @@ export async function POST(req) {
             };
           }
         } catch (e) {
-          console.warn(
-            "[invoices/send] fallback ensureStripeInvoice failed:",
-            e?.message || e
-          );
+          console.warn("[invoices/send] fallback ensureStripeInvoice failed:", e?.message || e);
         }
       }
 
@@ -538,7 +590,7 @@ export async function POST(req) {
         if (!base64.length) throw new Error("Empty PDF buffer");
         attachments.push({
           filename: asset.filename || `Invoice-${formatInv(b.id)}.pdf`,
-          content: base64, // base64 string for Resend
+          content: base64,
         });
         if (asset.hostedUrl) {
           html += `
@@ -558,10 +610,7 @@ export async function POST(req) {
 
     try {
       if (process.env.NODE_ENV !== "production") {
-        console.log(
-          "[sendMail] attachments:",
-          attachments.map((a) => a.filename)
-        );
+        console.log("[sendMail] attachments:", attachments.map((a) => a.filename));
       }
       await sendMail({ to, subject, html, attachments });
 
