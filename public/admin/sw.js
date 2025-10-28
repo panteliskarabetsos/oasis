@@ -1,7 +1,7 @@
 /* public/admin/sw.js */
-const CACHE = "oasis-admin-v3";
+const CACHE = "oasis-admin-v4";
 const APP_SCOPE = "/admin";
-const OFFLINE_URL = "/admin/offline.html";
+const OFFLINE_URL = "/admin/offline.html"; // static 200 page
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
@@ -26,7 +26,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (!url.pathname.startsWith(APP_SCOPE)) return;
 
-  // Next static assets
+  // Next.js static assets
   if (url.pathname.startsWith("/_next/static/") || url.pathname.startsWith("/_next/image")) {
     event.respondWith(cacheFirst(req));
     return;
@@ -38,40 +38,89 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // navigations: follow redirects so Safari never sees a redirected SW response
+  // navigations (HTML): follow redirects, allow non-200s (e.g., login pages)
   if (req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html")) {
     event.respondWith(handleNavigation(req));
     return;
   }
 
+  // default: network-first
   event.respondWith(networkFirst(req, OFFLINE_URL));
 });
 
-/* helpers */
+/* ---------------- helpers ---------------- */
 function isRedirect(res) {
   if (!res) return false;
   if (res.type === "opaqueredirect") return true;
   return [301, 302, 303, 307, 308].includes(res.status);
 }
 
-async function followRedirectOnce(res) {
+function resolveLocation(res) {
   const loc = res.headers.get("Location");
-  if (!loc) return res;
-  const finalUrl = new URL(loc, self.location.origin).toString();
-  return fetch(finalUrl, { cache: "no-store", credentials: "include" });
+  if (!loc) return null;
+  try {
+    return new URL(loc, self.location.origin);
+  } catch {
+    return null;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// For cross-origin redirects in navigations, return a small HTML shim that navigates client-side.
+// This avoids returning a redirected Response (which iOS hates).
+function redirectShim(toUrl) {
+  const safe = escapeHtml(toUrl);
+  return new Response(
+    `<!doctype html><meta charset="utf-8">
+     <meta name="viewport" content="width=device-width,initial-scale=1">
+     <title>Redirecting…</title>
+     <p>Redirecting…</p>
+     <script>location.href="${safe}";</script>`,
+    { headers: { "Content-Type": "text/html; charset=utf-8" }, status: 200 }
+  );
 }
 
 async function handleNavigation(req) {
   try {
-    let res = await fetch(req, { cache: "no-store", redirect: "manual", credentials: "include" });
+    let res = await fetch(req, {
+      cache: "no-store",
+      redirect: "manual",      // detect redirects
+      credentials: "include",
+    });
+
     let hops = 0;
     while (isRedirect(res) && hops < 5) {
-      res = await followRedirectOnce(res);
+      const target = resolveLocation(res);
+      if (!target) break;
+
+      // Cross-origin redirect (e.g., OAuth) — return a JS redirect shim.
+      if (target.origin !== self.location.origin) {
+        return redirectShim(target.toString());
+      }
+
+      // Same-origin: follow manually (still "manual" to keep detecting chains)
+      res = await fetch(target.toString(), {
+        cache: "no-store",
+        redirect: "manual",
+        credentials: "include",
+      });
       hops++;
     }
-    if (res && res.ok && !isRedirect(res)) return res;
-    throw new Error("navigation failed");
+
+    // At this point, res is final (not a redirect). IMPORTANT:
+    // Return it even if it's 401/403/500 so you see login/error instead of offline.html.
+    if (res) return res;
+
+    throw new Error("no response");
   } catch {
+    // Only show offline shell when fetch truly fails (network error)
     const cache = await caches.open(CACHE);
     const fallback = await cache.match(OFFLINE_URL);
     return fallback || new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain" } });
@@ -100,9 +149,17 @@ async function staleWhileRevalidate(req) {
 async function networkFirst(req, fallbackUrl) {
   try {
     let res = await fetch(req, { cache: "no-store", redirect: "manual", credentials: "include" });
-    if (isRedirect(res)) res = await followRedirectOnce(res);
-    if (res && res.ok && !isRedirect(res)) return res;
-    throw new Error("network fail");
+    if (isRedirect(res)) {
+      const target = resolveLocation(res);
+      if (target && target.origin !== self.location.origin) {
+        return redirectShim(target.toString());
+      }
+      if (target) {
+        res = await fetch(target.toString(), { cache: "no-store", redirect: "manual", credentials: "include" });
+      }
+    }
+    // For non-navigation requests we *can* return non-OK; callers decide what to do.
+    return res;
   } catch {
     const cache = await caches.open(CACHE);
     const fallback = await cache.match(fallbackUrl);
