@@ -1,4 +1,4 @@
-// app/admin/layout.js
+// src/app/admin/layout.js
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import AdminHeader from "@/app/admin/components/header";
@@ -7,17 +7,21 @@ import InstallPrompt from "@/app/admin/components/InstallPrompt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// ✅ Change #1: point metadata.manifest to the ADMIN-SCOPED manifest
+// (make sure this file exists at public/admin/manifest.webmanifest)
 export const metadata = {
   title: "Admin • Oasis",
   robots: { index: false, follow: false },
   applicationName: "Oasis Admin",
-  manifest: "/manifest.webmanifest",
+  manifest: "/admin/manifest.webmanifest",
   themeColor: "#8b6f47",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Oasis Admin",
   },
+  // You can keep these where your icon files live; if you moved icons under /admin, update paths accordingly.
   icons: {
     apple: "/icons/admin-128.png",
     icon: [
@@ -59,6 +63,16 @@ export default async function AdminLayout({ children }) {
         overflow-x-hidden supports-[overflow:clip]:overflow-x-clip
       "
     >
+      {/* ✅ Change #2: mount SW register as early as possible in the tree */}
+      <SwRegister />
+
+      {/* No-JS fallback (useful if user disables JS in Safari) */}
+      <noscript>
+        <div className="p-3 text-sm text-[#5a4a3f]">
+          JavaScript is disabled. Oasis Admin requires JavaScript to run.
+        </div>
+      </noscript>
+
       {/* Decorative blobs — desktop only */}
       <div className="pointer-events-none absolute -top-40 -left-24 h-[28rem] w-[28rem] rounded-full bg-[#e9e4dc] blur-3xl opacity-70 hidden sm:block" />
       <div className="pointer-events-none absolute -bottom-40 -right-24 h-[32rem] w-[32rem] rounded-full bg-[#fff4e1] blur-3xl opacity-80 hidden sm:block" />
@@ -119,7 +133,6 @@ export default async function AdminLayout({ children }) {
       {/* Bottom tab bar (mobile only) — full width, safe-area all around */}
       <InstallPrompt />
       <MobileBottomNav />
-      <SwRegister />
     </div>
   );
 }
