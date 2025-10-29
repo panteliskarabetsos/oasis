@@ -1,12 +1,12 @@
-// src/app/admin/components/SwRegister.tsx
 "use client";
 import { useEffect } from "react";
 
-export default function SwRegister() {
+export default function SWRegister() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    // Root-scoped SW that still only handles /admin/* in its fetch handler
-    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+    navigator.serviceWorker
+      .register("/admin/sw.js", { scope: "/admin/" })
+      .catch(() => {});
   }, []);
   return null;
 }
