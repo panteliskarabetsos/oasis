@@ -1,13 +1,13 @@
 /* public/sw.js */
-const CACHE = "oasis-root-v6"; // bump to force update
-const ADMIN_SCOPE = "/admin";
+const CACHE = "oasis-admin-v5";
+const APP_SCOPE = "/admin";
 const OFFLINE_URL = "/admin/offline.html";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const c = await caches.open(CACHE);
-      await c.addAll([OFFLINE_URL]); // pre-cache offline shell
+      await c.addAll([OFFLINE_URL]);
       self.skipWaiting();
     })()
   );
@@ -28,9 +28,12 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
-  const url = new URL(req.url);
 
-  // Cache-first for Next static bits (safe everywhere)
+  // Only handle admin paths; everything else goes straight to network.
+  const url = new URL(req.url);
+  if (!url.pathname.startsWith(APP_SCOPE)) return;
+
+  // Next assets
   if (
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/_next/image")
@@ -39,27 +42,24 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // SWR images under admin scope
-  if (req.destination === "image" && url.pathname.startsWith(ADMIN_SCOPE)) {
+  // Images: SWR
+  if (req.destination === "image") {
     event.respondWith(staleWhileRevalidate(req));
     return;
   }
 
-  // 🔑 Intercept ALL top-level navigations so we can show our offline shell
-  if (req.mode === "navigate") {
+  // Navigations to admin pages
+  const acceptsHTML = (req.headers.get("accept") || "").includes("text/html");
+  if (req.mode === "navigate" || acceptsHTML) {
     event.respondWith(handleNavigation(req));
     return;
   }
 
-  // Admin subresources: network-first with offline fallback
-  if (url.pathname.startsWith(ADMIN_SCOPE)) {
-    event.respondWith(networkFirst(req, OFFLINE_URL));
-    return;
-  }
-  // Everything else: pass-through (non-admin subresources)
+  // Default for admin subresources
+  event.respondWith(networkFirst(req, OFFLINE_URL));
 });
 
-/* ---------- helpers ---------- */
+/* ---------- helpers (same as your v4 admin SW) ---------- */
 function isRedirect(res) {
   if (!res) return false;
   if (res.type === "opaqueredirect") return true;
@@ -92,13 +92,13 @@ function redirectShim(toUrl) {
 
 async function handleNavigation(req) {
   try {
-    // Always prefer fresh network for navigations, and follow redirects manually
     let res = await fetch(req, {
       cache: "no-store",
       redirect: "manual",
       credentials: "include",
     });
 
+    // Follow redirects; never return a redirected response to iOS
     let hops = 0;
     while (isRedirect(res) && hops < 5) {
       const target = resolveLocation(res);
@@ -113,11 +113,10 @@ async function handleNavigation(req) {
       hops++;
     }
 
-    // Even 401/500 should render (don’t show offline unless we truly can’t fetch)
+    // Return the final response even if 401/403/500, so login/error renders (not offline)
     if (res) return res;
     throw new Error("no response");
   } catch {
-    // True offline or fetch failure → serve our offline shell (instead of Safari’s cached homepage)
     const cache = await caches.open(CACHE);
     const fallback = await cache.match(OFFLINE_URL);
     return (
@@ -138,11 +137,10 @@ async function cacheFirst(req) {
   if (res && res.ok && !isRedirect(res)) cache.put(req, res.clone());
   return res;
 }
-
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(CACHE);
   const hit = await cache.match(req, { ignoreSearch: true });
-  const fetcher = fetch(req, { credentials: "include" })
+  const fetcher = fetch(req)
     .then((res) => {
       if (res && res.ok && !isRedirect(res)) cache.put(req, res.clone());
       return res;
@@ -150,7 +148,6 @@ async function staleWhileRevalidate(req) {
     .catch(() => hit);
   return hit || fetcher;
 }
-
 async function networkFirst(req, fallbackUrl) {
   try {
     let res = await fetch(req, {
@@ -162,12 +159,13 @@ async function networkFirst(req, fallbackUrl) {
       const target = resolveLocation(res);
       if (target && target.origin !== self.location.origin)
         return redirectShim(target.toString());
-      if (target)
+      if (target) {
         res = await fetch(target.toString(), {
           cache: "no-store",
           redirect: "manual",
           credentials: "include",
         });
+      }
     }
     return res;
   } catch {
