@@ -19,6 +19,15 @@ import {
   Search,
   Plus,
   ArrowUpRight,
+  Gift,
+  Zap,
+  Star,
+  MessageSquare,
+  Link as LinkIcon,
+  Building2,
+  PackagePlus,
+  Boxes,
+  Puzzle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -30,7 +39,7 @@ import {
   YAxis,
 } from "recharts";
 
-// Admin Dashboard – refreshed UI/UX (JavaScript version, hook-order safe)
+// Admin Dashboard – refreshed UI/UX + business features
 export default function AdminDashboardPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -43,12 +52,14 @@ export default function AdminDashboardPage() {
   const [metrics, setMetrics] = useState(null);
   const [activity, setActivity] = useState([]);
 
-  // Helpers & UI state — declared BEFORE any early returns to keep hook order stable
+  // Helpers & UI state — declared BEFORE early returns
   const go = (p) => router.push(p);
   const [query, setQuery] = useState("");
 
+  /* ---------------------- Actions (tiles + search) ---------------------- */
   const actions = useMemo(
     () => [
+      // core
       {
         key: "experiences",
         icon: <Compass size={20} />,
@@ -79,15 +90,16 @@ export default function AdminDashboardPage() {
         title: "Manage Schedule",
         desc: "Availability and slots.",
         onClick: () => go("/admin/schedule"),
-        keywords: ["schedule", "slots", "availability"],
+        keywords: ["schedule", "slots", "availability", "calendar"],
       },
+      // money ops
       {
         key: "payments",
         icon: <CreditCard size={20} />,
         title: "Payments",
         desc: "Capture, refunds, reconciliation.",
         onClick: () => go("/admin/payments"),
-        keywords: ["payment", "refund", "billing"],
+        keywords: ["payment", "refund", "billing", "stripe"],
       },
       {
         key: "invoices",
@@ -95,7 +107,7 @@ export default function AdminDashboardPage() {
         title: "Invoices",
         desc: "Download and send invoices.",
         onClick: () => go("/admin/invoices"),
-        keywords: ["invoice", "billing", "pdf"],
+        keywords: ["invoice", "billing", "pdf", "tax"],
       },
       {
         key: "promotions",
@@ -104,6 +116,89 @@ export default function AdminDashboardPage() {
         desc: "Discount codes and campaigns.",
         onClick: () => go("/admin/promotions"),
         keywords: ["promo", "discount", "coupon", "campaign"],
+      },
+      // NEW: revenue growth
+      {
+        key: "addons",
+        icon: <PackagePlus size={20} />,
+        title: "Add-ons",
+        desc: "Sell extras & upgrades.",
+        onClick: () => go("/admin/addons"),
+        keywords: ["add-on", "extras", "upsell", "bundle"],
+      },
+      {
+        key: "vouchers",
+        icon: <Gift size={20} />,
+        title: "Gift Cards",
+        desc: "Issue & redeem vouchers.",
+        onClick: () => go("/admin/vouchers"),
+        keywords: ["voucher", "gift", "credit", "prepaid"],
+      },
+      {
+        key: "bundles",
+        icon: <Boxes size={20} />,
+        title: "Bundles",
+        desc: "Multi-visit & packages.",
+        onClick: () => go("/admin/bundles"),
+        keywords: ["bundle", "package", "multi", "value"],
+      },
+      // NEW: conversion & retention
+      {
+        key: "waitlist",
+        icon: <Users size={20} />,
+        title: "Waitlist",
+        desc: "Capture demand & auto-fill cancellations.",
+        onClick: () => go("/admin/waitlist"),
+        keywords: ["waitlist", "demand", "notify", "fill"],
+      },
+      {
+        key: "loyalty",
+        icon: <Star size={20} />,
+        title: "Loyalty",
+        desc: "Credits & tiers for repeat guests.",
+        onClick: () => go("/admin/loyalty"),
+        keywords: ["loyalty", "credit", "tier", "points", "retention"],
+      },
+      {
+        key: "reviews",
+        icon: <MessageSquare size={20} />,
+        title: "Reviews",
+        desc: "Collect feedback & publish.",
+        onClick: () => go("/admin/reviews"),
+        keywords: ["review", "rating", "nps", "feedback"],
+      },
+      // NEW: operations & integrations
+      {
+        key: "resources",
+        icon: <Puzzle size={20} />,
+        title: "Resources",
+        desc: "Assign guides/gear & prevent conflicts.",
+        onClick: () => go("/admin/resources"),
+        keywords: ["resource", "guide", "equipment", "room"],
+      },
+      {
+        key: "corporate",
+        icon: <Building2 size={20} />,
+        title: "Corporate",
+        desc: "Invoices, POs & bulk bookings.",
+        onClick: () => go("/admin/corporate"),
+        keywords: ["company", "po", "vat", "b2b"],
+      },
+      {
+        key: "integrations",
+        icon: <LinkIcon size={20} />,
+        title: "Integrations",
+        desc: "Webhooks, exports & OTAs.",
+        onClick: () => go("/admin/integrations"),
+        keywords: ["webhook", "zapier", "ota", "export"],
+      },
+      {
+        key: "automations",
+        icon: <Zap size={20} />,
+        title: "Automations",
+        desc: "If/then playbooks.",
+        onClick: () => go("/admin/automations"),
+        keywords: ["automation", "rules", "playbook"],
       },
       {
         key: "settings",
@@ -117,7 +212,7 @@ export default function AdminDashboardPage() {
     []
   );
 
-  const filtered = actions.filter(function (a) {
+  const filtered = actions.filter((a) => {
     const hay = (
       a.title +
       " " +
@@ -128,7 +223,7 @@ export default function AdminDashboardPage() {
     return hay.includes(query.toLowerCase());
   });
 
-  // Keyboard shortcuts (e.g., g b -> bookings, / -> search)
+  /* -------------------------- Keyboard shortcuts ------------------------- */
   const seqRef = useRef("");
   useEffect(() => {
     function onKeyDown(e) {
@@ -147,13 +242,20 @@ export default function AdminDashboardPage() {
         if (s === "gu") go("/admin/users");
         if (s === "ge") go("/admin/experiences");
         if (s === "gs") go("/admin/schedule");
+        if (s === "gw") go("/admin/waitlist");
+        if (s === "ga") go("/admin/addons");
+        if (s === "gv") go("/admin/vouchers");
+        if (s === "gl") go("/admin/loyalty");
+        if (s === "gr") go("/admin/reports");
+        if (s === "gi") go("/admin/integrations");
+        if (s === "gz") go("/admin/automations");
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // Resolve role from DB; fallback to Supabase metadata
+  /* ---------------------------- Resolve role ---------------------------- */
   useEffect(() => {
     let cancel = false;
     async function resolveRole() {
@@ -194,7 +296,28 @@ export default function AdminDashboardPage() {
     };
   }, [user, loading]);
 
-  // Fetch metrics and activity (soft-fail; show placeholders if missing)
+  // Which dashboard features are disabled right now
+  const DISABLED_KEYS = new Set([
+    "loyalty",
+    "addons",
+    "waitlist",
+    "bundles",
+    "integrations",
+    "automations",
+
+    "resources",
+    "reviews",
+    "gift cards",
+  ]);
+  const DISABLED_HINT = {
+    loyalty: "Coming soon",
+    // addons: "Rollout next week",
+    // vouchers: "Waiting for finance setup",
+  };
+  const isDisabled = (k) => DISABLED_KEYS.has(k);
+  const hintFor = (k) => DISABLED_HINT[k] || "";
+
+  /* --------------------- Fetch metrics & recent activity --------------------- */
   useEffect(() => {
     if (!booted || isAdmin !== true) return;
     (async function () {
@@ -207,12 +330,15 @@ export default function AdminDashboardPage() {
         if (mRes.ok) {
           const m = await mRes.json();
           setMetrics({
-            todayBookings: m && m.todayBookings != null ? m.todayBookings : 0,
-            pendingApprovals:
-              m && m.pendingApprovals != null ? m.pendingApprovals : 0,
-            revenueToday: m && m.revenueToday != null ? m.revenueToday : 0,
-            openSlots: m && m.openSlots != null ? m.openSlots : 0,
-            trend: (m && m.trend) || [
+            todayBookings: m?.todayBookings ?? 0,
+            pendingApprovals: m?.pendingApprovals ?? 0,
+            revenueToday: m?.revenueToday ?? 0,
+            openSlots: m?.openSlots ?? 0,
+            // NEW secondary KPIs (optional from API)
+            occupancyTodayPct: m?.occupancyTodayPct ?? 0,
+            noShow7dPct: m?.noShow7dPct ?? 0,
+            draftRecovery7dPct: m?.draftRecovery7dPct ?? 0,
+            trend: m?.trend ?? [
               { name: "Mon", value: 8 },
               { name: "Tue", value: 10 },
               { name: "Wed", value: 6 },
@@ -228,6 +354,9 @@ export default function AdminDashboardPage() {
             pendingApprovals: 0,
             revenueToday: 0,
             openSlots: 0,
+            occupancyTodayPct: 0,
+            noShow7dPct: 0,
+            draftRecovery7dPct: 0,
             trend: [
               { name: "Mon", value: 8 },
               { name: "Tue", value: 10 },
@@ -245,7 +374,7 @@ export default function AdminDashboardPage() {
           setActivity(Array.isArray(a) ? a : placeholderActivity());
         }
       } catch (e) {
-        // silence – UI will show placeholders
+        // silence – UI shows placeholders
       }
     })();
   }, [booted, isAdmin]);
@@ -272,14 +401,13 @@ export default function AdminDashboardPage() {
       <div className="relative mx-auto px-6 pt-2 lg:pt-2 pb-10 max-w-6xl xl:max-w-7xl 2xl:max-w-[88rem]">
         {/* Sticky Header */}
         <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-6 mb-4 bg-gradient-to-b from-[#f4f1ec]/90 to-[#f4f1ec]/40 backdrop-blur border-b border-[#e8e2d9] px-6 py-2">
-          {" "}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl md:text-3xl font-serif tracking-tight leading-tight text-[#5a4a3f]">
                 Admin Dashboard
               </h1>
               <p className="mt-1 text-sm text-[#7a6a5f]">
-                Manage experiences, bookings, clients & more.
+                Manage experiences, bookings, clients & growth programs.
               </p>
             </div>
 
@@ -346,6 +474,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {/* PRIMARY KPI row */}
         <section className="mb-6 hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             label="Today's bookings"
@@ -357,14 +486,10 @@ export default function AdminDashboardPage() {
             trend={metrics && metrics.trend}
           />
           <StatCard
-            label="Pending approvals"
-            value={
-              (metrics && metrics.pendingApprovals) != null
-                ? metrics.pendingApprovals
-                : 0
-            }
-            tone="amber"
+            label="Occupancy today"
+            value={formatPercent(metrics?.occupancyTodayPct ?? 0)}
           />
+
           <StatCard
             label="Revenue today"
             value={formatCurrency(
@@ -382,6 +507,8 @@ export default function AdminDashboardPage() {
             tone="blue"
           />
         </section>
+
+        {/* SECONDARY KPI row (new business insights) */}
 
         {/* Quick Actions toolbar (compact chips) */}
         <section className="mb-6 flex flex-wrap items-center gap-2">
@@ -406,19 +533,48 @@ export default function AdminDashboardPage() {
             onClick={() => go("/admin/schedule")}
           />
           <ToolbarButton
-            label="Payments"
-            icon={<CreditCard size={16} />}
-            onClick={() => go("/admin/payments")}
+            label="Add-ons"
+            icon={<PackagePlus size={16} />}
+            onClick={() => go("/admin/addons")}
           />
           <ToolbarButton
-            label="Invoices"
-            icon={<ReceiptText size={16} />}
-            onClick={() => go("/admin/invoices")}
+            label="Gift Cards"
+            icon={<Gift size={16} />}
+            onClick={() => go("/admin/vouchers")}
+          />
+          <ToolbarButton
+            label="Waitlist"
+            icon={<Users size={16} />}
+            onClick={() => go("/admin/waitlist")}
+          />
+          <ToolbarButton
+            label="Loyalty"
+            icon={<Star size={16} />}
+            onClick={() => go("/admin/loyalty")}
+            disabled={isDisabled("loyalty")}
+            title={hintFor("loyalty")}
+            disabledHint="Coming soon"
+          />
+          <ToolbarButton
+            label="Reviews"
+            icon={<MessageSquare size={16} />}
+            onClick={() => go("/admin/reviews")}
+          />
+          <ToolbarButton
+            label="Automations"
+            icon={<Zap size={16} />}
+            onClick={() => go("/admin/automations")}
           />
           <ToolbarButton
             label="Promos"
             icon={<Tag size={16} />}
             onClick={() => go("/admin/promotions")}
+          />
+          <ToolbarButton
+            label="Integrations"
+            icon={<LinkIcon size={16} />}
+            onClick={() => go("/admin/integrations")}
+            disabled={isDisabled("integrations")}
           />
         </section>
 
@@ -439,6 +595,8 @@ export default function AdminDashboardPage() {
                     title={a.title}
                     desc={a.desc}
                     onClick={a.onClick}
+                    disabled={isDisabled(a.key)}
+                    disabledHint={hintFor(a.key)}
                   />
                 </motion.div>
               ))}
@@ -455,7 +613,7 @@ export default function AdminDashboardPage() {
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 rounded-2xl bg-white/80 backdrop-blur border border-[#e0dcd4] shadow-xl p-5">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-semibold">Recent activity</h2>
+              <h2 className="text/base font-semibold">Recent activity</h2>
               <button
                 onClick={() => go("/admin/reports")}
                 className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 border border-[#d8cfc3] bg-white/70 text-xs hover:bg-[#f1ede7]"
@@ -467,36 +625,36 @@ export default function AdminDashboardPage() {
               {(activity && activity.length
                 ? activity
                 : placeholderActivity()
-              ).map(function (item) {
-                return (
-                  <li
-                    key={item.id}
-                    className="py-2.5 flex items-center justify-between"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm truncate">{item.label}</p>
-                      {item.meta ? (
-                        <p className="text-xs text-[#7a6a5f] truncate">
-                          {item.meta}
-                        </p>
-                      ) : null}
-                    </div>
-                    <time className="text-xs text-[#7a6a5f]">
-                      {formatShortTime(item.at)}
-                    </time>
-                  </li>
-                );
-              })}
+              ).map((item) => (
+                <li
+                  key={item.id}
+                  className="py-2.5 flex items-center justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm truncate">{item.label}</p>
+                    {item.meta ? (
+                      <p className="text-xs text-[#7a6a5f] truncate">
+                        {item.meta}
+                      </p>
+                    ) : null}
+                  </div>
+                  <time className="text-xs text-[#7a6a5f]">
+                    {formatShortTime(item.at)}
+                  </time>
+                </li>
+              ))}
             </ul>
           </div>
 
           <aside className="rounded-2xl bg-white/80 backdrop-blur border border-[#e0dcd4] shadow-xl p-5">
             <h2 className="text-base font-semibold mb-2">Quick Tips</h2>
             <ul className="space-y-2 text-sm">
-              <Tip>Keep the experiences catalogue fresh.</Tip>
-              <Tip>Confirm or cancel pending reservations promptly.</Tip>
-              <Tip>Keep client profiles up to date for faster checkouts.</Tip>
-              <Tip>Use the search (/) and shortcuts (g b, g e, g s, g u).</Tip>
+              <Tip>Enable the Waitlist to auto-fill cancellations.</Tip>
+              <Tip>Add Add-ons (extras) to lift ARPU immediately.</Tip>
+              <Tip>Send abandoned draft reminders to recover bookings.</Tip>
+              <Tip>Use Automations to discount low-occupancy slots.</Tip>
+              <Tip>Collect reviews post-visit for social proof.</Tip>
+              <Tip>Press / to search, g + letter shortcuts (e.g., g b).</Tip>
             </ul>
           </aside>
         </section>
@@ -510,40 +668,97 @@ export default function AdminDashboardPage() {
 
 /* ---------------------------- Components ---------------------------- */
 
-function ActionTile({ icon, title, desc, onClick }) {
-  return (
+function ActionTile({
+  icon,
+  title,
+  desc,
+  onClick,
+  disabled = false,
+  disabledHint,
+}) {
+  function handleClick(e) {
+    if (disabled) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    onClick?.(e);
+  }
+
+  const tile = (
     <button
-      onClick={onClick}
-      className="group text-left rounded-2xl bg-gradient-to-b from-white/90 to-[#fdfaf7] border border-[#e6dfd6] p-5 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#8b6f47]/40"
+      onClick={handleClick}
+      disabled={disabled}
+      aria-disabled={disabled}
+      className={
+        "group text-left rounded-2xl bg-gradient-to-b from-white/90 to-[#fdfaf7] border border-[#e6dfd6] p-5 shadow-sm transition-all focus:outline-none " +
+        (disabled
+          ? "opacity-60 cursor-not-allowed"
+          : "hover:shadow-md hover:-translate-y-0.5 focus:ring-2 focus:ring-offset-2 focus:ring-[#8b6f47]/40")
+      }
     >
       <div className="flex items-start gap-3">
-        <div className="shrink-0 h-10 w-10 rounded-xl border border-[#e0dcd4] bg-white/70 backdrop-blur flex items-center justify-center group-hover:bg-[#8b6f47] group-hover:text-white transition">
+        <div
+          className={
+            "shrink-0 h-10 w-10 rounded-xl border border-[#e0dcd4] bg-white/70 backdrop-blur flex items-center justify-center transition " +
+            (disabled ? "" : "group-hover:bg-[#8b6f47] group-hover:text-white")
+          }
+        >
           {icon}
         </div>
         <div className="min-w-0">
-          <h3 className="text-[15px] font-semibold text-[#5a4a3f] group-hover:text-[#3f332b]">
-            {title}
-          </h3>
+          <h3 className="text-[15px] font-semibold text-[#5a4a3f]">{title}</h3>
           <p className="mt-1 text-xs text-[#7a6a5f]">{desc}</p>
         </div>
-        <ChevronRight
-          className="ml-auto opacity-60 group-hover:opacity-100"
-          size={16}
-        />
+        <ChevronRight className="ml-auto opacity-60" size={16} />
       </div>
     </button>
   );
+
+  return disabled && disabledHint ? (
+    <span className="inline-block" title={disabledHint}>
+      {tile}
+    </span>
+  ) : (
+    tile
+  );
 }
 
-function ToolbarButton({ label, icon, onClick }) {
-  return (
+function ToolbarButton({ label, icon, onClick, disabled = false, title }) {
+  function handleClick(e) {
+    if (disabled) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    onClick?.(e);
+  }
+
+  const btn = (
     <button
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1.5 text-xs text-[#5a4a3f] hover:bg-[#f1ede7] transition focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+      type="button"
+      onClick={handleClick}
+      disabled={disabled}
+      aria-disabled={disabled}
+      className={
+        "inline-flex items-center gap-1.5 rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1.5 text-xs text-[#5a4a3f] transition focus:outline-none " +
+        (disabled
+          ? "opacity-50 cursor-not-allowed pointer-events-none"
+          : "hover:bg-[#f1ede7] focus:ring-2 focus:ring-[#8b6f47]/40")
+      }
     >
       {icon}
       <span className="font-medium">{label}</span>
     </button>
+  );
+
+  // Disabled <button> may not show tooltips; wrap to keep a title/hint.
+  return disabled && title ? (
+    <span className="inline-block" title={title}>
+      {btn}
+    </span>
+  ) : (
+    btn
   );
 }
 
@@ -635,21 +850,21 @@ function Skeleton() {
         <div className="h-5 w-28 bg-[#e8e2d9] rounded mb-4" />
         <div className="h-10 w-72 bg-[#e8e2d9] rounded mb-6" />
         <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {Array.from({ length: 4 }).map(function (_, i) {
-            return <div key={i} className="h-24 bg-[#e8e2d9] rounded-2xl" />;
-          })}
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-24 bg-[#e8e2d9] rounded-2xl" />
+          ))}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {Array.from({ length: 8 }).map(function (_, i) {
-            return <div key={i} className="h-28 bg-[#e8e2d9] rounded-2xl" />;
-          })}
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-28 bg-[#e8e2d9] rounded-2xl" />
+          ))}
         </div>
       </div>
     </div>
   );
 }
 
-// ---------------------------- Utils ----------------------------
+/* ---------------------------- Utils ---------------------------- */
 
 function formatCurrency(n) {
   try {
@@ -658,11 +873,14 @@ function formatCurrency(n) {
       currency: "EUR",
       maximumFractionDigits: 0,
     }).format(n);
-  } catch (e) {
+  } catch {
     return "€" + Math.round(n).toLocaleString();
   }
 }
-
+function formatPercent(n) {
+  const safe = isFinite(n) ? Number(n) : 0;
+  return `${Math.round(safe)}%`;
+}
 function formatShortTime(iso) {
   const d = new Date(iso);
   return d.toLocaleString(undefined, {
@@ -672,13 +890,12 @@ function formatShortTime(iso) {
     month: "short",
   });
 }
-
 function placeholderActivity() {
   return [
     {
       id: "p1",
-      label: "Welcome to your new dashboard ✨",
-      meta: "Tip: press / to search, g b for bookings",
+      label: "Welcome to your upgraded dashboard ✨",
+      meta: "Tip: press / to search, g b for bookings, g w for waitlist",
       at: new Date().toISOString(),
     },
   ];
