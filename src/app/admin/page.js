@@ -130,8 +130,8 @@ export default function AdminDashboardPage() {
         key: "vouchers",
         icon: <Gift size={20} />,
         title: "Gift Cards",
-        desc: "Issue & redeem vouchers.",
-        onClick: () => go("/admin/vouchers"),
+        desc: "Issue & redeem gift cards.",
+        onClick: () => go("/admin/giftcards"),
         keywords: ["voucher", "gift", "credit", "prepaid"],
       },
       {
@@ -307,7 +307,6 @@ export default function AdminDashboardPage() {
 
     "resources",
     "reviews",
-    "gift cards",
   ]);
   const DISABLED_HINT = {
     loyalty: "Coming soon",
@@ -540,7 +539,7 @@ export default function AdminDashboardPage() {
           <ToolbarButton
             label="Gift Cards"
             icon={<Gift size={16} />}
-            onClick={() => go("/admin/vouchers")}
+            onClick={() => go("/admin/giftcards")}
           />
           <ToolbarButton
             label="Waitlist"
