@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -28,6 +28,22 @@ export default function GiftCardDetailsPage() {
   const [toast, setToast] = useState(null);
   const [emailTo, setEmailTo] = useState("");
   const actionsRef = useRef(null);
+
+  // Normalize redemptions for rendering
+  const redemptionRows = redemptions === null ? null : toArray(redemptions);
+
+  const [redeemAmount, setRedeemAmount] = useState(""); // e.g. "25.00"
+  const [redeemNotes, setRedeemNotes] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
+  const redeemCents = useMemo(
+    () => parseMoneyToCents(redeemAmount),
+    [redeemAmount]
+  );
+  const canRedeem =
+    !redeeming &&
+    card?.status === "active" &&
+    redeemCents > 0 &&
+    redeemCents <= (card?.remainingAmountCents ?? 0);
 
   useEffect(() => {
     let ignore = false;
@@ -59,7 +75,7 @@ export default function GiftCardDetailsPage() {
         });
         if (r.ok) {
           const list = await r.json();
-          if (!ignore) setRedemptions(Array.isArray(list) ? list : []);
+          if (!ignore) setRedemptions(toArray(list));
         } else {
           setRedemptions([]);
         }
@@ -115,6 +131,46 @@ export default function GiftCardDetailsPage() {
     }
   }
 
+  function parseMoneyToCents(input) {
+    if (input == null) return 0;
+    // strip spaces & currency symbols, keep only digits and . ,
+    const raw = String(input)
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(/[^\d.,-]/g, "");
+    if (!raw) return 0;
+
+    // treat the *last* dot/comma as decimal separator, others as thousands
+    const lastSep = Math.max(raw.lastIndexOf(","), raw.lastIndexOf("."));
+    let intPart = raw;
+    let frac = "";
+    if (lastSep > -1) {
+      intPart = raw.slice(0, lastSep);
+      frac = raw.slice(lastSep + 1);
+    }
+    // remove any thousands separators in the integer part
+    intPart = intPart.replace(/[.,]/g, "");
+    // clamp fraction to 2 digits
+    if (frac.length > 2) frac = frac.slice(0, 2);
+
+    const joined = frac ? `${intPart}.${frac}` : intPart;
+    const n = Number(joined);
+    return Number.isFinite(n) ? Math.round(n * 100) : 0;
+  }
+
+  async function reloadRedemptions() {
+    try {
+      const r = await fetch(`/api/admin/giftcards/${id}/redemptions`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (r.ok) {
+        const list = await r.json();
+        setRedemptions(toArray(list));
+      }
+    } catch {}
+  }
+
   async function onVoid() {
     if (!card || card.status !== "active") return;
     if (!confirm(`Void gift card ${card.code}? This cannot be undone.`)) return;
@@ -155,6 +211,46 @@ export default function GiftCardDetailsPage() {
         </div>
       </PageShell>
     );
+  }
+  function toArray(x) {
+    if (Array.isArray(x)) return x;
+    if (Array.isArray(x?.data)) return x.data;
+    if (Array.isArray(x?.items)) return x.items;
+    if (Array.isArray(x?.redemptions)) return x.redemptions;
+    return [];
+  }
+
+  async function onRedeem() {
+    if (!card) return;
+    const cents = parseMoneyToCents(redeemAmount);
+    if (cents <= 0) return errToast("Enter a valid amount");
+    if (cents > (card.remainingAmountCents || 0))
+      return errToast("Amount exceeds remaining balance");
+    if (card.status !== "active") return errToast("Card is not active");
+
+    setRedeeming(true);
+    try {
+      const res = await fetch(`/api/admin/giftcards/${card.id}/redeem`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amountCents: cents,
+          notes: redeemNotes || undefined,
+        }),
+      });
+      const j = await safeJson(res);
+      if (!res.ok) throw new Error(j?.error || "Redemption failed");
+
+      okToast("Redeemed");
+      setRedeemAmount("");
+      setRedeemNotes("");
+      await Promise.all([reloadCard(), reloadRedemptions()]);
+    } catch (e) {
+      errToast(e.message || "Redemption failed");
+    } finally {
+      setRedeeming(false);
+    }
   }
 
   return (
@@ -249,6 +345,75 @@ export default function GiftCardDetailsPage() {
           </Card>
         )}
 
+        {/* Redeem */}
+        <Card className="mt-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-[#7a6a5f]">Redeem value</div>
+            <div className="text-xs text-[#7a6a5f]">
+              Remaining:{" "}
+              <span className="font-medium text-black">
+                {fmtMoney(card.remainingAmountCents, card.currency)}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-[#7a6a5f]">
+                Amount ({card.currency})
+              </label>
+              <input
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                value={redeemAmount}
+                onChange={(e) => setRedeemAmount(e.target.value)}
+                placeholder="e.g. 25.00"
+                className="mt-1 w-full rounded-md border border-[#d8cfc3] px-3 py-2 text-[15px]"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="text-xs text-[#7a6a5f]">Notes (optional)</label>
+              <input
+                value={redeemNotes}
+                onChange={(e) => setRedeemNotes(e.target.value)}
+                placeholder="POS, partial payment, etc."
+                className="mt-1 w-full rounded-md border border-[#d8cfc3] px-3 py-2 text-[15px]"
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end">
+            <button
+              onClick={onRedeem}
+              disabled={!canRedeem}
+              className="inline-flex items-center gap-2 rounded-full border border-[#d8cfc3] bg-[#8b6f47] text-white px-4 py-2 disabled:opacity-50"
+              title={
+                !card
+                  ? "Loading card…"
+                  : card.status !== "active"
+                  ? "Card is not active"
+                  : redeemCents <= 0
+                  ? "Enter a valid amount"
+                  : redeemCents > (card.remainingAmountCents ?? 0)
+                  ? "Amount exceeds remaining balance"
+                  : undefined
+              }
+            >
+              {redeeming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Gift className="h-4 w-4" />
+              )}
+              Redeem
+            </button>
+          </div>
+
+          <p className="mt-2 text-xs text-[#7a6a5f]">
+            Enter the amount to deduct from this card. A redemption record will
+            be created.
+          </p>
+        </Card>
+
         {/* Actions */}
         <Card className="mt-4" ref={actionsRef} id="actions">
           <div className="flex flex-col sm:flex-row sm:items-end gap-3">
@@ -309,15 +474,15 @@ export default function GiftCardDetailsPage() {
             <h3 className="font-medium">Redemption history</h3>
           </div>
 
-          {redemptions === null ? (
+          {redemptionRows === null ? (
             <div className="p-4 text-sm text-[#7a6a5f]">Loading…</div>
-          ) : redemptions.length === 0 ? (
+          ) : redemptionRows.length === 0 ? (
             <div className="p-4 text-sm text-[#7a6a5f]">
               No redemptions yet.
             </div>
           ) : (
             <ul className="divide-y divide-[#eee5da]">
-              {redemptions.map((r) => (
+              {redemptionRows.map((r) => (
                 <li
                   key={r.id}
                   className="px-4 py-3 text-sm grid grid-cols-1 sm:grid-cols-12 gap-1 sm:gap-2"

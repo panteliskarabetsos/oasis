@@ -535,6 +535,9 @@ export default function AdminDashboardPage() {
             label="Add-ons"
             icon={<PackagePlus size={16} />}
             onClick={() => go("/admin/addons")}
+            disabled={isDisabled("loyalty")}
+            title={hintFor("loyalty")}
+            disabledHint="Coming soon"
           />
           <ToolbarButton
             label="Gift Cards"
@@ -545,6 +548,9 @@ export default function AdminDashboardPage() {
             label="Waitlist"
             icon={<Users size={16} />}
             onClick={() => go("/admin/waitlist")}
+            disabled={isDisabled("loyalty")}
+            title={hintFor("loyalty")}
+            disabledHint="Coming soon"
           />
           <ToolbarButton
             label="Loyalty"
@@ -558,11 +564,17 @@ export default function AdminDashboardPage() {
             label="Reviews"
             icon={<MessageSquare size={16} />}
             onClick={() => go("/admin/reviews")}
+            disabled={isDisabled("loyalty")}
+            title={hintFor("loyalty")}
+            disabledHint="Coming soon"
           />
           <ToolbarButton
             label="Automations"
             icon={<Zap size={16} />}
             onClick={() => go("/admin/automations")}
+            disabled={isDisabled("loyalty")}
+            title={hintFor("loyalty")}
+            disabledHint="Coming soon"
           />
           <ToolbarButton
             label="Promos"

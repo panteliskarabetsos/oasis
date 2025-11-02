@@ -37,8 +37,8 @@ export async function GET(_req, ctx) {
   const gate = await requireAdmin();
   if (!gate.ok) return gate.response;
 
-  // Next.js App Router: ctx.params is sync
-  const { id } = ctx.params || {};
+  // ✅ Must await params
+  const { id } = await ctx.params;
   if (!id) return bad("Missing id", 422);
 
   const admin = createSupabaseAdmin();
@@ -46,19 +46,18 @@ export async function GET(_req, ctx) {
 
   const selectWithStripe = `${BASE_COLS}, ${STRIPE_COLS}`;
 
-  // 1) Try selecting with Stripe columns
+  // Try with Stripe columns
   let { data, error } = await admin
     .from("GiftCard")
     .select(selectWithStripe)
     .eq("id", id)
     .single();
 
-  // 2) If DB doesn't have Stripe columns yet, retry without them
-  const missingStripeCols =
+  // If Stripe cols don't exist yet, retry without them
+  if (
     error &&
-    (error.code === "42703" || /does not exist/i.test(error.message || ""));
-
-  if (missingStripeCols) {
+    (error.code === "42703" || /does not exist/i.test(error.message || ""))
+  ) {
     ({ data, error } = await admin
       .from("GiftCard")
       .select(BASE_COLS)
@@ -67,20 +66,16 @@ export async function GET(_req, ctx) {
   }
 
   if (error) {
-    // Not found / no rows
-    if (error.code === "PGRST116") return bad("Not found", 404);
+    if (error.code === "PGRST116" || /0 rows/.test(error.message || ""))
+      return bad("Not found", 404);
+    if (error.code === "22P02") return bad("Invalid id", 422); // bad UUID format
     return bad(error.message || "Database error", 500);
   }
 
-  // Derive a convenient payment_method for the UI
-  const payment_method =
-    data?.stripe_session_id ||
-    data?.stripe_payment_intent_id ||
-    String(data?.source || "")
-      .toLowerCase()
-      .includes("stripe")
-      ? "stripe"
-      : "offline";
+  const isStripe =
+    !!data?.stripe_session_id ||
+    !!data?.stripe_payment_intent_id ||
+    (data?.source && String(data.source).toLowerCase().includes("stripe"));
 
-  return ok({ ...data, payment_method });
+  return ok({ ...data, payment_method: isStripe ? "stripe" : "offline" });
 }
