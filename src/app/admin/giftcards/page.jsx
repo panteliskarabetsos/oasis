@@ -1,5 +1,5 @@
 // =============================================
-// PAGE: src/app/admin/giftcards/page.jsx (improved)
+// PAGE: src/app/admin/giftcards/page.jsx (mobile-friendly)
 // =============================================
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -20,7 +20,6 @@ import {
   X,
   Loader2,
   ShieldCheck,
-  RefreshCcw,
   Check,
 } from "lucide-react";
 
@@ -69,7 +68,6 @@ export default function GiftCardsPage() {
     if (tab !== "all") url.searchParams.set("status", tab);
     else url.searchParams.delete("status");
     window.history.replaceState({}, "", url.toString());
-    // reset page on filter change
     setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQ, tab]);
@@ -107,15 +105,13 @@ export default function GiftCardsPage() {
         );
         if (res.ok) {
           const j = await res.json();
-          setSuccessCard(j); // show modal
-          load(); // refresh table
-          loadMetrics(); // refresh KPIs
+          setSuccessCard(j);
+          load();
+          loadMetrics();
         } else {
           const j = await safeJson(res);
           errToast(j?.error || "Could not confirm payment");
         }
-
-        // Clean URL
         url.searchParams.delete("paid");
         url.searchParams.delete("session_id");
         window.history.replaceState({}, "", url.toString());
@@ -313,38 +309,40 @@ export default function GiftCardsPage() {
       <div className="pointer-events-none absolute -top-40 -left-24 h-[28rem] w-[28rem] rounded-full bg-[#e9e4dc] blur-3xl opacity-70" />
       <div className="pointer-events-none absolute -bottom-40 -right-24 h-[32rem] w-[32rem] rounded-full bg-[#fff4e1] blur-3xl opacity-80" />
 
-      <div className="relative mx-auto px-6 pt-2 lg:pt-2 pb-10 max-w-6xl xl:max-w-7xl 2xl:max-w-[88rem]">
+      <div className="relative mx-auto px-4 sm:px-6 pt-2 lg:pt-2 pb-16 sm:pb-10 max-w-6xl xl:max-w-7xl 2xl:max-w-[88rem]">
         {/* Header */}
-        <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-6 mb-4 bg-gradient-to-b from-[#f4f1ec]/90 to-[#f4f1ec]/40 backdrop-blur border-b border-[#e8e2d9] px-6 py-2">
+        <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-4 sm:-mx-6 mb-3 sm:mb-4 bg-gradient-to-b from-[#f4f1ec]/90 to-[#f4f1ec]/40 backdrop-blur border-b border-[#e8e2d9] px-4 sm:px-6 py-2">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <Link
                 href="/admin"
                 className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-[#fcf9f5] text-black text-xs shadow-sm hover:brightness-110"
               >
                 <ArrowLeft className="h-4 w-4" /> Back
               </Link>
-              <div>
-                <h1 className="text-2xl md:text-3xl font-serif tracking-tight leading-tight text-[#5a4a3f] flex items-center gap-2">
-                  <Gift className="h-6 w-6" /> Gift Cards
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl md:text-3xl font-serif tracking-tight leading-tight text-[#5a4a3f] flex items-center gap-2">
+                  <Gift className="h-5 w-5 sm:h-6 sm:w-6 shrink-0" />
+                  <span className="truncate">Gift Cards</span>
                 </h1>
-                <p className="mt-1 text-sm text-[#7a6a5f]">
+                <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm text-[#7a6a5f]">
                   Issue, track and manage stored-value gift cards.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Hide Export on mobile to reduce clutter */}
               <button
                 onClick={() => doExportCsv(filtered)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-white/70 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-white/70 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
               >
                 <Download className="h-4 w-4" /> Export CSV
               </button>
               <button
                 onClick={() => setOpenCreate(true)}
-                className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-[#d8cfc3] bg-[#8b6f47] text-white hover:brightness-110 transition text-sm shadow-sm"
+                className="inline-flex items-center gap-1.5 rounded-full px-3 sm:px-4 py-2 border border-[#d8cfc3] bg-[#8b6f47] text-white hover:brightness-110 transition text-sm shadow-sm"
               >
-                <Plus className="h-4 w-4" /> New Gift Card
+                <Plus className="h-4 w-4" /> New
               </button>
             </div>
           </div>
@@ -355,8 +353,8 @@ export default function GiftCardsPage() {
           onClose={() => setOpenCreate(false)}
           onCreated={() => {
             setOpenCreate(false);
-            load(); // refresh list
-            loadMetrics(); // refresh KPIs
+            load();
+            loadMetrics();
           }}
         />
 
@@ -367,7 +365,7 @@ export default function GiftCardsPage() {
         />
 
         {/* KPI row */}
-        <section className="mb-6 hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <section className="mb-4 sm:mb-6 hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <KPI
             label="Outstanding balance"
             value={fmtMoney(
@@ -387,7 +385,7 @@ export default function GiftCardsPage() {
         </section>
 
         {/* Toolbar */}
-        <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             <TabBtn active={tab === "all"} onClick={() => setTab("all")}>
               All
@@ -459,7 +457,7 @@ export default function GiftCardsPage() {
                 onClick={() =>
                   doExportCsv(items.filter((x) => selected.has(x.id)))
                 }
-                className="inline-flex items-center gap-1 rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1 hover:bg-[#f1ede7]"
+                className="hidden sm:inline-flex items-center gap-1 rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1 hover:bg-[#f1ede7]"
               >
                 <Download className="h-3.5 w-3.5" /> Export
               </button>
@@ -473,9 +471,10 @@ export default function GiftCardsPage() {
           </div>
         )}
 
-        {/* Table */}
+        {/* Table / Cards */}
         <div className="rounded-2xl bg-white/80 backdrop-blur border border-[#e0dcd4] shadow-xl overflow-hidden">
-          <div className="grid grid-cols-12 text-xs px-4 py-2 border-b border-[#eee5da] text-[#7a6a5f]">
+          {/* Desktop header */}
+          <div className="hidden sm:grid grid-cols-12 text-xs px-4 py-2 border-b border-[#eee5da] text-[#7a6a5f]">
             <div className="col-span-3 flex items-center gap-2">
               <input
                 type="checkbox"
@@ -505,74 +504,173 @@ export default function GiftCardsPage() {
           ) : (
             <ul className="divide-y divide-[#eee5da]">
               {pageItems.map((g) => (
-                <li
-                  key={g.id}
-                  className="grid grid-cols-12 items-center px-4 py-3 text-sm"
-                >
-                  <div className="col-span-3 flex items-center gap-2 min-w-0">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${g.code}`}
-                      checked={selected.has(g.id)}
-                      onChange={() => toggleRow(g.id)}
-                    />
-                    <span
-                      className="font-mono text-[13px] truncate"
-                      title={g.code}
-                    >
-                      {g.code}
-                    </span>
-                    <CopyBtn
-                      value={g.code}
-                      onCopied={() => okToast("Code copied")}
-                    />
+                <li key={g.id} className="px-4 py-3">
+                  {/* Mobile card */}
+                  <div className="sm:hidden">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${g.code}`}
+                          checked={selected.has(g.id)}
+                          onChange={() => toggleRow(g.id)}
+                          className="mt-0.5"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="font-mono text-[13px] truncate"
+                              title={g.code}
+                            >
+                              {g.code}
+                            </span>
+                            <CopyBtn
+                              value={g.code}
+                              onCopied={() => okToast("Code copied")}
+                            />
+                          </div>
+                          <div
+                            className="text-xs text-[#7a6a5f] truncate"
+                            title={g.recipientEmail || g.recipientName || ""}
+                          >
+                            {g.recipientName || g.recipientEmail || "—"}
+                          </div>
+                        </div>
+                      </div>
+                      {badge(g.status)}
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <div className="text-[11px] text-[#7a6a5f]">
+                          Initial
+                        </div>
+                        <div>{fmtMoney(g.initialAmountCents, g.currency)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-[#7a6a5f]">
+                          Remaining
+                        </div>
+                        <div>
+                          {fmtMoney(g.remainingAmountCents, g.currency)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-[#7a6a5f]">Issued</div>
+                        <div>{fmtDate(g.issuedAt)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-[#7a6a5f]">
+                          Expires
+                        </div>
+                        <div>{g.expiresAt ? fmtDate(g.expiresAt) : "—"}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex items-center justify-end gap-3">
+                      <button
+                        className="text-xs underline disabled:opacity-50"
+                        onClick={() => resend(g.id)}
+                        disabled={busyIds.has(g.id)}
+                        title="Resend email"
+                      >
+                        {busyIds.has(g.id) ? (
+                          <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Mail className="inline h-3 w-3 mr-1" />
+                        )}
+                        Resend
+                      </button>
+                      <button
+                        className="text-xs underline disabled:opacity-50"
+                        onClick={() => onVoid(g)}
+                        disabled={g.status !== "active" || busyIds.has(g.id)}
+                        title={
+                          g.status !== "active"
+                            ? "Only active cards can be voided"
+                            : "Void card"
+                        }
+                      >
+                        <CircleSlash className="inline h-3 w-3 mr-1" />
+                        Void
+                      </button>
+                      <Link
+                        href={`/admin/giftcards/${g.id}`}
+                        className="text-xs underline"
+                      >
+                        <MoreHorizontal className="inline h-3 w-3 mr-1" />
+                        Details
+                      </Link>
+                    </div>
                   </div>
-                  <div>{badge(g.status)}</div>
-                  <div>{fmtMoney(g.initialAmountCents, g.currency)}</div>
-                  <div>{fmtMoney(g.remainingAmountCents, g.currency)}</div>
-                  <div>{g.currency}</div>
-                  <div
-                    className="col-span-2 truncate"
-                    title={g.recipientEmail || g.recipientName || ""}
-                  >
-                    {g.recipientName || g.recipientEmail || "—"}
-                  </div>
-                  <div>{fmtDate(g.issuedAt)}</div>
-                  <div>{g.expiresAt ? fmtDate(g.expiresAt) : "—"}</div>
-                  <div className="col-span-2 flex items-center gap-4 justify-end">
-                    <button
-                      className="text-xs underline disabled:opacity-50"
-                      onClick={() => resend(g.id)}
-                      disabled={busyIds.has(g.id)}
-                      title="Resend email"
+
+                  {/* Desktop row */}
+                  <div className="hidden sm:grid sm:grid-cols-12 sm:items-center text-sm">
+                    <div className="col-span-3 flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${g.code}`}
+                        checked={selected.has(g.id)}
+                        onChange={() => toggleRow(g.id)}
+                      />
+                      <span
+                        className="font-mono text-[13px] truncate"
+                        title={g.code}
+                      >
+                        {g.code}
+                      </span>
+                      <CopyBtn
+                        value={g.code}
+                        onCopied={() => okToast("Code copied")}
+                      />
+                    </div>
+                    <div>{badge(g.status)}</div>
+                    <div>{fmtMoney(g.initialAmountCents, g.currency)}</div>
+                    <div>{fmtMoney(g.remainingAmountCents, g.currency)}</div>
+                    <div>{g.currency}</div>
+                    <div
+                      className="col-span-2 truncate"
+                      title={g.recipientEmail || g.recipientName || ""}
                     >
-                      {busyIds.has(g.id) ? (
-                        <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />
-                      ) : (
-                        <Mail className="inline h-3 w-3 mr-1" />
-                      )}
-                      Resend
-                    </button>
-                    <button
-                      className="text-xs underline disabled:opacity-50"
-                      onClick={() => onVoid(g)}
-                      disabled={g.status !== "active" || busyIds.has(g.id)}
-                      title={
-                        g.status !== "active"
-                          ? "Only active cards can be voided"
-                          : "Void card"
-                      }
-                    >
-                      <CircleSlash className="inline h-3 w-3 mr-1" />
-                      Void
-                    </button>
-                    <Link
-                      href={`/admin/giftcards/${g.id}`}
-                      className="text-xs underline"
-                    >
-                      <MoreHorizontal className="inline h-3 w-3 mr-1" />
-                      Details
-                    </Link>
+                      {g.recipientName || g.recipientEmail || "—"}
+                    </div>
+                    <div>{fmtDate(g.issuedAt)}</div>
+                    <div>{g.expiresAt ? fmtDate(g.expiresAt) : "—"}</div>
+                    <div className="col-span-2 flex items-center gap-4 justify-end">
+                      <button
+                        className="text-xs underline disabled:opacity-50"
+                        onClick={() => resend(g.id)}
+                        disabled={busyIds.has(g.id)}
+                        title="Resend email"
+                      >
+                        {busyIds.has(g.id) ? (
+                          <Loader2 className="inline h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Mail className="inline h-3 w-3 mr-1" />
+                        )}
+                        Resend
+                      </button>
+                      <button
+                        className="text-xs underline disabled:opacity-50"
+                        onClick={() => onVoid(g)}
+                        disabled={g.status !== "active" || busyIds.has(g.id)}
+                        title={
+                          g.status !== "active"
+                            ? "Only active cards can be voided"
+                            : "Void card"
+                        }
+                      >
+                        <CircleSlash className="inline h-3 w-3 mr-1" />
+                        Void
+                      </button>
+                      <Link
+                        href={`/admin/giftcards/${g.id}`}
+                        className="text-xs underline"
+                      >
+                        <MoreHorizontal className="inline h-3 w-3 mr-1" />
+                        Details
+                      </Link>
+                    </div>
                   </div>
                 </li>
               ))}
@@ -583,38 +681,43 @@ export default function GiftCardsPage() {
         {/* Pagination */}
         {totalPages > 1 && (
           <div className="mt-4 flex items-center justify-between text-sm">
-            <div className="text-[#7a6a5f]">
+            <div className="hidden sm:block text-[#7a6a5f]">
               Page {page} of {totalPages}
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                className="rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1 disabled:opacity-50"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-              >
-                Prev
-              </button>
-              <button
-                className="rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1 disabled:opacity-50"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-              >
-                Next
-              </button>
-              <select
-                className="rounded-full border border-[#d8cfc3] bg-white/70 px-2 py-1"
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-              >
-                {[10, 20, 30, 50].map((n) => (
-                  <option key={n} value={n}>
-                    {n}/page
-                  </option>
-                ))}
-              </select>
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-between">
+              <div className="text-[#7a6a5f] sm:hidden">
+                {page}/{totalPages}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1 disabled:opacity-50"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                >
+                  Prev
+                </button>
+                <button
+                  className="rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1 disabled:opacity-50"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                >
+                  Next
+                </button>
+                <select
+                  className="hidden sm:block rounded-full border border-[#d8cfc3] bg-white/70 px-2 py-1"
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                >
+                  {[10, 20, 30, 50].map((n) => (
+                    <option key={n} value={n}>
+                      {n}/page
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
         )}
@@ -710,13 +813,25 @@ function SkeletonRows({ rows = 6 }) {
   return (
     <ul className="divide-y divide-[#eee5da]">
       {Array.from({ length: rows }).map((_, i) => (
-        <li key={i} className="grid grid-cols-12 items-center px-4 py-3">
-          {[3, 1, 1, 1, 1, 2, 1, 1, 2].map((c, idx) => (
-            <div
-              key={idx}
-              className={`col-span-${c} h-4 bg-[#eee5da] rounded`}
-            ></div>
-          ))}
+        <li key={i} className="px-4 py-3">
+          {/* mobile skeleton */}
+          <div className="sm:hidden space-y-2">
+            <div className="h-4 w-1/2 bg-[#eee5da] rounded" />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="h-4 bg-[#eee5da] rounded" />
+              <div className="h-4 bg-[#eee5da] rounded" />
+              <div className="h-4 bg-[#eee5da] rounded" />
+              <div className="h-4 bg-[#eee5da] rounded" />
+            </div>
+          </div>
+          {/* desktop skeleton */}
+          <div className="hidden sm:grid sm:grid-cols-12 sm:items-center gap-2">
+            {[3, 1, 1, 1, 1, 2, 1, 1, 2].map((c, idx) => (
+              <div key={idx} className={`col-span-${c}`}>
+                <div className="h-4 bg-[#eee5da] rounded" />
+              </div>
+            ))}
+          </div>
         </li>
       ))}
     </ul>
@@ -877,13 +992,6 @@ function escapeCsv(v) {
   if (s.includes(",") || s.includes("\n") || s.includes('"'))
     return '"' + s.replaceAll('"', '""') + '"';
   return s;
-}
-function generateCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous chars
-  let s = "";
-  for (let i = 0; i < 12; i++)
-    s += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return s.replace(/(.{4})/g, "$1-").replace(/-$/, "");
 }
 async function safeJson(res) {
   try {
