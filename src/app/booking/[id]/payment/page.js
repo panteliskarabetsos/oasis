@@ -644,7 +644,7 @@ export default function PaymentPage() {
                           autoComplete="off"
                           spellCheck={false}
                           placeholder="ENTER CODE"
-                          pattern="[A-Z0-9-]{3,32}" // adjust length as needed
+                          pattern="[A-Z0-9-]{3,32}"
                           title="Use capitals, numbers, and hyphens only"
                           className="flex-1 rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40 uppercase tracking-wider font-voucher" // ← voucher font + uppercase UI
                           aria-label="Promo code"

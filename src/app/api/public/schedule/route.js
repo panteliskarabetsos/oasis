@@ -19,12 +19,24 @@ export async function GET(req) {
     return bad("Experience ID required", 400);
   }
 
+  // statuses that actually occupy capacity
+  const COUNT_STATUSES = [
+    "paid",
+    "confirmed",
+    "completed",
+    "checked_in",
+    "approved",
+  ];
+
   try {
-    // 1) Load slots for the experience (ordered)
+    // 1) Load FUTURE, non-cancelled slots for the experience
+    const nowIso = new Date().toISOString();
     const { data: slots, error: slotErr } = await admin
       .from("ScheduleSlot")
       .select("id, date, totalSlots, isCancelled")
       .eq("experienceId", experienceId)
+      .eq("isCancelled", false) // <- hide cancelled slots entirely
+      .gte("date", nowIso) // <- only future times
       .order("date", { ascending: true });
 
     if (slotErr) {
@@ -35,11 +47,14 @@ export async function GET(req) {
 
     const slotIds = slots.map((s) => s.id);
 
-    // 2) Booked seats from Booking (all rows are confirmed/paid)
+    // 2) Bookings that OCCUPY seats (filtered by status)
     const { data: bookings, error: bookErr } = await admin
       .from("Booking")
-      .select("scheduleSlotId, numberOfPeople, adultsCount, kidsCount, counts")
-      .in("scheduleSlotId", slotIds);
+      .select(
+        "scheduleSlotId, numberOfPeople, adultsCount, kidsCount, counts, status"
+      )
+      .in("scheduleSlotId", slotIds)
+      .in("status", COUNT_STATUSES); // <- the key fix
 
     if (bookErr) {
       console.error("[public/schedule] bookings error:", bookErr);
@@ -55,19 +70,15 @@ export async function GET(req) {
       const cKids = Number(b?.counts?.kids ?? 0);
 
       let seats = 0;
-      if (Number.isFinite(nDirect) && nDirect > 0) {
-        seats = nDirect;
-      } else if (
-        (Number.isFinite(nAdults) && nAdults >= 0) ||
-        (Number.isFinite(nKids) && nKids >= 0)
-      ) {
+      if (Number.isFinite(nDirect) && nDirect > 0) seats = nDirect;
+      else if (Number.isFinite(nAdults) || Number.isFinite(nKids))
         seats = (nAdults || 0) + (nKids || 0);
-      } else {
-        seats = (cAdults || 0) + (cKids || 0);
-      }
+      else seats = (cAdults || 0) + (cKids || 0);
 
-      const sid = b.scheduleSlotId;
-      bookedMap.set(sid, (bookedMap.get(sid) || 0) + (seats || 0));
+      bookedMap.set(
+        b.scheduleSlotId,
+        (bookedMap.get(b.scheduleSlotId) || 0) + (seats || 0)
+      );
     }
 
     // 3) Active holds from BookingDraft (unexpired)
@@ -89,9 +100,10 @@ export async function GET(req) {
       if (!Number.isFinite(expTs) || expTs <= nowTs) continue; // ignore null/expired
       const adults = Number(d?.counts?.adults ?? 0) || 0;
       const kids = Number(d?.counts?.kids ?? 0) || 0;
-      const held = adults + kids;
-      const sid = d.scheduleSlotId;
-      holdsMap.set(sid, (holdsMap.get(sid) || 0) + held);
+      holdsMap.set(
+        d.scheduleSlotId,
+        (holdsMap.get(d.scheduleSlotId) || 0) + adults + kids
+      );
     }
 
     // 4) Build response per slot
@@ -105,12 +117,11 @@ export async function GET(req) {
         id: s.id,
         date: s.date,
         totalSlots,
-        booked, // explicit field
-        holds, // explicit field
-        available, // what users care about
-        isCancelled: !!s.isCancelled,
-
-        // backwards compatibility for older UIs:
+        booked, // seats taken by real bookings
+        holds, // temporary holds
+        available, // what the UI should show
+        isCancelled: false, // we filtered them out
+        // backward-compat:
         bookedSlots: booked,
       };
     });

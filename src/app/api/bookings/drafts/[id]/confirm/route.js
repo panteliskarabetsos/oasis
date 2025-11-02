@@ -144,7 +144,7 @@ export async function POST(req, ctx) {
         source: meta.source || undefined, // (set in checkout if you added it)
       }
     : null;
-
+  // right after you compute promoFromPI, mergedPromo, mergedDiscountAmount, promoCurrency, etc.
   // Merge with any promo already on the draft (from checkout step)
   const mergedPromo =
     promoFromPI ||
@@ -158,6 +158,30 @@ export async function POST(req, ctx) {
     promoFromPI?.discountCents != null
       ? promoFromPI.discountCents / 100
       : Number(draft?.discountAmount || 0);
+  const giftMeta =
+    mergedPromo && String(mergedPromo.source || "").toLowerCase() === "giftcard"
+      ? mergedPromo
+      : null;
+
+  const giftCardId = giftMeta?.giftcard?.id ?? (meta.giftcard_id || null);
+
+  const giftCardCode = giftMeta?.code || meta.giftcard_code || null;
+
+  // amount (in cents) we expect to apply from the gift card
+  const giftApplyCentsRaw =
+    Number(
+      (giftMeta && giftMeta.discountCents) ??
+        giftMeta?.giftcard?.applyAmountCents ??
+        meta.giftcard_apply_cents ??
+        0
+    ) || 0;
+
+  const giftCurrency = (
+    giftMeta?.currency ||
+    promoCurrency ||
+    draft.currency ||
+    "EUR"
+  ).toUpperCase();
 
   // Persist onto the draft so it’s always visible in DB
   try {
@@ -288,6 +312,94 @@ export async function POST(req, ctx) {
       .from("Booking")
       .update({ userId: ensuredUserId })
       .eq("id", bookingId);
+  }
+
+  // >>> Gift card: redeem + persist on booking <<<
+  let giftAppliedCents = 0;
+
+  try {
+    if (isFinalPaid && (giftCardId || giftCardCode)) {
+      // Prefer explicit amount from metadata; otherwise infer from promo
+      const fallbackFromPromo =
+        String(mergedPromo?.source || "").toLowerCase() === "giftcard"
+          ? promoFromPI?.discountCents ??
+            Math.round(Number(mergedDiscountAmount || 0) * 100)
+          : 0;
+
+      const expectedGiftCents =
+        Number.isInteger(giftApplyCentsRaw) && giftApplyCentsRaw > 0
+          ? giftApplyCentsRaw
+          : fallbackFromPromo;
+
+      if (expectedGiftCents > 0) {
+        giftAppliedCents = await redeemGiftCardOnce({
+          admin,
+          bookingId,
+          draftId,
+          cardId: giftCardId || null,
+          code: giftCardCode || null,
+          amountCents: expectedGiftCents,
+          currency: giftCurrency,
+          notes: `Auto-redeem on booking ${bookingId} (draft ${draftId}) via checkout`,
+          tryRpc: true,
+        });
+
+        if (giftAppliedCents > 0) {
+          // Merge gift card into booking discount + promoJson
+          const { data: cur } = await admin
+            .from("Booking")
+            .select("discountAmount, appliedPromoCode, promoJson")
+            .eq("id", bookingId)
+            .maybeSingle();
+
+          // If mergedPromo already *is* a giftcard, store exactly what was redeemed.
+          // Otherwise add the gift amount on top of any existing promo discounts.
+          const existingDiscount = Number(cur?.discountAmount || 0);
+          const giftAmount = giftAppliedCents / 100;
+          const newDiscountAmount =
+            String(mergedPromo?.source || "").toLowerCase() === "giftcard"
+              ? giftAmount
+              : existingDiscount + giftAmount;
+
+          // Build appliedPromoCode (keep existing, append GIFT:CODE once)
+          const giftTag = giftCardCode ? `GIFT:${giftCardCode}` : "GIFT";
+          const appliedCodes = new Set(
+            [cur?.appliedPromoCode, mergedPromo?.code, giftTag].filter(Boolean)
+          );
+          const appliedPromoCode = Array.from(appliedCodes).join(" + ");
+
+          // Merge promoJson with a stable "giftcard" node
+          const prevJson =
+            cur?.promoJson && typeof cur.promoJson === "object"
+              ? cur.promoJson
+              : mergedPromo && typeof mergedPromo === "object"
+              ? mergedPromo
+              : {};
+
+          const promoJson = {
+            ...prevJson,
+            giftcard: {
+              ...(prevJson?.giftcard || {}),
+              id: giftCardId || prevJson?.giftcard?.id || null,
+              code: giftCardCode || prevJson?.giftcard?.code || null,
+              currency: giftCurrency,
+              appliedCents: giftAppliedCents,
+            },
+          };
+
+          await admin
+            .from("Booking")
+            .update({
+              discountAmount: newDiscountAmount,
+              appliedPromoCode,
+              promoJson,
+            })
+            .eq("id", bookingId);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[confirm] gift card redeem/persist failed:", e?.message || e);
   }
 
   // ----- Flip draft → converted and link booking -----
@@ -989,4 +1101,143 @@ function escapeHtml(s = "") {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+async function redeemGiftCardOnce({
+  admin,
+  bookingId,
+  draftId = null,
+  cardId = null,
+  code = null,
+  amountCents,
+  currency = "EUR",
+  notes = "",
+  tryRpc = true,
+}) {
+  if (
+    !bookingId ||
+    !(cardId || code) ||
+    !Number.isInteger(amountCents) ||
+    amountCents <= 0
+  ) {
+    return 0;
+  }
+
+  // 0) Locate card by id or code
+  let card = null;
+  if (cardId) {
+    const { data } = await admin
+      .from("GiftCard")
+      .select("id, code, currency, status, expires_at, remaining_amount_cents")
+      .eq("id", cardId)
+      .maybeSingle();
+    card = data || null;
+  } else if (code) {
+    const { data } = await admin
+      .from("GiftCard")
+      .select("id, code, currency, status, expires_at, remaining_amount_cents")
+      .ilike("code", code)
+      .maybeSingle();
+    card = data || null;
+  }
+  if (!card) return 0;
+
+  // 1) If we already recorded a redemption for (this card, this booking), bail
+  {
+    const { data: existing } = await admin
+      .from("GiftCardRedemption")
+      .select("id, amount_cents")
+      .eq("gift_card_id", card.id)
+      .eq("booking_id", bookingId)
+      .maybeSingle();
+
+    if (existing?.id) {
+      return Number(existing.amount_cents || 0) || 0;
+    }
+  }
+
+  // 2) Cap by remaining balance
+  const remain = Math.max(Number(card.remaining_amount_cents || 0), 0);
+  if (remain <= 0) return 0;
+
+  const toApply = Math.min(remain, amountCents);
+
+  // 3) Optional basic checks
+  const now = new Date();
+  if (card.status !== "active") return 0;
+  if (card.expires_at && new Date(card.expires_at) < now) return 0;
+  if (
+    String(card.currency || "EUR").toUpperCase() !==
+    String(currency || "EUR").toUpperCase()
+  ) {
+    // currency mismatch — skip to avoid corrupting the balance
+    return 0;
+  }
+
+  // 4) Try server-side atomic RPC first (if you created it)
+  if (tryRpc) {
+    try {
+      const { data, error } = await admin.rpc("redeem_giftcard", {
+        p_card_id: card.id,
+        p_amount_cents: toApply,
+        p_booking_id: bookingId,
+        p_notes: notes || null,
+      });
+
+      if (!error && data && data.id) {
+        return toApply;
+      }
+      if (error && String(error.code) !== "42883") {
+        console.warn("[giftcard] RPC failed:", error.message || error);
+      }
+    } catch (e) {
+      if (String(e?.code) !== "42883") {
+        console.warn("[giftcard] RPC exception:", e?.message || e);
+      }
+    }
+  }
+
+  // 5) Fallback (best effort): update card, then insert redemption
+  // Update remaining & status conditionally (only if still active)
+  const newRemaining = remain - toApply;
+  const newStatus = newRemaining === 0 ? "redeemed" : "active";
+
+  const { data: updated, error: upErr } = await admin
+    .from("GiftCard")
+    .update({
+      remaining_amount_cents: newRemaining,
+      last_redeemed_at: new Date().toISOString(),
+      status: newStatus,
+    })
+    .eq("id", card.id)
+    .eq("status", "active")
+    .select("id, remaining_amount_cents, status")
+    .maybeSingle();
+
+  if (upErr || !updated?.id) {
+    console.warn("[giftcard] balance update failed:", upErr?.message || upErr);
+    return 0;
+  }
+
+  // Insert redemption log (non-fatal if this fails after balance updated)
+  const ins = await admin
+    .from("GiftCardRedemption")
+    .insert({
+      gift_card_id: card.id,
+      amount_cents: toApply,
+      currency: currency,
+      booking_id: bookingId,
+      notes: notes || null,
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (ins?.error) {
+    console.warn(
+      "[giftcard] redemption insert failed:",
+      ins.error?.message || ins.error
+    );
+  }
+
+  return toApply;
 }

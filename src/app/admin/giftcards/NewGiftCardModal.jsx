@@ -40,7 +40,7 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
   const [recipientEmail, setRecipientEmail] = useState("");
   const [recipientName, setRecipientName] = useState("");
   const [message, setMessage] = useState("");
-  const [expiresAt, setExpiresAt] = useState(""); // yyyy-mm-dd
+  const [expiresAt, setExpiresAt] = useState(defaultExpiryLocal()); // "YYYY-MM-DDTHH:mm"
   const [code, setCode] = useState(generateCode());
   const [paymentMethod, setPaymentMethod] = useState("stripe"); // 'offline' | 'stripe'
   const [sendEmail, setSendEmail] = useState(true);
@@ -80,7 +80,8 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
       recipientEmail: recipientEmail || null,
       recipientName: recipientName || null,
       message: message || null,
-      expiresAt: expiresAt || null,
+      // convert local "YYYY-MM-DDTHH:mm" to ISO "YYYY-MM-DDTHH:mm:ss.sssZ"
+      expiresAt: expiresAt ? localToIso(expiresAt) : null,
       source: "admin",
     };
 
@@ -148,6 +149,39 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
       setSaving(false);
       alert(e?.message || "Something went wrong");
     }
+  }
+
+  // ---- date helpers for <input type="datetime-local"> ----
+  function pad(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  // Returns a string like "YYYY-MM-DDTHH:mm" in the *local* timezone
+  function toDatetimeLocalString(d) {
+    const y = d.getFullYear();
+    const m = pad(d.getMonth() + 1);
+    const day = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mm = pad(d.getMinutes());
+    return `${y}-${m}-${day}T${hh}:${mm}`;
+  }
+
+  // Convert a <datetime-local> value back to an ISO string with timezone (Z)
+  function localToIso(datetimeLocal) {
+    // Accept "YYYY-MM-DDTHH:mm" or "YYYY-MM-DD"
+    if (!datetimeLocal) return null;
+    const [datePart, timePart = "00:00"] = datetimeLocal.split("T");
+    const [y, m, d] = datePart.split("-").map((s) => parseInt(s, 10));
+    const [hh = 0, mm = 0] = timePart.split(":").map((s) => parseInt(s, 10));
+    const dt = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0); // local time
+    return dt.toISOString(); // send as ISO (UTC) to the API/DB
+  }
+
+  // Default: 2 years after now (same time-of-day)
+  function defaultExpiryLocal() {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 2);
+    return toDatetimeLocalString(d);
   }
 
   return (
@@ -246,7 +280,7 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
           {/* Amount */}
           <label className="flex flex-col gap-1">
-            <span>Amount</span>
+            <span>Amount *</span>
             <div className="relative">
               <input
                 ref={amountRef}
@@ -298,10 +332,11 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
           {/* Recipient email */}
           <label className="flex flex-col gap-1 sm:col-span-2">
             <span className="inline-flex items-center gap-1">
-              <Mail className="h-3.5 w-3.5" /> Recipient email (optional)
+              <Mail className="h-3.5 w-3.5" /> Recipient email *
             </span>
             <input
               type="email"
+              required
               value={recipientEmail}
               onChange={(e) => setRecipientEmail(e.target.value)}
               placeholder="name@example.com"
@@ -336,7 +371,7 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
               <CalendarIcon className="h-3.5 w-3.5" /> Expires at (optional)
             </span>
             <input
-              type="date"
+              type="datetime-local"
               value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
               className="rounded-md border border-[#d8cfc3] px-2 py-1.5"
@@ -353,6 +388,7 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
                 value={code}
                 onChange={(e) => setCode(e.target.value.toUpperCase())}
                 className="flex-1 rounded-md border border-[#d8cfc3] px-2 py-1.5 font-mono"
+                readOnly
               />
               <button
                 type="button"

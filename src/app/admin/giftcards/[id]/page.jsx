@@ -510,7 +510,7 @@ export default function GiftCardDetailsPage() {
                     {r.booking_id ? (
                       <Link
                         className="underline"
-                        href={`/admin/reservations/${r.booking_id}`}
+                        href={`/admin/bookings/${r.booking_id}`}
                       >
                         Booking #{r.booking_id}
                       </Link>

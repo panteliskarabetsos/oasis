@@ -89,7 +89,10 @@ export default function CheckAvailabilityPage() {
     for (const s of availableSlots) {
       const d = parseISO(s.date);
       const ymd = d.toISOString().slice(0, 10);
-      const remaining = Math.max(0, (s.totalSlots ?? 0) - (s.bookedSlots ?? 0));
+      const remaining =
+        typeof s.available === "number"
+          ? s.available
+          : Math.max(0, (s.totalSlots ?? 0) - (s.booked ?? s.bookedSlots ?? 0));
       m.set(ymd, (m.get(ymd) || 0) + remaining);
     }
     return m;
@@ -166,8 +169,8 @@ export default function CheckAvailabilityPage() {
         const slots = (await slotsRes.json()) || [];
         const now = new Date();
         const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-        const futureOnly = slots.filter((s) =>
-          isAfter(parseISO(s.date), oneHourFromNow)
+        const futureOnly = slots.filter(
+          (s) => !s.isCancelled && isAfter(parseISO(s.date), oneHourFromNow)
         );
         setAvailableSlots(futureOnly);
 
@@ -551,7 +554,13 @@ export default function CheckAvailabilityPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {slotsOnSelectedDay.map((slot) => {
                     const available =
-                      (slot.totalSlots ?? 0) - (slot.bookedSlots ?? 0);
+                      typeof slot.available === "number"
+                        ? slot.available
+                        : Math.max(
+                            0,
+                            (slot.totalSlots ?? 0) -
+                              (slot.booked ?? slot.bookedSlots ?? 0)
+                          );
                     const isSelected = selectedSlotId === slot.id;
                     const isDisabled = pausedNow || available <= 0;
                     const time = format(parseISO(slot.date), "p");
@@ -613,7 +622,15 @@ export default function CheckAvailabilityPage() {
                 {selectedSlot && (
                   <CapacityBar
                     total={selectedSlot.totalSlots}
-                    booked={selectedSlot.bookedSlots}
+                    booked={
+                      selectedSlot.booked ??
+                      selectedSlot.bookedSlots ??
+                      Math.max(
+                        0,
+                        (selectedSlot.totalSlots ?? 0) -
+                          (selectedSlot.available ?? 0)
+                      )
+                    }
                   />
                 )}
 

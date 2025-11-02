@@ -10,7 +10,12 @@ const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 const REFRESH_MINUTES_ON_CHECKOUT = 30;
-const COUNT_STATUSES = new Set(["confirmed", "completed", "checked_in"]);
+const COUNT_STATUSES = new Set([
+  "paid",
+  "confirmed",
+  "completed",
+  "checked_in",
+]);
 
 /** Fallback helper: prefer automatic_payment_methods; if API rejects it, retry with payment_method_types:["card"] */
 async function upsertPaymentIntent(stripe, piId, baseParams) {
@@ -250,6 +255,16 @@ export async function POST(req, ctx) {
 
   const finalTotalCents =
     subtotalCents - Math.min(discountCents, subtotalCents);
+  // [ADD] Gift card metadata (if validate endpoint marked this as a gift card)
+  const isGift = String(promo?.source || "").toLowerCase() === "giftcard";
+  // What we'll stamp into Stripe metadata so the confirm route can redeem atomically
+  const giftMeta = isGift
+    ? {
+        giftcard_id: promo?.giftcard?.id || promo?.giftcardId || null, // support either shape
+        giftcard_code: promo?.code || promo?.giftcard?.code || null,
+        giftcard_apply_cents: Math.min(discountCents, subtotalCents), // never over-apply
+      }
+    : null;
 
   // Zero total → mark paid and send confirmation
   if (finalTotalCents === 0) {
@@ -334,7 +349,16 @@ export async function POST(req, ctx) {
         promo_type: promo?.discountType ?? "",
         promo_value:
           promo?.discountValue != null ? String(promo.discountValue) : "",
-        promo_currency: promo?.currency ?? "",
+        promo_currency: (promo?.currency ?? "").toUpperCase(),
+        source: promo?.source ?? "",
+        // Gift card hints so confirm route can redeem exactly once
+        ...(giftMeta
+          ? {
+              giftcard_id: giftMeta.giftcard_id || "",
+              giftcard_code: giftMeta.giftcard_code || "",
+              giftcard_apply_cents: String(giftMeta.giftcard_apply_cents || 0),
+            }
+          : {}),
       },
     };
 
@@ -451,6 +475,14 @@ export async function POST(req, ctx) {
         promo?.discountValue != null ? String(promo.discountValue) : "",
       promo_currency: (promo?.currency ?? "").toUpperCase(),
       source: promo?.source ?? "",
+      // Gift card metadata mirrors Elements path
+      ...(giftMeta
+        ? {
+            giftcard_id: giftMeta.giftcard_id || "",
+            giftcard_code: giftMeta.giftcard_code || "",
+            giftcard_apply_cents: String(giftMeta.giftcard_apply_cents || 0),
+          }
+        : {}),
     };
 
     const customerEmail = draft.primary_contact?.email ?? undefined;
