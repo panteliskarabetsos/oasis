@@ -23,6 +23,10 @@ import {
   Zap,
   Star,
   MessageSquare,
+  QrCode,
+  Store,
+  AlertTriangle,
+  CloudSun,
   Link as LinkIcon,
   Building2,
   PackagePlus,
@@ -79,7 +83,7 @@ export default function AdminDashboardPage() {
       {
         key: "clients",
         icon: <Users size={20} />,
-        title: "Manage Clients",
+        title: "Guests & CRM",
         desc: "View, edit and segment users.",
         onClick: () => go("/admin/users"),
         keywords: ["client", "user", "customer"],
@@ -127,6 +131,14 @@ export default function AdminDashboardPage() {
         keywords: ["add-on", "extras", "upsell", "bundle"],
       },
       {
+        key: "pos",
+        icon: <Store size={20} />,
+        title: "Point of Sale",
+        desc: "Sell walk-ins & extras in person.",
+        onClick: () => go("/admin/pos"),
+        keywords: ["pos", "walk-in", "terminal", "in-person", "upsell"],
+      },
+      {
         key: "vouchers",
         icon: <Gift size={20} />,
         title: "Gift Cards",
@@ -160,21 +172,21 @@ export default function AdminDashboardPage() {
         keywords: ["loyalty", "credit", "tier", "points", "retention"],
       },
       {
-        key: "reviews",
-        icon: <MessageSquare size={20} />,
-        title: "Reviews",
-        desc: "Collect feedback & publish.",
-        onClick: () => go("/admin/reviews"),
-        keywords: ["review", "rating", "nps", "feedback"],
+        key: "checkins",
+        icon: <QrCode size={20} />,
+        title: "Check-ins",
+        desc: "QR/Roster check-ins & no-shows.",
+        onClick: () => go("/admin/checkins"),
+        keywords: ["checkin", "qr", "roster", "attendance", "no-show"],
       },
       // NEW: operations & integrations
       {
-        key: "resources",
-        icon: <Puzzle size={20} />,
-        title: "Resources",
-        desc: "Assign guides/gear & prevent conflicts.",
-        onClick: () => go("/admin/resources"),
-        keywords: ["resource", "guide", "equipment", "room"],
+        key: "waivers",
+        icon: <ShieldCheck size={20} />,
+        title: "Waivers",
+        desc: "Collect and verify waivers.",
+        onClick: () => go("/admin/waivers"),
+        keywords: ["waiver", "consent", "safety"],
       },
       {
         key: "corporate",
@@ -193,12 +205,12 @@ export default function AdminDashboardPage() {
         keywords: ["webhook", "zapier", "ota", "export"],
       },
       {
-        key: "automations",
-        icon: <Zap size={20} />,
-        title: "Automations",
-        desc: "If/then playbooks.",
-        onClick: () => go("/admin/automations"),
-        keywords: ["automation", "rules", "playbook"],
+        key: "partners",
+        icon: <Building2 size={20} />,
+        title: "Partners & Agencies",
+        desc: "B2B bookings, POs & commissions.",
+        onClick: () => go("/admin/partners"),
+        keywords: ["partner", "agency", "b2b", "commission", "po"],
       },
       {
         key: "settings",
@@ -243,9 +255,13 @@ export default function AdminDashboardPage() {
         if (s === "ge") go("/admin/experiences");
         if (s === "gs") go("/admin/schedule");
         if (s === "gw") go("/admin/waitlist");
+        if (s === "ga") go("/admin/pos"); // Point of Sale
+        if (s === "gv") go("/admin/giftcards"); // fix path
+        if (s === "gc") go("/admin/checkins"); // Check-ins
         if (s === "ga") go("/admin/addons");
         if (s === "gv") go("/admin/vouchers");
         if (s === "gl") go("/admin/loyalty");
+        if (s === "gz") go("/admin/yield");
         if (s === "gr") go("/admin/reports");
         if (s === "gi") go("/admin/integrations");
         if (s === "gz") go("/admin/automations");
@@ -304,9 +320,12 @@ export default function AdminDashboardPage() {
     "bundles",
     "integrations",
     "automations",
-
+    "waivers",
     "resources",
     "reviews",
+    "partners",
+    "checkins",
+    "pos",
   ]);
   const DISABLED_HINT = {
     loyalty: "Coming soon",
@@ -543,49 +562,6 @@ export default function AdminDashboardPage() {
             label="Gift Cards"
             icon={<Gift size={16} />}
             onClick={() => go("/admin/giftcards")}
-          />
-          <ToolbarButton
-            label="Waitlist"
-            icon={<Users size={16} />}
-            onClick={() => go("/admin/waitlist")}
-            disabled={isDisabled("loyalty")}
-            title={hintFor("loyalty")}
-            disabledHint="Coming soon"
-          />
-          <ToolbarButton
-            label="Loyalty"
-            icon={<Star size={16} />}
-            onClick={() => go("/admin/loyalty")}
-            disabled={isDisabled("loyalty")}
-            title={hintFor("loyalty")}
-            disabledHint="Coming soon"
-          />
-          <ToolbarButton
-            label="Reviews"
-            icon={<MessageSquare size={16} />}
-            onClick={() => go("/admin/reviews")}
-            disabled={isDisabled("loyalty")}
-            title={hintFor("loyalty")}
-            disabledHint="Coming soon"
-          />
-          <ToolbarButton
-            label="Automations"
-            icon={<Zap size={16} />}
-            onClick={() => go("/admin/automations")}
-            disabled={isDisabled("loyalty")}
-            title={hintFor("loyalty")}
-            disabledHint="Coming soon"
-          />
-          <ToolbarButton
-            label="Promos"
-            icon={<Tag size={16} />}
-            onClick={() => go("/admin/promotions")}
-          />
-          <ToolbarButton
-            label="Integrations"
-            icon={<LinkIcon size={16} />}
-            onClick={() => go("/admin/integrations")}
-            disabled={isDisabled("integrations")}
           />
         </section>
 
