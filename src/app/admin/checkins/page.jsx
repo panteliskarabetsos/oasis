@@ -145,10 +145,7 @@ function ScanModal({ open, onClose, onDetected }) {
     if (!val) return;
     const now = Date.now();
 
-    // busy? skip
     if (processingRef.current) return;
-
-    // same value, still within cooldown? skip
     if (val === lastValRef.current && now - lastTsRef.current < COOLDOWN_MS)
       return;
 
@@ -157,27 +154,33 @@ function ScanModal({ open, onClose, onDetected }) {
     lastTsRef.current = now;
 
     try {
-      // Let the parent do the check-in and tell us if it was already checked.
-      const result = onDetected?.(val);
-      const data =
-        result && typeof result.then === "function" ? await result : result;
+      // Ask parent to process it (returns { ok | already | invalid } flags)
+      const maybe = onDetected?.(val);
+      const res =
+        maybe && typeof maybe.then === "function" ? await maybe : maybe;
 
-      // Optional haptics/audio feedback:
-      if (data?.already) {
-        // already checked in → don't allow re-scan spam
-        if (navigator.vibrate) navigator.vibrate(40);
-        // show a quick inline status (optional)
-        setStatus("QR code already checked in");
-        // extend cooldown a bit so keeping the code in frame won’t re-trigger
-        lastTsRef.current = Date.now(); // reset the timestamp
-        return;
-      } else if (data?.ok) {
-        beep();
+      const outcome = res?.already
+        ? "already"
+        : res?.invalid || res?.ok === false
+        ? "invalid"
+        : "ok";
+
+      if (outcome === "ok") {
+        soundSuccess(); // ✅
         if (navigator.vibrate) navigator.vibrate(60);
         setStatus("Checked in ✓");
+      } else if (outcome === "already") {
+        soundError(); // 🚫
+        if (navigator.vibrate) navigator.vibrate(40);
+        setStatus("QR code already checked in");
+        // extend cooldown for this same code while it stays in frame
+        lastTsRef.current = Date.now();
+      } else {
+        soundError(); // 🚫
+        if (navigator.vibrate) navigator.vibrate(30);
+        setStatus("Invalid QR / booking not found");
       }
     } finally {
-      // allow new scans after a short pause (but same-code is still blocked via COOLDOWN_MS)
       setTimeout(() => {
         processingRef.current = false;
       }, 800);
@@ -328,7 +331,6 @@ function ScanModal({ open, onClose, onDetected }) {
         try {
           const res = await detectorRef.current.detect(videoRef.current);
           if (res && res.length) {
-            // BarcodeDetector returns an array of detections with .rawValue
             const val = res[0].rawValue || "";
             if (val) await handleDetected(val);
           }
@@ -705,63 +707,17 @@ export default function CheckinsPage() {
     }
   }
 
-  // Parse IDs from common QR payloads (plain id, numbers inside, or URLs)
-  function extractBookingId(payload) {
-    if (!payload) return null;
-    // if URL like https://site/booking/123 or /admin/bookings/123
-    const urlMatch = String(payload).match(/\/(?:booking|bookings)\/(\d+)/i);
-    if (urlMatch) return Number(urlMatch[1]);
-    // "booking:123"
-    const tagMatch = String(payload).match(/booking[:= ]+(\d+)/i);
-    if (tagMatch) return Number(tagMatch[1]);
-    // only digits
-    const just = String(payload).trim();
-    if (/^\d+$/.test(just)) return Number(just);
-    return null;
-  }
-
-  async function handleDetected(val) {
-    if (!val) return;
-    const now = Date.now();
-
-    if (processingRef.current) return;
-    if (val === lastValRef.current && now - lastTsRef.current < COOLDOWN_MS)
-      return;
-
-    processingRef.current = true;
-    lastValRef.current = val;
-    lastTsRef.current = now;
-
-    try {
-      const maybe = onDetected?.(val);
-      const res =
-        maybe && typeof maybe.then === "function" ? await maybe : maybe;
-
-      const outcome = res?.already
-        ? "already"
-        : res?.invalid || res?.ok === false
-        ? "invalid"
-        : "ok";
-
-      if (outcome === "ok") {
-        soundSuccess(); // ✅ happy chirp
-        if (navigator.vibrate) navigator.vibrate(60);
-        setStatus("Checked in ✓");
-      } else if (outcome === "already") {
-        soundError(); // 🚫 “nope” buzz
-        if (navigator.vibrate) navigator.vibrate(40);
-        setStatus("QR code already checked in");
-        lastTsRef.current = Date.now(); // extend cooldown for same code
-      } else {
-        soundError(); // 🚫 invalid sound
-        if (navigator.vibrate) navigator.vibrate(30);
-        setStatus("Invalid QR / booking not found");
-      }
-    } finally {
-      setTimeout(() => {
-        processingRef.current = false;
-      }, 800);
-    }
+  function extractBookingId(s) {
+    if (!s) return null;
+    // /booking/123 or /bookings/123
+    const mUrl = String(s).match(/\/(?:booking|bookings)\/(\d+)/i);
+    if (mUrl) return Number(mUrl[1]);
+    // booking:123 or booking=123
+    const mTag = String(s).match(/booking[:=\s]+(\d{1,10})/i);
+    if (mTag) return Number(mTag[1]);
+    // any 1–10 digit number present
+    const mNum = String(s).match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/);
+    return mNum ? Number(mNum[1]) : null;
   }
 
   const totals = useMemo(() => {
@@ -783,19 +739,10 @@ export default function CheckinsPage() {
     return { count, checked, noshow, capacity: cap, reserved: resv };
   }, [roster]);
 
-  function extractBookingId(s) {
-    if (!s) return null;
-    const m2 = String(s).match(/booking[s]?[/:=\s]+(\d{1,10})/i);
-    if (m2) return Number(m2[1]);
-    const m1 = String(s).match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/);
-    return m1 ? Number(m1[1]) : null;
-  }
-
   async function onScan(text) {
     const id = extractBookingId(text);
-    if (!id) return { invalid: true };
     if (!id) {
-      pushToast("Invalid code", "err");
+      pushToast("Invalid code", "err"); // now this runs
       return { invalid: true };
     }
 
@@ -813,13 +760,20 @@ export default function CheckinsPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "checkin" }),
     });
-    const json = await res.json();
+
+    let json = {};
+    try {
+      json = await res.json();
+    } catch {}
 
     if (!res.ok) {
-      // treat as invalid for sound/UX; you can also branch by status 409, etc.
+      pushToast("Invalid booking or not today", "err");
       return { invalid: true };
     }
-    if (json.already) return { already: true };
+    if (json.already) {
+      pushToast(`Booking #${id} already checked in`, "err");
+      return { already: true };
+    }
 
     // optimistic local update
     setRoster((prev) => {
@@ -832,7 +786,7 @@ export default function CheckinsPage() {
       });
       return { ...prev, slots };
     });
-
+    pushToast(`Booking #${id} → checked in`, "ok");
     return { ok: true };
   }
 
