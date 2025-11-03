@@ -328,7 +328,7 @@ export default function AdminDashboardPage() {
   const DISABLED_HINT = {
     loyalty: "Coming soon",
     // addons: "Rollout next week",
-    // vouchers: "Waiting for finance setup",
+    pos: "Waiting for finance setup",
   };
   const isDisabled = (k) => DISABLED_KEYS.has(k);
   const hintFor = (k) => DISABLED_HINT[k] || "";

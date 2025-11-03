@@ -127,7 +127,7 @@ function ScanModal({ open, onClose, onDetected }) {
   const rafRef = useRef(null);
   const streamRef = useRef(null);
   const controlsRef = useRef(null); // ZXing stop handle
-  const readerRef = useRef(null); // ZXing reader
+  const detectorRef = useRef(null);
 
   const [engine, setEngine] = useState("auto"); // 'native' | 'zxing'
   const [supported, setSupported] = useState(false);
@@ -138,9 +138,8 @@ function ScanModal({ open, onClose, onDetected }) {
   const [error, setError] = useState("");
 
   const formats = ["qr_code", "code_128", "ean_13", "ean_8"];
-  const detectorRef = useRef(null);
 
-  // tiny beep
+  // beep
   const beep = () => {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -163,34 +162,6 @@ function ScanModal({ open, onClose, onDetected }) {
     } catch {}
   };
 
-  // Ensure HTTPS and ask for permission *before* enumerateDevices (iOS quirk)
-  async function primePermission() {
-    if (location.protocol !== "https:" && location.hostname !== "localhost") {
-      throw new Error("Camera requires HTTPS (or localhost).");
-    }
-    try {
-      // Request a basic stream to unlock labels
-      const s = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: false,
-      });
-      s.getTracks().forEach((t) => t.stop());
-    } catch (e) {
-      throw new Error("Camera permission denied or unavailable.");
-    }
-  }
-
-  async function listVideoInputs() {
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    const vids = devs.filter((d) => d.kind === "videoinput");
-    setDevices(vids);
-    // prefer back camera if present
-    const back =
-      vids.find((d) => (d.label || "").toLowerCase().includes("back")) ||
-      vids[1];
-    setDeviceId((d) => d ?? back?.deviceId ?? vids[0]?.deviceId ?? null);
-  }
-
   function stopAll() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
@@ -200,95 +171,126 @@ function ScanModal({ open, onClose, onDetected }) {
       } catch {}
       controlsRef.current = null;
     }
-    if (readerRef.current) {
-      try {
-        readerRef.current.reset();
-      } catch {}
-      readerRef.current = null;
-    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    detectorRef.current = null;
   }
 
-  // Start with native, fall back to ZXing automatically
-  async function startScanner() {
-    setError("");
+  async function ensureHttpsAndPermission() {
+    if (location.protocol !== "https:" && location.hostname !== "localhost") {
+      throw new Error("Camera requires HTTPS (or localhost).");
+    }
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+      s.getTracks().forEach((t) => t.stop());
+    } catch {
+      throw new Error("Camera permission denied or unavailable.");
+    }
+  }
+
+  async function loadDevices() {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const vids = devs.filter((d) => d.kind === "videoinput");
+    setDevices(vids);
+    const back =
+      vids.find((d) => (d.label || "").toLowerCase().includes("back")) ||
+      vids[1];
+    setDeviceId((d) => d ?? back?.deviceId ?? vids[0]?.deviceId ?? null);
+  }
+
+  async function startNative() {
+    setEngine("native");
+    setSupported(true);
     setStatus("Starting camera…");
-    stopAll();
+    try {
+      const constraints = {
+        audio: false,
+        video: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      if (!videoRef.current) return;
+      videoRef.current.srcObject = stream;
+      videoRef.current.muted = true;
+      videoRef.current.setAttribute("muted", "true");
+      videoRef.current.setAttribute("playsinline", "true");
+      await videoRef.current.play();
 
-    // Decide engine
-    const hasNative = "BarcodeDetector" in window;
-    setSupported(hasNative);
-    setEngine(hasNative ? "native" : "zxing");
+      const sup = await (window.BarcodeDetector.getSupportedFormats?.() || []);
+      const useFormats =
+        sup && sup.length ? formats.filter((f) => sup.includes(f)) : formats;
+      detectorRef.current = new window.BarcodeDetector({ formats: useFormats });
 
-    if (hasNative) {
-      try {
-        // Native — start a vanilla stream, then run detector loop
-        const constraints = {
-          audio: false,
-          video: {
-            deviceId: deviceId ? { exact: deviceId } : undefined,
-            facingMode: "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        streamRef.current = stream;
-        if (!videoRef.current) return;
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("muted", true);
-        videoRef.current.muted = true;
-        await videoRef.current.play();
-
-        // init detector
-        const sup = await (window.BarcodeDetector.getSupportedFormats?.() ||
-          []);
-        const useFormats =
-          sup && sup.length ? formats.filter((f) => sup.includes(f)) : formats;
-        detectorRef.current = new window.BarcodeDetector({
-          formats: useFormats,
-        });
-        setStatus("Scanning…");
-
-        const loop = async () => {
-          if (!detectorRef.current || !videoRef.current) return;
-          try {
-            const res = await detectorRef.current.detect(videoRef.current);
-            if (res && res.length) {
-              const val = res[0].rawValue || "";
-              if (val) {
-                beep();
-                onDetected?.(val);
-                await new Promise((r) => setTimeout(r, 800));
-              }
+      setStatus("Scanning…");
+      const loop = async () => {
+        if (!detectorRef.current || !videoRef.current) return;
+        try {
+          const res = await detectorRef.current.detect(videoRef.current);
+          if (res && res.length) {
+            const val = res[0].rawValue || "";
+            if (val) {
+              beep();
+              onDetected?.(val);
+              await new Promise((r) => setTimeout(r, 700));
             }
-          } catch {}
-          rafRef.current = requestAnimationFrame(loop);
-        };
+          }
+        } catch {}
         rafRef.current = requestAnimationFrame(loop);
-        return;
-      } catch (e) {
-        // Fall back to ZXing
+      };
+      rafRef.current = requestAnimationFrame(loop);
+    } catch (e) {
+      throw new Error(`Native scanner failed: ${e?.message || e}`);
+    }
+  }
+
+  // Load ZXing via local pkg, ESM CDN, then UMD CDN (global window.ZXing)
+  async function loadZXing() {
+    try {
+      return await import("@zxing/browser"); // installed? great.
+    } catch (e1) {
+      try {
+        return await import(
+          "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm"
+        );
+      } catch (e2) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src =
+            "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js";
+          s.onload = () => resolve();
+          s.onerror = () =>
+            reject(new Error("Failed to load ZXing UMD from CDN"));
+          document.head.appendChild(s);
+        });
+        // @ts-ignore
+        return window.ZXing;
       }
     }
+  }
 
-    // ZXing fallback (broad support incl. iOS)
+  async function startZXing() {
+    setEngine("zxing");
+    setStatus("Loading scanner…");
     try {
-      setEngine("zxing");
-      setStatus("Loading scanner…");
-      const { BrowserMultiFormatReader, NotFoundException } = await import(
-        "@zxing/browser"
-      );
-      const reader = new BrowserMultiFormatReader();
-      readerRef.current = reader;
+      const ZX = await loadZXing();
+      const { BrowserMultiFormatReader, NotFoundException } = ZX;
+      if (!BrowserMultiFormatReader)
+        throw new Error("ZXing BrowserMultiFormatReader unavailable");
 
-      const videoEl = videoRef.current;
+      const reader = new BrowserMultiFormatReader();
       const controls = await reader.decodeFromVideoDevice(
         deviceId || undefined,
-        videoEl,
+        videoRef.current,
         (result, err) => {
           if (result) {
             const txt = result.getText();
@@ -296,8 +298,12 @@ function ScanModal({ open, onClose, onDetected }) {
               beep();
               onDetected?.(txt);
             }
-          } else if (err && !(err instanceof NotFoundException)) {
-            // ignore 'not found' noise; show real errors
+          } else if (
+            err &&
+            NotFoundException &&
+            !(err instanceof NotFoundException)
+          ) {
+            // ignore NotFound noise; show real errors
             setError(String(err));
           }
         }
@@ -305,7 +311,33 @@ function ScanModal({ open, onClose, onDetected }) {
       controlsRef.current = controls;
       setStatus("Scanning…");
     } catch (e) {
-      setError("Scanner failed to initialize.");
+      throw new Error(`ZXing init failed: ${e?.message || e}`);
+    }
+  }
+
+  async function startScanner() {
+    setError("");
+    setStatus("Initializing…");
+    stopAll();
+
+    // try native first if available
+    const hasNative = "BarcodeDetector" in window;
+    try {
+      await (hasNative ? startNative() : startZXing());
+    } catch (e) {
+      // If native failed, try ZXing. If ZXing failed, show details.
+      if (hasNative) {
+        try {
+          await startZXing();
+          return;
+        } catch (e2) {
+          setError(`Scanner failed: ${e2?.message || e2}`);
+          setStatus("");
+          return;
+        }
+      }
+      setError(`Scanner failed: ${e?.message || e}`);
+      setStatus("");
     }
   }
 
@@ -323,28 +355,26 @@ function ScanModal({ open, onClose, onDetected }) {
   useEffect(() => {
     if (!open) return;
     let alive = true;
-
     (async () => {
       try {
-        await primePermission();
-        await listVideoInputs();
+        await ensureHttpsAndPermission(); // ask permission early
+        await loadDevices(); // populate camera list
         if (!alive) return;
-        await startScanner();
+        await startScanner(); // start native or ZXing
       } catch (e) {
-        setError(e.message || "Camera unavailable.");
+        setError(e?.message || String(e));
+        setStatus("");
       }
     })();
-
     return () => {
       alive = false;
       stopAll();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
     if (!open || !deviceId) return;
-    // Switching camera
+    // switch camera
     startScanner();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
@@ -367,7 +397,6 @@ function ScanModal({ open, onClose, onDetected }) {
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         onClick={close}
       />
-
       <div className="relative z-10 w-full sm:max-w-2xl mx-auto sm:rounded-3xl sm:shadow-2xl bg-[#fdfaf5] border border-[#e6dfd6] overflow-hidden">
         <div className="px-4 py-3 border-b border-[#eee5da] flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -419,7 +448,6 @@ function ScanModal({ open, onClose, onDetected }) {
               </div>
             </div>
           </div>
-
           <ManualFallback onDetected={onDetected} />
           {error ? (
             <div className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center gap-2">
