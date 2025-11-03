@@ -209,6 +209,50 @@ function ScanModal({ open, onClose, onDetected }) {
     } catch {}
   };
 
+  function playTone(
+    freq = 880,
+    durationMs = 120,
+    type = "sine",
+    volume = 0.22
+  ) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AC();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = type;
+      o.frequency.value = freq;
+      o.connect(g);
+      g.connect(ctx.destination);
+
+      const t0 = ctx.currentTime;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(volume, t0 + 0.01);
+      o.start();
+
+      const t1 = t0 + durationMs / 1000;
+      g.gain.exponentialRampToValueAtTime(0.0001, t1);
+      setTimeout(() => {
+        try {
+          o.stop();
+          ctx.close();
+        } catch {}
+      }, durationMs + 50);
+    } catch {}
+  }
+
+  function soundSuccess() {
+    // two short, rising chirps
+    playTone(880, 80, "sine", 0.25);
+    setTimeout(() => playTone(1320, 90, "sine", 0.22), 95);
+  }
+
+  function soundError() {
+    // short “nope” buzz
+    playTone(220, 140, "square", 0.22);
+    setTimeout(() => playTone(180, 160, "sawtooth", 0.2), 130);
+  }
+
   function stopAll() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
@@ -674,15 +718,51 @@ export default function CheckinsPage() {
     return null;
   }
 
-  async function handleDetected(raw) {
-    const id = extractBookingId(raw);
-    if (!id || !Number.isFinite(id)) {
-      pushToast("Scanned code not recognized as a booking id.", "err");
+  async function handleDetected(val) {
+    if (!val) return;
+    const now = Date.now();
+
+    // prevent spamming if code stays in view
+    if (processingRef.current) return;
+    if (val === lastValRef.current && now - lastTsRef.current < COOLDOWN_MS)
       return;
+
+    processingRef.current = true;
+    lastValRef.current = val;
+    lastTsRef.current = now;
+
+    try {
+      const maybe = onDetected?.(val);
+      const res =
+        maybe && typeof maybe.then === "function" ? await maybe : maybe;
+
+      // normalize outcome
+      const outcome = res?.already
+        ? "already"
+        : res?.invalid || res?.ok === false
+        ? "invalid"
+        : "ok"; // default to ok if handler didn’t return anything
+
+      if (outcome === "ok") {
+        soundSuccess();
+        if (navigator.vibrate) navigator.vibrate(60);
+        setStatus("Checked in ✓");
+      } else if (outcome === "already") {
+        soundError();
+        if (navigator.vibrate) navigator.vibrate(40);
+        setStatus("QR code already checked in");
+        // extend cooldown for same code
+        lastTsRef.current = Date.now();
+      } else {
+        soundError();
+        if (navigator.vibrate) navigator.vibrate(30);
+        setStatus("Invalid QR / booking not found");
+      }
+    } finally {
+      setTimeout(() => {
+        processingRef.current = false;
+      }, 800);
     }
-    await mutateBooking(id, "checkin");
-    // keep scanner open; if you prefer auto-close:
-    // setScanOpen(false);
   }
 
   const totals = useMemo(() => {
@@ -704,35 +784,27 @@ export default function CheckinsPage() {
     return { count, checked, noshow, capacity: cap, reserved: resv };
   }, [roster]);
 
-  // (Put alongside other hooks in CheckinsPage)
   function extractBookingId(s) {
     if (!s) return null;
-    const m1 = String(s).match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/); // plain number
-    if (m1) return Number(m1[1]);
-    const m2 = String(s).match(/booking[s]?[/:=\s]+(\d{1,10})/i); // booking:123, /bookings/123
+    const m2 = String(s).match(/booking[s]?[/:=\s]+(\d{1,10})/i);
     if (m2) return Number(m2[1]);
-    return null;
+    const m1 = String(s).match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/);
+    return m1 ? Number(m1[1]) : null;
   }
 
   async function onScan(text) {
     const id = extractBookingId(text);
-    if (!id) {
-      // optionally show a toast here
-      return { ok: false };
-    }
+    if (!id) return { invalid: true };
 
-    // client-side quick check from today's roster
+    // quick local check
     const alreadyLocal = !!(roster?.slots || [])
       .flatMap((s) => s.bookings || [])
       .find(
         (b) => b.id === id && String(b.status).toLowerCase() === "checked_in"
       );
-    if (alreadyLocal) {
-      // toast: "QR code already checked in"
-      return { already: true };
-    }
+    if (alreadyLocal) return { already: true };
 
-    // server check-in (idempotent recommended)
+    // server idempotent check-in
     const res = await fetch(`/api/admin/checkins/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -741,18 +813,10 @@ export default function CheckinsPage() {
     const json = await res.json();
 
     if (!res.ok) {
-      // optionally show error toast: json.error
-      return { ok: false };
+      // treat as invalid for sound/UX; you can also branch by status 409, etc.
+      return { invalid: true };
     }
-
-    if (
-      json.already ||
-      (String(json.status).toLowerCase() === "checked_in" && alreadyLocal)
-    ) {
-      // server says it was already checked
-      // toast: "QR code already checked in"
-      return { already: true };
-    }
+    if (json.already) return { already: true };
 
     // optimistic local update
     setRoster((prev) => {
@@ -766,7 +830,6 @@ export default function CheckinsPage() {
       return { ...prev, slots };
     });
 
-    // toast: "Checked in ✓"
     return { ok: true };
   }
 
@@ -988,7 +1051,7 @@ export default function CheckinsPage() {
       <ScanModal
         open={scanOpen}
         onClose={() => setScanOpen(false)}
-        onDetected={handleDetected}
+        onDetected={onScan}
       />
     </div>
   );
