@@ -139,17 +139,16 @@ function ScanModal({ open, onClose, onDetected }) {
   const processingRef = useRef(false);
   const lastValRef = useRef("");
   const lastTsRef = useRef(0);
-  // how long we ignore the same code while it's in view
-  const COOLDOWN_MS = 2000;
+  const COOLDOWN_MS = 2500; // ignore same code while it's in frame
 
   async function handleDetected(val) {
     if (!val) return;
     const now = Date.now();
 
-    // already doing a check-in? ignore
+    // busy? skip
     if (processingRef.current) return;
 
-    // same value within cooldown window? ignore
+    // same value, still within cooldown? skip
     if (val === lastValRef.current && now - lastTsRef.current < COOLDOWN_MS)
       return;
 
@@ -158,15 +157,27 @@ function ScanModal({ open, onClose, onDetected }) {
     lastTsRef.current = now;
 
     try {
-      beep();
-      if (navigator.vibrate) navigator.vibrate(50);
-      const maybe = onDetected?.(val);
-      // if onDetected returns a promise, await it (prevents double PATCH)
-      if (maybe && typeof maybe.then === "function") {
-        await maybe;
+      // Let the parent do the check-in and tell us if it was already checked.
+      const result = onDetected?.(val);
+      const data =
+        result && typeof result.then === "function" ? await result : result;
+
+      // Optional haptics/audio feedback:
+      if (data?.already) {
+        // already checked in → don't allow re-scan spam
+        if (navigator.vibrate) navigator.vibrate(40);
+        // show a quick inline status (optional)
+        setStatus("QR code already checked in");
+        // extend cooldown a bit so keeping the code in frame won’t re-trigger
+        lastTsRef.current = Date.now(); // reset the timestamp
+        return;
+      } else if (data?.ok) {
+        beep();
+        if (navigator.vibrate) navigator.vibrate(60);
+        setStatus("Checked in ✓");
       }
     } finally {
-      // small delay before we accept the *same* code again
+      // allow new scans after a short pause (but same-code is still blocked via COOLDOWN_MS)
       setTimeout(() => {
         processingRef.current = false;
       }, 800);
@@ -272,9 +283,9 @@ function ScanModal({ open, onClose, onDetected }) {
         if (!detectorRef.current || !videoRef.current) return;
         try {
           const res = await detectorRef.current.detect(videoRef.current);
-          if (res && res.length) {
-            const val = res[0].rawValue || "";
-            if (val) await handleDetected(val);
+          if (result) {
+            const txt = result.getText();
+            if (txt) handleDetected(txt);
           }
         } catch {}
         rafRef.current = requestAnimationFrame(loop);
@@ -692,6 +703,72 @@ export default function CheckinsPage() {
       .reduce((sum, b) => sum + partySize(b), 0);
     return { count, checked, noshow, capacity: cap, reserved: resv };
   }, [roster]);
+
+  // (Put alongside other hooks in CheckinsPage)
+  function extractBookingId(s) {
+    if (!s) return null;
+    const m1 = String(s).match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/); // plain number
+    if (m1) return Number(m1[1]);
+    const m2 = String(s).match(/booking[s]?[/:=\s]+(\d{1,10})/i); // booking:123, /bookings/123
+    if (m2) return Number(m2[1]);
+    return null;
+  }
+
+  async function onScan(text) {
+    const id = extractBookingId(text);
+    if (!id) {
+      // optionally show a toast here
+      return { ok: false };
+    }
+
+    // client-side quick check from today's roster
+    const alreadyLocal = !!(roster?.slots || [])
+      .flatMap((s) => s.bookings || [])
+      .find(
+        (b) => b.id === id && String(b.status).toLowerCase() === "checked_in"
+      );
+    if (alreadyLocal) {
+      // toast: "QR code already checked in"
+      return { already: true };
+    }
+
+    // server check-in (idempotent recommended)
+    const res = await fetch(`/api/admin/checkins/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "checkin" }),
+    });
+    const json = await res.json();
+
+    if (!res.ok) {
+      // optionally show error toast: json.error
+      return { ok: false };
+    }
+
+    if (
+      json.already ||
+      (String(json.status).toLowerCase() === "checked_in" && alreadyLocal)
+    ) {
+      // server says it was already checked
+      // toast: "QR code already checked in"
+      return { already: true };
+    }
+
+    // optimistic local update
+    setRoster((prev) => {
+      if (!prev) return prev;
+      const slots = prev.slots.map((s) => {
+        const books = (s.bookings || []).map((b) =>
+          b.id === id ? { ...b, status: "checked_in" } : b
+        );
+        return { ...s, bookings: books };
+      });
+      return { ...prev, slots };
+    });
+
+    // toast: "Checked in ✓"
+    return { ok: true };
+  }
 
   return (
     <div className="min-h-screen bg-[#f4f1ec] text-[#5a4a3f]">

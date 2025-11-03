@@ -65,6 +65,43 @@ export async function PATCH(req, ctx) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  // 1) Read current status first (idempotency + guard rails)
+  const { data: current, error: curErr } = await admin
+    .from(TBL_BOOKING)
+    .select("id,status")
+    .eq("id", bookingId)
+    .single();
+
+  if (curErr || !current) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const curr = String(current.status || "").toLowerCase();
+  const next = String(nextStatus);
+
+  // If already in target status → return early with 'already'
+  if (curr === next) {
+    return NextResponse.json(
+      { id: current.id, status: current.status, already: true },
+      { headers: { "cache-control": "no-store" } }
+    );
+  }
+
+  // Guard: prevent invalid transitions
+  if (
+    (action === "checkin" || action === "no_show" || action === "noshow") &&
+    (curr === "cancelled" || curr === "completed")
+  ) {
+    return NextResponse.json(
+      {
+        error: `Cannot ${action.replace("_", "-")} a ${curr} booking.`,
+        status: curr,
+      },
+      { status: 409 }
+    );
+  }
+
+  // 2) Perform the update
   const { data, error } = await admin
     .from(TBL_BOOKING)
     .update({ status: nextStatus, updatedAt: new Date().toISOString() })
