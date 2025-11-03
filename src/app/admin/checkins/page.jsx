@@ -490,34 +490,34 @@ function ScanModal({ open, onClose, onDetected }) {
     }
   }
 
-  async function toggleTorch() {
-    try {
-      const track = streamRef.current?.getVideoTracks?.()[0];
-      if (!track) return;
-      const caps = track.getCapabilities?.();
-      if (!caps || !caps.torch) return;
-      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
-      setTorchOn((t) => !t);
-    } catch {}
+  // Helper: get the live video track regardless of who created the stream
+  function getActiveTrack() {
+    const stream = videoRef.current?.srcObject || streamRef.current || null;
+    return stream?.getVideoTracks?.()[0] || null;
   }
 
   async function forceTorchOff() {
     try {
-      const stream = videoRef.current?.srcObject || streamRef.current || null;
-      const track = stream?.getVideoTracks?.()[0];
+      const track = getActiveTrack();
       const caps = track?.getCapabilities?.();
       if (caps?.torch) {
         await track.applyConstraints({ advanced: [{ torch: false }] });
+        // tiny grace period for some Android HALs
+        await new Promise((r) => setTimeout(r, 60));
       }
     } catch {}
   }
 
+  // REPLACE your stopAll with this (note the order!)
   async function stopAll() {
-    // stop scanning loop
+    // stop decode loop first
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
 
-    // stop ZXing if used
+    // IMPORTANT: turn torch OFF while track is still alive
+    await forceTorchOff();
+
+    // now stop ZXing (which will stop the camera it owns)
     if (controlsRef.current) {
       try {
         controlsRef.current.stop();
@@ -525,36 +525,56 @@ function ScanModal({ open, onClose, onDetected }) {
       controlsRef.current = null;
     }
 
-    // ensure torch is OFF (do this before stopping the track)
-    await forceTorchOff();
-
-    // stop camera tracks
-    try {
-      const stream = videoRef.current?.srcObject || streamRef.current || null;
-      if (stream) {
-        stream.getTracks().forEach((t) => t.stop());
-      }
-    } catch {}
-
-    // clear refs and video element
-    streamRef.current = null;
-    detectorRef.current = null;
+    // pause/clear the <video> BEFORE stopping tracks (helps iOS)
     if (videoRef.current) {
       try {
         videoRef.current.pause();
       } catch {}
       videoRef.current.srcObject = null;
-      // Optional: nuke src on iOS Safari
       try {
         videoRef.current.removeAttribute("srcObject");
       } catch {}
+      try {
+        videoRef.current.load?.();
+      } catch {}
     }
 
-    // reset UI state
+    // stop any remaining tracks we hold
+    try {
+      const stream = streamRef.current;
+      stream?.getTracks?.().forEach((t) => t.stop());
+    } catch {}
+
+    // clear refs/state
+    streamRef.current = null;
+    detectorRef.current = null;
     setTorchOn(false);
     setTorchSupported(false);
     setStatus("");
   }
+
+  // Make close() async and await stopAll so it finishes before hiding the modal
+  async function close() {
+    await stopAll();
+    onClose?.();
+  }
+
+  // Also stop if the tab gets hidden (Android keeps the light otherwise)
+  useEffect(() => {
+    if (!open) return;
+    const onHide = () => {
+      if (document.hidden) stopAll();
+    };
+    const onPageHide = () => {
+      stopAll();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onPageHide, { once: true });
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onPageHide);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
