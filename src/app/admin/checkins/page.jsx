@@ -136,6 +136,42 @@ function ScanModal({ open, onClose, onDetected }) {
   const [torchOn, setTorchOn] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const processingRef = useRef(false);
+  const lastValRef = useRef("");
+  const lastTsRef = useRef(0);
+  // how long we ignore the same code while it's in view
+  const COOLDOWN_MS = 2000;
+
+  async function handleDetected(val) {
+    if (!val) return;
+    const now = Date.now();
+
+    // already doing a check-in? ignore
+    if (processingRef.current) return;
+
+    // same value within cooldown window? ignore
+    if (val === lastValRef.current && now - lastTsRef.current < COOLDOWN_MS)
+      return;
+
+    processingRef.current = true;
+    lastValRef.current = val;
+    lastTsRef.current = now;
+
+    try {
+      beep();
+      if (navigator.vibrate) navigator.vibrate(50);
+      const maybe = onDetected?.(val);
+      // if onDetected returns a promise, await it (prevents double PATCH)
+      if (maybe && typeof maybe.then === "function") {
+        await maybe;
+      }
+    } finally {
+      // small delay before we accept the *same* code again
+      setTimeout(() => {
+        processingRef.current = false;
+      }, 800);
+    }
+  }
 
   const formats = ["qr_code", "code_128", "ean_13", "ean_8"];
 
@@ -238,11 +274,7 @@ function ScanModal({ open, onClose, onDetected }) {
           const res = await detectorRef.current.detect(videoRef.current);
           if (res && res.length) {
             const val = res[0].rawValue || "";
-            if (val) {
-              beep();
-              onDetected?.(val);
-              await new Promise((r) => setTimeout(r, 700));
-            }
+            if (val) await handleDetected(val);
           }
         } catch {}
         rafRef.current = requestAnimationFrame(loop);
@@ -305,10 +337,7 @@ function ScanModal({ open, onClose, onDetected }) {
         (result, err) => {
           if (result) {
             const txt = result.getText();
-            if (txt) {
-              beep();
-              onDetected?.(txt);
-            }
+            if (txt) handleDetected(txt);
           } else if (
             err &&
             NotFoundException &&
