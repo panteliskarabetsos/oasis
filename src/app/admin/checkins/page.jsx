@@ -501,6 +501,61 @@ function ScanModal({ open, onClose, onDetected }) {
     } catch {}
   }
 
+  async function forceTorchOff() {
+    try {
+      const stream = videoRef.current?.srcObject || streamRef.current || null;
+      const track = stream?.getVideoTracks?.()[0];
+      const caps = track?.getCapabilities?.();
+      if (caps?.torch) {
+        await track.applyConstraints({ advanced: [{ torch: false }] });
+      }
+    } catch {}
+  }
+
+  async function stopAll() {
+    // stop scanning loop
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+
+    // stop ZXing if used
+    if (controlsRef.current) {
+      try {
+        controlsRef.current.stop();
+      } catch {}
+      controlsRef.current = null;
+    }
+
+    // ensure torch is OFF (do this before stopping the track)
+    await forceTorchOff();
+
+    // stop camera tracks
+    try {
+      const stream = videoRef.current?.srcObject || streamRef.current || null;
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    } catch {}
+
+    // clear refs and video element
+    streamRef.current = null;
+    detectorRef.current = null;
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch {}
+      videoRef.current.srcObject = null;
+      // Optional: nuke src on iOS Safari
+      try {
+        videoRef.current.removeAttribute("srcObject");
+      } catch {}
+    }
+
+    // reset UI state
+    setTorchOn(false);
+    setTorchSupported(false);
+    setStatus("");
+  }
+
   useEffect(() => {
     if (!open) return;
     let alive = true;
