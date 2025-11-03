@@ -128,7 +128,7 @@ function ScanModal({ open, onClose, onDetected }) {
   const streamRef = useRef(null);
   const controlsRef = useRef(null); // ZXing stop handle
   const detectorRef = useRef(null);
-
+  const [torchSupported, setTorchSupported] = useState(false);
   const [engine, setEngine] = useState("auto"); // 'native' | 'zxing'
   const [supported, setSupported] = useState(false);
   const [devices, setDevices] = useState([]);
@@ -140,6 +140,17 @@ function ScanModal({ open, onClose, onDetected }) {
   const lastValRef = useRef("");
   const lastTsRef = useRef(0);
   const COOLDOWN_MS = 2500; // ignore same code while it's in frame
+
+  async function detectTorchSupport() {
+    try {
+      const stream = videoRef.current?.srcObject || streamRef.current || null;
+      const track = stream?.getVideoTracks?.()[0];
+      const caps = track?.getCapabilities?.();
+      setTorchSupported(!!(caps && caps.torch));
+    } catch {
+      setTorchSupported(false);
+    }
+  }
 
   async function handleDetected(val) {
     if (!val) return;
@@ -319,6 +330,7 @@ function ScanModal({ open, onClose, onDetected }) {
       videoRef.current.setAttribute("muted", "true");
       videoRef.current.setAttribute("playsinline", "true");
       await videoRef.current.play();
+      await detectTorchSupport();
 
       const sup = await (window.BarcodeDetector.getSupportedFormats?.() || []);
       const useFormats =
@@ -326,6 +338,16 @@ function ScanModal({ open, onClose, onDetected }) {
       detectorRef.current = new window.BarcodeDetector({ formats: useFormats });
 
       setStatus("Scanning…");
+      setTimeout(() => {
+        try {
+          const s = videoRef.current?.srcObject;
+          if (s) {
+            streamRef.current = s; // keep a handle
+            detectTorchSupport(); // check capability
+          }
+        } catch {}
+      }, 150);
+
       const loop = async () => {
         if (!detectorRef.current || !videoRef.current) return;
         try {
@@ -379,6 +401,13 @@ function ScanModal({ open, onClose, onDetected }) {
     }
     return window.ZXing;
   }
+  useEffect(() => {
+    if (!open || !deviceId) return;
+    setTorchSupported(false);
+    setTorchOn(false);
+    startScanner();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId]);
 
   async function startZXing() {
     setEngine("zxing");
@@ -411,6 +440,25 @@ function ScanModal({ open, onClose, onDetected }) {
       setStatus("Scanning…");
     } catch (e) {
       throw new Error(`ZXing init failed: ${e?.message || e}`);
+    }
+  }
+
+  async function toggleTorch() {
+    try {
+      const stream = videoRef.current?.srcObject || streamRef.current || null;
+      const track = stream?.getVideoTracks?.()[0];
+      if (!track) return setError("No camera track available.");
+
+      const caps = track.getCapabilities?.();
+      if (!caps?.torch) {
+        setTorchSupported(false);
+        return setError("Torch not supported by this camera.");
+      }
+
+      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
+      setTorchOn((t) => !t);
+    } catch (e) {
+      setError(e?.message || "Failed to toggle torch");
     }
   }
 
@@ -532,13 +580,20 @@ function ScanModal({ open, onClose, onDetected }) {
                   : "Starting (zxing)…"}
               </span>
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={toggleTorch}
-                  className="text-xs text-white bg-black/40 rounded-full px-2 py-1 border border-white/20 hover:bg-black/50"
-                  title="Toggle flashlight"
-                >
-                  {torchOn ? "Torch On" : "Torch Off"}
-                </button>
+                {torchSupported ? (
+                  <button
+                    onClick={toggleTorch}
+                    className="text-xs text-white bg-black/40 rounded-full px-2 py-1 border border-white/20 hover:bg-black/50"
+                    title="Toggle flashlight"
+                  >
+                    {torchOn ? "Torch On" : "Torch Off"}
+                  </button>
+                ) : (
+                  <span className="text-xs text-white/70 bg-black/30 rounded-full px-2 py-1 border border-white/10">
+                    Torch N/A
+                  </span>
+                )}
+
                 <DeviceSelect
                   devices={devices}
                   deviceId={deviceId}
