@@ -6,41 +6,59 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 
-// Adjust if your table names differ
 const TBL_BOOKING = "Booking";
 const TBL_SLOT = "ScheduleSlot";
 
-function utcDayRange(date = new Date()) {
-  const start = new Date(date);
+// Treat these as "occupied/paid"
+const COUNT_STATUSES = new Set([
+  "confirmed",
+  "completed",
+  "checked_in",
+  "converted",
+  "approved",
+]);
+
+/* ------------------------------ Date helpers ------------------------------ */
+// Format a Date to "YYYY-MM-DD" in a given time zone (Europe/Athens)
+function formatDay(d, timeZone = "Europe/Athens") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${map.year}-${map.month}-${map.day}`; // YYYY-MM-DD
+}
+// returns { dayFrom, dayToOpen } where dayToOpen = next day (exclusive upper bound)
+function buildDayRange(from, to, timeZone = "Europe/Athens") {
+  const dayFrom = formatDay(from, timeZone);
+  const toPlusOne = new Date(to);
+  toPlusOne.setUTCDate(toPlusOne.getUTCDate() + 1);
+  const dayToOpen = formatDay(toPlusOne, timeZone);
+  return { dayFrom, dayToOpen };
+}
+function normalizeISO(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function eachDayKeys(from, to, timeZone = "Europe/Athens") {
+  // inclusive from, exclusive to+1
+  const keys = [];
+  const start = new Date(from);
   start.setUTCHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start, end };
-}
-function startOfUTCNDaysAgo(n) {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  d.setUTCDate(d.getUTCDate() - n);
-  return d;
-}
-function bucket7DayTrend(bookings) {
-  const buckets = [];
-  for (let i = 6; i >= 0; i--) {
-    const start = startOfUTCNDaysAgo(i);
-    buckets.push({
-      key: start.toISOString().slice(0, 10),
-      name: start.toLocaleDateString(undefined, { weekday: "short" }),
-      value: 0,
-    });
+  const end = new Date(to);
+  end.setUTCHours(0, 0, 0, 0);
+  // we’ll iterate day by day in UTC, but label days using the tz
+  for (
+    let cur = new Date(start);
+    cur <= end;
+    cur.setUTCDate(cur.getUTCDate() + 1)
+  ) {
+    keys.push(formatDay(cur, timeZone));
   }
-  const byKey = new Map(buckets.map((b) => [b.key, b]));
-  for (const b of bookings || []) {
-    if (!b.startTime || b.status === "cancelled") continue;
-    const k = new Date(b.startTime).toISOString().slice(0, 10);
-    const bucket = byKey.get(k);
-    if (bucket) bucket.value += 1;
-  }
-  return buckets.map(({ name, value }) => ({ name, value }));
+  return keys;
 }
 function reservedCount(b) {
   if (typeof b.numberOfPeople === "number" && !Number.isNaN(b.numberOfPeople)) {
@@ -50,13 +68,42 @@ function reservedCount(b) {
   const kids = typeof b.kidsCount === "number" ? b.kidsCount : 0;
   return adults + kids > 0 ? adults + kids : 1;
 }
+function estimateRevenue(b) {
+  if (
+    typeof b.totalPaidAmount === "number" &&
+    !Number.isNaN(b.totalPaidAmount)
+  ) {
+    return b.totalPaidAmount;
+  }
+  const a = typeof b.adultsCount === "number" ? b.adultsCount : 0;
+  const k = typeof b.kidsCount === "number" ? b.kidsCount : 0;
+  const puA = typeof b.unitPriceAdult === "number" ? b.unitPriceAdult : 0;
+  const puK = typeof b.unitPriceKid === "number" ? b.unitPriceKid : 0;
+  const discount = typeof b.discountAmount === "number" ? b.discountAmount : 0;
+  return Math.max(0, a * puA + k * puK - discount);
+}
 
-export async function GET() {
-  // 1) SSR auth: verify current user via cookies using @supabase/ssr
-  const cookieStore = await cookies(); // Next.js dynamic API is async
+/* ---------------------------------- API ---------------------------------- */
+export async function GET(req) {
+  const url = new URL(req.url);
+  const fromQ = normalizeISO(url.searchParams.get("from"));
+  const toQ = normalizeISO(url.searchParams.get("to"));
+  // default to MTD in Athens time if not provided
+  const now = new Date();
+  const monthStartAthens = new Date(now);
+  // compute Athens month start by reading the current day in tz, then setting to day 1
+  const todayKey = formatDay(now, "Europe/Athens"); // YYYY-MM-DD
+  const [yyyy, mm] = todayKey.split("-"); // get current month in tz
+  const fromDefault = new Date(
+    Date.UTC(Number(yyyy), Number(mm) - 1, 1, 0, 0, 0)
+  );
+  const from = fromQ ?? fromDefault;
+  const to = toQ ?? now;
+
+  // Auth
+  const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
-    // publishable (anon) key; name varies in docs (publishable/anon)
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
@@ -78,17 +125,13 @@ export async function GET() {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
-
-  if (userErr || !user) {
+  if (userErr || !user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const role = user.app_metadata?.role || user.user_metadata?.role || "user";
-  if (role !== "admin") {
+  if (role !== "admin")
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
 
-  // 2) Service-role client for privileged reads (metrics)
+  // Admin client
   const SUPABASE_URL =
     process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -102,28 +145,92 @@ export async function GET() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // 3) Date ranges (UTC by default)
-  const { start: todayStart, end: todayEnd } = utcDayRange(new Date());
-  const trendStart = startOfUTCNDaysAgo(6);
-  const todayStartISO = todayStart.toISOString();
-  const todayEndISO = todayEnd.toISOString();
-  const trendStartISO = trendStart.toISOString();
+  // ---- CRITICAL: use day strings for timestamp-without-time-zone columns
+  const { dayFrom, dayToOpen } = buildDayRange(from, to, "Europe/Athens");
 
-  // 4) Queries
-  const { data: bookingsToday, error: btErr } = await admin
-    .from(TBL_BOOKING)
-    .select(
-      "id,status,totalPaidAmount,startTime,numberOfPeople,adultsCount,kidsCount,scheduleSlotId"
-    )
-    .gte("startTime", todayStartISO)
-    .lt("startTime", todayEndISO);
-  if (btErr) {
+  /* 1) Slots in range (primary clock) */
+  const { data: slots, error: sErr } = await admin
+    .from(TBL_SLOT)
+    .select("id,totalSlots,isCancelled,date")
+    .gte("date", dayFrom) // "YYYY-MM-DD"
+    .lt("date", dayToOpen) // next day (exclusive)
+    .eq("isCancelled", false);
+
+  if (sErr) {
     return NextResponse.json(
-      { error: "Failed to load bookingsToday", details: btErr.message },
+      { error: "Failed to load slots", details: sErr.message },
       { status: 500 }
     );
   }
 
+  const slotIds = new Set((slots || []).map((s) => s.id));
+  const slotById = new Map((slots || []).map((s) => [s.id, s])); // s.date is string like "2025-11-01T10:00:00"
+
+  /* 2) Bookings linked to slots */
+  let bookingsBySlot = [];
+  if (slotIds.size > 0) {
+    const { data: b1, error: b1Err } = await admin
+      .from(TBL_BOOKING)
+      .select(
+        "id,status,totalPaidAmount,numberOfPeople,adultsCount,kidsCount,unitPriceAdult,unitPriceKid,discountAmount,scheduleSlotId,startTime"
+      )
+      .in("scheduleSlotId", Array.from(slotIds));
+    if (b1Err) {
+      return NextResponse.json(
+        { error: "Failed to load bookings by slot", details: b1Err.message },
+        { status: 500 }
+      );
+    }
+    bookingsBySlot = b1 || [];
+  }
+
+  /* 3) Also include bookings with startTime in range (timestamptz) */
+  const fromISO = from.toISOString();
+  const toISO = to.toISOString();
+  const { data: b2, error: b2Err } = await admin
+    .from(TBL_BOOKING)
+    .select(
+      "id,status,totalPaidAmount,numberOfPeople,adultsCount,kidsCount,unitPriceAdult,unitPriceKid,discountAmount,scheduleSlotId,startTime"
+    )
+    .gte("startTime", fromISO)
+    .lt("startTime", toISO);
+
+  if (b2Err) {
+    return NextResponse.json(
+      { error: "Failed to load time-range bookings", details: b2Err.message },
+      { status: 500 }
+    );
+  }
+
+  // Merge & dedupe
+  const merged = new Map();
+  for (const b of bookingsBySlot) merged.set(b.id, b);
+  for (const b of b2 || []) if (!merged.has(b.id)) merged.set(b.id, b);
+  const allBookings = Array.from(merged.values());
+
+  // Keep only "active/occupied" statuses
+  const activeBookings = allBookings.filter(
+    (b) => b.status && COUNT_STATUSES.has(b.status)
+  );
+
+  /* 4) KPIs */
+  const capacity = (slots || []).reduce(
+    (sum, s) => sum + (s.totalSlots || 0),
+    0
+  );
+  const reservedPeople = activeBookings
+    .filter((b) => b.scheduleSlotId && slotById.has(b.scheduleSlotId))
+    .reduce((sum, b) => sum + reservedCount(b), 0);
+
+  const openSlotsMTD = Math.max(0, capacity - reservedPeople);
+  const occupancyMTDPct = capacity > 0 ? (reservedPeople / capacity) * 100 : 0;
+  const bookingsMTD = activeBookings.length;
+  const revenueMTD = activeBookings.reduce(
+    (sum, b) => sum + estimateRevenue(b),
+    0
+  );
+
+  // Pending approvals (global)
   const { count: pendingApprovals, error: pErr } = await admin
     .from(TBL_BOOKING)
     .select("id", { count: "exact", head: true })
@@ -135,70 +242,66 @@ export async function GET() {
     );
   }
 
-  const { data: trendBookings, error: trErr } = await admin
-    .from(TBL_BOOKING)
-    .select("id,startTime,status")
-    .gte("startTime", trendStartISO)
-    .lt("startTime", todayEndISO);
-  if (trErr) {
-    return NextResponse.json(
-      { error: "Failed to load trend bookings", details: trErr.message },
-      { status: 500 }
-    );
-  }
+  /* 5) Trend (bucket by slot date if present, else startTime) */
+  const dayKeys = eachDayKeys(from, to, "Europe/Athens");
+  const bucket = new Map(dayKeys.map((k) => [k, 0]));
 
-  const { data: slots, error: sErr } = await admin
-    .from(TBL_SLOT)
-    .select("id,totalSlots,isCancelled,date")
-    .gte("date", todayStartISO)
-    .lt("date", todayEndISO)
-    .eq("isCancelled", false);
-  if (sErr) {
-    return NextResponse.json(
-      { error: "Failed to load slots", details: sErr.message },
-      { status: 500 }
-    );
-  }
-
-  let openSlots = 0;
-  if (slots?.length) {
-    const slotIds = slots.map((s) => s.id);
-    const { data: slotBookings, error: sbErr } = await admin
-      .from(TBL_BOOKING)
-      .select("scheduleSlotId,status,numberOfPeople,adultsCount,kidsCount")
-      .in("scheduleSlotId", slotIds);
-    if (sbErr) {
-      return NextResponse.json(
-        { error: "Failed to load slot bookings", details: sbErr.message },
-        { status: 500 }
-      );
+  for (const b of activeBookings) {
+    let key = null;
+    if (b.scheduleSlotId && slotById.has(b.scheduleSlotId)) {
+      // slot.date is e.g. "2025-11-01T10:00:00" -> use first 10 chars
+      key = String(slotById.get(b.scheduleSlotId).date || "").slice(0, 10);
+    } else if (b.startTime) {
+      key = new Date(b.startTime).toISOString().slice(0, 10);
     }
-
-    const capacity = slots.reduce((sum, s) => sum + (s.totalSlots || 0), 0);
-    const reserved = (slotBookings || [])
-      .filter((b) => b.status !== "cancelled")
-      .reduce((sum, b) => sum + reservedCount(b), 0);
-
-    openSlots = Math.max(0, capacity - reserved);
+    if (key && bucket.has(key)) {
+      bucket.set(key, bucket.get(key) + 1);
+    }
   }
 
-  const activeToday = (bookingsToday || []).filter(
-    (b) => b.status !== "cancelled"
-  );
-  const todayBookings = activeToday.length;
-  const revenueToday = activeToday.reduce(
-    (sum, b) => sum + (b.totalPaidAmount || 0),
-    0
-  );
-  const trend = bucket7DayTrend(trendBookings);
+  const trend = dayKeys.map((k) => ({
+    name: new Date(k + "T00:00:00Z").toLocaleDateString(undefined, {
+      day: "2-digit",
+      month: "short",
+    }),
+    value: bucket.get(k) || 0,
+  }));
 
+  /* Return */
   return NextResponse.json(
     {
-      todayBookings,
+      from: fromISO,
+      to: toISO,
+      // MTD (or range) metrics
+      bookingsMTD,
+      revenueMTD,
+      openSlotsMTD,
+      occupancyMTDPct,
       pendingApprovals: pendingApprovals || 0,
-      revenueToday,
-      openSlots,
       trend,
+
+      // Frontend aliases
+      bookings: bookingsMTD,
+      revenue: revenueMTD,
+      openSlots: openSlotsMTD,
+      occupancyPct: occupancyMTDPct,
+
+      todayBookings: bookingsMTD,
+      revenueToday: revenueMTD,
+      occupancyTodayPct: occupancyMTDPct,
+
+      // Debug counts to verify the pipeline (remove if you like)
+      _debug: {
+        dayFrom,
+        dayToOpen,
+        slotsCount: slots?.length ?? 0,
+        bookingsBySlotCount: bookingsBySlot.length,
+        bookingsByStartTimeCount: (b2 || []).length,
+        mergedBookingsCount: allBookings.length,
+        activeBookingsCount: activeBookings.length,
+        capacity,
+        reservedPeople,
+      },
     },
     { headers: { "cache-control": "no-store" } }
   );

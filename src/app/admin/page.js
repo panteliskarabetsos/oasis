@@ -55,6 +55,7 @@ export default function AdminDashboardPage() {
   // Dashboard state
   const [metrics, setMetrics] = useState(null);
   const [activity, setActivity] = useState([]);
+  const [metricsRaw, setMetricsRaw] = useState(null); // debug
 
   // Helpers & UI state — declared BEFORE early returns
   const go = (p) => router.push(p);
@@ -255,16 +256,13 @@ export default function AdminDashboardPage() {
         if (s === "ge") go("/admin/experiences");
         if (s === "gs") go("/admin/schedule");
         if (s === "gw") go("/admin/waitlist");
-        if (s === "ga") go("/admin/pos"); // Point of Sale
-        if (s === "gv") go("/admin/giftcards"); // fix path
-        if (s === "gc") go("/admin/checkins"); // Check-ins
-        if (s === "ga") go("/admin/addons");
-        if (s === "gv") go("/admin/vouchers");
+        if (s === "ga") go("/admin/pos"); // a = POS
+        if (s === "gv") go("/admin/giftcards"); // v = vouchers/giftcards
+        if (s === "gc") go("/admin/checkins"); // c = checkins
         if (s === "gl") go("/admin/loyalty");
-        if (s === "gz") go("/admin/yield");
+        if (s === "gz") go("/admin/yield"); // z = yield
         if (s === "gr") go("/admin/reports");
         if (s === "gi") go("/admin/integrations");
-        if (s === "gz") go("/admin/automations");
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -324,7 +322,7 @@ export default function AdminDashboardPage() {
     "resources",
     "reviews",
     "partners",
-    "checkins",
+
     "pos",
   ]);
   const DISABLED_HINT = {
@@ -340,20 +338,58 @@ export default function AdminDashboardPage() {
     if (!booted || isAdmin !== true) return;
     (async function () {
       try {
-        const mRes = await fetch("/api/admin/metrics", { cache: "no-store" });
+        // Month-to-date range for metrics (local TZ)
+        const { from, to } = getCalendarMonthRange();
+        const qs = new URLSearchParams({
+          from: from.toISOString(),
+          to: to.toISOString(),
+          group: "day", // hint to return daily trend if supported
+        });
+        const mRes = await fetch(
+          `/api/admin/metrics?${qs.toString()}&tz=Europe/Athens`,
+          {
+            cache: "no-store",
+          }
+        );
         const aRes = await fetch("/api/admin/activity?limit=6", {
           cache: "no-store",
         });
 
         if (mRes.ok) {
           const m = await mRes.json();
+          setMetricsRaw(m);
+          console.log("[dashboard] /api/admin/metrics payload:", m);
           setMetrics({
-            todayBookings: m?.todayBookings ?? 0,
-            pendingApprovals: m?.pendingApprovals ?? 0,
-            revenueToday: m?.revenueToday ?? 0,
-            openSlots: m?.openSlots ?? 0,
-            // NEW secondary KPIs (optional from API)
-            occupancyTodayPct: m?.occupancyTodayPct ?? 0,
+            // Prefer MTD keys; gracefully fall back to existing "today" keys
+            bookings: coalesce(
+              m?.bookingsMTD,
+              m?.bookingsMonth,
+              m?.bookings,
+              m?.todayBookings,
+              0
+            ),
+            revenue: coalesce(
+              m?.revenueMTD,
+              m?.revenueMonth,
+              m?.revenue,
+              m?.revenueToday,
+              0
+            ),
+            openSlots: coalesce(
+              m?.openSlotsMTD,
+              m?.openSlotsMonth,
+              m?.openSlots,
+              0
+            ),
+            occupancyPct: coalesce(
+              m?.occupancyMTD, // if server ever exposes this
+              m?.occupancyMTDPct,
+              m?.occupancyMonthPct,
+              m?.occupancyPct,
+              m?.occupancyTodayPct,
+              0
+            ),
+            // optional extras, left intact
             noShow7dPct: m?.noShow7dPct ?? 0,
             draftRecovery7dPct: m?.draftRecovery7dPct ?? 0,
             trend: m?.trend ?? [
@@ -368,11 +404,10 @@ export default function AdminDashboardPage() {
           });
         } else {
           setMetrics({
-            todayBookings: 0,
-            pendingApprovals: 0,
-            revenueToday: 0,
+            bookings: 0,
+            revenue: 0,
             openSlots: 0,
-            occupancyTodayPct: 0,
+            occupancyPct: 0,
             noShow7dPct: 0,
             draftRecovery7dPct: 0,
             trend: [
@@ -495,33 +530,23 @@ export default function AdminDashboardPage() {
         {/* PRIMARY KPI row */}
         <section className="mb-6 hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
-            label="Today's bookings"
-            value={
-              (metrics && metrics.todayBookings) != null
-                ? metrics.todayBookings
-                : 0
-            }
+            label="Bookings this month"
+            value={metrics?.bookings ?? 0}
             trend={metrics && metrics.trend}
           />
           <StatCard
-            label="Occupancy today"
-            value={formatPercent(metrics?.occupancyTodayPct ?? 0)}
+            label="Occupancy this month"
+            value={formatPercent(metrics?.occupancyPct ?? 0)}
           />
 
           <StatCard
-            label="Revenue today"
-            value={formatCurrency(
-              (metrics && metrics.revenueToday) != null
-                ? metrics.revenueToday
-                : 0
-            )}
+            label="Revenue this month"
+            value={formatCurrency(metrics?.revenue ?? 0)}
             tone="green"
           />
           <StatCard
-            label="Open slots"
-            value={
-              (metrics && metrics.openSlots) != null ? metrics.openSlots : 0
-            }
+            label="Open slots this month"
+            value={metrics?.openSlots ?? 0}
             tone="blue"
           />
         </section>
@@ -852,6 +877,32 @@ function Skeleton() {
 }
 
 /* ---------------------------- Utils ---------------------------- */
+function getCalendarMonthRange(d = new Date(), tz = "Europe/Athens") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const year = Number(parts.find((p) => p.type === "year").value);
+  const monthIdx = Number(parts.find((p) => p.type === "month").value) - 1; // 0–11
+  const from = new Date(Date.UTC(year, monthIdx, 1, 0, 0, 0));
+  // day 0 of (month+1) = last day of current month; set a midday time to be safely "inside" the day
+  const to = new Date(Date.UTC(year, monthIdx + 1, 0, 12, 0, 0));
+  return { from, to };
+}
+function coalesce(...vals) {
+  for (const v of vals) {
+    if (
+      v !== undefined &&
+      v !== null &&
+      !(typeof v === "number" && Number.isNaN(v))
+    ) {
+      return v;
+    }
+  }
+  return 0;
+}
 
 function formatCurrency(n) {
   try {
