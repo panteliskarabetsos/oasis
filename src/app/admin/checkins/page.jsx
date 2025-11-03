@@ -327,13 +327,15 @@ function ScanModal({ open, onClose, onDetected }) {
         if (!detectorRef.current || !videoRef.current) return;
         try {
           const res = await detectorRef.current.detect(videoRef.current);
-          if (result) {
-            const txt = result.getText();
-            if (txt) handleDetected(txt);
+          if (res && res.length) {
+            // BarcodeDetector returns an array of detections with .rawValue
+            const val = res[0].rawValue || "";
+            if (val) await handleDetected(val);
           }
         } catch {}
         rafRef.current = requestAnimationFrame(loop);
       };
+
       rafRef.current = requestAnimationFrame(loop);
     } catch (e) {
       throw new Error(`Native scanner failed: ${e?.message || e}`);
@@ -722,7 +724,6 @@ export default function CheckinsPage() {
     if (!val) return;
     const now = Date.now();
 
-    // prevent spamming if code stays in view
     if (processingRef.current) return;
     if (val === lastValRef.current && now - lastTsRef.current < COOLDOWN_MS)
       return;
@@ -736,25 +737,23 @@ export default function CheckinsPage() {
       const res =
         maybe && typeof maybe.then === "function" ? await maybe : maybe;
 
-      // normalize outcome
       const outcome = res?.already
         ? "already"
         : res?.invalid || res?.ok === false
         ? "invalid"
-        : "ok"; // default to ok if handler didn’t return anything
+        : "ok";
 
       if (outcome === "ok") {
-        soundSuccess();
+        soundSuccess(); // ✅ happy chirp
         if (navigator.vibrate) navigator.vibrate(60);
         setStatus("Checked in ✓");
       } else if (outcome === "already") {
-        soundError();
+        soundError(); // 🚫 “nope” buzz
         if (navigator.vibrate) navigator.vibrate(40);
         setStatus("QR code already checked in");
-        // extend cooldown for same code
-        lastTsRef.current = Date.now();
+        lastTsRef.current = Date.now(); // extend cooldown for same code
       } else {
-        soundError();
+        soundError(); // 🚫 invalid sound
         if (navigator.vibrate) navigator.vibrate(30);
         setStatus("Invalid QR / booking not found");
       }
@@ -795,6 +794,10 @@ export default function CheckinsPage() {
   async function onScan(text) {
     const id = extractBookingId(text);
     if (!id) return { invalid: true };
+    if (!id) {
+      pushToast("Invalid code", "err");
+      return { invalid: true };
+    }
 
     // quick local check
     const alreadyLocal = !!(roster?.slots || [])
