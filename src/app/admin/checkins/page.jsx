@@ -401,13 +401,6 @@ function ScanModal({ open, onClose, onDetected }) {
     }
     return window.ZXing;
   }
-  useEffect(() => {
-    if (!open || !deviceId) return;
-    setTorchSupported(false);
-    setTorchOn(false);
-    startScanner();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceId]);
 
   async function startZXing() {
     setEngine("zxing");
@@ -438,6 +431,15 @@ function ScanModal({ open, onClose, onDetected }) {
       );
       controlsRef.current = controls;
       setStatus("Scanning…");
+      setTimeout(() => {
+        try {
+          const s = videoRef.current?.srcObject;
+          if (s) {
+            streamRef.current = s;
+            detectTorchSupport();
+          }
+        } catch {}
+      }, 150);
     } catch (e) {
       throw new Error(`ZXing init failed: ${e?.message || e}`);
     }
@@ -521,7 +523,9 @@ function ScanModal({ open, onClose, onDetected }) {
 
   useEffect(() => {
     if (!open || !deviceId) return;
-    // switch camera
+    setTorchSupported(false);
+    setTorchOn(false);
+    setTorchSupported(false);
     startScanner();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
