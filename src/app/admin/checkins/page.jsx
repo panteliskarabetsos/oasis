@@ -254,28 +254,39 @@ function ScanModal({ open, onClose, onDetected }) {
   }
 
   // Load ZXing via local pkg, ESM CDN, then UMD CDN (global window.ZXing)
+  // REPLACE your current loadZXing() with this:
   async function loadZXing() {
+    // 1) Prefer local package if you installed it (`npm i @zxing/browser`)
     try {
-      return await import("@zxing/browser"); // installed? great.
-    } catch (e1) {
-      try {
-        return await import(
-          "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm"
-        );
-      } catch (e2) {
-        await new Promise((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src =
-            "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js";
-          s.onload = () => resolve();
-          s.onerror = () =>
-            reject(new Error("Failed to load ZXing UMD from CDN"));
-          document.head.appendChild(s);
-        });
-        // @ts-ignore
-        return window.ZXing;
-      }
+      return await import("@zxing/browser");
+    } catch (_) {
+      // ignore, fall through to UMD
     }
+
+    // 2) Load UMD at runtime; no bundling, works across browsers
+    if (typeof window === "undefined") throw new Error("Client only");
+    if (window.ZXing && window.ZXing.BrowserMultiFormatReader)
+      return window.ZXing;
+
+    await new Promise((resolve, reject) => {
+      const id = "zxing-umd";
+      if (document.getElementById(id)) return resolve(); // already injected
+      const s = document.createElement("script");
+      s.id = id;
+      s.src =
+        "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js";
+      s.async = true;
+      s.crossOrigin = "anonymous";
+      s.referrerPolicy = "no-referrer";
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("Failed to load ZXing UMD from CDN"));
+      document.head.appendChild(s);
+    });
+
+    if (!window.ZXing || !window.ZXing.BrowserMultiFormatReader) {
+      throw new Error("ZXing UMD loaded but BrowserMultiFormatReader missing");
+    }
+    return window.ZXing;
   }
 
   async function startZXing() {
