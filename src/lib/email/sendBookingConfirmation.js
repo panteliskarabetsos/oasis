@@ -254,6 +254,8 @@ export default async function sendBookingConfirmation(opts = {}) {
         receiptUrl,
         qrValue: opts.qrValue || defaultQrUrl,
         fontDir: path.join(process.cwd(), "public", "fonts"), // <- explicit
+        logoUrl: path.join(process.cwd(), "public", "brand", "logo.png"),
+        brandName: "Oasis", // fallback text if the image can’t load
       });
 
       attachments.push({
