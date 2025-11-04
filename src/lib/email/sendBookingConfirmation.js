@@ -3,6 +3,9 @@ import "server-only";
 import { format } from "date-fns";
 import { getTransporter } from "./mailer";
 import Stripe from "stripe";
+
+import path from "node:path";
+import buildTicketPdfBuffer from "@/lib/pdf/buildTicket";
 /**
  * Env
  */
@@ -225,6 +228,46 @@ export default async function sendBookingConfirmation(opts = {}) {
     console.warn("[email] stripe artifacts error:", e?.message || e);
   }
 
+  /** -------------------- Custom Ticket PDF (experience + payment + QR) -------------------- */
+  if (opts.attachTicketPdf !== false) {
+    const appOrigin =
+      opts.appOrigin || process.env.APP_ORIGIN || "https://youroasis.gr";
+
+    const defaultQrUrl =
+      opts.checkinUrl ||
+      `${appOrigin}/bookings/${encodeURIComponent(
+        reference || bookingId || draft?.id || "ref"
+      )}`;
+
+    try {
+      const ticketPdfBuffer = await buildTicketPdfBuffer({
+        brand,
+        logoUrl,
+        experienceName: experience?.name || "Reservation",
+        location: experience?.location || "",
+        dateLabel,
+        timeLabel,
+        attendees,
+        amountLabel,
+        currency,
+        bookingRef: reference || String(bookingId ?? draft?.id ?? ""),
+        receiptUrl,
+        qrValue: opts.qrValue || defaultQrUrl,
+        fontDir: path.join(process.cwd(), "public", "fonts"), // <- explicit
+      });
+
+      attachments.push({
+        filename: `Booking-${
+          reference || bookingId || draft?.id || "ticket"
+        }.pdf`,
+        content: ticketPdfBuffer,
+        contentType: "application/pdf",
+      });
+    } catch (e) {
+      console.warn("[email] ticket pdf error:", e?.message || e);
+    }
+  }
+
   // Re-render HTML and text with receipt link / invoice note info
   const htmlFinal = renderConfirmationHtml({
     brand,
@@ -304,7 +347,7 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
   }
   const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 
-  // Always re-fetch the session to expand what we need
+  // Re-fetch the session to expand invoice + latest charge
   let sess = null;
   if (stripeSessionId) {
     try {
@@ -315,6 +358,7 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
       console.warn("[email] retrieve session failed:", e?.message || e);
     }
   }
+
   // Hosted receipt URL from PI/Charge
   let receiptUrl = null;
   async function receiptFromPI(idOrObj) {
@@ -325,6 +369,7 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
           })
         : idOrObj;
     if (!pi) return null;
+
     if (pi.latest_charge) {
       const ch =
         typeof pi.latest_charge === "string"
@@ -336,7 +381,11 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
   }
 
   if (sess?.payment_intent) {
-    receiptUrl = await receiptFromPI(sess.payment_intent);
+    try {
+      receiptUrl = await receiptFromPI(sess.payment_intent);
+    } catch (e) {
+      console.warn("[email] receipt from session PI failed:", e?.message || e);
+    }
   }
   if (!receiptUrl && stripePaymentIntentId) {
     try {
@@ -346,17 +395,21 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
     }
   }
 
-  // Invoice PDF (if you enabled invoice_creation at Checkout)
+  // Invoice PDF (if invoice_creation enabled at Checkout)
   let invoicePdfBuffer = null;
   let invoiceFilename = null;
   if (sess?.invoice) {
-    const inv =
-      typeof sess.invoice === "string"
-        ? await stripe.invoices.retrieve(sess.invoice)
-        : sess.invoice;
-    if (inv?.invoice_pdf) {
-      invoicePdfBuffer = await fetchPdfBuffer(inv.invoice_pdf);
-      invoiceFilename = inv?.number ? `${inv.number}.pdf` : undefined;
+    try {
+      const inv =
+        typeof sess.invoice === "string"
+          ? await stripe.invoices.retrieve(sess.invoice)
+          : sess.invoice;
+      if (inv?.invoice_pdf) {
+        invoicePdfBuffer = await fetchPdfBuffer(inv.invoice_pdf);
+        invoiceFilename = inv?.number ? `${inv.number}.pdf` : undefined;
+      }
+    } catch (e) {
+      console.warn("[email] retrieve invoice failed:", e?.message || e);
     }
   }
 
@@ -381,8 +434,8 @@ export function renderConfirmationHtml({
   receiptUrl,
   hasInvoicePdf,
   // NEW (optional):
-  calendarUrl,   // e.g. a Google Calendar template link
-  manageUrl,     // e.g. “Manage booking” link in your app
+  calendarUrl, // e.g. a Google Calendar template link
+  manageUrl, // e.g. “Manage booking” link in your app
 }) {
   const {
     text = "#2b2a28",
@@ -399,11 +452,19 @@ export function renderConfirmationHtml({
 
   const headKpis = [
     dateTime ? { label: "When", value: dateTime } : null,
-    attendees?.length ? { label: "Guests", value: String(attendees.length) } : null,
-    location ? {
-      label: "Location",
-      value: `<a href="https://maps.google.com/?q=${encodeURIComponent(location)}" style="color:${primary};text-decoration:none;border-bottom:1px solid ${primary}">${escapeHtml(location)}</a>`
-    } : null,
+    attendees?.length
+      ? { label: "Guests", value: String(attendees.length) }
+      : null,
+    location
+      ? {
+          label: "Location",
+          value: `<a href="https://maps.google.com/?q=${encodeURIComponent(
+            location
+          )}" style="color:${primary};text-decoration:none;border-bottom:1px solid ${primary}">${escapeHtml(
+            location
+          )}</a>`,
+        }
+      : null,
   ].filter(Boolean);
 
   const attendeesHtml = (attendees || []).length
@@ -412,24 +473,31 @@ export function renderConfirmationHtml({
           const zebra = i % 2 === 1 ? `background:${panel};` : "";
           return `
             <tr>
-              <td style="padding:8px 10px;border-bottom:1px solid ${border};${zebra}">${i + 1}</td>
-              <td style="padding:8px 10px;border-bottom:1px solid ${border};${zebra}">${escapeHtml(a?.name || "Guest")}</td>
+              <td style="padding:8px 10px;border-bottom:1px solid ${border};${zebra}">${
+            i + 1
+          }</td>
+              <td style="padding:8px 10px;border-bottom:1px solid ${border};${zebra}">${escapeHtml(
+            a?.name || "Guest"
+          )}</td>
             </tr>`;
         })
         .join("")
     : `<tr><td colspan="2" style="padding:10px;color:${subtext}">No attendee names on file</td></tr>`;
 
-  const totalsRows = (promoCode || discountLabel || subtotalLabel)
-    ? `
+  const totalsRows =
+    promoCode || discountLabel || subtotalLabel
+      ? `
       ${row("Promo code", promoCode || "-", border)}
       ${row("Subtotal", subtotalLabel || amountLabel || "", border)}
       ${row("Discount", discountLabel || "€0.00", border)}
       <tr>
         <td style="padding:10px;border-top:1px solid ${border}"><strong>Total</strong></td>
-        <td style="padding:10px;border-top:1px solid ${border}"><strong>${escapeHtml(amountLabel || "")}</strong></td>
+        <td style="padding:10px;border-top:1px solid ${border}"><strong>${escapeHtml(
+          amountLabel || ""
+        )}</strong></td>
       </tr>
     `
-    : row("Total", amountLabel || "", border);
+      : row("Total", amountLabel || "", border);
 
   return `
   <div style="margin:0;padding:0;background:${bg};color:${text};font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
@@ -453,7 +521,9 @@ export function renderConfirmationHtml({
                     <td align="left">
                       ${
                         logoUrl
-                          ? `<img src="${escapeHtml(logoUrl)}" alt="" height="28" style="display:block;border:0;outline:none;">`
+                          ? `<img src="${escapeHtml(
+                              logoUrl
+                            )}" alt="" height="28" style="display:block;border:0;outline:none;">`
                           : `<span style="font-weight:700;font-size:16px;color:${text};">Booking Confirmation</span>`
                       }
                     </td>
@@ -471,9 +541,15 @@ export function renderConfirmationHtml({
             <tr>
               <td style="padding:16px 20px 8px;">
                 <h1 style="margin:0 0 4px;font-size:20px;line-height:1.25;color:${text};">${
-                  experienceName ? escapeHtml(experienceName) : "Your reservation"
-                }</h1>
-                ${bookingRef ? `<div style="color:${subtext};font-size:13px;">Ref: ${escapeHtml(bookingRef)}</div>` : ""}
+    experienceName ? escapeHtml(experienceName) : "Your reservation"
+  }</h1>
+                ${
+                  bookingRef
+                    ? `<div style="color:${subtext};font-size:13px;">Ref: ${escapeHtml(
+                        bookingRef
+                      )}</div>`
+                    : ""
+                }
               </td>
             </tr>
 
@@ -484,12 +560,17 @@ export function renderConfirmationHtml({
                   <tr>
                     <td style="padding:8px 20px 4px;">
                       <table role="presentation" width="100%" style="border:1px solid ${border};border-radius:10px;background:${panel};">
-                        ${headKpis.map(k => `
+                        ${headKpis
+                          .map(
+                            (k) => `
                           <tr>
                             <td style="width:120px;padding:10px 12px;border-bottom:1px solid ${border};color:${subtext};font-size:12px;">${k.label}</td>
                             <td style="padding:10px 12px;border-bottom:1px solid ${border};font-size:14px;color:${text};">${k.value}</td>
                           </tr>
-                        `).join("").replace(/<\/tr>\s*$/,"</tr>")}
+                        `
+                          )
+                          .join("")
+                          .replace(/<\/tr>\s*$/, "</tr>")}
                       </table>
                     </td>
                   </tr>`
@@ -503,9 +584,24 @@ export function renderConfirmationHtml({
                   <tr>
                     <td colspan="2" style="padding:10px 12px;background:${panel};color:${subtext};font-weight:700;">Order summary</td>
                   </tr>
-                  ${experienceName ? row("Experience", experienceName, border) : ""}
-                  ${location ? rowHtml("Location",
-                    `<a href="https://maps.google.com/?q=${encodeURIComponent(location)}" style="color:${primary};text-decoration:none;border-bottom:1px solid ${primary}">${escapeHtml(location)}</a>`, border) : ""}
+                  ${
+                    experienceName
+                      ? row("Experience", experienceName, border)
+                      : ""
+                  }
+                  ${
+                    location
+                      ? rowHtml(
+                          "Location",
+                          `<a href="https://maps.google.com/?q=${encodeURIComponent(
+                            location
+                          )}" style="color:${primary};text-decoration:none;border-bottom:1px solid ${primary}">${escapeHtml(
+                            location
+                          )}</a>`,
+                          border
+                        )
+                      : ""
+                  }
                   ${dateTime ? row("Date", dateTime, border) : ""}
                   ${totalsRows}
                 </table>
@@ -518,12 +614,38 @@ export function renderConfirmationHtml({
                 ? `
                 <tr>
                   <td style="padding:4px 20px 14px;">
-                    ${calendarUrl ? cta(calendarUrl, "Add to calendar", primary) : ""}
-                    ${receiptUrl ? cta(receiptUrl, "View Stripe receipt", "#3f382f", border, panel) : ""}
-                    ${manageUrl ? cta(manageUrl, "Manage booking", "#3f382f", border, panel) : ""}
+                    ${
+                      calendarUrl
+                        ? cta(calendarUrl, "Add to calendar", primary)
+                        : ""
+                    }
+                    ${
+                      receiptUrl
+                        ? cta(
+                            receiptUrl,
+                            "View Stripe receipt",
+                            "#3f382f",
+                            border,
+                            panel
+                          )
+                        : ""
+                    }
+                    ${
+                      manageUrl
+                        ? cta(
+                            manageUrl,
+                            "Manage booking",
+                            "#3f382f",
+                            border,
+                            panel
+                          )
+                        : ""
+                    }
                     <div style="margin-top:8px;color:${subtext};font-size:12px;">
                       A calendar invite (.ics) is attached.${
-                        hasInvoicePdf ? " We\u2019ve also attached your invoice PDF." : ""
+                        hasInvoicePdf
+                          ? " We\u2019ve also attached your invoice PDF."
+                          : ""
                       }
                     </div>
                   </td>
@@ -533,7 +655,9 @@ export function renderConfirmationHtml({
                   <td style="padding:4px 20px 14px;">
                     <div style="color:${subtext};font-size:12px;">
                       A calendar invite (.ics) is attached.${
-                        hasInvoicePdf ? " We\u2019ve also attached your invoice PDF." : ""
+                        hasInvoicePdf
+                          ? " We\u2019ve also attached your invoice PDF."
+                          : ""
                       }
                     </div>
                   </td>
@@ -560,9 +684,9 @@ export function renderConfirmationHtml({
               <td style="padding:14px 20px;border-top:1px solid ${border}">
                 <div style="color:${subtext};font-size:12px;line-height:18px;">
                   Questions? Reply to this email.
-                  <br/>© ${new Date().getFullYear()} ${
-                    escapeHtml((experienceName || "Our venue").replace(/<[^>]*>/g,""))
-                  }.
+                  <br/>© ${new Date().getFullYear()} ${escapeHtml(
+    (experienceName || "Our venue").replace(/<[^>]*>/g, "")
+  )}.
                 </div>
               </td>
             </tr>
@@ -576,25 +700,42 @@ export function renderConfirmationHtml({
 /* small helpers used above */
 function row(label, value, border = "#efeae1") {
   return `<tr>
-    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(label)}</strong></td>
-    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${escapeHtml(value || "")}</td>
+    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(
+    label
+  )}</strong></td>
+    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${escapeHtml(
+    value || ""
+  )}</td>
   </tr>`;
 }
 function rowHtml(label, html, border = "#efeae1") {
   return `<tr>
-    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(label)}</strong></td>
-    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${html || ""}</td>
+    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(
+    label
+  )}</strong></td>
+    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${
+    html || ""
+  }</td>
   </tr>`;
 }
 function cta(href, label, bg = "#8b6f47", border = "transparent", fgPanel) {
   const styles = `display:inline-block;margin:6px 8px 0 0;padding:11px 16px;border-radius:10px;border:1px solid ${border};background:${bg};color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;line-height:20px;`;
   const onPanel = fgPanel ? `background:${fgPanel};color:#2b2a28;` : "";
-  return `<a href="${href}" target="_blank" style="${fgPanel ? styles.replace(`background:${bg};color:#ffffff;`, onPanel + `border:1px solid ${border};`) : styles}">${escapeHtml(label)} →</a>`;
+  return `<a href="${href}" target="_blank" style="${
+    fgPanel
+      ? styles.replace(
+          `background:${bg};color:#ffffff;`,
+          onPanel + `border:1px solid ${border};`
+        )
+      : styles
+  }">${escapeHtml(label)} →</a>`;
 }
 function escapeHtml(s = "") {
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
-
 
 function renderTextFallback({
   experienceName,
