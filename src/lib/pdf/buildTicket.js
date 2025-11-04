@@ -597,15 +597,28 @@ export default async function buildTicketPdfBuffer(args = {}) {
     // ================= FOOTER =================
     doc.moveDown(1);
 
-    // Clamp footer into remaining space instead of forcing a new page
-    const needed = 36; // approx space the footer needs
+    // Measure exactly how much space the footer needs
+    const note =
+      "Present this PDF or the QR code at check-in. For changes or questions, reply to the confirmation email.";
+    const noteX = M + 24;
+    const noteW = rightEdge - noteX;
+
+    // set the font BEFORE measuring
+    doc.font("Body").fontSize(FS.small);
+    const noteH = doc.heightOfString(note, { width: noteW });
+    const pageNumH = doc.currentLineHeight();
+    const hrGap = 8;
+
+    // Clamp footer into the current page so it never creates a new one
+    const needed = hrGap + noteH + pageNumH;
     let footY = doc.y + 6;
     if (footY + needed > pageBottom()) {
-      footY = pageBottom() - needed; // pull footer up, no new page
+      footY = pageBottom() - needed; // pull the footer up instead of adding a page
     }
 
+    // draw the footer
     hr(footY);
-    footY += 8;
+    footY += hrGap;
 
     // mini mark (logo or dot)
     if (logoBuf) {
@@ -621,18 +634,14 @@ export default async function buildTicketPdfBuffer(args = {}) {
         .restore();
     }
 
+    // note text (safe: we already reserved noteH space)
     doc
       .font("Body")
       .fontSize(FS.small)
       .fillColor(subtext)
-      .text(
-        "Present this PDF or the QR code at check-in. For changes or questions, reply to the confirmation email.",
-        M + 24,
-        footY,
-        { width: rightEdge - (M + 24) }
-      );
+      .text(note, noteX, footY, { width: noteW });
 
-    // Absolute positioning: won't push content or create a new page
+    // absolute page number; no line break => cannot trigger a new page
     doc
       .font("Body")
       .fontSize(FS.small)
@@ -640,6 +649,8 @@ export default async function buildTicketPdfBuffer(args = {}) {
       .text("Page 1", rightEdge - 70, doc.page.height - M - 8, {
         width: 60,
         align: "right",
+        lineBreak: false,
+        height: pageNumH,
       });
 
     doc.end();
