@@ -20,6 +20,7 @@ export default async function buildTicketPdfBuffer(args = {}) {
     receiptUrl,
     qrValue,
     fontDir, // optional override
+    statusLabel = "CONFIRMED",
   } = args;
 
   const {
@@ -30,10 +31,9 @@ export default async function buildTicketPdfBuffer(args = {}) {
     panel = "#fcfbf8",
   } = brand || {};
 
-  // ---------- Resolve font paths and read BEFORE new PDFDocument ----------
+  // ---------- Resolve fonts BEFORE creating the PDF ----------
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
-
   const candidates = [
     fontDir,
     path.join(process.cwd(), "public", "fonts"),
@@ -59,20 +59,17 @@ export default async function buildTicketPdfBuffer(args = {}) {
   const regularBuf = fs.readFileSync(path.join(base, "Inter-Regular.ttf"));
   const boldBuf = fs.readFileSync(path.join(base, "Inter-Bold.ttf"));
 
-  // ---------- Precompute QR (async) ----------
+  // ---------- Precompute QR ----------
   let qrImgBuf = null;
   try {
     const dataUrl = await QRCode.toDataURL(
       qrValue || String(bookingRef || "booking"),
-      {
-        margin: 0,
-        scale: 8,
-      }
+      { margin: 0, scale: 8 }
     );
     qrImgBuf = Buffer.from(dataUrl.split(",")[1], "base64");
   } catch {}
 
-  // ---------- Create doc with our TTF as the initial font ----------
+  // ---------- Create doc ----------
   const doc = new PDFDocument({ size: "A4", margin: 36, font: regularBuf });
 
   const chunks = [];
@@ -81,113 +78,235 @@ export default async function buildTicketPdfBuffer(args = {}) {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    // Register fonts and aliases (so any stray 'Helvetica' never hits AFM files)
+    // Fonts
     doc.registerFont("Body", regularBuf);
     doc.registerFont("Body-Bold", boldBuf);
     doc.registerFont("Helvetica", regularBuf);
     doc.registerFont("Helvetica-Bold", boldBuf);
-
-    // Use our font from here on
-    // Use our font from here on
     doc.font("Body");
 
-    // ---------- helpers ----------
+    // ---------- layout helpers ----------
+    const margin = 36;
+    const pageBottom = () => doc.page.height - margin;
+    const rightEdge = doc.page.width - margin;
+
+    function ensureSpace(h, extraGap = 10) {
+      if (doc.y + h > pageBottom()) {
+        doc.addPage();
+        doc.font("Body");
+        doc.y = margin;
+      } else {
+        doc.moveDown(extraGap / 12);
+      }
+    }
+
+    function divider(y) {
+      doc
+        .moveTo(margin, y)
+        .lineTo(rightEdge, y)
+        .strokeColor(border)
+        .lineWidth(1)
+        .stroke();
+    }
+
+    function dashedPerforation(y) {
+      doc
+        .save()
+        .dash(3, { space: 4 })
+        .moveTo(margin, y)
+        .lineTo(rightEdge, y)
+        .strokeColor(border)
+        .lineWidth(1)
+        .stroke()
+        .undash();
+      const r = 6;
+      doc.circle(margin, y, r).fill("#ffffff");
+      doc.circle(rightEdge, y, r).fill("#ffffff");
+      doc.restore();
+    }
+
     function chip(txt, x, y, { bg = panel, fg = primary } = {}) {
       const padX = 10,
-        padY = 6;
-      const w = doc.widthOfString(txt) + padX * 2;
-      const h = 22;
+        padY = 6,
+        h = 22,
+        w = doc.widthOfString(txt) + padX * 2;
       doc
         .save()
         .roundedRect(x, y, w, h, 8)
         .fill(bg)
         .fillColor(fg)
         .font("Body-Bold")
-        .fontSize(11)
+        .fontSize(10.5)
         .text(txt, x + padX, y + padY - 2)
         .restore();
       return { w, h };
     }
-    function sectionTitle(txt, x, y) {
-      doc.font("Body-Bold").fontSize(13).fillColor(subtext).text(txt, x, y);
-      return doc.y;
+
+    function statusColors(status = "CONFIRMED") {
+      const s = String(status).toUpperCase();
+      if (s === "CANCELLED") return { bg: "#fdecec", fg: "#c03636" };
+      if (s === "PENDING") return { bg: "#fff6e5", fg: "#a15d00" };
+      if (s === "RESCHEDULED") return { bg: "#eef6ff", fg: "#1b63a6" };
+      return { bg: panel, fg: primary };
     }
-    function labelValue(label, value, xLabel, xValue, y, width = 240) {
+
+    function labelValueHeight(
+      value,
+      labelSize = 10,
+      valueSize = 12,
+      width = 260
+    ) {
+      doc.font("Body-Bold").fontSize(labelSize);
+      const labelH = doc.currentLineHeight();
+      doc.font("Body").fontSize(valueSize);
+      const valueH = doc.heightOfString(String(value ?? ""), { width });
+      return Math.ceil(labelH + 4 + valueH);
+    }
+
+    function drawLabelValue(
+      label,
+      value,
+      x,
+      y,
+      width = 260,
+      labelSize = 10,
+      valueSize = 12
+    ) {
+      doc
+        .font("Body-Bold")
+        .fontSize(labelSize)
+        .fillColor(subtext)
+        .text(label, x, y);
+      doc
+        .font("Body")
+        .fontSize(valueSize)
+        .fillColor(text)
+        .text(String(value ?? "-"), x, y + doc.currentLineHeight() + 2, {
+          width,
+        });
+      return Math.max(
+        doc.y,
+        y + labelValueHeight(value, labelSize, valueSize, width)
+      );
+    }
+
+    function buttonLink(txt, url, x, y) {
+      const padX = 12,
+        padY = 7,
+        h = 26,
+        w = Math.max(80, doc.widthOfString(txt) + padX * 2);
+      doc
+        .save()
+        .roundedRect(x, y, w, h, 8)
+        .fill(primary)
+        .fillColor("#ffffff")
+        .font("Body-Bold")
+        .fontSize(10.5)
+        .text(txt, x + padX, y + padY - 3, { link: url })
+        .restore();
+      return { w, h };
+    }
+
+    function sectionTitle(txt, x, y) {
       doc
         .font("Body-Bold")
         .fontSize(12)
         .fillColor(subtext)
-        .text(label, xLabel, y);
-      doc
-        .font("Body")
-        .fontSize(13)
-        .fillColor(text)
-        .text(value, xValue, y + 16, { width });
-    }
-    function divider(y) {
-      doc
-        .moveTo(36, y)
-        .lineTo(rightEdge, y)
-        .strokeColor(border)
-        .lineWidth(1)
-        .stroke();
-    }
-    function dashedPerforation(y) {
-      doc
-        .save()
-        .dash(3, { space: 4 })
-        .moveTo(36, y)
-        .lineTo(rightEdge, y)
-        .strokeColor(border)
-        .lineWidth(1)
-        .stroke()
-        .undash();
-      // notch “cutouts”
-      const r = 6;
-      doc.circle(36, y, r).fill("#ffffff");
-      doc.circle(rightEdge, y, r).fill("#ffffff");
-      doc.restore();
+        .text(String(txt).toUpperCase(), x, y, { characterSpacing: 0.2 });
+      return doc.y;
     }
 
-    // ---------- header band ----------
+    function formatCurrencySafe(value, curr = currency) {
+      try {
+        const num = Number(
+          String(value ?? "")
+            .replace(/[^\d.,-]/g, "")
+            .replace(",", ".")
+        );
+        if (Number.isFinite(num)) {
+          return new Intl.NumberFormat("en-GB", {
+            style: "currency",
+            currency: curr || "EUR",
+            minimumFractionDigits: 2,
+          }).format(num);
+        }
+        return String(value ?? "-");
+      } catch {
+        return String(value ?? "-");
+      }
+    }
+
+    // ---------- Header band ----------
+    const bandTop = margin;
+    const bandPad = 14;
+    const bandHeight = 64;
+
     doc
-      .rect(36, 36, doc.page.width - 72, 6)
-      .fill(primary)
-      .fillColor(text);
+      .save()
+      .roundedRect(margin, bandTop, rightEdge - margin, bandHeight, 12)
+      .fill(panel)
+      .restore();
+    doc
+      .moveTo(margin, bandTop + bandHeight)
+      .lineTo(rightEdge, bandTop + bandHeight)
+      .strokeColor(border)
+      .lineWidth(1)
+      .stroke();
 
-    const yStart = 56;
+    let yCursor = bandTop + bandPad;
 
-    // logo / title
     try {
       if (logoUrl) {
-        doc.image(logoUrl, 36, yStart, { width: 120 }).fillColor(text);
+        doc
+          .image(logoUrl, margin + bandPad, yCursor - 4, { width: 120 })
+          .fillColor(text);
       } else {
         doc
           .font("Body-Bold")
-          .fontSize(16)
+          .fontSize(15)
           .fillColor(text)
-          .text("Booking Confirmation", 36, yStart);
+          .text("Booking Confirmation", margin + bandPad, yCursor);
       }
     } catch {
       doc
         .font("Body-Bold")
-        .fontSize(16)
+        .fontSize(15)
         .fillColor(text)
-        .text("Booking Confirmation", 36, yStart);
+        .text("Booking Confirmation", margin + bandPad, yCursor);
     }
 
-    // status chip
-    const chipXY = { x: 36, y: yStart + 28 };
-    chip("CONFIRMED", chipXY.x, chipXY.y);
+    if (bookingRef) {
+      doc
+        .font("Body")
+        .fontSize(10.5)
+        .fillColor(subtext)
+        .text(`Reference: ${bookingRef}`, rightEdge - 220, yCursor + 2, {
+          width: 200,
+          align: "right",
+        });
+    }
 
-    // QR block (right side, framed)
+    const { bg: statusBg, fg: statusFg } = statusColors(statusLabel);
+    const chipX = margin + bandPad;
+    const chipY = bandTop + bandHeight - bandPad - 22;
+    chip(String(statusLabel).toUpperCase(), chipX, chipY, {
+      bg: statusBg,
+      fg: statusFg,
+    });
+
+    // ---------- Hero area ----------
+    const heroTop = bandTop + bandHeight + 14;
+    const qrSize = qrImgBuf ? 150 : 0;
+    const qrCardPad = 14;
+    const qrCardW = qrSize ? qrSize + qrCardPad * 2 : 0;
+    const qrCardH = qrSize ? qrSize + qrCardPad * 2 + 36 : 0; // caption space
+    const qrX = qrSize ? rightEdge - qrSize - qrCardPad - 10 : 0;
+    const qrY = heroTop;
+
     if (qrImgBuf) {
-      const qrSize = 150;
-      const qrX = doc.page.width - 36 - qrSize;
-      const qrY = yStart;
       doc
         .save()
-        .roundedRect(qrX - 10, qrY - 10, qrSize + 20, qrSize + 36, 12)
+        .roundedRect(qrX - qrCardPad, qrY - qrCardPad, qrCardW, qrCardH, 14)
         .fill(panel)
         .strokeColor(border)
         .lineWidth(1)
@@ -196,118 +315,192 @@ export default async function buildTicketPdfBuffer(args = {}) {
         .font("Body")
         .fontSize(10)
         .fillColor(subtext)
-        .text("Scan at check-in", qrX - 6, qrY + qrSize + 8, {
+        .text("Scan at check-in", qrX - 6, qrY + qrSize + 10, {
           width: qrSize + 12,
           align: "center",
         })
         .restore();
     }
 
-    const rightEdge = doc.page.width - 36;
+    const gutter = 18;
+    const leftColRight = qrImgBuf ? qrX - gutter : rightEdge;
+    const leftColWidth = leftColRight - margin;
 
-    // title & reference
+    // Title in left column
     doc
       .font("Body-Bold")
       .fontSize(22)
       .fillColor(text)
-      .text(experienceName || "Your reservation", 36, chipXY.y + 28, {
-        width: rightEdge - 36 - 160,
+      .text(experienceName || "Your reservation", margin, heroTop, {
+        width: leftColWidth,
+        lineGap: 2,
       });
-    if (bookingRef) {
-      doc
-        .font("Body")
-        .fontSize(12)
-        .fillColor(subtext)
-        .text(`Reference: ${bookingRef}`, 36, doc.y + 6);
-    }
 
-    // ---------- details card ----------
-    doc.moveDown(0.6);
-    const cardTop = doc.y + 6;
-    const cardHeight = 110;
+    // ----- Details card (dynamic height) -----
+    const whenText = [dateLabel, timeLabel ? `, ${timeLabel}` : ""]
+      .filter(Boolean)
+      .join("");
+    const whereText = location || "-";
+
+    const whenH = labelValueHeight(whenText, 10, 12, leftColWidth - 24);
+    const whereH = labelValueHeight(whereText, 10, 12, leftColWidth - 24);
+    const detailsInnerPad = 12;
+    const detailsH = detailsInnerPad + whenH + 8 + whereH + detailsInnerPad;
+
+    const detailsTop = Math.max(doc.y + 6, heroTop + 58);
+    ensureSpace(detailsH);
+
     doc
-      .roundedRect(36, cardTop, rightEdge - 36, cardHeight, 12)
+      .roundedRect(margin, detailsTop, leftColWidth, detailsH, 12)
       .fill(panel)
       .fillColor(text);
 
-    let cursorY = cardTop + 12;
-    labelValue(
+    let dy = detailsTop + detailsInnerPad;
+    dy = drawLabelValue(
       "When",
-      [dateLabel, timeLabel ? `, ${timeLabel}` : ""].filter(Boolean).join(""),
-      48,
-      48,
-      cursorY,
-      260
+      whenText || "-",
+      margin + 12,
+      dy,
+      leftColWidth - 24,
+      10,
+      12
     );
-    labelValue("Location", location || "-", 300, 300, cursorY, rightEdge - 316);
+    dy += 8;
+    dy = drawLabelValue(
+      "Where",
+      whereText,
+      margin + 12,
+      dy,
+      leftColWidth - 24,
+      10,
+      12
+    );
 
-    // ---------- perforation ----------
-    const perfY = cardTop + cardHeight + 18;
+    if (location) {
+      const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        location
+      )}`;
+      buttonLink(
+        "Open in Maps →",
+        mapUrl,
+        margin + 12,
+        detailsTop + detailsH - detailsInnerPad - 26
+      );
+    }
+
+    const detailsBottom = detailsTop + detailsH;
+    const qrBottom = qrImgBuf ? qrY + qrCardH : detailsBottom;
+
+    // ---------- Perforation ----------
+    const perfY = Math.max(detailsBottom, qrBottom) + 18;
     dashedPerforation(perfY);
 
-    // ---------- order summary ----------
-    let y = perfY + 16;
-    y = sectionTitle("Order Summary", 36, y) + 6;
+    // ---------- Order Summary ----------
+    let y = perfY + 18;
+    y = sectionTitle("Order Summary", margin, y) + 6;
 
-    const rowHeight = 20;
     function row(label, value, emphasize = false) {
+      const rH = 20;
+      ensureSpace(rH, 0);
       doc
         .font(emphasize ? "Body-Bold" : "Body")
         .fontSize(emphasize ? 13 : 12)
         .fillColor(emphasize ? text : subtext)
-        .text(label, 36, y, { width: 150 });
+        .text(label, margin, y, { width: 150 });
+
       doc
         .font(emphasize ? "Body-Bold" : "Body")
         .fillColor(text)
-        .text(value, 200, y, { width: rightEdge - 200, align: "left" });
-      y += rowHeight;
+        .text(value, margin + 164, y, {
+          width: rightEdge - (margin + 164),
+          align: "left",
+        });
+
+      y += rH;
+      doc.y = y;
     }
 
     row("Experience", experienceName || "-");
-    row(
-      "Date",
-      [dateLabel, timeLabel ? `, ${timeLabel}` : ""].filter(Boolean).join("")
-    );
-    // subtle divider
+    row("Date", whenText || "-");
+
     divider(y - 6);
-    y += 4;
+    y += 6;
+    doc.y = y;
 
     if (receiptUrl) {
       row("Receipt", receiptUrl);
-      doc
-        .fillColor(primary)
-        .text("Open receipt →", 200, y - rowHeight, {
-          link: receiptUrl,
-          underline: true,
-        })
-        .fillColor(text);
+      buttonLink("Open receipt →", receiptUrl, margin + 164, y - 22);
     }
 
-    row(
-      "Total",
-      `${amountLabel || "-"}${currency ? ` (${currency})` : ""}`,
-      true
-    );
+    const totalPretty = formatCurrencySafe(amountLabel, currency);
+    row("Total", `${totalPretty}${currency ? ` (${currency})` : ""}`, true);
 
-    // ---------- attendees ----------
-    y += 10;
-    y = sectionTitle("Attendees", 36, y) + 8;
+    // ---------- Attendees ----------
+    y += 12;
+    y = sectionTitle("Attendees", margin, y) + 8;
+    doc.y = y;
 
-    if (!attendees.length) {
-      doc
-        .font("Body")
-        .fontSize(12)
-        .fillColor(text)
-        .text("No attendee names on file.", 36, y);
-      y += rowHeight;
-    } else {
-      const startTableY = y;
-      attendees.forEach((a, i) => {
+    const rowHeight = 20;
+
+    const drawAttendeesBatch = (fromIdx) => {
+      const startY = doc.y;
+      let tableTop = startY;
+      let localY = startY;
+      let i = fromIdx;
+
+      if (!attendees.length && fromIdx === 0) {
+        ensureSpace(rowHeight, 0);
+        doc
+          .font("Body")
+          .fontSize(12)
+          .fillColor(text)
+          .text("No attendee names on file.", margin, localY);
+        localY += rowHeight;
+        doc
+          .roundedRect(
+            margin,
+            tableTop - 6,
+            rightEdge - margin,
+            localY - tableTop + 12,
+            8
+          )
+          .strokeColor(border)
+          .lineWidth(1)
+          .stroke();
+        doc.y = localY;
+        return 0;
+      }
+
+      const frameWidth = rightEdge - margin;
+      while (i < attendees.length) {
+        if (localY + rowHeight > pageBottom()) {
+          if (localY > tableTop) {
+            doc
+              .roundedRect(
+                margin,
+                tableTop - 6,
+                frameWidth,
+                localY - tableTop + 12,
+                8
+              )
+              .strokeColor(border)
+              .lineWidth(1)
+              .stroke();
+          }
+          doc.addPage();
+          doc.font("Body");
+          tableTop = doc.y = margin;
+          localY = tableTop;
+          sectionTitle("Attendees (cont.)", margin, localY);
+          localY = doc.y + 8;
+          tableTop = localY;
+        }
+
         const zebra = i % 2 === 1;
         if (zebra) {
           doc
             .save()
-            .rect(36, y - 2, rightEdge - 36, rowHeight)
+            .rect(margin, localY - 2, frameWidth, rowHeight)
             .fill(panel)
             .restore();
         }
@@ -315,42 +508,63 @@ export default async function buildTicketPdfBuffer(args = {}) {
           .font("Body")
           .fontSize(12)
           .fillColor(subtext)
-          .text(String(i + 1).padStart(2, "0"), 36, y, { width: 30 });
+          .text(String(i + 1).padStart(2, "0"), margin, localY, { width: 30 });
         doc
           .font("Body")
           .fontSize(12)
           .fillColor(text)
-          .text(a?.name || "Guest", 74, y);
-        y += rowHeight;
-      });
-      // frame the table subtly
-      doc
-        .roundedRect(
-          36,
-          startTableY - 6,
-          rightEdge - 36,
-          y - startTableY + 12,
-          8
-        )
-        .strokeColor(border)
-        .lineWidth(1)
-        .stroke();
-    }
+          .text(attendees[i]?.name || "Guest", margin + 36, localY, {
+            width: frameWidth - 36,
+          });
+        localY += rowHeight;
+        i++;
+      }
 
-    // ---------- footer ----------
-    y += 16;
-    divider(y);
-    y += 10;
+      if (localY > tableTop) {
+        doc
+          .roundedRect(
+            margin,
+            tableTop - 6,
+            frameWidth,
+            localY - tableTop + 12,
+            8
+          )
+          .strokeColor(border)
+          .lineWidth(1)
+          .stroke();
+      }
+      doc.y = localY;
+      return i - fromIdx;
+    };
+
+    drawAttendeesBatch(0);
+
+    // ---------- Footer ----------
+    doc.moveDown(1);
+    let footY = doc.y + 6;
+    ensureSpace(40, 0);
+    divider(footY);
+    footY += 10;
+
     doc
       .font("Body")
       .fontSize(10)
       .fillColor(subtext)
       .text(
         "Present this PDF or the QR code at check-in. For changes or questions, reply to the confirmation email.",
-        36,
-        y,
-        { width: rightEdge - 36 }
+        margin,
+        footY,
+        { width: rightEdge - margin }
       );
+
+    doc
+      .font("Body")
+      .fontSize(9)
+      .fillColor(subtext)
+      .text("Page 1", rightEdge - 80, doc.page.height - margin - 10, {
+        width: 70,
+        align: "right",
+      });
 
     doc.end();
   });
