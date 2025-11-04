@@ -242,7 +242,6 @@ export default async function sendBookingConfirmation(opts = {}) {
     try {
       const ticketPdfBuffer = await buildTicketPdfBuffer({
         brand,
-        logoUrl,
         experienceName: experience?.name || "Reservation",
         location: experience?.location || "",
         dateLabel,

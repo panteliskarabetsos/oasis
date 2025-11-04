@@ -471,16 +471,17 @@ export default async function buildTicketPdfBuffer(args = {}) {
     row("Date", whenText || "-");
 
     // receipt as pill
+    // --- Order Summary rows above ---
     if (receiptUrl) {
-      const pillX = M + osPad + labelColW + 10;
-      const pillY = y - 18;
-      doc
-        .font("Body")
-        .fontSize(FS.body - 0.5)
-        .fillColor(subtext)
-        .text("Receipt", M + osPad, y - 18);
-      pillLink("Open receipt", receiptUrl, pillX, pillY);
-      y += 12;
+      // keep the label column aligned, but don't print the raw URL
+      row("Receipt", "");
+
+      // draw a compact pill button inside the value column
+      const pillX = M + 160; // start of value column (matches your row() layout)
+      const pillY = y - 18; // baseline-align with the row
+      pillLink("View invoice", receiptUrl, pillX, pillY);
+
+      y += 6; // a touch of breathing room under the pill
       doc.y = y;
     }
 
@@ -593,18 +594,23 @@ export default async function buildTicketPdfBuffer(args = {}) {
       doc.y = localY;
     }
 
-    // =============== FOOTER (clamped) ===============
+    // ================= FOOTER =================
     doc.moveDown(1);
-    const needed = 36;
+
+    // Clamp footer into remaining space instead of forcing a new page
+    const needed = 36; // approx space the footer needs
     let footY = doc.y + 6;
     if (footY + needed > pageBottom()) {
-      footY = pageBottom() - needed;
+      footY = pageBottom() - needed; // pull footer up, no new page
     }
+
     hr(footY);
     footY += 8;
+
+    // mini mark (logo or dot)
     if (logoBuf) {
       try {
-        doc.image(logoBuf, M, footY - 1, { height: 14 });
+        doc.image(logoBuf, M, footY - 2, { height: 14 });
       } catch {}
     } else {
       doc
@@ -614,6 +620,7 @@ export default async function buildTicketPdfBuffer(args = {}) {
         .fill()
         .restore();
     }
+
     doc
       .font("Body")
       .fontSize(FS.small)
@@ -624,6 +631,8 @@ export default async function buildTicketPdfBuffer(args = {}) {
         footY,
         { width: rightEdge - (M + 24) }
       );
+
+    // Absolute positioning: won't push content or create a new page
     doc
       .font("Body")
       .fontSize(FS.small)
