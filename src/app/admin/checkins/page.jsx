@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   QrCode,
   Search,
@@ -10,12 +11,17 @@ import {
   XCircle,
   RotateCcw,
   AlertTriangle,
-  Flashlight,
   Camera,
   CameraOff,
+  Flashlight,
   Check,
+  User,
+  Users,
 } from "lucide-react";
 
+/* ------------------------------------------------------------
+   Utilities
+-------------------------------------------------------------*/
 /** Format Date -> YYYY-MM-DD in Europe/Athens */
 function formatDayTZ(d = new Date(), tz = "Europe/Athens") {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -30,20 +36,38 @@ function formatDayTZ(d = new Date(), tz = "Europe/Athens") {
 function clsx(...xs) {
   return xs.filter(Boolean).join(" ");
 }
-function Badge({ tone = "slate", children }) {
+
+/* ------------------------------------------------------------
+   Design Tokens (soft, ambient palette)
+-------------------------------------------------------------*/
+const colors = {
+  card: "bg-white/80 border border-[#e6dfd6] backdrop-blur",
+  soft: "bg-[#f4f1ec]",
+  accent: "#8b6f47",
+  border: "#e6dfd6",
+  text: "#5a4a3f",
+  sub: "#7a6a5f",
+};
+
+/* ------------------------------------------------------------
+   Badges & small UI atoms
+-------------------------------------------------------------*/
+function Badge({ tone = "slate", children, className = "" }) {
   const tones = {
     slate: "bg-slate-100 text-slate-700 border-slate-200",
     green: "bg-green-100 text-green-700 border-green-200",
-    amber: "bg-amber-100 text-amber-800 border-amber-200",
+    amber: "bg-amber-100 text-amber-900 border-amber-200",
     red: "bg-red-100 text-red-700 border-red-200",
     sky: "bg-sky-100 text-sky-700 border-sky-200",
     violet: "bg-violet-100 text-violet-700 border-violet-200",
+    blue: "bg-blue-100 text-blue-700 border-blue-200",
   };
   return (
     <span
       className={clsx(
         "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border",
-        tones[tone] || tones.slate
+        tones[tone] || tones.slate,
+        className
       )}
     >
       {children}
@@ -52,16 +76,24 @@ function Badge({ tone = "slate", children }) {
 }
 function StatusBadge({ status }) {
   const s = (status || "").toLowerCase();
-  if (s === "checked_in") return <Badge tone="green">Checked-in</Badge>;
+  if (s === "checked_in") return <Badge tone="green">Checked‑in</Badge>;
   if (s === "completed") return <Badge tone="violet">Completed</Badge>;
-  if (s === "approved") return <Badge tone="sky">Approved</Badge>;
-  if (s === "converted") return <Badge tone="sky">Converted</Badge>;
+  if (s === "approved" || s === "converted")
+    return <Badge tone="sky">Approved</Badge>;
   if (s === "pending") return <Badge tone="amber">Pending</Badge>;
   if (s === "no_show" || s === "noshow")
-    return <Badge tone="red">No-show</Badge>;
+    return <Badge tone="red">No‑show</Badge>;
   if (s === "cancelled") return <Badge tone="red">Cancelled</Badge>;
   return <Badge>Confirmed</Badge>;
 }
+function Kbd({ children }) {
+  return (
+    <kbd className="px-1.5 py-0.5 rounded-md border border-slate-300 text-[10px] font-mono bg-white/70">
+      {children}
+    </kbd>
+  );
+}
+
 function partySize(b) {
   if (typeof b?.numberOfPeople === "number" && !Number.isNaN(b.numberOfPeople))
     return b.numberOfPeople;
@@ -79,10 +111,12 @@ function contactName(pc) {
   return "—";
 }
 
-/* ---------------------------- Toasts ---------------------------- */
+/* ------------------------------------------------------------
+   Toasts (animated)
+-------------------------------------------------------------*/
 function useToasts() {
   const [toasts, setToasts] = useState([]);
-  function pushToast(msg, tone = "default", ms = 2200) {
+  function pushToast(msg, tone = "default", ms = 2400) {
     const id = Math.random().toString(36).slice(2);
     setToasts((t) => [...t, { id, msg, tone }]);
     if (ms)
@@ -96,32 +130,46 @@ function useToasts() {
 }
 function Toasts({ toasts, remove }) {
   return (
-    <div className="fixed top-3 right-3 z-50 space-y-2">
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          className={clsx(
-            "rounded-xl px-3 py-2 text-sm shadow border backdrop-blur bg-white/90 flex items-center gap-2",
-            t.tone === "ok" && "border-green-200 text-green-800",
-            t.tone === "err" && "border-red-200 text-red-700",
-            (!t.tone || t.tone === "default") &&
-              "border-[#e6dfd6] text-[#5a4a3f]"
-          )}
-          onClick={() => remove(t.id)}
-        >
-          {t.tone === "ok" ? (
-            <Check size={14} />
-          ) : t.tone === "err" ? (
-            <AlertTriangle size={14} />
-          ) : null}
-          <span>{t.msg}</span>
-        </div>
-      ))}
+    <div className="fixed top-3 right-3 z-[60] space-y-2" aria-live="polite">
+      <AnimatePresence>
+        {toasts.map((t) => (
+          <motion.div
+            key={t.id}
+            initial={{ opacity: 0, y: -8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{
+              type: "spring",
+              stiffness: 400,
+              damping: 30,
+              mass: 0.6,
+            }}
+            role="status"
+            className={clsx(
+              "rounded-xl px-3 py-2 text-sm shadow border backdrop-blur bg-white/90 flex items-center gap-2 cursor-pointer",
+              t.tone === "ok" && "border-green-200 text-green-800",
+              t.tone === "err" && "border-red-200 text-red-700",
+              (!t.tone || t.tone === "default") &&
+                `border-[${colors.border}] text-[${colors.text}]`
+            )}
+            onClick={() => remove(t.id)}
+          >
+            {t.tone === "ok" ? (
+              <Check size={14} />
+            ) : t.tone === "err" ? (
+              <AlertTriangle size={14} />
+            ) : null}
+            <span>{t.msg}</span>
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
 
-/* ---------------------------- Scanner Modal ---------------------------- */
+/* ------------------------------------------------------------
+   Scanner Modal (refined UI + safer lifecycle)
+-------------------------------------------------------------*/
 function ScanModal({ open, onClose, onDetected }) {
   const videoRef = useRef(null);
   const rafRef = useRef(null);
@@ -130,7 +178,6 @@ function ScanModal({ open, onClose, onDetected }) {
   const detectorRef = useRef(null);
   const [torchSupported, setTorchSupported] = useState(false);
   const [engine, setEngine] = useState("auto"); // 'native' | 'zxing'
-  const [supported, setSupported] = useState(false);
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState(null);
   const [torchOn, setTorchOn] = useState(false);
@@ -155,39 +202,33 @@ function ScanModal({ open, onClose, onDetected }) {
   async function handleDetected(val) {
     if (!val) return;
     const now = Date.now();
-
     if (processingRef.current) return;
     if (val === lastValRef.current && now - lastTsRef.current < COOLDOWN_MS)
       return;
-
     processingRef.current = true;
     lastValRef.current = val;
     lastTsRef.current = now;
 
     try {
-      // Ask parent to process it (returns { ok | already | invalid } flags)
       const maybe = onDetected?.(val);
       const res =
         maybe && typeof maybe.then === "function" ? await maybe : maybe;
-
       const outcome = res?.already
         ? "already"
         : res?.invalid || res?.ok === false
         ? "invalid"
         : "ok";
-
       if (outcome === "ok") {
-        soundSuccess(); // ✅
+        soundSuccess();
         if (navigator.vibrate) navigator.vibrate(60);
         setStatus("Checked in ✓");
       } else if (outcome === "already") {
-        soundError(); // 🚫
+        soundError();
         if (navigator.vibrate) navigator.vibrate(40);
-        setStatus("QR code already checked in");
-        // extend cooldown for this same code while it stays in frame
+        setStatus("QR already checked in");
         lastTsRef.current = Date.now();
       } else {
-        soundError(); // 🚫
+        soundError();
         if (navigator.vibrate) navigator.vibrate(30);
         setStatus("Invalid QR / booking not found");
       }
@@ -199,29 +240,6 @@ function ScanModal({ open, onClose, onDetected }) {
   }
 
   const formats = ["qr_code", "code_128", "ean_13", "ean_8"];
-
-  // beep
-  const beep = () => {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = "sine";
-      o.frequency.value = 880;
-      o.connect(g);
-      g.connect(ctx.destination);
-      g.gain.value = 0.0001;
-      o.start();
-      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.01);
-      setTimeout(() => {
-        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
-        setTimeout(() => {
-          o.stop();
-          ctx.close();
-        }, 160);
-      }, 100);
-    } catch {}
-  };
 
   function playTone(
     freq = 880,
@@ -238,12 +256,10 @@ function ScanModal({ open, onClose, onDetected }) {
       o.frequency.value = freq;
       o.connect(g);
       g.connect(ctx.destination);
-
       const t0 = ctx.currentTime;
       g.gain.setValueAtTime(0.0001, t0);
       g.gain.exponentialRampToValueAtTime(volume, t0 + 0.01);
       o.start();
-
       const t1 = t0 + durationMs / 1000;
       g.gain.exponentialRampToValueAtTime(0.0001, t1);
       setTimeout(() => {
@@ -251,36 +267,16 @@ function ScanModal({ open, onClose, onDetected }) {
           o.stop();
           ctx.close();
         } catch {}
-      }, durationMs + 50);
+      }, durationMs + 60);
     } catch {}
   }
-
   function soundSuccess() {
-    // two short, rising chirps
     playTone(880, 80, "sine", 0.25);
     setTimeout(() => playTone(1320, 90, "sine", 0.22), 95);
   }
-
   function soundError() {
-    // short “nope” buzz
     playTone(220, 140, "square", 0.22);
     setTimeout(() => playTone(180, 160, "sawtooth", 0.2), 130);
-  }
-
-  function stopAll() {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    if (controlsRef.current) {
-      try {
-        controlsRef.current.stop();
-      } catch {}
-      controlsRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    detectorRef.current = null;
   }
 
   async function ensureHttpsAndPermission() {
@@ -310,7 +306,6 @@ function ScanModal({ open, onClose, onDetected }) {
 
   async function startNative() {
     setEngine("native");
-    setSupported(true);
     setStatus("Starting camera…");
     try {
       const constraints = {
@@ -342,8 +337,8 @@ function ScanModal({ open, onClose, onDetected }) {
         try {
           const s = videoRef.current?.srcObject;
           if (s) {
-            streamRef.current = s; // keep a handle
-            detectTorchSupport(); // check capability
+            streamRef.current = s;
+            detectTorchSupport();
           }
         } catch {}
       }, 150);
@@ -359,31 +354,24 @@ function ScanModal({ open, onClose, onDetected }) {
         } catch {}
         rafRef.current = requestAnimationFrame(loop);
       };
-
       rafRef.current = requestAnimationFrame(loop);
     } catch (e) {
       throw new Error(`Native scanner failed: ${e?.message || e}`);
     }
   }
 
-  // Load ZXing via local pkg, ESM CDN, then UMD CDN (global window.ZXing)
-  // REPLACE your current loadZXing() with this:
+  // Load ZXing via local pkg or UMD
   async function loadZXing() {
-    // 1) Prefer local package if you installed it (`npm i @zxing/browser`)
     try {
       return await import("@zxing/browser");
-    } catch (_) {
-      // ignore, fall through to UMD
-    }
-
-    // 2) Load UMD at runtime; no bundling, works across browsers
+    } catch (_) {}
     if (typeof window === "undefined") throw new Error("Client only");
     if (window.ZXing && window.ZXing.BrowserMultiFormatReader)
       return window.ZXing;
 
     await new Promise((resolve, reject) => {
       const id = "zxing-umd";
-      if (document.getElementById(id)) return resolve(); // already injected
+      if (document.getElementById(id)) return resolve();
       const s = document.createElement("script");
       s.id = id;
       s.src =
@@ -392,10 +380,9 @@ function ScanModal({ open, onClose, onDetected }) {
       s.crossOrigin = "anonymous";
       s.referrerPolicy = "no-referrer";
       s.onload = () => resolve();
-      s.onerror = () => reject(new Error("Failed to load ZXing UMD from CDN"));
+      s.onerror = () => reject(new Error("Failed to load ZXing"));
       document.head.appendChild(s);
     });
-
     if (!window.ZXing || !window.ZXing.BrowserMultiFormatReader) {
       throw new Error("ZXing UMD loaded but BrowserMultiFormatReader missing");
     }
@@ -409,8 +396,7 @@ function ScanModal({ open, onClose, onDetected }) {
       const ZX = await loadZXing();
       const { BrowserMultiFormatReader, NotFoundException } = ZX;
       if (!BrowserMultiFormatReader)
-        throw new Error("ZXing BrowserMultiFormatReader unavailable");
-
+        throw new Error("ZXing reader unavailable");
       const reader = new BrowserMultiFormatReader();
       const controls = await reader.decodeFromVideoDevice(
         deviceId || undefined,
@@ -424,7 +410,6 @@ function ScanModal({ open, onClose, onDetected }) {
             NotFoundException &&
             !(err instanceof NotFoundException)
           ) {
-            // ignore NotFound noise; show real errors
             setError(String(err));
           }
         }
@@ -445,36 +430,61 @@ function ScanModal({ open, onClose, onDetected }) {
     }
   }
 
-  async function toggleTorch() {
+  function getActiveTrack() {
+    const stream = videoRef.current?.srcObject || streamRef.current || null;
+    return stream?.getVideoTracks?.()[0] || null;
+  }
+  async function forceTorchOff() {
     try {
-      const stream = videoRef.current?.srcObject || streamRef.current || null;
-      const track = stream?.getVideoTracks?.()[0];
-      if (!track) return setError("No camera track available.");
-
-      const caps = track.getCapabilities?.();
-      if (!caps?.torch) {
-        setTorchSupported(false);
-        return setError("Torch not supported by this camera.");
+      const track = getActiveTrack();
+      const caps = track?.getCapabilities?.();
+      if (caps?.torch) {
+        await track.applyConstraints({ advanced: [{ torch: false }] });
+        await new Promise((r) => setTimeout(r, 60));
       }
-
-      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
-      setTorchOn((t) => !t);
-    } catch (e) {
-      setError(e?.message || "Failed to toggle torch");
+    } catch {}
+  }
+  async function stopAll() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    await forceTorchOff();
+    if (controlsRef.current) {
+      try {
+        controlsRef.current.stop();
+      } catch {}
+      controlsRef.current = null;
     }
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch {}
+      videoRef.current.srcObject = null;
+      try {
+        videoRef.current.removeAttribute("srcObject");
+      } catch {}
+      try {
+        videoRef.current.load?.();
+      } catch {}
+    }
+    try {
+      const stream = streamRef.current;
+      stream?.getTracks?.().forEach((t) => t.stop());
+    } catch {}
+    streamRef.current = null;
+    detectorRef.current = null;
+    setTorchOn(false);
+    setTorchSupported(false);
+    setStatus("");
   }
 
   async function startScanner() {
     setError("");
     setStatus("Initializing…");
-    stopAll();
-
-    // try native first if available
+    await stopAll();
     const hasNative = "BarcodeDetector" in window;
     try {
       await (hasNative ? startNative() : startZXing());
     } catch (e) {
-      // If native failed, try ZXing. If ZXing failed, show details.
       if (hasNative) {
         try {
           await startZXing();
@@ -490,76 +500,11 @@ function ScanModal({ open, onClose, onDetected }) {
     }
   }
 
-  // Helper: get the live video track regardless of who created the stream
-  function getActiveTrack() {
-    const stream = videoRef.current?.srcObject || streamRef.current || null;
-    return stream?.getVideoTracks?.()[0] || null;
-  }
-
-  async function forceTorchOff() {
-    try {
-      const track = getActiveTrack();
-      const caps = track?.getCapabilities?.();
-      if (caps?.torch) {
-        await track.applyConstraints({ advanced: [{ torch: false }] });
-        // tiny grace period for some Android HALs
-        await new Promise((r) => setTimeout(r, 60));
-      }
-    } catch {}
-  }
-
-  // REPLACE your stopAll with this (note the order!)
-  async function stopAll() {
-    // stop decode loop first
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-
-    // IMPORTANT: turn torch OFF while track is still alive
-    await forceTorchOff();
-
-    // now stop ZXing (which will stop the camera it owns)
-    if (controlsRef.current) {
-      try {
-        controlsRef.current.stop();
-      } catch {}
-      controlsRef.current = null;
-    }
-
-    // pause/clear the <video> BEFORE stopping tracks (helps iOS)
-    if (videoRef.current) {
-      try {
-        videoRef.current.pause();
-      } catch {}
-      videoRef.current.srcObject = null;
-      try {
-        videoRef.current.removeAttribute("srcObject");
-      } catch {}
-      try {
-        videoRef.current.load?.();
-      } catch {}
-    }
-
-    // stop any remaining tracks we hold
-    try {
-      const stream = streamRef.current;
-      stream?.getTracks?.().forEach((t) => t.stop());
-    } catch {}
-
-    // clear refs/state
-    streamRef.current = null;
-    detectorRef.current = null;
-    setTorchOn(false);
-    setTorchSupported(false);
-    setStatus("");
-  }
-
-  // Make close() async and await stopAll so it finishes before hiding the modal
   async function close() {
     await stopAll();
     onClose?.();
   }
 
-  // Also stop if the tab gets hidden (Android keeps the light otherwise)
   useEffect(() => {
     if (!open) return;
     const onHide = () => {
@@ -581,10 +526,10 @@ function ScanModal({ open, onClose, onDetected }) {
     let alive = true;
     (async () => {
       try {
-        await ensureHttpsAndPermission(); // ask permission early
-        await loadDevices(); // populate camera list
+        await ensureHttpsAndPermission();
+        await loadDevices();
         if (!alive) return;
-        await startScanner(); // start native or ZXing
+        await startScanner();
       } catch (e) {
         setError(e?.message || String(e));
         setStatus("");
@@ -600,96 +545,157 @@ function ScanModal({ open, onClose, onDetected }) {
     if (!open || !deviceId) return;
     setTorchSupported(false);
     setTorchOn(false);
-    setTorchSupported(false);
     startScanner();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
 
-  function close() {
-    stopAll();
-    onClose?.();
-  }
-
   return (
-    <div
-      className={clsx(
-        "fixed inset-0 z-40 items-end sm:items-center justify-center",
-        open ? "flex" : "hidden"
-      )}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={close}
-      />
-      <div className="relative z-10 w-full sm:max-w-2xl mx-auto sm:rounded-3xl sm:shadow-2xl bg-[#fdfaf5] border border-[#e6dfd6] overflow-hidden">
-        <div className="px-4 py-3 border-b border-[#eee5da] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <QrCode size={18} className="opacity-80" />
-            <h3 className="font-semibold">Scan QR / Barcode</h3>
-          </div>
-          <button
+    <AnimatePresence>
+      {open ? (
+        <motion.div
+          className={clsx(
+            "fixed inset-0 z-40 items-end sm:items-center justify-center flex"
+          )}
+          role="dialog"
+          aria-modal="true"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={close}
-            className="text-sm rounded-full px-3 py-1 border border-[#e6dfd6] hover:bg-white"
+          />
+          <motion.div
+            initial={{ y: 20, opacity: 0, scale: 0.98 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 10, opacity: 0, scale: 0.98 }}
+            transition={{
+              type: "spring",
+              stiffness: 300,
+              damping: 28,
+              mass: 0.7,
+            }}
+            className={clsx(
+              "relative z-10 w-full sm:max-w-2xl mx-auto sm:rounded-3xl sm:shadow-2xl",
+              colors.card,
+              "bg-[#fdfaf5]"
+            )}
           >
-            Close
-          </button>
-        </div>
-
-        <div className="p-4">
-          <div className="relative rounded-2xl overflow-hidden border border-[#e6dfd6] bg-black aspect-[16/10]">
-            <video
-              ref={videoRef}
-              className="w-full h-full object-cover"
-              playsInline
-              muted
-            />
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="w-[72%] max-w-[560px] aspect-square rounded-2xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]" />
-            </div>
-            <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
-              <span className="text-xs text-white/90 bg-black/40 rounded-full px-2 py-1">
-                {error
-                  ? error
-                  : status
-                  ? `${status} (${engine})`
-                  : supported
-                  ? "Starting…"
-                  : "Starting (zxing)…"}
-              </span>
-              <div className="flex items-center gap-1.5">
-                {torchSupported ? (
-                  <button
-                    onClick={toggleTorch}
-                    className="text-xs text-white bg-black/40 rounded-full px-2 py-1 border border-white/20 hover:bg-black/50"
-                    title="Toggle flashlight"
-                  >
-                    {torchOn ? "Torch On" : "Torch Off"}
-                  </button>
-                ) : (
-                  <span className="text-xs text-white/70 bg-black/30 rounded-full px-2 py-1 border border-white/10">
-                    Torch N/A
-                  </span>
-                )}
-
-                <DeviceSelect
-                  devices={devices}
-                  deviceId={deviceId}
-                  setDeviceId={setDeviceId}
-                />
+            <div className="px-4 py-3 border-b border-[#eee5da] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <QrCode size={18} className="opacity-80" />
+                <h3 className="font-semibold">Scan QR / Barcode</h3>
               </div>
+              <button
+                onClick={close}
+                className="text-sm rounded-full px-3 py-1 border border-[var(--border,#e6dfd6)] hover:bg-white"
+              >
+                Close <span className="ml-1 text-xs text-slate-500">⎋ Esc</span>
+              </button>
             </div>
-          </div>
-          <ManualFallback onDetected={onDetected} />
-          {error ? (
-            <div className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center gap-2">
-              <AlertTriangle size={16} /> {error}
+
+            <div className="p-4">
+              <div className="relative rounded-2xl overflow-hidden border border-[#e6dfd6] bg-black aspect-[16/10]">
+                <video
+                  ref={videoRef}
+                  className="w-full h-full object-cover"
+                  playsInline
+                  muted
+                />
+
+                {/* focus frame */}
+                <div className="absolute inset-0 pointer-events-none grid place-items-center">
+                  <div className="w-[72%] max-w-[560px] aspect-square rounded-3xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.28)]" />
+                </div>
+
+                {/* status & controls */}
+                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
+                  <span
+                    className="text-xs text-white/90 bg-black/45 rounded-full px-2 py-1 border border-white/20"
+                    aria-live="polite"
+                    aria-atomic="true"
+                  >
+                    {error
+                      ? error
+                      : status
+                      ? `${status} (${engine})`
+                      : "Starting…"}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {torchSupported ? (
+                      <IconPill
+                        onClick={async () => {
+                          try {
+                            const stream =
+                              videoRef.current?.srcObject ||
+                              streamRef.current ||
+                              null;
+                            const track = stream?.getVideoTracks?.()[0];
+                            if (!track)
+                              return setError("No camera track available.");
+                            const caps = track.getCapabilities?.();
+                            if (!caps?.torch)
+                              return setError(
+                                "Torch not supported by this camera."
+                              );
+                            await track.applyConstraints({
+                              advanced: [{ torch: !torchOn }],
+                            });
+                            setTorchOn((t) => !t);
+                          } catch (e) {
+                            setError(e?.message || "Failed to toggle torch");
+                          }
+                        }}
+                        title="Toggle flashlight"
+                        active={torchOn}
+                      >
+                        <Flashlight size={14} />{" "}
+                        {torchOn ? "Torch On" : "Torch Off"}
+                      </IconPill>
+                    ) : (
+                      <span className="text-xs text-white/70 bg-black/30 rounded-full px-2 py-1 border border-white/10">
+                        Torch N/A
+                      </span>
+                    )}
+
+                    <DeviceSelect
+                      devices={devices}
+                      deviceId={deviceId}
+                      setDeviceId={setDeviceId}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <ManualFallback onDetected={onDetected} />
+              {error ? (
+                <div className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                  <AlertTriangle size={16} /> {error}
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+function IconPill({ children, onClick, title, active }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={clsx(
+        "text-xs text-white rounded-full px-2 py-1 border flex items-center gap-1.5",
+        active
+          ? "bg-black/70 border-white/30"
+          : "bg-black/40 border-white/20 hover:bg-black/50"
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -714,6 +720,7 @@ function DeviceSelect({ devices, deviceId, setDeviceId }) {
     </label>
   );
 }
+
 function ManualFallback({ onDetected }) {
   const [val, setVal] = useState("");
   function submit(e) {
@@ -737,7 +744,9 @@ function ManualFallback({ onDetected }) {
   );
 }
 
-/* ---------------------------- Page ---------------------------- */
+/* ------------------------------------------------------------
+   Page
+-------------------------------------------------------------*/
 export default function CheckinsPage() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -751,8 +760,10 @@ export default function CheckinsPage() {
   const [error, setError] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
 
+  const searchRef = useRef(null);
   const { toasts, pushToast, remove } = useToasts();
 
+  // URL sync
   useEffect(() => {
     const p = new URLSearchParams(Array.from(sp.entries()));
     p.set("date", date);
@@ -760,6 +771,22 @@ export default function CheckinsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "/") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+      if (e.key.toLowerCase() === "s") setScanOpen(true);
+      if (e.key.toLowerCase() === "t") setDate(formatDayTZ(new Date()));
+      if (e.key === "Escape") setScanOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Data loading
   useEffect(() => {
     let abort = false;
     async function load() {
@@ -770,7 +797,9 @@ export default function CheckinsPage() {
           `/api/admin/checkins?date=${encodeURIComponent(
             date
           )}&tz=Europe/Athens`,
-          { cache: "no-store" }
+          {
+            cache: "no-store",
+          }
         );
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || "Failed to load roster");
@@ -843,13 +872,10 @@ export default function CheckinsPage() {
 
   function extractBookingId(s) {
     if (!s) return null;
-    // /booking/123 or /bookings/123
     const mUrl = String(s).match(/\/(?:booking|bookings)\/(\d+)/i);
     if (mUrl) return Number(mUrl[1]);
-    // booking:123 or booking=123
     const mTag = String(s).match(/booking[:=\s]+(\d{1,10})/i);
     if (mTag) return Number(mTag[1]);
-    // any 1–10 digit number present
     const mNum = String(s).match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/);
     return mNum ? Number(mNum[1]) : null;
   }
@@ -876,11 +902,9 @@ export default function CheckinsPage() {
   async function onScan(text) {
     const id = extractBookingId(text);
     if (!id) {
-      pushToast("Invalid code", "err"); // now this runs
+      pushToast("Invalid code", "err");
       return { invalid: true };
     }
-
-    // quick local check
     const alreadyLocal = !!(roster?.slots || [])
       .flatMap((s) => s.bookings || [])
       .find(
@@ -888,7 +912,6 @@ export default function CheckinsPage() {
       );
     if (alreadyLocal) return { already: true };
 
-    // server idempotent check-in
     const res = await fetch(`/api/admin/checkins/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -909,7 +932,6 @@ export default function CheckinsPage() {
       return { already: true };
     }
 
-    // optimistic local update
     setRoster((prev) => {
       if (!prev) return prev;
       const slots = prev.slots.map((s) => {
@@ -925,22 +947,32 @@ export default function CheckinsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f1ec] text-[#5a4a3f]">
+    <div className={clsx("min-h-screen", colors.soft, `text-[${colors.text}]`)}>
       <Toasts toasts={toasts} remove={remove} />
+
       <div className="mx-auto max-w-6xl px-6 py-6">
-        {/* Header */}
-        <div className="mb-4 -mx-2 sm:-mx-4 px-2 sm:px-4 py-3 rounded-2xl bg-gradient-to-r from-[#f4f1ec] via-[#fff8ef] to-[#f4f1ec] border border-[#e8e2d9]">
+        {/* Header / Toolbar */}
+        <div
+          className={clsx(
+            "mb-4 -mx-2 sm:-mx-4 px-2 sm:px-4 py-3 rounded-2xl border",
+            `border-[${colors.border}]`,
+            "bg-gradient-to-r from-[#f4f1ec] via-[#fff8ef] to-[#f4f1ec]"
+          )}
+        >
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl md:text-3xl font-serif tracking-tight">
-                Check-ins
+                Check‑ins
               </h1>
-              <p className="text-sm text-[#7a6a5f]">
+              <p className={clsx("text-sm", `text-[${colors.sub}]`)}>
                 Scan or mark arrivals for today’s slots.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-2 rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1.5">
+              <div
+                className="flex items-center gap-2 rounded-full border px-3 py-1.5 bg-white/70"
+                style={{ borderColor: colors.border }}
+              >
                 <CalendarDays size={16} className="opacity-70" />
                 <input
                   type="date"
@@ -948,40 +980,90 @@ export default function CheckinsPage() {
                   onChange={(e) => setDate(e.target.value)}
                   className="bg-transparent text-sm outline-none"
                 />
+                <button
+                  type="button"
+                  onClick={() => setDate(formatDayTZ(new Date()))}
+                  className="text-[11px] px-2 py-0.5 rounded-full border hover:bg-white"
+                  style={{ borderColor: colors.border }}
+                  title="Jump to today (T)"
+                >
+                  Today
+                </button>
               </div>
+
               <div className="relative">
                 <Search
-                  className="absolute left-3 top-2.5 h-4 w-4 text-[#7a6a5f]"
+                  className="absolute left-3 top-2.5 h-4 w-4"
+                  style={{ color: colors.sub }}
                   aria-hidden
                 />
                 <input
+                  ref={searchRef}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search guest, booking id, email…"
-                  className="w-64 rounded-full border border-[#d8cfc3] bg-white/80 backdrop-blur px-9 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                  className="w-64 rounded-full border bg-white/80 backdrop-blur px-9 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2"
+                  style={{
+                    borderColor: colors.border,
+                    boxShadow: `0 0 0 2px transparent`,
+                    outlineColor: colors.accent,
+                  }}
                 />
+                {query ? (
+                  <button
+                    onClick={() => setQuery("")}
+                    className="absolute right-2 top-1.5 text-xs px-2 py-0.5 rounded-full border bg-white/70 hover:bg-white"
+                    style={{ borderColor: colors.border }}
+                    title="Clear"
+                  >
+                    Clear
+                  </button>
+                ) : null}
               </div>
+
               <button
                 type="button"
                 onClick={() => setScanOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-[#8b6f47] text-white hover:brightness-110 transition text-xs shadow-sm"
-                title="Open camera scanner"
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border bg-[var(--btn-bg,#8b6f47)] text-white hover:brightness-110 transition text-xs shadow-sm"
+                style={{ borderColor: colors.border }}
+                title="Open camera scanner (S)"
               >
                 <QrCode size={14} /> Scan
               </button>
             </div>
           </div>
+          <div className="mt-2 text-xs flex items-center gap-3 opacity-80">
+            <span>
+              Shortcuts: <Kbd>/</Kbd> focus search · <Kbd>S</Kbd> scan ·{" "}
+              <Kbd>T</Kbd> today
+            </span>
+          </div>
         </div>
 
         {/* Totals */}
         <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-          <SummaryCard label="Bookings" value={totals.count} />
-          <SummaryCard label="Checked-in" value={totals.checked} tone="green" />
-          <SummaryCard label="No-shows" value={totals.noshow} tone="red" />
+          <SummaryCard
+            label="Bookings"
+            value={totals.count}
+            icon={<Users className="w-4 h-4" />}
+          />
+          <SummaryCard
+            label="Checked‑in"
+            value={totals.checked}
+            tone="green"
+            icon={<CheckCircle2 className="w-4 h-4" />}
+          />
+          <SummaryCard
+            label="No‑shows"
+            value={totals.noshow}
+            tone="red"
+            icon={<XCircle className="w-4 h-4" />}
+          />
           <SummaryCard
             label="Reserved / Capacity"
             value={`${totals.reserved} / ${totals.capacity}`}
             tone="blue"
+            icon={<User className="w-4 h-4" />}
           />
         </div>
 
@@ -995,25 +1077,56 @@ export default function CheckinsPage() {
         {/* Loading */}
         {loading ? (
           <div className="grid gap-3">
-            {Array.from({ length: 3 }).map((_, i) => (
+            {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
-                className="h-28 rounded-2xl bg-[#e8e2d9] animate-pulse"
+                className="h-28 rounded-2xl bg-gradient-to-tr from-[#ebe6df] to-[#f9f6f2] animate-pulse border"
+                style={{ borderColor: colors.border }}
               />
             ))}
           </div>
         ) : null}
 
-        {/* Slots list */}
+        {/* Empty state */}
         {!loading && filteredSlots.length === 0 ? (
-          <p className="text-sm text-[#7a6a5f]">No bookings for this date.</p>
+          <div
+            className={clsx(
+              "text-center py-12 rounded-2xl border",
+              `border-[${colors.border}]`,
+              "bg-white/60"
+            )}
+          >
+            <QrCode className="mx-auto mb-2 opacity-60" />
+            <p className="text-sm" style={{ color: colors.sub }}>
+              No bookings for this date.
+            </p>
+            <div className="mt-3 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setScanOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-xs bg-[#8b6f47] text-white hover:brightness-110"
+                style={{ borderColor: colors.border }}
+              >
+                <QrCode size={14} /> Scan code
+              </button>
+              <button
+                type="button"
+                onClick={() => setDate(formatDayTZ(new Date()))}
+                className="rounded-full px-3 py-1.5 text-xs border bg-white/80 hover:bg-white"
+                style={{ borderColor: colors.border }}
+              >
+                Today
+              </button>
+            </div>
+          </div>
         ) : null}
 
+        {/* Slots list */}
         <div className="space-y-4">
           {filteredSlots.map((slot) => (
             <div
               key={slot.id}
-              className="rounded-2xl bg-white/80 backdrop-blur border border-[#e0dcd4] shadow-sm p-4"
+              className={clsx("rounded-2xl p-4 shadow-sm", colors.card)}
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
@@ -1027,7 +1140,7 @@ export default function CheckinsPage() {
                     {slot.experienceName || "Experience"}
                   </span>
                 </div>
-                <div className="text-xs text-[#7a6a5f]">
+                <div className="text-xs" style={{ color: colors.sub }}>
                   Capacity {slot.totalSlots ?? 0} · Reserved{" "}
                   {(slot.bookings || [])
                     .filter(
@@ -1037,10 +1150,11 @@ export default function CheckinsPage() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              {/* Table (md+) */}
+              <div className="overflow-x-auto hidden md:block">
                 <table className="min-w-full text-sm">
                   <thead>
-                    <tr className="text-left text-[#7a6a5f]">
+                    <tr className="text-left" style={{ color: colors.sub }}>
                       <th className="py-2 pr-4">Booking</th>
                       <th className="py-2 pr-4">Guest</th>
                       <th className="py-2 pr-4">Party</th>
@@ -1048,7 +1162,10 @@ export default function CheckinsPage() {
                       <th className="py-2 pr-4 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="[&>tr:not(:last-child)]:border-b [&>tr:not(:last-child)]:border-[#eee5da]">
+                  <tbody
+                    className="[&>tr:not(:last-child)]:border-b"
+                    style={{ borderColor: "#eee5da" }}
+                  >
                     {(slot.bookings || []).map((b) => {
                       const size = partySize(b);
                       const s = (b.status || "").toLowerCase();
@@ -1064,7 +1181,7 @@ export default function CheckinsPage() {
                         "noshow",
                       ].includes(s);
                       return (
-                        <tr key={b.id}>
+                        <tr key={b.id} className="align-middle">
                           <td className="py-2 pr-4 font-medium">#{b.id}</td>
                           <td className="py-2 pr-4">
                             <div className="flex flex-col">
@@ -1072,7 +1189,10 @@ export default function CheckinsPage() {
                                 {contactName(b.primary_contact)}
                               </span>
                               {b.primary_contact?.phone ? (
-                                <span className="text-xs text-[#7a6a5f]">
+                                <span
+                                  className="text-xs"
+                                  style={{ color: colors.sub }}
+                                >
                                   {b.primary_contact.phone}
                                 </span>
                               ) : null}
@@ -1084,45 +1204,35 @@ export default function CheckinsPage() {
                           </td>
                           <td className="py-2 pr-0">
                             <div className="flex justify-end gap-2">
-                              <button
-                                className={clsx(
-                                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs border transition",
-                                  canCheckIn
-                                    ? "border-green-600/30 text-green-700 bg-green-50 hover:bg-green-100"
-                                    : "opacity-40 cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
-                                )}
+                              <ActionButton
+                                tone="green"
                                 disabled={!canCheckIn}
                                 onClick={() => mutateBooking(b.id, "checkin")}
-                                title="Mark as checked-in"
-                              >
-                                <CheckCircle2 size={14} /> Check-in
-                              </button>
-                              <button
-                                className={clsx(
-                                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs border transition",
-                                  canUndo
-                                    ? "border-slate-600/30 text-slate-700 bg-white hover:bg-slate-50"
-                                    : "opacity-40 cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
-                                )}
+                                icon={<CheckCircle2 size={14} />}
+                                label="Check‑in"
+                                title="Mark as checked‑in"
+                              />
+                              <ActionButton
+                                tone="slate"
                                 disabled={!canUndo}
                                 onClick={() => mutateBooking(b.id, "undo")}
+                                icon={<RotateCcw size={14} />}
+                                label="Undo"
                                 title="Undo"
-                              >
-                                <RotateCcw size={14} /> Undo
-                              </button>
-                              <button
-                                className={clsx(
-                                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs border transition",
-                                  s !== "no_show" && s !== "noshow"
-                                    ? "border-red-600/30 text-red-700 bg-red-50 hover:bg-red-100"
-                                    : "opacity-40 cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
-                                )}
+                              />
+                              <ActionButton
+                                tone="red"
                                 disabled={s === "no_show" || s === "noshow"}
-                                onClick={() => mutateBooking(b.id, "no_show")}
-                                title="Mark as no-show"
-                              >
-                                <XCircle size={14} /> No-show
-                              </button>
+                                onClick={() => {
+                                  const ok = window.confirm(
+                                    `Mark booking #${b.id} as no‑show?`
+                                  );
+                                  if (ok) mutateBooking(b.id, "no_show");
+                                }}
+                                icon={<XCircle size={14} />}
+                                label="No‑show"
+                                title="Mark as no‑show"
+                              />
                             </div>
                           </td>
                         </tr>
@@ -1130,6 +1240,85 @@ export default function CheckinsPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Cards (mobile) */}
+              <div className="md:hidden space-y-3">
+                {(slot.bookings || []).map((b) => {
+                  const size = partySize(b);
+                  const s = (b.status || "").toLowerCase();
+                  const canCheckIn = ![
+                    "checked_in",
+                    "cancelled",
+                    "no_show",
+                    "noshow",
+                  ].includes(s);
+                  const canUndo = ["checked_in", "no_show", "noshow"].includes(
+                    s
+                  );
+                  return (
+                    <div
+                      key={b.id}
+                      className="rounded-xl border p-3 bg-white/80"
+                      style={{ borderColor: colors.border }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium">#{b.id}</div>
+                        <StatusBadge status={b.status} />
+                      </div>
+                      <div className="mt-1 text-sm">
+                        <div className="font-medium">
+                          {contactName(b.primary_contact)}
+                        </div>
+                        {b.primary_contact?.phone ? (
+                          <div
+                            className="text-xs"
+                            style={{ color: colors.sub }}
+                          >
+                            {b.primary_contact.phone}
+                          </div>
+                        ) : null}
+                        <div
+                          className="mt-1 text-xs flex items-center gap-1"
+                          style={{ color: colors.sub }}
+                        >
+                          Party: <Badge tone="blue">{size}</Badge>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <ActionButton
+                          tone="green"
+                          block
+                          disabled={!canCheckIn}
+                          onClick={() => mutateBooking(b.id, "checkin")}
+                          icon={<CheckCircle2 size={14} />}
+                          label="Check‑in"
+                        />
+                        <ActionButton
+                          tone="slate"
+                          block
+                          disabled={!canUndo}
+                          onClick={() => mutateBooking(b.id, "undo")}
+                          icon={<RotateCcw size={14} />}
+                          label="Undo"
+                        />
+                        <ActionButton
+                          tone="red"
+                          block
+                          disabled={s === "no_show" || s === "noshow"}
+                          onClick={() => {
+                            const ok = window.confirm(
+                              `Mark booking #${b.id} as no‑show?`
+                            );
+                            if (ok) mutateBooking(b.id, "no_show");
+                          }}
+                          icon={<XCircle size={14} />}
+                          label="No‑show"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -1148,22 +1337,76 @@ export default function CheckinsPage() {
   );
 }
 
-function SummaryCard({ label, value, tone }) {
+function SummaryCard({ label, value, tone, icon }) {
   const rings = {
     green: "focus:ring-green-600/30",
     red: "focus:ring-red-600/30",
     blue: "focus:ring-sky-600/30",
     default: "focus:ring-[#8b6f47]/30",
   };
+  const accents = {
+    green: "text-green-700",
+    red: "text-red-700",
+    blue: "text-sky-700",
+    default: "text-slate-700",
+  };
   return (
     <div
       className={clsx(
-        "rounded-2xl border border-[#e6dfd6] bg-white/80 backdrop-blur p-4 shadow-sm focus-within:ring-2",
+        "rounded-2xl p-4 shadow-sm",
+        colors.card,
         rings[tone] || rings.default
       )}
     >
-      <p className="text-xs text-[#7a6a5f]">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
+      <p className="text-xs" style={{ color: colors.sub }}>
+        {label}
+      </p>
+      <div className="mt-1 flex items-end justify-between">
+        <p className="text-2xl font-semibold tracking-tight">{value}</p>
+        {icon ? (
+          <span
+            className={clsx(
+              "ml-3 opacity-70",
+              accents[tone] || accents.default
+            )}
+          >
+            {icon}
+          </span>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function ActionButton({
+  tone = "slate",
+  icon,
+  label,
+  onClick,
+  disabled,
+  title,
+  block,
+}) {
+  const tones = {
+    green: "border-green-600/30 text-green-800 bg-green-50 hover:bg-green-100",
+    red: "border-red-600/30 text-red-700 bg-red-50 hover:bg-red-100",
+    slate: "border-slate-600/30 text-slate-700 bg-white hover:bg-slate-50",
+  };
+  const off =
+    "opacity-40 cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400";
+  return (
+    <button
+      className={clsx(
+        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs border transition",
+        block && "flex-1 justify-center",
+        disabled ? off : tones[tone] || tones.slate
+      )}
+      disabled={disabled}
+      onClick={onClick}
+      title={title}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
   );
 }
