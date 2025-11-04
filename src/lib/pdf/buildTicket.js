@@ -5,9 +5,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+/**
+ * buildTicketPdfBuffer (v3)
+ *
+ * Design upgrades over v2:
+ * - Solid branded masthead with logo (left) and booking info + status (right)
+ * - Ticket-style HERO with vertical "stub" (QR + ref) and main card (title + when/where)
+ * - Vertical perforation between hero main card and stub
+ * - Order Summary and Attendees rendered in soft cards with clearer hierarchy
+ * - Attendees table with header row and zebra striping
+ * - Link-style pill buttons (e.g., Open in Maps)
+ * - Footer brand mark + cleaner microcopy
+ *
+ * Backward compatible. New optional args: brandName (fallback text in masthead).
+ */
 export default async function buildTicketPdfBuffer(args = {}) {
   const {
     brand = {},
+    brandName = "",
     logoUrl,
     experienceName,
     location,
@@ -24,11 +39,48 @@ export default async function buildTicketPdfBuffer(args = {}) {
   } = args;
 
   const {
-    primary = "#8b6f47",
+    primary = "#8b6f47", // brand bronze
     text = "#2b2a28",
     subtext = "#6b665d",
     border = "#efeae1",
+    surface = "#fbf9f6", // soft paper for cards/rows
+    accent = "#b9a07a",
   } = brand || {};
+
+  // ---------- Helpers ----------
+  function hexToRgb(hex) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return m
+      ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
+      : { r: 0, g: 0, b: 0 };
+  }
+  function shade(hex, factor = 0.9) {
+    const { r, g, b } = hexToRgb(hex);
+    const f = Math.max(0, Math.min(1, factor));
+    const nr = Math.round(r * f),
+      ng = Math.round(g * f),
+      nb = Math.round(b * f);
+    return `#${nr.toString(16).padStart(2, "0")}${ng
+      .toString(16)
+      .padStart(2, "0")}${nb.toString(16).padStart(2, "0")}`;
+  }
+
+  async function safeLoadImage(src) {
+    try {
+      if (!src) return null;
+      if (/^https?:\/\//i.test(src)) {
+        if (typeof fetch !== "function") return null;
+        const res = await fetch(src);
+        if (!res.ok) return null;
+        const ab = await res.arrayBuffer();
+        return Buffer.from(ab);
+      }
+      if (fs.existsSync(src)) return fs.readFileSync(src);
+      return null;
+    } catch {
+      return null;
+    }
+  }
 
   // ---------- Resolve fonts BEFORE creating the PDF ----------
   const __filename = fileURLToPath(import.meta.url);
@@ -58,6 +110,8 @@ export default async function buildTicketPdfBuffer(args = {}) {
   const regularBuf = fs.readFileSync(path.join(base, "Inter-Regular.ttf"));
   const boldBuf = fs.readFileSync(path.join(base, "Inter-Bold.ttf"));
 
+  const logoBuf = await safeLoadImage(logoUrl);
+
   // ---------- Precompute QR ----------
   let qrImgBuf = null;
   try {
@@ -70,7 +124,6 @@ export default async function buildTicketPdfBuffer(args = {}) {
 
   // ---------- Create doc ----------
   const doc = new PDFDocument({ size: "A4", margin: 36, font: regularBuf });
-
   const chunks = [];
   return await new Promise((resolve, reject) => {
     doc.on("data", (c) => chunks.push(c));
@@ -89,7 +142,7 @@ export default async function buildTicketPdfBuffer(args = {}) {
     const rightEdge = doc.page.width - M;
     const pageBottom = () => doc.page.height - M;
 
-    const FS = { title: 21, h2: 11, body: 11.5, small: 9.5 };
+    const FS = { title: 23, h2: 11, body: 11.5, small: 9.5 };
     const LINE = { hair: 0.5, reg: 1 };
 
     function ensureSpace(h, gap = 8) {
@@ -102,13 +155,26 @@ export default async function buildTicketPdfBuffer(args = {}) {
       }
     }
 
-    function hr(y) {
+    function hr(y, color = border) {
       doc
         .moveTo(M, y)
         .lineTo(rightEdge, y)
-        .strokeColor(border)
+        .strokeColor(color)
         .lineWidth(LINE.hair)
         .stroke();
+    }
+
+    function vDash(x, y1, y2, color = border) {
+      doc
+        .save()
+        .dash(2.5, { space: 4 })
+        .moveTo(x, y1)
+        .lineTo(x, y2)
+        .strokeColor(color)
+        .lineWidth(LINE.hair)
+        .stroke()
+        .undash()
+        .restore();
     }
 
     function perforation(y) {
@@ -127,22 +193,36 @@ export default async function buildTicketPdfBuffer(args = {}) {
       doc.restore();
     }
 
-    function chip(txt, x, y, { fg = primary } = {}) {
+    function chip(
+      txt,
+      x,
+      y,
+      { fg = primary, invert = false, ghost = false } = {}
+    ) {
       const padX = 10,
         padY = 5,
         h = 20;
       const w = doc.widthOfString(txt) + padX * 2;
+      doc.save();
       doc
-        .save()
         .roundedRect(x, y, w, h, 10)
         .lineWidth(LINE.hair)
-        .strokeColor(fg)
-        .stroke()
-        .fillColor(fg)
+        .strokeColor(invert ? "#ffffff" : fg)
+        .stroke();
+      if (invert || ghost) {
+        doc
+          .roundedRect(x, y, w, h, 10)
+          .fillOpacity(invert ? 0.1 : 0.06)
+          .fillColor(invert ? "#ffffff" : fg)
+          .fill()
+          .fillOpacity(1);
+      }
+      doc
+        .fillColor(invert ? "#ffffff" : fg)
         .font("Body-Bold")
         .fontSize(FS.small)
-        .text(txt, x + padX, y + padY - 2, { characterSpacing: 0.2 })
-        .restore();
+        .text(txt, x + padX, y + padY - 2, { characterSpacing: 0.2 });
+      doc.restore();
       return { w, h };
     }
 
@@ -201,12 +281,27 @@ export default async function buildTicketPdfBuffer(args = {}) {
       return { nextY: Math.max(doc.y, y + h), h };
     }
 
-    function linkText(txt, url, x, y, width) {
+    function pillLink(txt, url, x, y) {
+      const padX = 10,
+        padY = 6;
+      const w = doc.widthOfString(txt) + padX * 2;
+      const h = 22;
       doc
+        .save()
+        .roundedRect(x, y, w, h, 11)
+        .fillOpacity(0.08)
+        .fillColor(primary)
+        .fill()
+        .fillOpacity(1)
+        .strokeColor(primary)
+        .lineWidth(LINE.hair)
+        .stroke()
         .font("Body-Bold")
         .fontSize(FS.small)
         .fillColor(primary)
-        .text(txt, x, y, { width, underline: true, link: url });
+        .text(txt, x + padX, y + padY - 3, { link: url, underline: false })
+        .restore();
+      return { w, h };
     }
 
     function currencyPretty(value, curr = currency) {
@@ -229,236 +324,382 @@ export default async function buildTicketPdfBuffer(args = {}) {
       }
     }
 
-    // ========== HEADER ==========
-    const topY = M;
-    // Thin top hairline and tiny padding gives a minimal masthead feel
-    hr(topY);
-    let y = topY + 10;
+    // ================= MASTHEAD =================
+    const mastheadH = 68;
+    doc.save().rect(0, 0, doc.page.width, mastheadH).fill(primary).restore();
 
-    // Left: logo/title; Right: booking ref
-    try {
-      if (logoUrl) {
-        doc.image(logoUrl, M, y - 2, { width: 110 }).fillColor(text);
-      } else {
+    const mastPadX = M;
+    const mastPadY = 18;
+    const sColor = statusColor(statusLabel);
+
+    // Logo or brand text
+    if (logoBuf) {
+      try {
+        doc.image(logoBuf, mastPadX, mastPadY - 2, { height: 30 });
+      } catch {
         doc
           .font("Body-Bold")
           .fontSize(14)
-          .fillColor(text)
-          .text("Booking Confirmation", M, y);
+          .fillColor("#ffffff")
+          .text(brandName || "Booking", mastPadX, mastPadY + 6);
       }
-    } catch {
+    } else {
       doc
         .font("Body-Bold")
         .fontSize(14)
-        .fillColor(text)
-        .text("Booking Confirmation", M, y);
+        .fillColor("#ffffff")
+        .text(brandName || "Booking", mastPadX, mastPadY + 6);
     }
 
+    // Right side: booking ref + status
     if (bookingRef) {
       doc
         .font("Body")
         .fontSize(FS.small)
-        .fillColor(subtext)
-        .text(`Reference: ${bookingRef}`, rightEdge - 220, y, {
+        .fillColor("#ffffff")
+        .text(`Ref: ${bookingRef}`, rightEdge - 220, mastPadY + 2, {
           width: 200,
           align: "right",
         });
     }
+    chip(String(statusLabel).toUpperCase(), rightEdge - 130, mastPadY + 28, {
+      fg: sColor,
+      invert: true,
+    });
 
-    // Status chip (left, below)
-    const sColor = statusColor(statusLabel);
-    chip(String(statusLabel).toUpperCase(), M, y + 20, { fg: sColor });
+    // ================= HERO (ticket with stub) =================
+    const heroTop = mastheadH + 18;
+    const heroLeft = M;
+    const heroRight = rightEdge;
+    const heroW = heroRight - heroLeft;
 
-    // ========== HERO (Title + QR) ==========
-    const heroTop = y + 48;
+    const gap = 18;
+    const stubW = 180; // right stub width
+    const mainW = heroW - stubW - gap;
 
-    // QR on right in a delicate frame
-    const qrSize = qrImgBuf ? 144 : 0;
-    const qrPad = 10;
-    const qrW = qrSize ? qrSize + qrPad * 2 : 0;
-    const qrX = qrSize ? rightEdge - qrW : 0;
-    const qrY = heroTop;
+    const cardPad = 18;
+    const qrSize = qrImgBuf ? 124 : 0;
+    const qrPad = 8;
 
-    if (qrImgBuf) {
-      doc
-        .save()
-        .roundedRect(qrX, qrY, qrW, qrW + 26, 10)
-        .lineWidth(LINE.hair)
-        .strokeColor(border)
-        .stroke()
-        .image(qrImgBuf, qrX + qrPad, qrY + qrPad, { width: qrSize })
-        .font("Body")
-        .fontSize(FS.small)
-        .fillColor(subtext)
-        .text("Scan at check-in", qrX + 6, qrY + qrW - 6, {
-          width: qrW - 12,
-          align: "center",
-        })
-        .restore();
-    }
+    const mainX = heroLeft;
+    const stubX = heroLeft + mainW + gap;
 
-    const gutter = 20;
-    const leftColRight = qrImgBuf ? qrX - gutter : rightEdge;
-    const leftColWidth = leftColRight - M;
+    const heroH = Math.max(
+      170,
+      qrImgBuf ? qrSize + qrPad * 2 + 22 + cardPad * 2 - 8 : 170
+    );
 
-    // Experience title
+    // Main card background
     doc
-      .font("Body-Bold")
-      .fontSize(FS.title)
-      .fillColor(text)
-      .text(experienceName || "Your reservation", M, heroTop, {
-        width: leftColWidth,
-        lineGap: 1,
-      });
+      .save()
+      .roundedRect(mainX, heroTop, mainW, heroH, 12)
+      .fillColor(surface)
+      .fill()
+      .restore();
 
-    // ========== DETAILS (no boxes — just spacing) ==========
+    // Stub background
+    doc
+      .save()
+      .roundedRect(stubX, heroTop, stubW, heroH, 12)
+      .fillColor("#ffffff")
+      .strokeColor(border)
+      .lineWidth(LINE.hair)
+      .stroke()
+      .restore();
+
+    // Perforation between
+    vDash(
+      stubX - gap / 2,
+      heroTop + 10,
+      heroTop + heroH - 10,
+      shade(border, 0.9)
+    );
+
+    // --- Main content (left) ---
     const whenText = [dateLabel, timeLabel ? `, ${timeLabel}` : ""]
       .filter(Boolean)
       .join("");
     const whereText = location || "-";
 
-    const detailsTop = Math.max(doc.y + 8, heroTop + 56);
-    ensureSpace(60);
+    doc
+      .font("Body-Bold")
+      .fontSize(FS.title)
+      .fillColor(text)
+      .text(
+        experienceName || "Your reservation",
+        mainX + cardPad,
+        heroTop + cardPad,
+        { width: mainW - cardPad * 2, lineGap: 1 }
+      );
 
-    // two stacked label-value blocks
-    let lvY = detailsTop;
-    const whenBlock = labelValue("When", whenText || "-", M, lvY, leftColWidth);
-    lvY = whenBlock.nextY + 10;
+    let infoY = Math.max(doc.y + 8, heroTop + 52);
+    const w1 = mainW - cardPad * 2;
+    const whenBlock = labelValue(
+      "When",
+      whenText || "-",
+      mainX + cardPad,
+      infoY,
+      w1
+    );
+    infoY = whenBlock.nextY + 6;
+    const whereBlock = labelValue(
+      "Where",
+      whereText,
+      mainX + cardPad,
+      infoY,
+      w1
+    );
+    infoY = whereBlock.nextY + 8;
 
-    const whereBlock = labelValue("Where", whereText, M, lvY, leftColWidth);
-    lvY = whereBlock.nextY + 4;
-
-    // links under Where
     if (location) {
       const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
         location
       )}`;
-      linkText("Open in Maps", mapUrl, M, lvY, leftColWidth);
-      lvY += 16;
+      pillLink("Open in Maps", mapUrl, mainX + cardPad, infoY);
     }
 
-    // Perforation after the lower of (details vs QR)
-    const perfY = Math.max(lvY, qrImgBuf ? qrY + qrW + 26 : lvY) + 16;
-    perforation(perfY);
+    // --- Stub content (right) ---
+    const stubInnerX = stubX + cardPad;
+    let stubY = heroTop + cardPad;
 
-    // ========== ORDER SUMMARY ==========
-    y = perfY + 18;
+    if (qrImgBuf) {
+      const qrW = qrSize + qrPad * 2;
+      doc
+        .save()
+        .roundedRect(stubInnerX, stubY, qrW, qrW + 22, 10)
+        .lineWidth(LINE.hair)
+        .strokeColor(border)
+        .stroke()
+        .image(qrImgBuf, stubInnerX + qrPad, stubY + qrPad, { width: qrSize })
+        .font("Body")
+        .fontSize(FS.small)
+        .fillColor(subtext)
+        .text("Scan at check-in", stubInnerX + 6, stubY + qrW - 4, {
+          width: qrW - 12,
+          align: "center",
+        })
+        .restore();
+      stubY += qrW + 28;
+    }
+
+    if (bookingRef) {
+      doc
+        .font("Body-Bold")
+        .fontSize(FS.small)
+        .fillColor(subtext)
+        .text("Reference", stubInnerX, stubY);
+      doc
+        .font("Body")
+        .fontSize(FS.body)
+        .fillColor(text)
+        .text(String(bookingRef), stubInnerX, stubY + 12, {
+          width: stubW - cardPad * 2,
+        });
+      stubY = doc.y + 6;
+    }
+
+    const sCol = statusColor(statusLabel);
+    chip(String(statusLabel).toUpperCase(), stubInnerX, stubY + 4, {
+      fg: sCol,
+      ghost: true,
+    });
+
+    // Move flow after hero
+    doc.y = heroTop + heroH + 16;
+
+    // ================= ORDER SUMMARY (card) =================
+    let y = doc.y;
     y = sectionTitle("Order Summary", M, y) + 6;
 
+    const osTop = y;
+    const osW = rightEdge - M;
+    const osPad = 14;
+    const labelColW = 150;
+
+    // card frame
+    doc
+      .save()
+      .roundedRect(M, osTop - 8, osW, 92, 10)
+      .fillColor("#ffffff")
+      .fill()
+      .strokeColor(border)
+      .lineWidth(LINE.hair)
+      .stroke()
+      .restore();
+
+    y = osTop + osPad - 2;
+
     function row(label, value, emphasize = false) {
-      const rH = 18;
+      const rH = 20;
       ensureSpace(rH, 0);
       doc
         .font(emphasize ? "Body-Bold" : "Body")
         .fontSize(emphasize ? FS.body + 0.5 : FS.body - 0.5)
         .fillColor(emphasize ? text : subtext)
-        .text(label, M, y, { width: 150 });
+        .text(label, M + osPad, y, { width: labelColW });
 
       doc
         .font(emphasize ? "Body-Bold" : "Body")
         .fontSize(FS.body)
         .fillColor(text)
-        .text(value, M + 160, y, {
-          width: rightEdge - (M + 160),
-          align: "left",
+        .text(value, M + osPad + labelColW + 10, y, {
+          width: osW - (osPad * 2 + labelColW + 10),
         });
 
       y += rH;
       doc.y = y;
     }
 
+    const whenPretty = whenText || "-";
     row("Experience", experienceName || "-");
-    row("Date", whenText || "-");
+    row("Date", whenPretty);
 
-    // hairline
+    // subtle divider
     hr(y - 4);
     y += 4;
     doc.y = y;
 
     if (receiptUrl) {
       row("Receipt", receiptUrl);
-      linkText(
-        "Open receipt",
-        receiptUrl,
-        M + 160,
-        y - 18,
-        rightEdge - (M + 160)
-      );
+      // Link overlay
+      doc
+        .font("Body-Bold")
+        .fontSize(FS.small)
+        .fillColor(primary)
+        .text("Open receipt", M + osPad + labelColW + 10, y - 18, {
+          link: receiptUrl,
+          underline: true,
+        });
     }
 
     const pretty = currencyPretty(amountLabel, currency);
     row("Total", `${pretty}${currency ? ` (${currency})` : ""}`, true);
 
-    // ========== ATTENDEES ==========
-    y += 10;
+    // ================= ATTENDEES (card + table) =================
+    y += 12;
     y = sectionTitle("Attendees", M, y) + 6;
-    doc.y = y;
-
-    const tableTop = doc.y;
-    const frameW = rightEdge - M;
+    const atTop = y;
+    const atW = rightEdge - M;
 
     if (!attendees.length) {
-      ensureSpace(18, 0);
+      const emptyH = 44;
+      doc
+        .save()
+        .roundedRect(M, atTop - 8, atW, emptyH, 10)
+        .fillColor("#ffffff")
+        .fill()
+        .strokeColor(border)
+        .lineWidth(LINE.hair)
+        .stroke()
+        .restore();
       doc
         .font("Body")
         .fontSize(FS.body)
         .fillColor(text)
-        .text("No attendee names on file.", M, doc.y);
-      doc.y += 18;
-      // subtle frame
-      doc
-        .roundedRect(M, tableTop - 6, frameW, doc.y - tableTop + 12, 8)
-        .lineWidth(LINE.hair)
-        .strokeColor(border)
-        .stroke();
+        .text("No attendee names on file.", M + 14, atTop + 6);
+      doc.y = atTop + emptyH;
     } else {
-      let localY = doc.y;
+      // header row
+      let localY = atTop;
+      const rowH = 22;
+      const numW = 36;
+
+      // card background grows with content; we will stroke after content to match height
+      // background behind header
+      doc
+        .save()
+        .roundedRect(M, atTop - 8, atW, rowH + 14, 10)
+        .fillColor("#ffffff")
+        .fill()
+        .strokeColor(border)
+        .lineWidth(LINE.hair)
+        .stroke()
+        .restore();
+
+      // header text
+      doc
+        .font("Body-Bold")
+        .fontSize(FS.small)
+        .fillColor(subtext)
+        .text("No.", M + 14, localY);
+      doc
+        .font("Body-Bold")
+        .fontSize(FS.small)
+        .fillColor(subtext)
+        .text("Name", M + 14 + numW, localY);
+      localY += rowH - 2;
+
+      // rows
       attendees.forEach((a, i) => {
-        const rH = 18;
-        if (localY + rH > pageBottom()) {
-          // close frame
+        if (localY + rowH > pageBottom()) {
+          // draw border for previous page section
           doc
-            .roundedRect(M, tableTop - 6, frameW, localY - tableTop + 12, 8)
+            .roundedRect(M, atTop - 8, atW, localY - (atTop - 8) + 8, 10)
             .lineWidth(LINE.hair)
             .strokeColor(border)
             .stroke();
-          // new page / continuation
           doc.addPage();
           doc.font("Body");
-          const contTop = M;
-          sectionTitle("Attendees (cont.)", M, contTop);
+          sectionTitle("Attendees (cont.)", M, M);
           localY = doc.y + 6;
         }
 
-        // row content
+        if (i % 2 === 0) {
+          doc
+            .save()
+            .rect(M + 1, localY - 1, atW - 2, rowH)
+            .fillColor(surface)
+            .fill()
+            .restore();
+        }
+
         doc
           .font("Body")
           .fontSize(FS.body - 0.5)
           .fillColor(subtext)
-          .text(String(i + 1).padStart(2, "0"), M, localY, { width: 30 });
+          .text(String(i + 1).padStart(2, "0"), M + 14, localY, {
+            width: numW - 8,
+          });
         doc
           .font("Body")
           .fontSize(FS.body)
           .fillColor(text)
-          .text(a?.name || "Guest", M + 36, localY, { width: frameW - 36 });
-        localY += rH;
+          .text(a?.name || "Guest", M + 14 + numW, localY, {
+            width: atW - (numW + 28),
+          });
+
+        localY += rowH;
       });
 
-      // single delicate frame around the list
+      // outer frame to encompass entire table
       doc
-        .roundedRect(M, tableTop - 6, frameW, localY - tableTop + 12, 8)
+        .roundedRect(M, atTop - 8, atW, localY - (atTop - 8) + 8, 10)
         .lineWidth(LINE.hair)
         .strokeColor(border)
         .stroke();
+
       doc.y = localY;
     }
 
-    // ========== FOOTER ==========
+    // ================= FOOTER =================
     doc.moveDown(1);
     let footY = doc.y + 6;
     ensureSpace(36, 0);
     hr(footY);
     footY += 8;
+
+    if (logoBuf) {
+      try {
+        doc.image(logoBuf, M, footY - 1, { height: 14 });
+      } catch {}
+    } else {
+      doc
+        .save()
+        .circle(M + 6, footY + 6, 3)
+        .fillColor(accent)
+        .fill()
+        .restore();
+    }
 
     doc
       .font("Body")
@@ -466,9 +707,9 @@ export default async function buildTicketPdfBuffer(args = {}) {
       .fillColor(subtext)
       .text(
         "Present this PDF or the QR code at check-in. For changes or questions, reply to the confirmation email.",
-        M,
+        M + 24,
         footY,
-        { width: rightEdge - M }
+        { width: rightEdge - (M + 24) }
       );
 
     doc
