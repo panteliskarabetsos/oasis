@@ -14,7 +14,25 @@ import {
 import { useRouteLoader } from "./RouteLoader";
 import { useAuth } from "./SessionWrapper";
 
-/* ---------- helpers ---------- */
+/* ---------------------------------- UI ---------------------------------- */
+// Reusable palette (keeps the earthy, ambient style consistent)
+const ui = {
+  bg: "bg-[#f4f1ec]",
+  bgSoft: "bg-[#fdfaf5]",
+  bgElevated: "bg-white",
+  bgHover: "hover:bg-[#e8e2d9]",
+  bgChip: "bg-[#fbf7ef]",
+  text: "text-[#5a4a3f]",
+  textSoft: "text-[#7a6a5f]",
+  textAccent: "text-[#8b6f47]",
+  brand: "text-[#5a4a3f]",
+  border: "border-[#eae6e0]",
+  borderSoft: "border-[#efe7d9]",
+  borderMuted: "border-[#e0dcd4]",
+  cta: "bg-[#8b6f47] text-white hover:bg-[#7a5f3a]",
+};
+
+/* ------------------------------- helpers -------------------------------- */
 function safeTitle(str = "") {
   return String(str)
     .toLowerCase()
@@ -91,6 +109,7 @@ function PublicHeader() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dbProfile, setDbProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [routeBusy, setRouteBusy] = useState(false); // subtle header progress
 
   const dropdownRef = useRef(null);
   const mobileMenuRef = useRef(null);
@@ -99,10 +118,20 @@ function PublicHeader() {
   const mobileToggleBtnRef = useRef(null);
   useClickOutside(dropdownRef, () => setDropdownOpen(false));
 
-  // Header shadow on scroll (passive listener)
+  // Header shadow on scroll (passive listener with rAF for smoothness)
   useEffect(() => {
-    const onScroll = () => setHasShadow(window.scrollY > 4);
+    let ticking = false;
+    const onScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          setHasShadow(window.scrollY > 4);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
@@ -119,10 +148,11 @@ function PublicHeader() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Close any open menus on route change
+  // Close any open menus on route change and stop route progress
   useEffect(() => {
     setIsOpen(false);
     setDropdownOpen(false);
+    setRouteBusy(false);
   }, [pathname]);
 
   // Lock body scroll while mobile menu is open
@@ -152,7 +182,6 @@ function PublicHeader() {
   // Focus management: when opening mobile menu, focus first action
   useEffect(() => {
     if (isOpen) {
-      // give paint a tick
       const id = requestAnimationFrame(() => {
         mobileFirstFocusRef.current?.focus?.();
       });
@@ -248,7 +277,10 @@ function PublicHeader() {
   const isAuthed = !!user;
 
   const go = useCallback(
-    (href) => routeLoader?.triggerRouteChange(href),
+    (href) => {
+      setRouteBusy(true);
+      routeLoader?.triggerRouteChange(href);
+    },
     [routeLoader]
   );
 
@@ -264,9 +296,19 @@ function PublicHeader() {
       id="site-header"
       className={`fixed top-0 left-0 right-0 z-50 print:hidden transition-shadow ${
         hasShadow ? "shadow-lg" : "shadow-none"
-      } bg-[#f4f1ec]/85 backdrop-blur-md border-b border-[#eae6e0] pt-[env(safe-area-inset-top)]`}
+      } ${ui.bg}/85 backdrop-blur-md border-b ${
+        ui.border
+      } pt-[env(safe-area-inset-top)]`}
       role="banner"
     >
+      {/* Thin progress bar on route changes */}
+      <div
+        className={`h-0.5 w-full origin-left scale-x-0 bg-[linear-gradient(90deg,#8b6f47,#b89a6b)] transition-transform duration-500 ${
+          routeBusy ? "scale-x-100" : "scale-x-0"
+        }`}
+        aria-hidden="true"
+      />
+
       {/* Skip link for a11y */}
       <a
         href="#main"
@@ -275,14 +317,17 @@ function PublicHeader() {
         Skip to content
       </a>
 
-      <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
         {/* Brand */}
         <button
           onClick={() => go("/")}
-          className="group inline-flex items-center gap-2"
+          className="group inline-flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6] rounded"
           aria-label="Go to homepage"
         >
-          <span className="text-3xl font-serif tracking-tight text-[#5a4a3f] group-hover:text-[#8b6f47] transition-colors">
+          <span
+            className={`text-2xl sm:text-3xl font-serif tracking-tight ${ui.brand} group-hover:${ui.textAccent} transition-colors`}
+            style={{ fontFamily: "Noto Serif, ui-serif, Georgia, serif" }}
+          >
             Oasis
           </span>
         </button>
@@ -295,14 +340,15 @@ function PublicHeader() {
               <button
                 key={l.href}
                 onClick={() => go(l.href)}
-                className={`rounded-full px-4 py-2 text-sm transition-all ${
+                className={`relative rounded-full px-4 py-2 text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6] ${
                   active
-                    ? "bg-white text-[#5a4a3f] border border-[#e0dcd4]"
-                    : "text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                    ? `bg-white ${ui.text} border ${ui.borderMuted}`
+                    : `${ui.text} ${ui.bgHover}`
                 }`}
                 aria-current={active ? "page" : undefined}
               >
                 {l.name}
+                {/* Active underline */}
               </button>
             );
           })}
@@ -310,7 +356,7 @@ function PublicHeader() {
           {/* CTA */}
           <button
             onClick={() => go("/experiences")}
-            className="ml-2 rounded-full bg-[#8b6f47] px-4 py-2 text-sm text-white hover:bg-[#7a5f3a] transition-colors"
+            className={`ml-2 rounded-full px-4 py-2 text-sm ${ui.cta} transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6]`}
           >
             Book a Journey
           </button>
@@ -321,13 +367,15 @@ function PublicHeader() {
               <>
                 <button
                   onClick={() => setDropdownOpen((v) => !v)}
-                  className="flex items-center gap-2 rounded-full border border-[#e4ddd3] bg-[#fdfaf5] px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#f1ede7] transition"
+                  className={`flex items-center gap-2 rounded-full border ${ui.borderSoft} ${ui.bgSoft} px-3 py-2 text-sm ${ui.text} hover:bg-[#f1ede7] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6]`}
                   aria-haspopup="menu"
                   aria-expanded={dropdownOpen}
                   aria-controls="account-menu"
                 >
                   {/* Avatar */}
-                  <span className="inline-grid h-6 w-6 place-items-center rounded-full bg-[#e8dfcf] text-[10px] font-semibold text-[#5a4a3f]">
+                  <span
+                    className={`inline-grid h-6 w-6 place-items-center rounded-full bg-[#e8dfcf] text-[10px] font-semibold ${ui.text}`}
+                  >
                     {avatar}
                   </span>
                   <span className="max-w-[10rem] truncate">
@@ -340,16 +388,18 @@ function PublicHeader() {
                   <div
                     id="account-menu"
                     role="menu"
-                    className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-[#eae6e0] bg-white shadow-xl"
+                    className={`absolute right-0 mt-2 w-72 overflow-hidden rounded-xl border ${ui.border} ${ui.bgElevated} shadow-xl`}
                   >
                     <div className="border-b border-[#eee] px-4 py-3">
-                      <p className="truncate text-sm font-medium text-[#5a4a3f]">
+                      <p className={`truncate text-sm font-medium ${ui.text}`}>
                         {displayName}
                       </p>
-                      <p className="truncate text-xs text-[#7a6a5f]">
+                      <p className={`truncate text-xs ${ui.textSoft}`}>
                         {finalProfile.email}
                       </p>
-                      <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-[#efe7d9] bg-[#fbf7ef] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
+                      <span
+                        className={`mt-2 inline-flex items-center gap-1 rounded-full border ${ui.borderSoft} ${ui.bgChip} px-2 py-0.5 text-[11px] ${ui.text}`}
+                      >
                         <ShieldCheck size={12} />{" "}
                         {safeTitle(finalProfile.badge)}
                       </span>
@@ -361,7 +411,7 @@ function PublicHeader() {
                         setDropdownOpen(false);
                         go("/bookings");
                       }}
-                      className="block w-full px-4 py-2 text-left text-sm text-[#5a4a3f] hover:bg-[#fdfaf5]"
+                      className={`block w-full px-4 py-2 text-left text-sm ${ui.text} hover:${ui.bgSoft}`}
                     >
                       My Bookings
                     </button>
@@ -371,7 +421,7 @@ function PublicHeader() {
                         setDropdownOpen(false);
                         go("/dashboard");
                       }}
-                      className="block w-full px-4 py-2 text-left text-sm text-[#5a4a3f] hover:bg-[#fdfaf5]"
+                      className={`block w-full px-4 py-2 text-left text-sm ${ui.text} hover:${ui.bgSoft}`}
                     >
                       Dashboard
                     </button>
@@ -383,7 +433,7 @@ function PublicHeader() {
                           setDropdownOpen(false);
                           go("/admin");
                         }}
-                        className="block w-full px-4 py-2 text-left text-sm text-[#5a4a3f] hover:bg-[#fdfaf5]"
+                        className={`block w-full px-4 py-2 text-left text-sm ${ui.text} hover:${ui.bgSoft}`}
                       >
                         Admin Dashboard
                       </button>
@@ -403,14 +453,14 @@ function PublicHeader() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => go("/login")}
-                  className="flex items-center gap-2 rounded-full border border-transparent px-3 py-2 text-sm text-[#8b6f47] hover:bg-[#e8e2d9] hover:text-[#5a4a3f]"
+                  className={`flex items-center gap-2 rounded-full border border-transparent px-3 py-2 text-sm ${ui.textAccent} ${ui.bgHover} hover:${ui.text}`}
                 >
                   <LogIn size={16} />
                   Log In
                 </button>
                 <button
                   onClick={() => go("/sign-up")}
-                  className="flex items-center gap-2 rounded-full border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#faf7f1]"
+                  className={`flex items-center gap-2 rounded-full border ${ui.borderMuted} ${ui.bgElevated} px-3 py-2 text-sm ${ui.text} hover:bg-[#faf7f1]`}
                 >
                   <User size={16} />
                   Register
@@ -429,7 +479,7 @@ function PublicHeader() {
                 setMenuSection("account");
                 setIsOpen(true);
               }}
-              className="flex items-center gap-2 rounded-full border border-[#e4ddd3] bg-[#fdfaf5] px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#f1ede7] transition"
+              className={`flex items-center gap-2 rounded-full border ${ui.borderSoft} ${ui.bgSoft} px-3 py-2 text-sm ${ui.text} hover:bg-[#f1ede7] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6]`}
               aria-label="Open account menu"
               aria-expanded={isOpen && menuSection === "account"}
               aria-controls="mobile-menu"
@@ -443,7 +493,7 @@ function PublicHeader() {
               setMenuSection("nav");
               setIsOpen((v) => !v);
             }}
-            className="rounded-full p-2 text-[#5a4a3f] hover:bg-[#e8e2d9]"
+            className={`rounded-full p-2 ${ui.text} ${ui.bgHover} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6]`}
             aria-label="Toggle menu"
             aria-expanded={isOpen}
             aria-controls="mobile-menu"
@@ -476,18 +526,18 @@ function PublicHeader() {
           ref={mobileMenuRef}
           className={`fixed left-0 right-0 z-50 origin-top transform-gpu transition-transform duration-200 ease-out ${
             isOpen ? "translate-y-0" : "-translate-y-full"
-          } border-t border-[#e2ded8] bg-[#fdfaf5] shadow-xl`}
+          } border-t ${ui.border} ${ui.bgSoft} shadow-xl rounded-b-2xl`}
           style={{ top: headerH }}
           role="dialog"
           aria-modal="true"
           aria-label={menuSection === "account" ? "Account" : "Navigation"}
         >
-          <div className="px-6 py-4">
+          <div className="px-4 sm:px-6 py-4">
             {/* Sheet header (mobile close button) */}
-            <div className="mb-2 flex items-center justify-end">
+            <div className="mb-1 flex items-center justify-end">
               <button
                 onClick={() => setIsOpen(false)}
-                className="rounded-full p-2 text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                className={`rounded-full p-2 ${ui.text} ${ui.bgHover} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6]`}
                 aria-label="Close menu"
               >
                 <X size={22} />
@@ -499,13 +549,13 @@ function PublicHeader() {
             >
               {/* Section toggle (only visible when authed) */}
               {isAuthed && (
-                <div className="mb-4 flex items-center gap-2 text-sm">
+                <div className="mb-3 flex items-center gap-2 text-sm">
                   <button
                     onClick={() => setMenuSection("nav")}
                     className={`rounded-full px-3 py-1.5 ${
                       menuSection === "nav"
-                        ? "bg-[#e8e2d9] text-[#5a4a3f]"
-                        : "text-[#7a6a5f] hover:bg-[#f3efe8]"
+                        ? `bg-[#e8e2d9] ${ui.text}`
+                        : `${ui.textSoft} hover:bg-[#f3efe8]`
                     }`}
                   >
                     Browse
@@ -514,8 +564,8 @@ function PublicHeader() {
                     onClick={() => setMenuSection("account")}
                     className={`rounded-full px-3 py-1.5 ${
                       menuSection === "account"
-                        ? "bg-[#e8e2d9] text-[#5a4a3f]"
-                        : "text-[#7a6a5f] hover:bg-[#f3efe8]"
+                        ? `bg-[#e8e2d9] ${ui.text}`
+                        : `${ui.textSoft} hover:bg-[#f3efe8]`
                     }`}
                   >
                     Account
@@ -525,7 +575,9 @@ function PublicHeader() {
 
               {menuSection === "nav" && (
                 <nav className="flex flex-col gap-2" aria-label="Mobile">
-                  <p className="px-2 pb-2 text-xs uppercase tracking-wide text-[#7a6a5f]">
+                  <p
+                    className={`px-2 pb-2 text-xs uppercase tracking-wide ${ui.textSoft}`}
+                  >
                     Navigate
                   </p>
                   {navLinks.map((l, idx) => {
@@ -539,10 +591,10 @@ function PublicHeader() {
                           setIsOpen(false);
                           go(l.href);
                         }}
-                        className={`rounded-xl px-4 py-3 text-left text-base ${
+                        className={`rounded-xl px-4 py-3 text-left text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6] ${
                           active
-                            ? "bg-white text-[#5a4a3f] border border-[#e0dcd4]"
-                            : "text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                            ? `bg-white ${ui.text} border ${ui.borderMuted}`
+                            : `${ui.text} ${ui.bgHover}`
                         }`}
                         aria-current={active ? "page" : undefined}
                       >
@@ -557,7 +609,7 @@ function PublicHeader() {
                       setIsOpen(false);
                       go("/experiences");
                     }}
-                    className="mt-4 rounded-xl bg-[#8b6f47] px-4 py-3 text-base text-white hover:bg-[#7a5f3a]"
+                    className={`mt-4 rounded-xl px-4 py-3 text-base ${ui.cta} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6]`}
                   >
                     Book a Journey
                   </button>
@@ -565,13 +617,13 @@ function PublicHeader() {
                   <div className="mt-4 h-px bg-[#e7e2da]" />
 
                   {!isAuthed && (
-                    <div className="mt-4 flex gap-2">
+                    <div className="mt-4 grid grid-cols-2 gap-2">
                       <button
                         onClick={() => {
                           setIsOpen(false);
                           go("/login");
                         }}
-                        className="flex-1 rounded-xl border border-transparent bg-white px-4 py-3 text-center text-[#5a4a3f] hover:bg-[#faf7f1]"
+                        className={`rounded-xl border border-transparent ${ui.bgElevated} px-4 py-3 text-center ${ui.text} hover:bg-[#faf7f1]`}
                       >
                         Log In
                       </button>
@@ -580,7 +632,7 @@ function PublicHeader() {
                           setIsOpen(false);
                           go("/sign-up");
                         }}
-                        className="flex-1 rounded-xl border border-[#e0dcd4] bg-white px-4 py-3 text-center text-[#5a4a3f] hover:bg-[#faf7f1]"
+                        className={`rounded-xl border ${ui.borderMuted} ${ui.bgElevated} px-4 py-3 text-center ${ui.text} hover:bg-[#faf7f1]`}
                       >
                         Register
                       </button>
@@ -592,19 +644,25 @@ function PublicHeader() {
               {menuSection === "account" && isAuthed && (
                 <div aria-label="Account" className="flex flex-col">
                   {/* Compact account header */}
-                  <div className="mb-3 flex items-center gap-3 rounded-xl border border-[#efe7d9] bg-[#fbf7ef] p-3">
-                    <div className="inline-grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#e8dfcf] text-sm font-semibold text-[#5a4a3f]">
+                  <div
+                    className={`mb-3 flex items-center gap-3 rounded-xl border ${ui.borderSoft} ${ui.bgChip} p-3`}
+                  >
+                    <div
+                      className={`inline-grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#e8dfcf] text-sm font-semibold ${ui.text}`}
+                    >
                       {avatar}
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[#5a4a3f]">
+                      <p className={`truncate text-sm font-medium ${ui.text}`}>
                         {displayName}
                       </p>
-                      <p className="truncate text-xs text-[#7a6a5f]">
+                      <p className={`truncate text-xs ${ui.textSoft}`}>
                         {finalProfile.email}
                       </p>
                     </div>
-                    <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-[#efe7d9] bg-white px-2 py-0.5 text-[11px] text-[#5a4a3f]">
+                    <span
+                      className={`ml-auto inline-flex items-center gap-1 rounded-full border ${ui.borderSoft} ${ui.bgElevated} px-2 py-0.5 text-[11px] ${ui.text}`}
+                    >
                       <ShieldCheck size={12} /> {safeTitle(finalProfile.badge)}
                     </span>
                   </div>
@@ -616,7 +674,7 @@ function PublicHeader() {
                         setIsOpen(false);
                         go("/bookings");
                       }}
-                      className="rounded-xl px-4 py-3 text-left text-base text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                      className={`rounded-xl px-4 py-3 text-left text-base ${ui.text} ${ui.bgHover}`}
                     >
                       My Bookings
                     </button>
@@ -625,7 +683,7 @@ function PublicHeader() {
                         setIsOpen(false);
                         go("/dashboard");
                       }}
-                      className="rounded-xl px-4 py-3 text-left text-base text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                      className={`rounded-xl px-4 py-3 text-left text-base ${ui.text} ${ui.bgHover}`}
                     >
                       Dashboard
                     </button>
@@ -635,7 +693,7 @@ function PublicHeader() {
                           setIsOpen(false);
                           go("/admin");
                         }}
-                        className="rounded-xl px-4 py-3 text-left text-base text-[#5a4a3f] hover:bg-[#e8e2d9]"
+                        className={`rounded-xl px-4 py-3 text-left text-base ${ui.text} ${ui.bgHover}`}
                       >
                         Admin Dashboard
                       </button>
@@ -653,6 +711,11 @@ function PublicHeader() {
           </div>
         </div>
       </div>
+
+      {/* polite live region for route changes (accessibility) */}
+      <p className="sr-only" aria-live="polite">
+        {routeBusy ? "Loading page…" : ""}
+      </p>
     </header>
   );
 }
