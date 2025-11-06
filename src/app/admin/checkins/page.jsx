@@ -183,6 +183,7 @@ function ScanModal({ open, onClose, onDetected }) {
   const [torchOn, setTorchOn] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [hit, setHit] = useState(null); // { id, name, size }
   const processingRef = useRef(false);
   const lastValRef = useRef("");
   const lastTsRef = useRef(0);
@@ -222,6 +223,10 @@ function ScanModal({ open, onClose, onDetected }) {
         soundSuccess();
         if (navigator.vibrate) navigator.vibrate(60);
         setStatus("Checked in ✓");
+        if (res?.booking) {
+          setHit(res.booking);
+          setTimeout(() => setHit(null), 2400);
+        }
       } else if (outcome === "already") {
         soundError();
         if (navigator.vibrate) navigator.vibrate(40);
@@ -475,6 +480,7 @@ function ScanModal({ open, onClose, onDetected }) {
     setTorchOn(false);
     setTorchSupported(false);
     setStatus("");
+    setHit(null);
   }
 
   async function startScanner() {
@@ -608,6 +614,33 @@ function ScanModal({ open, onClose, onDetected }) {
                 <div className="absolute inset-0 pointer-events-none grid place-items-center">
                   <div className="w-[72%] max-w-[560px] aspect-square rounded-3xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.28)]" />
                 </div>
+
+                {/* SUCCESS BANNER with booking info */}
+                <AnimatePresence>
+                  {hit ? (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 400,
+                        damping: 30,
+                      }}
+                      className="absolute top-3 left-1/2 -translate-x-1/2"
+                    >
+                      <div className="rounded-2xl px-3 py-2 border bg-white/90 backdrop-blur shadow flex items-center gap-2">
+                        <CheckCircle2 size={16} className="text-green-600" />
+                        <div className="text-sm">
+                          <span className="font-semibold">{hit.name}</span>{" "}
+                          <span className="opacity-70">· party</span>{" "}
+                          <Badge tone="blue">{hit.size}</Badge>{" "}
+                          <span className="opacity-60"># {hit.id}</span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
 
                 {/* status & controls */}
                 <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
@@ -905,11 +938,10 @@ export default function CheckinsPage() {
       pushToast("Invalid code", "err");
       return { invalid: true };
     }
-    const alreadyLocal = !!(roster?.slots || [])
-      .flatMap((s) => s.bookings || [])
-      .find(
-        (b) => b.id === id && String(b.status).toLowerCase() === "checked_in"
-      );
+    const allBookings = (roster?.slots || []).flatMap((s) => s.bookings || []);
+    const alreadyLocal = !!allBookings.find(
+      (b) => b.id === id && String(b.status).toLowerCase() === "checked_in"
+    );
     if (alreadyLocal) return { already: true };
 
     const res = await fetch(`/api/admin/checkins/${id}`, {
@@ -932,6 +964,11 @@ export default function CheckinsPage() {
       return { already: true };
     }
 
+    // Find booking info for friendly UI (name + party)
+    const bObj = allBookings.find((b) => b.id === id) || null;
+    const name = contactName(bObj?.primary_contact) || "—";
+    const size = partySize(bObj);
+
     setRoster((prev) => {
       if (!prev) return prev;
       const slots = prev.slots.map((s) => {
@@ -942,8 +979,12 @@ export default function CheckinsPage() {
       });
       return { ...prev, slots };
     });
-    pushToast(`Booking #${id} → checked in`, "ok");
-    return { ok: true };
+
+    // Richer success toast with booking info
+    pushToast(`Checked in: ${name} · party of ${size} (Booking #${id})`, "ok");
+
+    // Return info so the scanner modal can show an inline success banner
+    return { ok: true, booking: { id, name, size } };
   }
 
   return (
