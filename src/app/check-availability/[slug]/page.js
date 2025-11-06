@@ -2,7 +2,7 @@
 "use client";
 
 import { enGB } from "date-fns/locale";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useId } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { format, isSameDay, parseISO } from "date-fns";
 import { DayPicker } from "react-day-picker";
@@ -79,6 +79,7 @@ export default function CheckAvailabilityPage() {
   });
 
   const slotsContainerRef = useRef(null);
+  const timesListRef = useRef(null);
 
   // Remaining capacity per calendar day (not per time)
   const countsByYMD = useMemo(() => {
@@ -297,6 +298,13 @@ export default function CheckAvailabilityPage() {
     </span>
   );
 
+  const tz = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+    []
+  );
+
+  const priceLiveId = useId();
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
       {/* Top bar */}
@@ -304,7 +312,7 @@ export default function CheckAvailabilityPage() {
         <div className="flex items-center justify-between py-4">
           <button
             onClick={() => router.back()}
-            className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#8b6f47]/70 rounded-full px-4 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm"
+            className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#8b6f47]/70 rounded-full px-4 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
           >
             <ArrowLeft size={16} />
             Back
@@ -358,10 +366,20 @@ export default function CheckAvailabilityPage() {
             </div>
 
             {/* Stepper */}
-            <div className="mt-5 grid grid-cols-3 gap-2 text-xs sm:text-sm">
-              <Step label="Choose date" active={step >= 1} done={step > 1} />
-              <Step label="Choose time" active={step >= 2} done={step > 2} />
-              <Step label="Group size" active={step >= 3} />
+            <div className="mt-5">
+              <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm">
+                <Step label="Choose date" active={step >= 1} done={step > 1} />
+                <Step label="Choose time" active={step >= 2} done={step > 2} />
+                <Step label="Group size" active={step >= 3} />
+              </div>
+              {/* Progress bar */}
+              <div className="mt-3 h-1.5 w-full rounded-full bg-[#ece6dc]">
+                <div
+                  className="h-1.5 rounded-full bg-[#8b6f47] transition-all"
+                  style={{ width: `${(step / 3) * 100}%` }}
+                  aria-hidden
+                />
+              </div>
             </div>
 
             {/* Info / Pause banner */}
@@ -400,12 +418,15 @@ export default function CheckAvailabilityPage() {
                 </div>
               </div>
             ) : (
-              <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
                 <Info size={14} className="mt-0.5 text-[#8b6f47]" />
                 <p>
                   Pick a date and time, then set your group split. You’ll fill
                   attendee details on the next page.
                 </p>
+                <span className="ml-auto text-[11px] text-[#8b6f47]">
+                  Times shown in {tz}
+                </span>
               </div>
             )}
           </div>
@@ -413,7 +434,7 @@ export default function CheckAvailabilityPage() {
       </div>
 
       {/* Content */}
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 pb-28 sm:pb-16">
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-10">
           {/* Left: Calendar */}
           <section
@@ -440,7 +461,7 @@ export default function CheckAvailabilityPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedDate(new Date())}
-                  className="rounded-full border border-[#e0dcd4] px-3 py-1.5 text-xs text-[#5a4a3f] hover:bg-[#faf7f1]"
+                  className="rounded-full border border-[#e0dcd4] px-3 py-1.5 text-xs text-[#5a4a3f] hover:bg-[#faf7f1] focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
                 >
                   Today
                 </button>
@@ -450,7 +471,7 @@ export default function CheckAvailabilityPage() {
                     const d = earliestDayWithAvailability(availableSlots);
                     if (d && !pausedNow) setSelectedDate(d);
                   }}
-                  className="rounded-full bg-[#8b6f47] px-3 py-1.5 text-xs text-white hover:bg-[#7a5f3a] disabled:opacity-50"
+                  className="rounded-full bg-[#8b6f47] px-3 py-1.5 text-xs text-white hover:bg-[#7a5f3a] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
                   disabled={!hasAnySlots}
                 >
                   First available
@@ -567,7 +588,12 @@ export default function CheckAvailabilityPage() {
                   No times available for this day.
                 </p>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div
+                  ref={timesListRef}
+                  role="radiogroup"
+                  aria-label="Available start times"
+                  className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+                >
                   {slotsOnSelectedDay.map((slot) => {
                     const available =
                       typeof slot.available === "number"
@@ -588,7 +614,15 @@ export default function CheckAvailabilityPage() {
                         onClick={() =>
                           !isDisabled && setSelectedSlotId(slot.id)
                         }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            !isDisabled && setSelectedSlotId(slot.id);
+                          }
+                        }}
                         disabled={isDisabled}
+                        role="radio"
+                        aria-checked={isSelected}
                         className={`flex items-center justify-between rounded-xl border p-4 text-left transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e] ${
                           isDisabled
                             ? "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
@@ -596,7 +630,6 @@ export default function CheckAvailabilityPage() {
                             ? "bg-[#f5efe4] border-[#8b6f47]"
                             : "bg-white border-[#e8e5df] hover:shadow-md"
                         }`}
-                        aria-pressed={isSelected}
                         aria-label={`Start time ${time}${
                           available > 0
                             ? `, ${available} spots left`
@@ -623,6 +656,7 @@ export default function CheckAvailabilityPage() {
                           className="accent-[#8b6f47]"
                           checked={isSelected}
                           readOnly
+                          tabIndex={-1}
                         />
                       </button>
                     );
@@ -656,9 +690,23 @@ export default function CheckAvailabilityPage() {
 
                 {/* Counters */}
                 <div className={`mt-4 ${pausedNow ? "opacity-60" : ""}`}>
-                  <p className="text-xs text-[#7a6a58]">
-                    Adults 15+, Kids 3–14.
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-[#7a6a58]">
+                      Adults 15+, Kids 3–14.
+                    </p>
+                    {(adults !== 1 || kids !== 0) && (
+                      <button
+                        type="button"
+                        className="text-[11px] underline text-[#8b6f47] hover:text-[#6f583c]"
+                        onClick={() => {
+                          setAdults(1);
+                          setKids(0);
+                        }}
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <Counter
                       label="Adults"
@@ -695,7 +743,12 @@ export default function CheckAvailabilityPage() {
                 </div>
 
                 {/* Price summary (tiered) */}
-                <div className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner">
+                <div
+                  id={priceLiveId}
+                  role="status"
+                  aria-live="polite"
+                  className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner"
+                >
                   <div className="space-y-1 text-sm text-[#5a4a3f]">
                     {adults > 0 && (
                       <div className="flex items-center justify-between">
@@ -732,7 +785,7 @@ export default function CheckAvailabilityPage() {
                 <button
                   onClick={handleContinue}
                   disabled={!canContinue || isSubmitting}
-                  className={`mt-6 w-full py-3 rounded-lg font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md ${
+                  className={`mt-6 w-full py-3 rounded-lg font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md hidden sm:flex ${
                     !canContinue
                       ? "bg-gray-400 cursor-not-allowed text-white"
                       : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
@@ -758,6 +811,43 @@ export default function CheckAvailabilityPage() {
           </section>
         </div>
       </main>
+
+      {/* Mobile sticky action bar */}
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 border-t border-[#e5e0d8] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 px-4 py-3">
+        <div className="mx-auto max-w-6xl flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs text-[#7a6a58]">Total</div>
+            <div className="text-xl font-bold text-[#5a4a3f]">
+              {formatEuro(totalPrice)}
+            </div>
+          </div>
+          <button
+            onClick={handleContinue}
+            disabled={!canContinue || isSubmitting}
+            className={`flex-1 justify-center py-3 rounded-lg font-semibold text-base transition-all flex items-center gap-2 shadow-md ${
+              !canContinue
+                ? "bg-gray-400 cursor-not-allowed text-white"
+                : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
+            }`}
+            aria-label="Continue to details"
+          >
+            {pausedNow ? (
+              "Paused"
+            ) : isSubmitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Continue…
+              </>
+            ) : !selectedSlotId ? (
+              "Select a time"
+            ) : totalPeople <= 0 ? (
+              "Add people"
+            ) : (
+              "Continue"
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -823,20 +913,24 @@ function CapacityBar({ total = 0, booked = 0 }) {
 }
 
 function Counter({ label, value, onChange, min = 0, disabled = false }) {
+  const inputId = useId();
   return (
     <div className="bg-white border border-[#e2ddd2] rounded-xl p-3 shadow-sm">
-      <div className="text-sm text-[#5a4a3f] mb-2">{label}</div>
+      <label htmlFor={inputId} className="text-sm text-[#5a4a3f] mb-2 block">
+        {label}
+      </label>
       <div className="flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={() => !disabled && onChange(Math.max(min, (value || 0) - 1))}
           disabled={disabled}
-          className="text-[#8b6f47] p-1 disabled:opacity-40"
+          className="text-[#8b6f47] p-1 disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#cbb89e] rounded"
           aria-label={`Decrease ${label}`}
         >
           <Minus className="w-4 h-4" />
         </button>
         <input
+          id={inputId}
           type="number"
           min={min}
           value={value}
@@ -852,7 +946,7 @@ function Counter({ label, value, onChange, min = 0, disabled = false }) {
           type="button"
           onClick={() => !disabled && onChange((value || 0) + 1)}
           disabled={disabled}
-          className="text-[#8b6f47] p-1 disabled:opacity-40"
+          className="text-[#8b6f47] p-1 disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#cbb89e] rounded"
           aria-label={`Increase ${label}`}
         >
           <Plus className="w-4 h-4" />
@@ -904,7 +998,7 @@ function SelectedDatePill({ date, onClear }) {
       <button
         type="button"
         onClick={onClear}
-        className="ml-1 rounded-full px-1.5 py-0.5 hover:bg-white"
+        className="ml-1 rounded-full px-1.5 py-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
         aria-label="Clear selected date"
       >
         ×
