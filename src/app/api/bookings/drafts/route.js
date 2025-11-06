@@ -9,8 +9,15 @@ const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 const HOLD_MINUTES = 10;
-// statuses that count toward booked seats
-const COUNT_STATUSES = new Set(["confirmed", "completed", "checked_in"]);
+
+// Count these booking statuses towards capacity (align with availability API)
+const COUNT_STATUSES = new Set([
+  "paid",
+  "approved",
+  "confirmed",
+  "completed",
+  "checked_in",
+]);
 
 export async function POST(req) {
   const admin = createSupabaseAdmin();
@@ -25,6 +32,12 @@ export async function POST(req) {
   const requestedGroup = A + K;
   const clientToken = (body?.clientToken || "").trim() || null;
 
+  // ---- Time anchors (shared) ----
+  const nowMs = Date.now();
+  const now = new Date(nowMs);
+  const BUFFER_MINUTES = 0; // set to >0 if you want a small guard window
+
+  // Basic validation
   if (!Number.isFinite(experienceId) || experienceId <= 0)
     return bad("experienceId required");
   if (!Number.isFinite(scheduleSlotId) || scheduleSlotId <= 0)
@@ -41,7 +54,7 @@ export async function POST(req) {
   if (expErr || !exp) return bad("Experience not found", 404);
   if (!exp.visibility) return bad("Experience not public", 403);
 
-  // 2) Fetch Slot (ensure belongs to exp, not cancelled, >1h from now)
+  // 2) Fetch Slot (ensure belongs to exp, not cancelled, and in the future)
   const { data: slot, error: slotErr } = await admin
     .from("ScheduleSlot")
     .select("id, experienceId, date, totalSlots, isCancelled")
@@ -51,9 +64,10 @@ export async function POST(req) {
   if (slot.experienceId !== experienceId)
     return bad("Slot does not belong to experience", 400);
   if (slot.isCancelled) return bad("This slot is cancelled", 400);
-  const now = new Date();
-  const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-  if (new Date(slot.date) <= oneHourFromNow)
+
+  const slotTs = Date.parse(slot.date);
+  if (!Number.isFinite(slotTs)) return bad("Invalid slot date", 400);
+  if (slotTs <= nowMs + BUFFER_MINUTES * 60 * 1000)
     return bad("Slot no longer available", 400);
 
   // 3) Aggregate booked seats from real reservations (Booking)
@@ -72,7 +86,7 @@ export async function POST(req) {
     return sum + (Number.isFinite(n) ? n : 0);
   }, 0);
 
-  // 4) Aggregate active holds from other drafts (draft/checkout unexpired + paid not converted)
+  // 4) Aggregate active holds from other drafts
   const { data: holds, error: holdsErr } = await admin
     .from("BookingDraft")
     .select('id, counts, status, "expiresAt", "convertedBookingId"')
@@ -85,10 +99,14 @@ export async function POST(req) {
   const activeHoldSize = (list, excludeId = null) =>
     (list || []).reduce((sum, d) => {
       if (excludeId && d.id === excludeId) return sum;
+
       const isPaidUnconverted = d.status === "paid" && !d.convertedBookingId;
-      const expAt = d.expiresAt ? new Date(d.expiresAt) : null;
-      const isActive =
-        isPaidUnconverted || (d.status !== "paid" && (!expAt || expAt > now));
+
+      const expMs = d.expiresAt ? Date.parse(d.expiresAt) : NaN;
+      const notExpired = !Number.isFinite(expMs) || expMs > nowMs;
+
+      const isActive = isPaidUnconverted || (d.status !== "paid" && notExpired);
+
       if (!isActive) return sum;
       const a = toInt(d?.counts?.adults, 0);
       const k = toInt(d?.counts?.kids, 0);
@@ -104,9 +122,13 @@ export async function POST(req) {
       .eq("status", "draft")
       .maybeSingle();
 
+    const existingExpMs = existing?.expiresAt
+      ? Date.parse(existing.expiresAt)
+      : NaN;
+
     if (
       existing &&
-      (!existing.expiresAt || new Date(existing.expiresAt) > now)
+      (!Number.isFinite(existingExpMs) || existingExpMs > nowMs)
     ) {
       // Capacity check excluding this draft's current hold
       const holdsExcludingSelf = activeHoldSize(holds, existing.id);
@@ -124,15 +146,16 @@ export async function POST(req) {
 
       // Update counts/slot and bump expiry
       const newExpiry = new Date(
-        Date.now() + HOLD_MINUTES * 60 * 1000
+        nowMs + HOLD_MINUTES * 60 * 1000
       ).toISOString();
+
       const { error: upErr } = await admin
         .from("BookingDraft")
         .update({
           counts: { adults: A, kids: K },
           scheduleSlotId,
           expiresAt: newExpiry,
-          updatedAt: new Date().toISOString(),
+          updatedAt: new Date(nowMs).toISOString(),
         })
         .eq("id", existing.id);
 
@@ -159,9 +182,8 @@ export async function POST(req) {
   const totalAmount = A * unitAdult + K * unitKid;
 
   // 8) Insert draft
-  const expiresAt = new Date(
-    Date.now() + HOLD_MINUTES * 60 * 1000
-  ).toISOString();
+  const expiresAt = new Date(nowMs + HOLD_MINUTES * 60 * 1000).toISOString();
+
   const insertPayload = {
     experienceId,
     scheduleSlotId,
@@ -171,7 +193,7 @@ export async function POST(req) {
     unitPriceKid: unitKid,
     totalAmount,
     expiresAt,
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(nowMs).toISOString(),
     ...(clientToken ? { clientToken } : {}),
   };
 

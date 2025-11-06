@@ -1,9 +1,10 @@
 // src/app/check-availability/[slug]/page.js
 "use client";
+
 import { enGB } from "date-fns/locale";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { format, isSameDay, parseISO, isAfter } from "date-fns";
+import { format, isSameDay, parseISO } from "date-fns";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/dist/style.css";
 import toast from "react-hot-toast";
@@ -20,27 +21,25 @@ import {
   PauseCircle,
 } from "lucide-react";
 
-// --- Currency helpers ---
-function formatEuro(n) {
-  return `€${(Number(n) || 0).toFixed(2)}`;
-}
+/* -------------------------------------------------------------------------- */
+/*                               Helper utils                                 */
+/* -------------------------------------------------------------------------- */
 
-// --- Pricing helpers ---
-function normalizePricing(exp) {
-  // Priority: pricing JSON -> explicit columns -> legacy price
-  const pj = exp?.pricing || {};
-  const adult = toNum(pj.adult ?? exp?.priceAdult ?? exp?.price ?? 0);
-
-  const kid = toNum(pj.kid ?? exp?.priceKid ?? adult); // default = adult
-  return { adult, kid };
-}
-function toNum(x) {
+const formatEuro = (n) => `€${(Number(n) || 0).toFixed(2)}`;
+const toNum = (x) => {
   const n = Number(x);
   return Number.isFinite(n) ? n : 0;
-}
-function eur(n) {
-  return `€${(Number(n) || 0).toFixed(2)}`;
-}
+};
+const normalizePricing = (exp) => {
+  const pj = exp?.pricing || {};
+  const adult = toNum(pj.adult ?? exp?.priceAdult ?? exp?.price ?? 0);
+  const kid = toNum(pj.kid ?? exp?.priceKid ?? adult);
+  return { adult, kid };
+};
+
+/* -------------------------------------------------------------------------- */
+/*                               Main component                               */
+/* -------------------------------------------------------------------------- */
 
 export default function CheckAvailabilityPage() {
   const router = useRouter();
@@ -52,11 +51,9 @@ export default function CheckAvailabilityPage() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlotId, setSelectedSlotId] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  // alias (in case other parts use `eur(...)`)
-  const eur = formatEuro;
+
   // Group split
   const [adults, setAdults] = useState(1);
-
   const [kids, setKids] = useState(0);
 
   const prices = useMemo(() => normalizePricing(experience), [experience]);
@@ -88,7 +85,11 @@ export default function CheckAvailabilityPage() {
     const m = new Map();
     for (const s of availableSlots) {
       const d = parseISO(s.date);
-      const ymd = d.toISOString().slice(0, 10);
+      const ymd = [
+        d.getFullYear(),
+        String(d.getMonth() + 1).padStart(2, "0"),
+        String(d.getDate()).padStart(2, "0"),
+      ].join("-");
       const remaining =
         typeof s.available === "number"
           ? s.available
@@ -168,10 +169,11 @@ export default function CheckAvailabilityPage() {
         );
         const slots = (await slotsRes.json()) || [];
         const now = new Date();
-        const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-        const futureOnly = slots.filter(
-          (s) => !s.isCancelled && isAfter(parseISO(s.date), oneHourFromNow)
-        );
+        const futureOnly = slots.filter((s) => {
+          if (s.isCancelled) return false;
+          const dt = parseISO(s.date);
+          return dt.getTime() >= now.getTime();
+        });
         setAvailableSlots(futureOnly);
 
         const firstDay = earliestDayWithAvailability(futureOnly);
@@ -223,10 +225,9 @@ export default function CheckAvailabilityPage() {
   const availablePlaces = selectedSlot
     ? Math.max(
         0,
-        // prefer API's computed `available` if present, else derive
         selectedSlot.available ??
           Number(selectedSlot.totalSlots || 0) -
-            Number(selectedSlot.bookedSlots || 0) // subtract holds if you have them
+            Number(selectedSlot.bookedSlots || 0)
       )
     : 0;
 
@@ -236,15 +237,13 @@ export default function CheckAvailabilityPage() {
   const bookingCap = Math.min(MAX_PER_BOOKING, availablePlaces);
 
   // Clamp a counter so total never exceeds `bookingCap`
-  const clampGroup = (nextValue, min, _cap, _total, who) => {
+  const clampGroup = (nextValue, min, who) => {
     const n = Math.max(min, Number(nextValue) || 0);
     const others = who === "adults" ? Number(kids) || 0 : Number(adults) || 0;
-    // max this counter can be so that (this + others) <= bookingCap
     const maxForThis = Math.max(min, bookingCap - others);
     return Math.min(n, maxForThis);
   };
 
-  // Optional: block continue when over cap
   const canContinue =
     !!selectedSlotId &&
     totalPeople >= 1 &&
@@ -290,11 +289,19 @@ export default function CheckAvailabilityPage() {
 
   const step = !selectedDate ? 1 : !selectedSlotId ? 2 : 3;
 
+  /* ---------------------- Local DayContent with availability dot --------------------- */
+  const DayContent = (props) => (
+    <span className="relative inline-flex items-center justify-center w-7 h-7">
+      {props.children}
+      <DayDot date={props.date} countsByYMD={countsByYMD} />
+    </span>
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
       {/* Top bar */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 ">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between py-4">
           <button
             onClick={() => router.back()}
             className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#8b6f47]/70 rounded-full px-4 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm"
@@ -302,14 +309,20 @@ export default function CheckAvailabilityPage() {
             <ArrowLeft size={16} />
             Back
           </button>
+          {experience?.name && (
+            <div className="hidden sm:flex items-center gap-2 text-[#6b5e53] text-sm">
+              <Users className="w-4 h-4" /> Max {MAX_PER_BOOKING}/booking
+            </div>
+          )}
         </div>
       </div>
 
       {/* Header banner */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 mt-6">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 mt-2">
         <div className="relative overflow-hidden rounded-3xl border border-[#e5e0d8] bg-[#fcf9f4]">
           <div className="absolute inset-0 bg-gradient-to-r from-[#efe9df] via-transparent to-[#efe9df] pointer-events-none" />
           {firstImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={firstImage}
               alt={experience?.name || "Experience"}
@@ -337,8 +350,9 @@ export default function CheckAvailabilityPage() {
               </div>
               {fromPrice !== null ? (
                 <div className="mt-3 sm:mt-0 rounded-xl border border-[#e0dcd4] bg-white px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
-                  From <span className="font-semibold">{eur(fromPrice)}</span> /
-                  person
+                  From{" "}
+                  <span className="font-semibold">{formatEuro(fromPrice)}</span>{" "}
+                  / person
                 </div>
               ) : null}
             </div>
@@ -352,7 +366,10 @@ export default function CheckAvailabilityPage() {
 
             {/* Info / Pause banner */}
             {settingsLoading ? (
-              <div className="mt-4 flex items-center gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
+              <div
+                className="mt-4 flex items-center gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm"
+                aria-busy
+              >
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-[#8b6f47]" />
                 Loading booking status…
               </div>
@@ -433,7 +450,8 @@ export default function CheckAvailabilityPage() {
                     const d = earliestDayWithAvailability(availableSlots);
                     if (d && !pausedNow) setSelectedDate(d);
                   }}
-                  className="rounded-full bg-[#8b6f47] px-3 py-1.5 text-xs text-white hover:bg-[#7a5f3a]"
+                  className="rounded-full bg-[#8b6f47] px-3 py-1.5 text-xs text-white hover:bg-[#7a5f3a] disabled:opacity-50"
+                  disabled={!hasAnySlots}
                 >
                   First available
                 </button>
@@ -465,14 +483,12 @@ export default function CheckAvailabilityPage() {
                   fromYear={new Date().getFullYear()}
                   toYear={new Date().getFullYear() + 1}
                   locale={enGB}
-                  /* style days by capacity + weekend tint */
                   modifiers={{
                     plenty: availabilityBuckets.plenty,
                     some: availabilityBuckets.some,
                     few: availabilityBuckets.few,
                     weekend: { dayOfWeek: [0, 6] },
                   }}
-                  /* disable past days + days without availability */
                   disabled={[
                     { before: new Date() },
                     (date) => !availableDates.some((d) => isSameDay(d, date)),
@@ -573,7 +589,7 @@ export default function CheckAvailabilityPage() {
                           !isDisabled && setSelectedSlotId(slot.id)
                         }
                         disabled={isDisabled}
-                        className={`flex items-center justify-between rounded-xl border p-4 text-left transition-all shadow-sm ${
+                        className={`flex items-center justify-between rounded-xl border p-4 text-left transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e] ${
                           isDisabled
                             ? "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
                             : isSelected
@@ -581,6 +597,11 @@ export default function CheckAvailabilityPage() {
                             : "bg-white border-[#e8e5df] hover:shadow-md"
                         }`}
                         aria-pressed={isSelected}
+                        aria-label={`Start time ${time}${
+                          available > 0
+                            ? `, ${available} spots left`
+                            : ", fully booked"
+                        }`}
                       >
                         <div>
                           <div className="text-sm font-semibold">{time}</div>
@@ -602,7 +623,6 @@ export default function CheckAvailabilityPage() {
                           className="accent-[#8b6f47]"
                           checked={isSelected}
                           readOnly
-                          aria-label={`Time ${time}`}
                         />
                       </button>
                     );
@@ -643,11 +663,7 @@ export default function CheckAvailabilityPage() {
                     <Counter
                       label="Adults"
                       value={adults}
-                      onChange={(v) =>
-                        setAdults(
-                          clampGroup(v, 1, bookingCap, totalPeople, "adults")
-                        )
-                      }
+                      onChange={(v) => setAdults(clampGroup(v, 1, "adults"))}
                       min={1}
                       disabled={!selectedSlot || pausedNow || bookingCap === 0}
                     />
@@ -655,13 +671,17 @@ export default function CheckAvailabilityPage() {
                     <Counter
                       label="Kids"
                       value={kids}
-                      onChange={(v) =>
-                        setKids(
-                          clampGroup(v, 0, bookingCap, totalPeople, "kids")
-                        )
-                      }
+                      onChange={(v) => setKids(clampGroup(v, 0, "kids"))}
                       disabled={!selectedSlot || pausedNow || bookingCap === 0}
                     />
+
+                    {/* Total people quick-view */}
+                    <div className="bg-white border border-[#e2ddd2] rounded-xl p-3 shadow-sm flex flex-col justify-center">
+                      <div className="text-sm text-[#5a4a3f] mb-1">Total</div>
+                      <div className="text-2xl font-bold text-[#8b6f47] tracking-wide">
+                        {totalPeople}
+                      </div>
+                    </div>
                   </div>
 
                   {selectedSlot && (
@@ -680,18 +700,22 @@ export default function CheckAvailabilityPage() {
                     {adults > 0 && (
                       <div className="flex items-center justify-between">
                         <span>
-                          Adults × {adults} @ {eur(prices.adult)}
+                          Adults × {adults} @ {formatEuro(prices.adult)}
                         </span>
-                        <span className="font-semibold">{eur(lineAdult)}</span>
+                        <span className="font-semibold">
+                          {formatEuro(lineAdult)}
+                        </span>
                       </div>
                     )}
 
                     {kids > 0 && (
                       <div className="flex items-center justify-between">
                         <span>
-                          Kids × {kids} @ {eur(prices.kid)}
+                          Kids × {kids} @ {formatEuro(prices.kid)}
                         </span>
-                        <span className="font-semibold">{eur(lineKid)}</span>
+                        <span className="font-semibold">
+                          {formatEuro(lineKid)}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -699,7 +723,7 @@ export default function CheckAvailabilityPage() {
                   <div className="mt-3 border-t border-[#e5e0d8] pt-3 flex items-center justify-between">
                     <span className="text-sm text-[#5a4a3f]">Total</span>
                     <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                      {eur(totalPrice)}
+                      {formatEuro(totalPrice)}
                     </span>
                   </div>
                 </div>
@@ -738,7 +762,7 @@ export default function CheckAvailabilityPage() {
   );
 }
 
-/* ---------- UI bits ---------- */
+/* -------------------------------- Subcomponents ------------------------------- */
 
 function Step({ label, active, done }) {
   return (
@@ -757,6 +781,7 @@ function Step({ label, active, done }) {
             ? "bg-[#efe9df] text-[#5a4a3f] border border-[#e1d8c9]"
             : "bg-[#f2ede6] text-[#8b6f47]"
         }`}
+        aria-hidden
       >
         {done ? "✓" : "•"}
       </span>
@@ -784,7 +809,10 @@ function CapacityBar({ total = 0, booked = 0 }) {
           {available} / {total} available
         </span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-[#ece6dc]">
+      <div
+        className="h-2 w-full overflow-hidden rounded-full bg-[#ece6dc]"
+        aria-hidden
+      >
         <div
           className={`h-2 ${tone} transition-all`}
           style={{ width: `${usedPct}%` }}
@@ -804,7 +832,7 @@ function Counter({ label, value, onChange, min = 0, disabled = false }) {
           onClick={() => !disabled && onChange(Math.max(min, (value || 0) - 1))}
           disabled={disabled}
           className="text-[#8b6f47] p-1 disabled:opacity-40"
-          aria-label="Decrease"
+          aria-label={`Decrease ${label}`}
         >
           <Minus className="w-4 h-4" />
         </button>
@@ -817,13 +845,15 @@ function Counter({ label, value, onChange, min = 0, disabled = false }) {
           }
           className="w-12 text-center text-[#5a4a3f] bg-transparent border-0 focus:outline-none font-semibold"
           disabled={disabled}
+          aria-label={`${label} count`}
+          inputMode="numeric"
         />
         <button
           type="button"
           onClick={() => !disabled && onChange((value || 0) + 1)}
           disabled={disabled}
           className="text-[#8b6f47] p-1 disabled:opacity-40"
-          aria-label="Increase"
+          aria-label={`Increase ${label}`}
         >
           <Plus className="w-4 h-4" />
         </button>
@@ -832,17 +862,7 @@ function Counter({ label, value, onChange, min = 0, disabled = false }) {
   );
 }
 
-/* ---------- Helpers ---------- */
-
-// Keep total within cap and never drop below min adult count
-function clampGroup(nextVal, min, bookingCap, totalPeople, which) {
-  const raw = Math.max(min, Number(nextVal) || 0);
-  // We don't know others here; caller passes setState in sequence,
-  // so just rely on Continue button validation to enforce total ≤ cap.
-  // Optional: enforce soft cap here by not allowing a single field to push over cap.
-  // Return raw and rely on disabled button + message for UX clarity.
-  return raw;
-}
+/* --------------------------------- Helpers ---------------------------------- */
 
 function SkeletonCalendar() {
   return (
@@ -850,7 +870,10 @@ function SkeletonCalendar() {
       <div className="mx-auto h-6 w-28 rounded bg-[#ece6dc]" />
       <div className="mt-4 grid grid-cols-7 gap-2">
         {Array.from({ length: 35 }).map((_, i) => (
-          <div key={i} className="h-10 rounded-full bg-[#f0ebe3]" />
+          <div
+            key={i}
+            className="h-10 rounded-full bg-[#f0ebe3] animate-pulse"
+          />
         ))}
       </div>
       <p className="mt-3 text-center text-xs text-[#7a6a58]">
@@ -890,7 +913,6 @@ function SelectedDatePill({ date, onClear }) {
   );
 }
 
-// Legend for calendar buckets
 function Legend() {
   return (
     <div className="mt-3 flex flex-wrap items-center justify-center gap-4 text-[11px] text-[#7a6a58]">
@@ -918,9 +940,12 @@ function Legend() {
   );
 }
 
-// a tiny dot under the date number for available days
 function DayDot({ date, countsByYMD }) {
-  const ymd = date.toISOString().slice(0, 10);
+  const ymd = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
   const remaining = countsByYMD.get(ymd) || 0;
   if (!remaining) return null;
   const few = remaining <= 3;
@@ -931,16 +956,5 @@ function DayDot({ date, countsByYMD }) {
       }`}
       aria-hidden="true"
     />
-  );
-}
-
-// inject the dot inside each day cell without breaking keyboard behavior
-function DayContent(props) {
-  return (
-    <span className="relative inline-flex items-center justify-center w-7 h-7">
-      {props.children}
-      {/* countsByYMD is captured from the outer scope */}
-      <DayDot date={props.date} countsByYMD={countsByYMD} />
-    </span>
   );
 }
