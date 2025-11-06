@@ -12,11 +12,11 @@ import {
   RotateCcw,
   AlertTriangle,
   Camera,
-  CameraOff,
   Flashlight,
   Check,
   User,
   Users,
+  Info,
 } from "lucide-react";
 
 /* ------------------------------------------------------------
@@ -76,13 +76,13 @@ function Badge({ tone = "slate", children, className = "" }) {
 }
 function StatusBadge({ status }) {
   const s = (status || "").toLowerCase();
-  if (s === "checked_in") return <Badge tone="green">Checked‑in</Badge>;
+  if (s === "checked_in") return <Badge tone="green">Checked-in</Badge>;
   if (s === "completed") return <Badge tone="violet">Completed</Badge>;
   if (s === "approved" || s === "converted")
     return <Badge tone="sky">Approved</Badge>;
   if (s === "pending") return <Badge tone="amber">Pending</Badge>;
   if (s === "no_show" || s === "noshow")
-    return <Badge tone="red">No‑show</Badge>;
+    return <Badge tone="red">No-show</Badge>;
   if (s === "cancelled") return <Badge tone="red">Cancelled</Badge>;
   return <Badge>Confirmed</Badge>;
 }
@@ -183,7 +183,6 @@ function ScanModal({ open, onClose, onDetected }) {
   const [torchOn, setTorchOn] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
-  const [hit, setHit] = useState(null); // { id, name, size }
   const processingRef = useRef(false);
   const lastValRef = useRef("");
   const lastTsRef = useRef(0);
@@ -223,10 +222,6 @@ function ScanModal({ open, onClose, onDetected }) {
         soundSuccess();
         if (navigator.vibrate) navigator.vibrate(60);
         setStatus("Checked in ✓");
-        if (res?.booking) {
-          setHit(res.booking);
-          setTimeout(() => setHit(null), 2400);
-        }
       } else if (outcome === "already") {
         soundError();
         if (navigator.vibrate) navigator.vibrate(40);
@@ -480,7 +475,6 @@ function ScanModal({ open, onClose, onDetected }) {
     setTorchOn(false);
     setTorchSupported(false);
     setStatus("");
-    setHit(null);
   }
 
   async function startScanner() {
@@ -614,33 +608,6 @@ function ScanModal({ open, onClose, onDetected }) {
                 <div className="absolute inset-0 pointer-events-none grid place-items-center">
                   <div className="w-[72%] max-w-[560px] aspect-square rounded-3xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.28)]" />
                 </div>
-
-                {/* SUCCESS BANNER with booking info */}
-                <AnimatePresence>
-                  {hit ? (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{
-                        type: "spring",
-                        stiffness: 400,
-                        damping: 30,
-                      }}
-                      className="absolute top-3 left-1/2 -translate-x-1/2"
-                    >
-                      <div className="rounded-2xl px-3 py-2 border bg-white/90 backdrop-blur shadow flex items-center gap-2">
-                        <CheckCircle2 size={16} className="text-green-600" />
-                        <div className="text-sm">
-                          <span className="font-semibold">{hit.name}</span>{" "}
-                          <span className="opacity-70">· party</span>{" "}
-                          <Badge tone="blue">{hit.size}</Badge>{" "}
-                          <span className="opacity-60"># {hit.id}</span>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
 
                 {/* status & controls */}
                 <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
@@ -778,6 +745,114 @@ function ManualFallback({ onDetected }) {
 }
 
 /* ------------------------------------------------------------
+   Scan result pop-up (NEW)
+-------------------------------------------------------------*/
+function ScanResultPopover({ result, onClose, onUndo, onScroll }) {
+  if (!result) return null;
+  const tone =
+    result.mode === "ok"
+      ? "ok"
+      : result.mode === "already"
+      ? "already"
+      : "invalid";
+
+  const icon =
+    result.mode === "ok" ? (
+      <CheckCircle2 className="w-5 h-5 text-green-700" />
+    ) : result.mode === "already" ? (
+      <Info className="w-5 h-5 text-amber-700" />
+    ) : (
+      <XCircle className="w-5 h-5 text-red-700" />
+    );
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ y: 20, opacity: 0, scale: 0.98 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 10, opacity: 0, scale: 0.98 }}
+        transition={{ type: "spring", stiffness: 350, damping: 30, mass: 0.7 }}
+        className={clsx(
+          "fixed bottom-4 right-4 z-[70] max-w-sm w-[92vw] sm:w-[420px] rounded-2xl shadow-lg",
+          colors.card,
+          "bg-white/90"
+        )}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="p-3">
+          <div className="flex items-start gap-2">
+            {icon}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold">
+                  {result.mode === "ok"
+                    ? "Check-in successful"
+                    : result.mode === "already"
+                    ? "Already checked-in"
+                    : "Invalid code"}
+                </p>
+                <button
+                  onClick={onClose}
+                  className="text-xs rounded-full px-2 py-0.5 border bg-white hover:bg-slate-50"
+                  style={{ borderColor: colors.border }}
+                >
+                  Close
+                </button>
+              </div>
+
+              {result.booking ? (
+                <div className="mt-1 text-sm">
+                  <div className="font-medium truncate">
+                    #{result.id} — {result.booking.name}
+                  </div>
+                  <div className="mt-0.5 text-xs flex flex-wrap gap-2">
+                    <Badge tone="blue">
+                      Party{" "}
+                      <span className="ml-1 font-semibold">
+                        {result.booking.party}
+                      </span>
+                    </Badge>
+                    <Badge tone="sky">
+                      {result.booking.experience || "Experience"}
+                    </Badge>
+                    {result.booking.time ? (
+                      <Badge tone="slate">{result.booking.time}</Badge>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-1 text-xs" style={{ color: colors.sub }}>
+                  Couldn’t locate booking details for today’s roster.
+                </p>
+              )}
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={onScroll}
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs border bg-white hover:bg-slate-50"
+                  style={{ borderColor: colors.border }}
+                >
+                  View in list
+                </button>
+                {result.mode === "ok" ? (
+                  <button
+                    onClick={onUndo}
+                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs border bg-red-50 text-red-700 hover:bg-red-100 border-red-200"
+                  >
+                    Undo check-in
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+/* ------------------------------------------------------------
    Page
 -------------------------------------------------------------*/
 export default function CheckinsPage() {
@@ -792,6 +867,10 @@ export default function CheckinsPage() {
   const [roster, setRoster] = useState(null); // { slots: [...], totals: {...} }
   const [error, setError] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
+
+  // NEW: scan result + row flash highlight
+  const [scanResult, setScanResult] = useState(null);
+  const [flashId, setFlashId] = useState(null);
 
   const searchRef = useRef(null);
   const { toasts, pushToast, remove } = useToasts();
@@ -811,8 +890,7 @@ export default function CheckinsPage() {
         e.preventDefault();
         searchRef.current?.focus();
       }
-      if (e.key.toLowerCase() === "s") setScanOpen(true);
-      if (e.key.toLowerCase() === "t") setDate(formatDayTZ(new Date()));
+
       if (e.key === "Escape") setScanOpen(false);
     };
     window.addEventListener("keydown", onKey);
@@ -932,17 +1010,84 @@ export default function CheckinsPage() {
     return { count, checked, noshow, capacity: cap, reserved: resv };
   }, [roster]);
 
+  // --- NEW: helpers for scan result ---
+  function findBookingInRoster(id) {
+    const slots = roster?.slots || [];
+    for (const slot of slots) {
+      for (const b of slot.bookings || []) {
+        if (b.id === id) {
+          return {
+            slot,
+            booking: b,
+          };
+        }
+      }
+    }
+    return { slot: null, booking: null };
+  }
+
+  function makeScanResult(mode, id) {
+    const { slot, booking } = findBookingInRoster(id);
+    const info =
+      slot && booking
+        ? {
+            id,
+            booking: {
+              name: contactName(booking.primary_contact),
+              party: partySize(booking),
+              experience: slot.experienceName,
+              time: new Date(slot.date).toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
+            mode,
+          }
+        : { id, booking: null, mode };
+    return info;
+  }
+
+  function flashBooking(id) {
+    setFlashId(id);
+    setTimeout(() => setFlashId(null), 2500);
+  }
+
+  function scrollToBooking(id) {
+    const el =
+      document.querySelector(`[data-booking-id="${id}"]`) ||
+      document.querySelector(`[data-booking-card="${id}"]`);
+    if (el?.scrollIntoView) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    flashBooking(id);
+  }
+
+  // Auto-hide scan result after a few seconds
+  useEffect(() => {
+    if (!scanResult) return;
+    const t = setTimeout(() => setScanResult(null), 5500);
+    return () => clearTimeout(t);
+  }, [scanResult]);
+
   async function onScan(text) {
     const id = extractBookingId(text);
     if (!id) {
       pushToast("Invalid code", "err");
+      setScanResult({ mode: "invalid", id, booking: null });
       return { invalid: true };
     }
-    const allBookings = (roster?.slots || []).flatMap((s) => s.bookings || []);
-    const alreadyLocal = !!allBookings.find(
-      (b) => b.id === id && String(b.status).toLowerCase() === "checked_in"
-    );
-    if (alreadyLocal) return { already: true };
+
+    const alreadyLocal = !!(roster?.slots || [])
+      .flatMap((s) => s.bookings || [])
+      .find(
+        (b) => b.id === id && String(b.status).toLowerCase() === "checked_in"
+      );
+    if (alreadyLocal) {
+      const r = makeScanResult("already", id);
+      setScanResult(r);
+      scrollToBooking(id);
+      return { already: true };
+    }
 
     const res = await fetch(`/api/admin/checkins/${id}`, {
       method: "PATCH",
@@ -957,18 +1102,18 @@ export default function CheckinsPage() {
 
     if (!res.ok) {
       pushToast("Invalid booking or not today", "err");
+      setScanResult({ mode: "invalid", id, booking: null });
       return { invalid: true };
     }
     if (json.already) {
       pushToast(`Booking #${id} already checked in`, "err");
+      const r = makeScanResult("already", id);
+      setScanResult(r);
+      scrollToBooking(id);
       return { already: true };
     }
 
-    // Find booking info for friendly UI (name + party)
-    const bObj = allBookings.find((b) => b.id === id) || null;
-    const name = contactName(bObj?.primary_contact) || "—";
-    const size = partySize(bObj);
-
+    // Optimistic roster patch for checked_in
     setRoster((prev) => {
       if (!prev) return prev;
       const slots = prev.slots.map((s) => {
@@ -979,17 +1124,33 @@ export default function CheckinsPage() {
       });
       return { ...prev, slots };
     });
+    pushToast(`Booking #${id} → checked in`, "ok");
 
-    // Richer success toast with booking info
-    pushToast(`Checked in: ${name} · party of ${size} (Booking #${id})`, "ok");
-
-    // Return info so the scanner modal can show an inline success banner
-    return { ok: true, booking: { id, name, size } };
+    const r = makeScanResult("ok", id);
+    setScanResult(r);
+    scrollToBooking(id);
+    return { ok: true };
   }
 
   return (
     <div className={clsx("min-h-screen", colors.soft, `text-[${colors.text}]`)}>
       <Toasts toasts={toasts} remove={remove} />
+
+      {/* NEW: Scan result popover */}
+      <ScanResultPopover
+        result={scanResult}
+        onClose={() => setScanResult(null)}
+        onUndo={() => {
+          if (!scanResult?.id) return;
+          mutateBooking(scanResult.id, "undo");
+          setScanResult(null);
+          setTimeout(() => scrollToBooking(scanResult.id), 250);
+        }}
+        onScroll={() => {
+          if (!scanResult?.id) return;
+          scrollToBooking(scanResult.id);
+        }}
+      />
 
       <div className="mx-auto max-w-6xl px-6 py-6">
         {/* Header / Toolbar */}
@@ -1003,7 +1164,7 @@ export default function CheckinsPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl md:text-3xl font-serif tracking-tight">
-                Check‑ins
+                Check-ins
               </h1>
               <p className={clsx("text-sm", `text-[${colors.sub}]`)}>
                 Scan or mark arrivals for today’s slots.
@@ -1089,13 +1250,13 @@ export default function CheckinsPage() {
             icon={<Users className="w-4 h-4" />}
           />
           <SummaryCard
-            label="Checked‑in"
+            label="Checked-in"
             value={totals.checked}
             tone="green"
             icon={<CheckCircle2 className="w-4 h-4" />}
           />
           <SummaryCard
-            label="No‑shows"
+            label="No-shows"
             value={totals.noshow}
             tone="red"
             icon={<XCircle className="w-4 h-4" />}
@@ -1221,8 +1382,17 @@ export default function CheckinsPage() {
                         "no_show",
                         "noshow",
                       ].includes(s);
+                      const flashing = flashId === b.id;
                       return (
-                        <tr key={b.id} className="align-middle">
+                        <tr
+                          key={b.id}
+                          data-booking-id={b.id}
+                          className={clsx(
+                            "align-middle transition",
+                            flashing &&
+                              "ring-2 ring-green-400/50 bg-green-50/60"
+                          )}
+                        >
                           <td className="py-2 pr-4 font-medium">#{b.id}</td>
                           <td className="py-2 pr-4">
                             <div className="flex flex-col">
@@ -1248,10 +1418,13 @@ export default function CheckinsPage() {
                               <ActionButton
                                 tone="green"
                                 disabled={!canCheckIn}
-                                onClick={() => mutateBooking(b.id, "checkin")}
+                                onClick={() => {
+                                  mutateBooking(b.id, "checkin");
+                                  setTimeout(() => scrollToBooking(b.id), 100);
+                                }}
                                 icon={<CheckCircle2 size={14} />}
-                                label="Check‑in"
-                                title="Mark as checked‑in"
+                                label="Check-in"
+                                title="Mark as checked-in"
                               />
                               <ActionButton
                                 tone="slate"
@@ -1266,13 +1439,13 @@ export default function CheckinsPage() {
                                 disabled={s === "no_show" || s === "noshow"}
                                 onClick={() => {
                                   const ok = window.confirm(
-                                    `Mark booking #${b.id} as no‑show?`
+                                    `Mark booking #${b.id} as no-show?`
                                   );
                                   if (ok) mutateBooking(b.id, "no_show");
                                 }}
                                 icon={<XCircle size={14} />}
-                                label="No‑show"
-                                title="Mark as no‑show"
+                                label="No-show"
+                                title="Mark as no-show"
                               />
                             </div>
                           </td>
@@ -1297,10 +1470,15 @@ export default function CheckinsPage() {
                   const canUndo = ["checked_in", "no_show", "noshow"].includes(
                     s
                   );
+                  const flashing = flashId === b.id;
                   return (
                     <div
                       key={b.id}
-                      className="rounded-xl border p-3 bg-white/80"
+                      data-booking-card={b.id}
+                      className={clsx(
+                        "rounded-xl border p-3 bg-white/80 transition",
+                        flashing && "ring-2 ring-green-400/50 bg-green-50/60"
+                      )}
                       style={{ borderColor: colors.border }}
                     >
                       <div className="flex items-center justify-between">
@@ -1331,9 +1509,12 @@ export default function CheckinsPage() {
                           tone="green"
                           block
                           disabled={!canCheckIn}
-                          onClick={() => mutateBooking(b.id, "checkin")}
+                          onClick={() => {
+                            mutateBooking(b.id, "checkin");
+                            setTimeout(() => scrollToBooking(b.id), 100);
+                          }}
                           icon={<CheckCircle2 size={14} />}
-                          label="Check‑in"
+                          label="Check-in"
                         />
                         <ActionButton
                           tone="slate"
@@ -1349,12 +1530,12 @@ export default function CheckinsPage() {
                           disabled={s === "no_show" || s === "noshow"}
                           onClick={() => {
                             const ok = window.confirm(
-                              `Mark booking #${b.id} as no‑show?`
+                              `Mark booking #${b.id} as no-show?`
                             );
                             if (ok) mutateBooking(b.id, "no_show");
                           }}
                           icon={<XCircle size={14} />}
-                          label="No‑show"
+                          label="No-show"
                         />
                       </div>
                     </div>

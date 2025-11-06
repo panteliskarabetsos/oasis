@@ -55,14 +55,13 @@ const fmtMoney = (n) =>
     : "-";
 
 const cx = (...xs) => xs.filter(Boolean).join(" ");
-
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
-  { value: "paid" || "Paid", label: "Paid" },
-  { value: "confirmed", label: "Confirmed" },
-  { value: "pending", label: "Pending" },
+  { value: "confirmed", label: "Confirmed" }, // paid & confirmed
+  { value: "pending", label: "Pending" }, // seat on hold until paid
+  { value: "checked_in", label: "Checked-in" },
+  { value: "no_show", label: "No-show" },
   { value: "cancelled", label: "Cancelled" },
-  { value: "draft", label: "Drafts" },
 ];
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -128,10 +127,11 @@ export default function ReservationsPage() {
   // Aggregate quick stats for current view (client-side)
   const viewStats = useMemo(() => {
     const s = {
-      paid: 0,
+      confirmed: 0,
       pending: 0,
+      checked_in: 0,
+      no_show: 0,
       cancelled: 0,
-      draft: 0,
       total: 0,
       revenue: 0,
     };
@@ -139,8 +139,12 @@ export default function ReservationsPage() {
       const k = normalizeStatus(r.status);
       if (k in s) s[k] += 1;
       s.total += 1;
+
       const t = rowTotal(r);
-      if (typeof t === "number" && k !== "cancelled") s.revenue += t;
+      // revenue only for money-realized states
+      if (typeof t === "number" && ["confirmed", "checked_in"].includes(k)) {
+        s.revenue += t;
+      }
     }
     return s;
   }, [rows]);
@@ -527,7 +531,11 @@ export default function ReservationsPage() {
         {/* Stat bar (current view) */}
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <StatPill label="Results" value={viewStats.total} />
-          <StatPill label="Paid" value={viewStats.paid} tone="green" />
+          <StatPill
+            label="Confirmed"
+            value={viewStats.confirmed}
+            tone="green"
+          />
           <StatPill label="Pending" value={viewStats.pending} tone="amber" />
           <StatPill
             label="Revenue (view)"
@@ -604,11 +612,11 @@ export default function ReservationsPage() {
               <div className="mt-2 flex flex-wrap gap-2">
                 {[
                   { v: "", l: "All" },
-                  { v: "paid", l: "Paid" },
                   { v: "confirmed", l: "Confirmed" },
                   { v: "pending", l: "Pending" },
+                  { v: "checked_in", l: "Checked-in" },
+                  { v: "no_show", l: "No-show" },
                   { v: "cancelled", l: "Cancelled" },
-                  { v: "draft", l: "Drafts" },
                 ].map((o) => (
                   <button
                     key={o.v}
@@ -1386,40 +1394,70 @@ function normalizeStatus(s) {
   const v = String(s || "")
     .toLowerCase()
     .trim();
-  // if (v === "confirmed") return "paid"; // legacy synonym
-  if (v === "processing") return "pending";
-  return v || "draft";
+
+  // canonical 5-state model
+  if (
+    [
+      "confirmed",
+      "paid",
+      "approved",
+      "converted",
+      "completed",
+      "success",
+      "ok",
+    ].includes(v)
+  )
+    return "confirmed";
+  if (
+    [
+      "pending",
+      "processing",
+      "awaiting_payment",
+      "hold",
+      "held",
+      "unpaid",
+    ].includes(v)
+  )
+    return "pending";
+  if (["checked_in", "checkin", "checkedin"].includes(v)) return "checked_in";
+  if (["no_show", "noshow", "no-show", "no_showed"].includes(v))
+    return "no_show";
+  if (["cancelled", "canceled", "refunded", "void"].includes(v))
+    return "cancelled";
+
+  // unknown stays as-is (shown neutrally)
+  return v || "";
 }
 
 function labelStatus(status) {
   const k = normalizeStatus(status);
   return (
     {
-      paid: "Paid",
+      confirmed: "Confirmed",
       pending: "Pending",
+      checked_in: "Checked-in",
+      no_show: "No-show",
       cancelled: "Cancelled",
-      draft: "Draft",
-    }[k] ||
-    status ||
-    "-"
+    }[k] || (status ? String(status) : "-")
   );
 }
 
 function StatusBadge({ status }) {
   const k = normalizeStatus(status);
-  const map = {
-    paid: "bg-green-100 text-green-800 border-green-200",
-    pending: "bg-amber-100 text-amber-800 border-amber-200",
-    cancelled: "bg-red-100 text-red-800 border-red-200",
-    draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
-    confirmed: "bg-blue-100 text-blue-800 border-blue-200",
-  };
+  const cls =
+    {
+      confirmed: "bg-sky-100 text-sky-800 border-sky-200",
+      pending: "bg-amber-100 text-amber-900 border-amber-200",
+      checked_in: "bg-green-100 text-green-800 border-green-200",
+      no_show: "bg-rose-100 text-rose-800 border-rose-200",
+      cancelled: "bg-red-100 text-red-800 border-red-200",
+    }[k] || "bg-neutral-100 text-neutral-700 border-neutral-200";
 
   return (
     <span
       className={cx(
         "inline-flex items-center rounded-full border px-2.5 py-1 text-xs",
-        map[k] || "bg-neutral-100 text-neutral-700 border-neutral-200"
+        cls
       )}
     >
       {labelStatus(k)}
