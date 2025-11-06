@@ -42,6 +42,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import QRCode from "@zxing/library/esm/core/qrcode/encoder/QRCode";
 
 // Admin Dashboard – refreshed UI/UX + business features
 export default function AdminDashboardPage() {
@@ -576,12 +577,9 @@ export default function AdminDashboardPage() {
             onClick={() => go("/admin/schedule")}
           />
           <ToolbarButton
-            label="Add-ons"
-            icon={<PackagePlus size={16} />}
-            onClick={() => go("/admin/addons")}
-            disabled={isDisabled("loyalty")}
-            title={hintFor("loyalty")}
-            disabledHint="Coming soon"
+            label="Check-ins"
+            icon={<QrCode size={16} />}
+            onClick={() => go("/admin/checkins")}
           />
           <ToolbarButton
             label="Gift Cards"
