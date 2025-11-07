@@ -5,6 +5,7 @@ import { RouteLoader } from "./components/RouteLoader";
 import SessionWrapper from "./components/SessionWrapper";
 import PromoBannerGate from "./components/PromoBannerGate";
 import FooterGate from "./components/FooterGate";
+import { BotIdClient } from "botid/client";
 import { Toaster } from "react-hot-toast";
 export const metadata = {
   title: "Oasis – Agrotourism & Wellness",

@@ -142,6 +142,24 @@ export default function CheckAvailabilityPage() {
     };
   }, []);
 
+  // run cleanup once when this page loads
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      try {
+        await fetch("/api/cleanupDrafts", {
+          method: "POST",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+      } catch (e) {
+        // silent fail; we don't want to block the UI
+        console.warn("[check-availability] cleanupDrafts failed", e);
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+
   const pausedNow = useMemo(() => {
     const paused = !!globalSettings.bookingsPaused;
     if (!paused) return false;

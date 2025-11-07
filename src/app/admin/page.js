@@ -46,6 +46,24 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+export const dynamic = "force-dynamic"; // ensure this runs on every request (no static caching)
+
+async function runCleanup() {
+  const headers = {};
+  if (process.env.CRON_SECRET) {
+    headers.Authorization = `Bearer ${process.env.CRON_SECRET}`;
+  }
+
+  // Global sweep. If you want per-slot, add ?scheduleSlotId=123
+  await fetch("/api/cleanupDrafts", {
+    method: "POST",
+    headers,
+    cache: "no-store",
+    next: { revalidate: 0 },
+  }).catch((e) => {
+    console.error("[admin] cleanupDrafts failed:", e);
+  });
+}
 
 // Admin Dashboard – refreshed UI/UX + business features (improved)
 export default function AdminDashboardPage() {
