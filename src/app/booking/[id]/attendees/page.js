@@ -1,4 +1,3 @@
-// src/app/booking/[id]/attendees/page.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -17,6 +16,11 @@ import {
   Info,
   User,
   CheckCircle2,
+  Star,
+  CreditCard,
+  ChevronDown,
+  Edit3,
+  ShieldCheck,
 } from "lucide-react";
 
 export default function AttendeesPage() {
@@ -40,6 +44,9 @@ export default function AttendeesPage() {
   const [pcEmail, setPcEmail] = useState("");
   const [pcPhone, setPcPhone] = useState("");
 
+  // Auto-link primary contact name to first adult
+  const [autoPcFromFirstAdult, setAutoPcFromFirstAdult] = useState(true);
+
   // Attendees array
   const expectedTotal = useMemo(
     () => Number(counts.adults || 0) + Number(counts.kids || 0),
@@ -57,6 +64,24 @@ export default function AttendeesPage() {
   const progressPct = expectedTotal
     ? Math.round((completedCount / expectedTotal) * 100)
     : 0;
+
+  // Figure out the first adult
+  const firstAdultIndex = useMemo(
+    () => attendees.findIndex((a) => a.category === "adult"),
+    [attendees]
+  );
+  const firstAdultFullName = useMemo(() => {
+    if (firstAdultIndex === -1) return "";
+    const a = attendees[firstAdultIndex] || {};
+    const fn = (a.firstName || "").trim();
+    const ln = (a.lastName || "").trim();
+    return [fn, ln].filter(Boolean).join(" ");
+  }, [firstAdultIndex, attendees]);
+
+  // Keep pcName in sync with first adult while toggle is ON
+  useEffect(() => {
+    if (autoPcFromFirstAdult) setPcName(firstAdultFullName);
+  }, [firstAdultFullName, autoPcFromFirstAdult]);
 
   // Fetch draft
   useEffect(() => {
@@ -117,6 +142,8 @@ export default function AttendeesPage() {
           setPcName(pc.name || "");
           setPcEmail(pc.email || "");
           setPcPhone(pc.phone || "");
+          // If a primary contact already exists, respect it and turn OFF auto-link (can be re-enabled by the user)
+          if (pc.name) setAutoPcFromFirstAdult(false);
         }
 
         // Build attendee list to match expected total & categories
@@ -187,8 +214,12 @@ export default function AttendeesPage() {
   }
 
   async function handleSaveAndContinue() {
+    const effectivePcName = autoPcFromFirstAdult
+      ? firstAdultFullName || pcName
+      : pcName;
+
     const issues = validate(attendees, counts, {
-      name: pcName,
+      name: effectivePcName,
       email: pcEmail,
       phone: pcPhone,
     });
@@ -204,7 +235,7 @@ export default function AttendeesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           primaryContact: {
-            name: pcName.trim(),
+            name: (effectivePcName || "").trim(),
             email: pcEmail.trim(),
             phone: pcPhone.trim(),
           },
@@ -235,33 +266,27 @@ export default function AttendeesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
+    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_right,rgba(233,227,217,0.6),transparent_45%),linear-gradient(to_bottom,#f7f3ed,#f4f1ec)]">
       {/* Top bar */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-10">
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => router.back()}
-            className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#8b6f47]/70 rounded-full px-4 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm"
-          >
-            <ArrowLeft size={16} />
-            Back
-          </button>
-
-          <div className="w-48 sm:w-64">
-            <div className="flex items-center justify-between text-[11px] text-[#6b5e53] mb-1">
-              <span>Details</span>
-              <span>Payment</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-[#e6e0d5] overflow-hidden">
-              <div
-                className="h-full bg-[#8b6f47] rounded-full transition-all"
-                style={{ width: "66%" }}
-              />
-            </div>
-            <div className="mt-1.5 text-[11px] text-[#6b5e53] text-right">
-              Step 2 of 3
-            </div>
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 sm:pt-10">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="inline-flex items-center gap-2 text-[#725b3b] text-sm border border-[#8b6f47]/50 rounded-full px-4 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4b89f] focus-visible:ring-offset-2"
+            >
+              <ArrowLeft size={16} />
+              Back
+            </button>
+            <span className="hidden sm:inline-flex items-center gap-2 text-xs text-[#7a6a58] pl-2">
+              <Users size={14} className="opacity-80" />
+              Attendees
+            </span>
           </div>
+
+          {/* Stepper */}
+          <Stepper current={2} />
         </div>
       </div>
 
@@ -272,11 +297,11 @@ export default function AttendeesPage() {
           <div className="relative z-10 p-6 sm:p-8">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-full bg-[#efeae2] p-2">
+                <div className="mt-0.5 rounded-full bg-[#efeae2] p-2 shadow-inner">
                   <Users className="h-5 w-5 text-[#8b6f47]" />
                 </div>
                 <div>
-                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#5a4a3f]">
+                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#5a4a3f] tracking-tight">
                     {experience?.name || "Your booking"}
                   </h1>
                   <div className="mt-1 flex flex-wrap items-center gap-4 text-sm text-[#6b5e53]">
@@ -308,10 +333,11 @@ export default function AttendeesPage() {
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => router.back()}
-                  className="hidden sm:inline-flex items-center text-xs px-3 py-2 rounded-lg border border-[#e0dcd4] text-[#6b5e53] hover:bg-white shadow-sm"
+                  className="hidden sm:inline-flex items-center text-xs px-3 py-2 rounded-lg border border-[#e0dcd4] text-[#6b5e53] hover:bg-white shadow-sm gap-1"
                 >
-                  Edit group
+                  <Edit3 size={14} /> Edit group
                 </button>
               </div>
             </div>
@@ -331,12 +357,12 @@ export default function AttendeesPage() {
       </div>
 
       {/* Content */}
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 pb-28 sm:pb-16">
         {loading ? (
           <LoadingBlock />
         ) : (
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-10">
-            {/* Left: Explorer forms */}
+            {/* Left: Attendee forms */}
             <section className="lg:col-span-2 space-y-4">
               <div className="flex items-center justify-between text-xs text-[#6b5e53] pl-1">
                 <span>
@@ -357,15 +383,20 @@ export default function AttendeesPage() {
                 >
                   <summary className="flex list-none items-center justify-between gap-3 cursor-pointer select-none px-5 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 shrink-0 rounded-full bg-[#efeae2] text-[#8b6f47] grid place-items-center text-sm font-semibold">
+                      <div className="h-9 w-9 shrink-0 rounded-full bg-[#efeae2] text-[#8b6f47] grid place-items-center text-sm font-semibold shadow-inner">
                         {idx + 1}
                       </div>
                       <div>
-                        <h3 className="text-sm font-semibold text-[#5a4a3f]">
+                        <h3 className="text-sm font-semibold text-[#5a4a3f] flex items-center gap-2">
                           Explorer {idx + 1}
-                          <span className="ml-2 inline-block rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
+                          <span className="inline-block rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
                             {labelForCategory(a.category)}
                           </span>
+                          {idx === firstAdultIndex && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#8b6f47] bg-[#efeae2] border border-[#decfb7] px-2 py-0.5 rounded-full">
+                              <Star className="h-3.5 w-3.5" /> Primary contact
+                            </span>
+                          )}
                         </h3>
                         <p className="text-[11px] text-[#7a6a58]">
                           {a.firstName && a.lastName
@@ -374,15 +405,19 @@ export default function AttendeesPage() {
                         </p>
                       </div>
                     </div>
-                    <CheckCircle2
-                      className={`h-5 w-5 ${
-                        a.firstName?.trim() &&
-                        a.lastName?.trim() &&
-                        a.age !== ""
-                          ? "text-[#8b6f47]"
-                          : "text-[#d9d3c7]"
-                      }`}
-                    />
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2
+                        aria-hidden
+                        className={`h-5 w-5 ${
+                          a.firstName?.trim() &&
+                          a.lastName?.trim() &&
+                          a.age !== ""
+                            ? "text-[#8b6f47]"
+                            : "text-[#d9d3c7]"
+                        }`}
+                      />
+                      <ChevronDown className="h-5 w-5 text-[#7a6a58] transition-transform group-open:rotate-180" />
+                    </div>
                   </summary>
 
                   <div className="px-5 pb-5 pt-0">
@@ -450,8 +485,17 @@ export default function AttendeesPage() {
               ))}
 
               {expectedTotal === 0 && (
-                <div className="rounded-2xl border border-[#e8e5df] bg-white p-5 shadow-sm text-[#5a4a3f]">
-                  No attendees expected — go back and select your group first.
+                <div className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm text-[#5a4a3f]">
+                  <p className="mb-3">
+                    No attendees expected — go back and select your group first.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => router.back()}
+                    className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-lg border border-[#e0dcd4] text-[#6b5e53] hover:bg-[#faf7f2] shadow-sm"
+                  >
+                    <ArrowLeft size={16} /> Edit group
+                  </button>
                 </div>
               )}
             </section>
@@ -524,13 +568,44 @@ export default function AttendeesPage() {
 
                 {/* Primary Contact */}
                 <div className="mt-6">
-                  <h4 className="text-sm font-semibold text-[#5a4a3f]">
-                    Primary contact
+                  <h4 className="text-sm font-semibold text-[#5a4a3f] flex items-center gap-2">
+                    <Star className="w-4 h-4 text-[#8b6f47]" /> Primary contact
                   </h4>
-                  <p className="text-[11px] text-[#7a6a58] mb-2">
+                  <p className="text-[11px] text-[#7a6a58] mb-3">
                     We’ll send the confirmation to this email and use the phone
                     for day-of updates.
                   </p>
+
+                  {/* Auto-bind toggle */}
+                  <div className="flex items-center justify-between rounded-lg border border-[#e5e0d8] bg-white px-3 py-2 mb-3">
+                    <div className="text-xs text-[#5a4a3f]">
+                      Use first adult as contact name
+                      {firstAdultFullName ? (
+                        <span className="ml-1 text-[#7a6a58]">
+                          — {firstAdultFullName}
+                        </span>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAutoPcFromFirstAdult((v) => !v)}
+                      aria-pressed={autoPcFromFirstAdult}
+                      aria-label="Toggle auto use of first adult as contact name"
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-all border ${
+                        autoPcFromFirstAdult
+                          ? "bg-[#8b6f47] border-[#7a5f3a]"
+                          : "bg-[#e9e3d9] border-[#d7d2c6]"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                          autoPcFromFirstAdult
+                            ? "translate-x-5"
+                            : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
 
                   <div className="grid grid-cols-1 gap-3">
                     <Field label="Full name">
@@ -539,9 +614,18 @@ export default function AttendeesPage() {
                         <input
                           type="text"
                           autoComplete="name"
-                          value={pcName}
+                          value={
+                            autoPcFromFirstAdult
+                              ? firstAdultFullName || pcName
+                              : pcName
+                          }
                           onChange={(e) => setPcName(e.target.value)}
-                          className={`${inputCls} pl-9`}
+                          disabled={autoPcFromFirstAdult}
+                          className={`${inputCls} pl-9 ${
+                            autoPcFromFirstAdult
+                              ? "opacity-75 cursor-not-allowed bg-[#faf7f2]"
+                              : ""
+                          }`}
                         />
                       </div>
                     </Field>
@@ -575,12 +659,13 @@ export default function AttendeesPage() {
                   </div>
 
                   <button
+                    type="button"
                     disabled={saving || expectedTotal === 0}
                     onClick={handleSaveAndContinue}
                     className={`mt-6 w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#c4b89f] ${
                       saving || expectedTotal === 0
                         ? "bg-gray-400 cursor-not-allowed text-white"
-                        : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
+                        : "bg-gradient-to-r from-[#8b6f47] to-[#7a5f3a] hover:from-[#7a5f3a] hover:to-[#6b5232] text-white"
                     }`}
                   >
                     {saving ? (
@@ -589,12 +674,15 @@ export default function AttendeesPage() {
                         Saving…
                       </>
                     ) : (
-                      "Continue to Payment"
+                      <>
+                        <CreditCard className="w-5 h-5" /> Continue to Payment
+                      </>
                     )}
                   </button>
 
-                  <p className="mt-2 text-[11px] text-[#7a6a58] text-center">
-                    By continuing you agree to our booking terms.
+                  <p className="mt-2 text-[11px] text-[#7a6a58] text-center flex items-center justify-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5" /> By continuing you
+                    agree to our booking terms.
                   </p>
                 </div>
               </div>
@@ -602,11 +690,92 @@ export default function AttendeesPage() {
           </div>
         )}
       </main>
+
+      {/* Mobile bottom action bar */}
+      {!loading && (
+        <div className="lg:hidden fixed inset-x-0 bottom-0 border-t border-[#e5e0d8] bg-[#fcf9f4]/95 backdrop-blur supports-[backdrop-filter]:bg-[#fcf9f4]/80 px-4 py-3">
+          <div className="mx-auto max-w-6xl flex items-center justify-between gap-4">
+            <div className="text-xs text-[#6b5e53]">
+              <div className="font-medium text-[#5a4a3f]">Total</div>
+              <div className="text-base font-semibold text-[#8b6f47]">
+                {priceBreakdown.total}
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={saving || expectedTotal === 0}
+              onClick={handleSaveAndContinue}
+              className={`flex-1 py-3 rounded-xl font-semibold text-base transition-all flex items-center justify-center gap-2 shadow-md ${
+                saving || expectedTotal === 0
+                  ? "bg-gray-400 cursor-not-allowed text-white"
+                  : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
+              }`}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-5 h-5" /> Pay
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 /* ---------- helpers & small components ---------- */
+
+function Stepper({ current = 2 }) {
+  const steps = [
+    { id: 1, label: "Details", icon: Users },
+    { id: 2, label: "Attendees", icon: User },
+    { id: 3, label: "Payment", icon: CreditCard },
+  ];
+  return (
+    <div className="w-full sm:w-80">
+      <ol className="flex items-center justify-between text-[11px] text-[#6b5e53]">
+        {steps.map((s, i) => {
+          const Icon = s.icon;
+          const active = s.id <= current;
+          return (
+            <li key={s.id} className="relative flex-1 flex items-center">
+              {/* line */}
+              {i !== 0 && (
+                <div
+                  className={`h-1.5 w-full rounded-full mx-2 ${
+                    s.id <= current ? "bg-[#8b6f47]" : "bg-[#e6e0d5]"
+                  }`}
+                />
+              )}
+              {/* dot */}
+              <div
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm ${
+                  active
+                    ? "bg-[#8b6f47] border-[#7a5f3a] text-white"
+                    : "bg-white border-[#e0dcd4]"
+                }`}
+                aria-current={s.id === current ? "step" : undefined}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{s.label}</span>
+                <span className="sm:hidden">{s.id}</span>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="mt-1.5 text-[11px] text-[#6b5e53] text-right">
+        Step {current} of 3
+      </div>
+    </div>
+  );
+}
 
 function Progress({ value = 0 }) {
   return (

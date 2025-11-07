@@ -1,4 +1,3 @@
-// src/app/booking/[id]/payment/page.js
 "use client";
 
 import {
@@ -28,6 +27,7 @@ import {
   useElements,
 } from "@stripe/react-stripe-js";
 
+// Stripe init
 const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
 );
@@ -40,7 +40,6 @@ export default function PaymentPage() {
 
   const draftId = Number(id);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const [experience, setExperience] = useState(null);
@@ -49,18 +48,22 @@ export default function PaymentPage() {
   const [unitPrices, setUnitPrices] = useState({ adult: 0, teen: 0, kid: 0 });
   const [attendees, setAttendees] = useState([]);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+
+  // Promo state
   const [promoOpen, setPromoOpen] = useState(false);
   const [promoInput, setPromoInput] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
   const [promo, setPromo] = useState(null); // { code, discountType, discountValue, currency, endsAt? }
+
   const [clientSecret, setClientSecret] = useState("");
   const [piInfo, setPiInfo] = useState({ amountCents: 0, currency: "eur" });
+
   const sanitizePromo = (raw) =>
     raw
       .toUpperCase()
-      .replace(/[\s_]/g, "-") // turn spaces/underscores into hyphens (optional)
-      .replace(/[^A-Z0-9-]/g, ""); // allow only A–Z, 0–9, and -
+      .replace(/[\s_]/g, "-")
+      .replace(/[^A-Z0-9-]/g, "");
 
   useEffect(() => {
     if (!Number.isFinite(draftId) || draftId <= 0) {
@@ -99,26 +102,18 @@ export default function PaymentPage() {
         const c = d?.counts || {};
         setCounts({
           adults: Number(c.adults || 0),
-          teens: Number(c.teens || 0), // stays zero for your current schema
+          teens: Number(c.teens || 0),
           kids: Number(c.kids || 0),
         });
 
-        // Prefer unitPrices; fall back to unitPriceAdult/Kid snapshot
         const up = d?.unitPrices || {};
         const unitAdult = Number(
           up.adult ?? d?.unitPriceAdult ?? d?.unit_price_adult ?? 0
         );
         const unitKid = Number(
-          up.kid ??
-            d?.unitPriceKid ??
-            d?.unit_price_kid ??
-            unitAdult /* fallback same as adult */
+          up.kid ?? d?.unitPriceKid ?? d?.unit_price_kid ?? unitAdult
         );
-        setUnitPrices({
-          adult: unitAdult,
-          teen: unitAdult, // no teens in schema; keep compatibility if UI shows it
-          kid: unitKid,
-        });
+        setUnitPrices({ adult: unitAdult, teen: unitAdult, kid: unitKid });
 
         setAttendees(extractAttendees(d));
         setError("");
@@ -137,12 +132,13 @@ export default function PaymentPage() {
     if (isDetailsOpen) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isDetailsOpen]);
+
   function normalizePromo(p, fallbackCode) {
     return {
       code: (p?.code || fallbackCode || "").toString().toUpperCase(),
       discountType: String(
         p?.discountType || p?.type || "percent"
-      ).toLowerCase(), // "percent" | "fixed"
+      ).toLowerCase(),
       discountValue: Number(p?.discountValue ?? p?.value ?? 0),
       currency: p?.currency || "EUR",
       endsAt: p?.endsAt ? new Date(p.endsAt) : null,
@@ -187,7 +183,6 @@ export default function PaymentPage() {
   function applyPromo() {
     validateAndApply(promoInput);
   }
-
   function removePromo() {
     setPromo(null);
     setPromoError("");
@@ -203,8 +198,8 @@ export default function PaymentPage() {
       setPromoInput(qp);
       validateAndApply(qp);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qs, promoLoading]);
+
   const when = useMemo(() => {
     if (!slot?.date) return null;
     const d =
@@ -216,15 +211,13 @@ export default function PaymentPage() {
     const A = Number(counts.adults || 0);
     const K = Number(counts.kids || 0);
 
-    // cents helpers
     const toC = (x) => Math.round((Number(x) || 0) * 100);
     const fromC = (c) => c / 100;
 
-    const laC = toC(unitPrices.adult) * A; // adults line in cents
-    const lkC = toC(unitPrices.kid) * K; // kids line in cents
+    const laC = toC(unitPrices.adult) * A;
+    const lkC = toC(unitPrices.kid) * K;
     const subtotalC = laC + lkC;
 
-    // promo discount in cents (mirror server logic: floor for percent)
     let discountC = 0;
     if (promo && subtotalC > 0) {
       if (String(promo.discountType).toLowerCase() === "percent") {
@@ -244,7 +237,7 @@ export default function PaymentPage() {
 
     const finalC = Math.max(0, subtotalC - discountC);
 
-    const eur = (n) =>
+    const eurFmt = (n) =>
       new Intl.NumberFormat("el-GR", {
         style: "currency",
         currency: "EUR",
@@ -253,24 +246,24 @@ export default function PaymentPage() {
     const lines = [
       A > 0 && {
         label: `Adults × ${A}`,
-        value: eur(unitPrices.adult),
-        sum: eur(fromC(laC)),
+        value: eurFmt(unitPrices.adult),
+        sum: eurFmt(fromC(laC)),
       },
       K > 0 && {
         label: `Kids × ${K}`,
-        value: eur(unitPrices.kid),
-        sum: eur(fromC(lkC)),
+        value: eurFmt(unitPrices.kid),
+        sum: eurFmt(fromC(lkC)),
       },
     ].filter(Boolean);
 
     return {
       lines,
       subtotalRaw: fromC(subtotalC),
-      subtotal: eur(fromC(subtotalC)),
+      subtotal: eurFmt(fromC(subtotalC)),
       discountRaw: fromC(discountC),
-      discount: discountC > 0 ? `- ${eur(fromC(discountC))}` : null,
+      discount: discountC > 0 ? `- ${eurFmt(fromC(discountC))}` : null,
       finalTotalRaw: fromC(finalC),
-      finalTotal: eur(fromC(finalC)),
+      finalTotal: eurFmt(fromC(finalC)),
     };
   }, [counts, unitPrices, promo]);
 
@@ -290,12 +283,7 @@ export default function PaymentPage() {
     let idx = 1;
     const pushN = (n, label) => {
       for (let i = 0; i < Number(n || 0); i++) {
-        rows.push({
-          idx,
-          name: `Attendee ${idx}`,
-          type: label,
-          notes: "",
-        });
+        rows.push({ idx, name: `Attendee ${idx}`, type: label, notes: "" });
         idx++;
       }
     };
@@ -305,32 +293,7 @@ export default function PaymentPage() {
     return rows;
   }, [attendees, counts]);
 
-  async function handlePay() {
-    try {
-      setSubmitting(true);
-      setError("");
-
-      const res = await fetch(`/api/bookings/drafts/${draftId}/checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          promoCode: promo?.code ?? null,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.url) {
-        throw new Error(data?.error || "Could not start checkout.");
-      }
-
-      // Redirect to Stripe Checkout
-      window.location.assign(data.url);
-    } catch (e) {
-      setError(e.message || "Something went wrong.");
-      setSubmitting(false);
-    }
-  }
-
+  // Initialize Elements checkout session (and re-init on promo changes)
   useEffect(() => {
     (async () => {
       if (!Number.isFinite(draftId) || draftId <= 0) return;
@@ -345,16 +308,13 @@ export default function PaymentPage() {
         });
         const data = await res.json();
 
-        // If already confirmed or paid, the server may respond 409 + redirectUrl
         if (res.status === 409 && data?.redirectUrl) {
           window.location.replace(data.redirectUrl);
           return;
         }
-
         if (!res.ok || !data?.clientSecret) {
           throw new Error(data?.error || "Failed to initialize payment.");
         }
-
         setClientSecret(data.clientSecret);
         setPiInfo({
           amountCents: data.amountCents || 0,
@@ -364,65 +324,51 @@ export default function PaymentPage() {
         setError(e.message || "Could not initialize payment.");
       }
     })();
-    // re-init when promo changes
   }, [draftId, promo?.code]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
-      {/* Top bar / breadcrumbs */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 sm:pt-10">
+    <main className="min-h-screen relative overflow-hidden">
+      {/* Ambient background */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 bg-[radial-gradient(1200px_600px_at_50%_-50%,#fdfaf6,transparent),radial-gradient(800px_400px_at_20%_10%,#f4efe7,transparent),linear-gradient(to_bottom,#f7f3ed,#f4f1ec)]" />
+        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/60 to-transparent" />
+      </div>
+
+      {/* Header / breadcrumbs */}
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 sm:pt-8">
         <div className="flex items-center gap-3 text-sm text-[#7a6a58]">
           <button
             onClick={() => router.back()}
-            className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 border border-[#e8e5df] bg-white/80 backdrop-blur hover:bg-white transition"
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#e8e5df] bg-white/80 backdrop-blur hover:bg-white transition"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
           </button>
+
           <div className="ml-auto hidden sm:flex items-center gap-2 text-xs">
             <Lock className="h-4 w-4 text-[#8b6f47]" />
             <span>Secure checkout</span>
           </div>
         </div>
 
-        <div className="mt-6 sm:mt-10 flex items-center justify-between">
+        <div className="mt-6 sm:mt-8 flex items-center justify-between">
           <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#5a4a3f] flex items-center gap-3">
             <CreditCard className="h-7 w-7 text-[#8b6f47]" />
             Secure payment
           </h1>
-          {/* Step indicator */}
-          <div
-            className="hidden sm:flex items-center gap-2 text-xs text-[#7a6a58]"
-            aria-label="progress"
-          >
-            <Step done>Tickets</Step>
-            <span className="opacity-50">—</span>
-            <Step done>Details</Step>
-            <span className="opacity-50">—</span>
-            <Step current>Payment</Step>
-          </div>
+
+          <Stepper currentStep={3} />
         </div>
 
         {cancelled && (
-          <div
-            className="mt-4 flex items-start gap-2 rounded-xl border border-[#f1d7d7] bg-[#fff6f6] px-3 py-2 text-xs text-[#7a4a4a] shadow-sm"
-            role="alert"
-            aria-live="polite"
-          >
-            <AlertCircle size={14} className="mt-0.5 text-[#b14545]" />
-            <p>Payment cancelled. You can try again below.</p>
-          </div>
+          <Banner tone="danger" icon={<AlertCircle size={14} />}>
+            Payment cancelled. You can try again below.
+          </Banner>
         )}
-
         {error && (
-          <div
-            className="mt-4 flex items-start gap-2 rounded-xl border border-[#f1d7d7] bg-[#fff6f6] px-3 py-2 text-xs text-[#7a4a4a] shadow-sm"
-            role="alert"
-            aria-live="assertive"
-          >
-            <AlertCircle size={14} className="mt-0.5 text-[#b14545]" />
-            <p className="font-medium">{error}</p>
-          </div>
+          <Banner tone="danger" icon={<AlertCircle size={14} />}>
+            <span className="font-medium">{error}</span>
+          </Banner>
         )}
       </div>
 
@@ -430,10 +376,10 @@ export default function PaymentPage() {
         {loading ? (
           <Skeleton />
         ) : (
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-10">
+          <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-10">
             {/* Left: booking summary */}
             <section className="lg:col-span-2 space-y-6">
-              <div className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm">
+              <div className="rounded-3xl border border-[#e8e5df] bg-white/90 backdrop-blur p-6 shadow-sm">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h3 className="text-lg font-semibold text-[#5a4a3f] mb-3">
@@ -471,7 +417,6 @@ export default function PaymentPage() {
                     </div>
                   </div>
 
-                  {/* View details trigger */}
                   <button
                     onClick={() => setIsDetailsOpen(true)}
                     type="button"
@@ -481,7 +426,7 @@ export default function PaymentPage() {
                   </button>
                 </div>
 
-                <div className="mt-5 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner">
+                <div className="mt-5 rounded-2xl border border-[#ebe6dd] bg-[#faf7f2] px-6 py-4 shadow-inner">
                   {breakdown.lines.length > 0 ? (
                     <div className="space-y-2 text-sm text-[#5a4a3f]">
                       {breakdown.lines.map((ln, i) => (
@@ -504,31 +449,41 @@ export default function PaymentPage() {
                   )}
 
                   <div className="mt-4 border-t border-[#e5e0d8] pt-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-[#5a4a3f]">Subtotal</span>
-                      <span className="text-sm font-medium text-[#5a4a3f]">
-                        {breakdown.subtotal}
-                      </span>
-                    </div>
+                    <Row
+                      label="Subtotal"
+                      value={
+                        <span className="font-medium">
+                          {breakdown.subtotal}
+                        </span>
+                      }
+                    />
                     {promo && breakdown.discountRaw > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-[#5a4a3f]">
-                          Promo{" "}
-                          <span className="font-mono">({promo.code})</span>
-                        </span>
-                        <span className="text-sm font-semibold text-[#b14545]">
-                          {breakdown.discount}
-                        </span>
-                      </div>
+                      <Row
+                        label={
+                          <span>
+                            Promo{" "}
+                            <span className="font-mono">({promo.code})</span>
+                          </span>
+                        }
+                        value={
+                          <span className="font-semibold text-[#b14545]">
+                            {breakdown.discount}
+                          </span>
+                        }
+                      />
                     )}
-                    <div className="flex items-center justify-between pt-2">
-                      <span className="text-sm text-[#5a4a3f]">
-                        {promo ? "Total after discount" : "Total"}
-                      </span>
-                      <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                        {breakdown.finalTotal}
-                      </span>
-                    </div>
+                    <Row
+                      label={
+                        <span className="text-sm">
+                          {promo ? "Total after discount" : "Total"}
+                        </span>
+                      }
+                      value={
+                        <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
+                          {breakdown.finalTotal}
+                        </span>
+                      }
+                    />
                   </div>
 
                   <p className="mt-2 text-[11px] text-[#7a6a58]">
@@ -538,31 +493,12 @@ export default function PaymentPage() {
                 </div>
               </div>
 
-              {/* Trust / help card */}
-              <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
-                <div className="flex flex-wrap items-center gap-4 text-sm text-[#5a4a3f]">
-                  <span className="inline-flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-[#8b6f47]" /> PCI-DSS
-                    compliant via Stripe
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <Lock className="h-4 w-4 text-[#8b6f47]" /> 256-bit SSL
-                    encryption
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-[#8b6f47]" /> Free
-                    reschedule policy*
-                  </span>
-                </div>
-                <p className="mt-2 text-[11px] text-[#7a6a58]">
-                  *In selected experiences.
-                </p>
-              </div>
+              <TrustBadges />
             </section>
 
-            {/* Right: payment action */}
+            {/* Right: payment */}
             <section className="space-y-6 lg:sticky lg:top-28 self-start">
-              <div className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm">
+              <div className="rounded-3xl border border-[#e8e5df] bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-semibold text-[#5a4a3f] flex items-center gap-2">
                   <CreditCard className="h-5 w-5 text-[#8b6f47]" /> Pay with
                   card
@@ -588,23 +524,25 @@ export default function PaymentPage() {
                           colorPrimary: "#8b6f47",
                           colorText: "#2f2f2f",
                           colorDanger: "#b14545",
-                          borderRadius: "10px",
+                          borderRadius: "12px",
                         },
                       },
                     }}
                   >
-                    <CheckoutForm
-                      draftId={draftId}
-                      amountLabel={new Intl.NumberFormat("el-GR", {
-                        style: "currency",
-                        currency: (piInfo.currency || "eur").toUpperCase(),
-                      }).format((piInfo.amountCents || 0) / 100)}
-                      onError={(msg) => setError(msg)}
-                    />
+                    <div className="mt-5 rounded-xl border border-[#ebe6dd] bg-[#faf7f2] p-4">
+                      <CheckoutForm
+                        draftId={draftId}
+                        amountLabel={new Intl.NumberFormat("el-GR", {
+                          style: "currency",
+                          currency: (piInfo.currency || "eur").toUpperCase(),
+                        }).format((piInfo.amountCents || 0) / 100)}
+                        onError={(msg) => setError(msg)}
+                      />
+                    </div>
                   </Elements>
                 )}
 
-                {/* Promo code (unchanged) */}
+                {/* Promo */}
                 <div className="mt-6">
                   <button
                     type="button"
@@ -646,19 +584,18 @@ export default function PaymentPage() {
                           placeholder="ENTER CODE"
                           pattern="[A-Z0-9-]{3,32}"
                           title="Use capitals, numbers, and hyphens only"
-                          className="flex-1 rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40 uppercase tracking-wider font-voucher" // ← voucher font + uppercase UI
+                          className="flex-1 rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40 uppercase tracking-wider font-voucher"
                           aria-label="Promo code"
                           data-lpignore="true"
                         />
                         <button
                           onClick={applyPromo}
                           disabled={promoLoading || !promoInput.trim()}
-                          className={`rounded-lg px-4 py-2 text-sm font-semibold transition
-                ${
-                  promoLoading || !promoInput.trim()
-                    ? "bg-gray-300 text-white cursor-not-allowed"
-                    : "bg-[#8b6f47] text-white hover:bg-[#7a5f3a]"
-                }`}
+                          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                            promoLoading || !promoInput.trim()
+                              ? "bg-gray-300 text-white cursor-not-allowed"
+                              : "bg-[#8b6f47] text-white hover:bg-[#7a5f3a]"
+                          }`}
                         >
                           {promoLoading ? "Checking…" : "Apply"}
                         </button>
@@ -706,7 +643,6 @@ export default function PaymentPage() {
                 </div>
               </div>
 
-              {/* Small info note (unchanged) */}
               <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-4 shadow-sm text-xs text-[#7a6a58]">
                 <div className="flex items-start gap-2">
                   <Info className="h-4 w-4 text-[#8b6f47] mt-0.5" />
@@ -723,109 +659,12 @@ export default function PaymentPage() {
       </div>
 
       {isDetailsOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="details-title"
-          className="fixed inset-0 z-50"
-        >
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setIsDetailsOpen(false)}
-          />
-          <div className="relative mx-auto max-w-2xl mt-24 px-4">
-            <div className="relative rounded-2xl border border-[#e8e5df] bg-white shadow-lg">
-              <button
-                onClick={() => setIsDetailsOpen(false)}
-                className="absolute top-3 right-3 inline-flex items-center justify-center rounded-full p-1.5 hover:bg-[#f6f2ea]"
-                aria-label="Close"
-              >
-                <X className="h-5 w-5 text-[#7a6a58]" />
-              </button>
-              <div className="p-6">
-                <h2
-                  id="details-title"
-                  className="text-lg font-semibold text-[#5a4a3f]"
-                >
-                  Booking details
-                </h2>
-                <div className="mt-1 text-sm text-[#7a6a58]">
-                  {experience?.name && (
-                    <div className="font-medium text-[#5a4a3f]">
-                      {experience.name}
-                    </div>
-                  )}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-1">
-                    {experience?.location && (
-                      <span className="inline-flex items-center gap-1.5">
-                        <MapPin size={14} className="text-[#8b6f47]" />
-                        {experience.location}
-                      </span>
-                    )}
-                    {when && (
-                      <>
-                        <span className="inline-flex items-center gap-1.5">
-                          <CalendarDays size={14} className="text-[#8b6f47]" />
-                          {when.dateLabel}
-                        </span>
-                        <span className="inline-flex items-center gap-1.5">
-                          <Clock size={14} className="text-[#8b6f47]" />
-                          {when.timeLabel}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4 overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead>
-                      <tr className="text-[#7a6a58] border-b border-[#eee9df]">
-                        <th className="py-2 pr-2">#</th>
-                        <th className="py-2 pr-2">Name</th>
-                        <th className="py-2 pr-2">Type</th>
-                        <th className="py-2">Notes - Allergies</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-[#5a4a3f]">
-                      {attendeesRows.length === 0 ? (
-                        <tr>
-                          <td className="py-3 text-[#7a6a58]" colSpan={4}>
-                            No attendee details available.
-                          </td>
-                        </tr>
-                      ) : (
-                        attendeesRows.map((row) => (
-                          <tr
-                            key={row.idx}
-                            className="border-b last:border-0 border-[#f0ebe2]"
-                          >
-                            <td className="py-2 pr-2">{row.idx}</td>
-                            <td className="py-2 pr-2">{row.name}</td>
-                            <td className="py-2 pr-2">{row.type}</td>
-                            <td className="py-2">
-                              {row.notes || (
-                                <span className="opacity-60">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="p-4 border-t border-[#eee9df] bg-[#fcf9f4] rounded-b-2xl flex justify-end">
-                <button
-                  onClick={() => setIsDetailsOpen(false)}
-                  className="rounded-lg border border-[#e8e5df] px-4 py-2 text-sm text-[#5a4a3f] hover:bg-[#f6f2ea]"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <DetailsDialog
+          onClose={() => setIsDetailsOpen(false)}
+          experience={experience}
+          when={when}
+          attendeesRows={attendeesRows}
+        />
       )}
     </main>
   );
@@ -864,11 +703,7 @@ function extractAttendees(d) {
   for (const arr of candidates) {
     if (arr?.length) {
       if (typeof arr[0] === "string") {
-        return arr.map((name) => ({
-          name: String(name),
-          type: "",
-          notes: "",
-        }));
+        return arr.map((name) => ({ name: String(name), type: "", notes: "" }));
       }
       return arr
         .map((o) => ({
@@ -888,33 +723,111 @@ function extractAttendees(d) {
   return [];
 }
 
-function Step({ children, done, current }) {
+function Row({ label, value }) {
   return (
-    <span
-      className={
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 border " +
-        (current
-          ? "border-[#8b6f47] text-[#5a4a3f] bg-[#faf7f2]"
-          : done
-          ? "border-[#e8e5df] text-[#7a6a58] bg-white"
-          : "border-[#e8e5df] text-[#b1a595] bg-white")
-      }
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-[#5a4a3f]">{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+function Banner({ children, tone = "neutral", icon }) {
+  const tones = {
+    neutral: {
+      border: "border-[#e8e5df]",
+      bg: "bg-[#fffdf8]",
+      text: "text-[#6d6255]",
+      icon: "text-[#8b6f47]",
+    },
+    danger: {
+      border: "border-[#f1d7d7]",
+      bg: "bg-[#fff6f6]",
+      text: "text-[#7a4a4a]",
+      icon: "text-[#b14545]",
+    },
+  }[tone];
+  return (
+    <div
+      className={`mt-4 flex items-start gap-2 rounded-xl border ${tones.border} ${tones.bg} px-3 py-2 text-xs ${tones.text} shadow-sm`}
+      role="alert"
+      aria-live="polite"
     >
-      {done ? (
-        <CheckCircle2 className="h-3.5 w-3.5 text-[#8b6f47]" />
-      ) : (
-        <span className="h-1.5 w-1.5 rounded-full bg-[#d6cfc4]" />
-      )}
-      <span>{children}</span>
-    </span>
+      <span className={`${tones.icon} mt-0.5`}>{icon}</span>
+      <p>{children}</p>
+    </div>
+  );
+}
+
+function Stepper({ currentStep = 3 }) {
+  const steps = ["Tickets", "Details", "Payment"];
+  return (
+    <div
+      className="hidden sm:flex items-center gap-2 text-xs text-[#7a6a58]"
+      aria-label="progress"
+    >
+      {steps.map((label, i) => {
+        const step = i + 1;
+        const current = step === currentStep;
+        const done = step < currentStep;
+        return (
+          <div key={label} className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 border ${
+                current
+                  ? "border-[#8b6f47] text-[#5a4a3f] bg-[#faf7f2]"
+                  : done
+                  ? "border-[#e8e5df] text-[#7a6a58] bg-white"
+                  : "border-[#e8e5df] text-[#b1a595] bg-white"
+              }`}
+              aria-current={current ? "step" : undefined}
+            >
+              {done ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-[#8b6f47]" />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-[#d6cfc4]" />
+              )}
+              <span>{label}</span>
+            </span>
+            {i !== steps.length - 1 && <span className="opacity-50">—</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TrustBadges() {
+  return (
+    <div className="rounded-3xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
+      <div className="flex flex-wrap items-center gap-4 text-sm text-[#5a4a3f]">
+        <span className="inline-flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-[#8b6f47]" /> PCI-DSS compliant
+          via Stripe
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <Lock className="h-4 w-4 text-[#8b6f47]" /> 256-bit SSL encryption
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-[#8b6f47]" /> Free reschedule
+          policy*
+        </span>
+      </div>
+      <p className="mt-2 text-[11px] text-[#7a6a58]">
+        *In selected experiences.
+      </p>
+    </div>
   );
 }
 
 function Skeleton() {
   return (
-    <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-10" aria-hidden>
+    <div
+      className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-10"
+      aria-hidden
+    >
       <div className="lg:col-span-2 space-y-6">
-        <div className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-[#e8e5df] bg-white p-6 shadow-sm">
           <div className="h-5 w-36 bg-[#eee9df] rounded animate-pulse" />
           <div className="mt-4 space-y-2">
             <div className="h-4 w-64 bg-[#eee9df] rounded animate-pulse" />
@@ -926,19 +839,125 @@ function Skeleton() {
             <div className="h-10 w-full bg-[#f2ede4] rounded-xl animate-pulse" />
           </div>
         </div>
-        <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
+        <div className="rounded-3xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
           <div className="h-4 w-3/4 bg-[#eee9df] rounded animate-pulse" />
         </div>
       </div>
 
       <div className="space-y-6 lg:sticky lg:top-28">
-        <div className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-[#e8e5df] bg-white p-6 shadow-sm">
           <div className="h-5 w-40 bg-[#eee9df] rounded animate-pulse" />
           <div className="mt-4 h-12 w-full bg-[#f2ede4] rounded-xl animate-pulse" />
           <div className="mt-3 h-3 w-3/4 bg-[#eee9df] rounded animate-pulse" />
         </div>
-        <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-4 shadow-sm">
+        <div className="rounded-3xl border border-[#e8e5df] bg-[#fcf9f4] p-4 shadow-sm">
           <div className="h-3 w-2/3 bg-[#eee9df] rounded animate-pulse" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailsDialog({ onClose, experience, when, attendeesRows }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="details-title"
+      className="fixed inset-0 z-50"
+    >
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="relative mx-auto max-w-2xl mt-24 px-4">
+        <div className="relative rounded-2xl border border-[#e8e5df] bg-white shadow-lg">
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 inline-flex items-center justify-center rounded-full p-1.5 hover:bg-[#f6f2ea]"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5 text-[#7a6a58]" />
+          </button>
+          <div className="p-6">
+            <h2
+              id="details-title"
+              className="text-lg font-semibold text-[#5a4a3f]"
+            >
+              Booking details
+            </h2>
+            <div className="mt-1 text-sm text-[#7a6a58]">
+              {experience?.name && (
+                <div className="font-medium text-[#5a4a3f]">
+                  {experience.name}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-1">
+                {experience?.location && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <MapPin size={14} className="text-[#8b6f47]" />
+                    {experience.location}
+                  </span>
+                )}
+                {when && (
+                  <>
+                    <span className="inline-flex items-center gap-1.5">
+                      <CalendarDays size={14} className="text-[#8b6f47]" />
+                      {when.dateLabel}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Clock size={14} className="text-[#8b6f47]" />
+                      {when.timeLabel}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead>
+                  <tr className="text-[#7a6a58] border-b border-[#eee9df]">
+                    <th className="py-2 pr-2">#</th>
+                    <th className="py-2 pr-2">Name</th>
+                    <th className="py-2 pr-2">Type</th>
+                    <th className="py-2">Notes - Allergies</th>
+                  </tr>
+                </thead>
+                <tbody className="text-[#5a4a3f]">
+                  {attendeesRows.length === 0 ? (
+                    <tr>
+                      <td className="py-3 text-[#7a6a58]" colSpan={4}>
+                        No attendee details available.
+                      </td>
+                    </tr>
+                  ) : (
+                    attendeesRows.map((row) => (
+                      <tr
+                        key={row.idx}
+                        className="border-b last:border-0 border-[#f0ebe2]"
+                      >
+                        <td className="py-2 pr-2">{row.idx}</td>
+                        <td className="py-2 pr-2">{row.name}</td>
+                        <td className="py-2 pr-2">{row.type}</td>
+                        <td className="py-2">
+                          {row.notes || <span className="opacity-60">—</span>}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="p-4 border-t border-[#eee9df] bg-[#fcf9f4] rounded-b-2xl flex justify-end">
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-[#e8e5df] px-4 py-2 text-sm text-[#5a4a3f] hover:bg-[#f6f2ea]"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -984,7 +1003,7 @@ function CheckoutForm({ draftId, amountLabel, onError }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <LinkAuthenticationElement
         onChange={(e) => setEmail(e?.value?.email || "")}
         options={{ defaultValues: { email } }}
@@ -993,13 +1012,11 @@ function CheckoutForm({ draftId, amountLabel, onError }) {
       <button
         type="submit"
         disabled={processing || !stripe || !elements}
-        className={`w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md
-          ${
-            processing
-              ? "bg-gray-300 text-white cursor-not-allowed"
-              : "bg-gradient-to-b from-[#8b6f47] to-[#7a5f3a] text-white hover:from-[#7f643f] hover:to-[#6a5233]"
-          }
-        `}
+        className={`w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md ${
+          processing
+            ? "bg-gray-300 text-white cursor-not-allowed"
+            : "bg-gradient-to-b from-[#8b6f47] to-[#7a5f3a] text-white hover:from-[#7f643f] hover:to-[#6a5233]"
+        }`}
       >
         {processing ? (
           <>
