@@ -4,6 +4,7 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import AdminHeader from "@/app/admin/components/header";
 import SwRegister from "@/app/admin/components/SwRegister";
 import InstallPrompt from "@/app/admin/components/InstallPrompt";
+import AppSplashOverlay from "@/app/components/AppSplashOverlay"; // "use client" inside
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -115,7 +116,7 @@ export default async function AdminLayout({ children }) {
       >
         {children}
       </main>
-
+      <AppSplashOverlay />
       {/* Bottom tab bar (mobile only) — full width, safe-area all around */}
       <InstallPrompt />
       <MobileBottomNav />

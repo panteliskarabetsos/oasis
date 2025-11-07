@@ -244,28 +244,62 @@ export async function GET(req) {
 
   /* 5) Trend (bucket by slot date if present, else startTime) */
   const dayKeys = eachDayKeys(from, to, "Europe/Athens");
-  const bucket = new Map(dayKeys.map((k) => [k, 0]));
+  const bookingsByDay = new Map(dayKeys.map((k) => [k, 0]));
+  const revenueByDay = new Map(dayKeys.map((k) => [k, 0]));
+  const reservedByDay = new Map(dayKeys.map((k) => [k, 0]));
+  const capacityByDay = new Map(dayKeys.map((k) => [k, 0]));
 
-  for (const b of activeBookings) {
-    let key = null;
-    if (b.scheduleSlotId && slotById.has(b.scheduleSlotId)) {
-      // slot.date is e.g. "2025-11-01T10:00:00" -> use first 10 chars
-      key = String(slotById.get(b.scheduleSlotId).date || "").slice(0, 10);
-    } else if (b.startTime) {
-      key = new Date(b.startTime).toISOString().slice(0, 10);
-    }
-    if (key && bucket.has(key)) {
-      bucket.set(key, bucket.get(key) + 1);
+  // capacity per day from slots
+  for (const s of slots || []) {
+    const k = String(s.date ?? "").slice(0, 10); // YYYY-MM-DD
+    if (capacityByDay.has(k)) {
+      capacityByDay.set(k, capacityByDay.get(k) + (s.totalSlots || 0));
     }
   }
 
+  // bookings, revenue, reserved per day from active bookings
+  for (const b of activeBookings) {
+    let k = null;
+    if (b.scheduleSlotId && slotById.has(b.scheduleSlotId)) {
+      k = String(slotById.get(b.scheduleSlotId).date || "").slice(0, 10);
+    } else if (b.startTime) {
+      k = new Date(b.startTime).toISOString().slice(0, 10);
+    }
+    if (!k || !bookingsByDay.has(k)) continue;
+    bookingsByDay.set(k, bookingsByDay.get(k) + 1);
+    reservedByDay.set(k, reservedByDay.get(k) + reservedCount(b));
+    revenueByDay.set(k, revenueByDay.get(k) + estimateRevenue(b));
+  }
+
+  // Keep your existing bookings trend for compatibility
   const trend = dayKeys.map((k) => ({
     name: new Date(k + "T00:00:00Z").toLocaleDateString(undefined, {
       day: "2-digit",
       month: "short",
     }),
-    value: bucket.get(k) || 0,
+    value: bookingsByDay.get(k) || 0,
   }));
+
+  // New: per-day map for all KPIs
+  const byDay = Object.fromEntries(
+    dayKeys.map((k) => {
+      const cap = capacityByDay.get(k) || 0;
+      const res = reservedByDay.get(k) || 0;
+      const open = Math.max(0, cap - res);
+      const occ = cap > 0 ? (res / cap) * 100 : 0;
+      return [
+        k,
+        {
+          bookings: bookingsByDay.get(k) || 0,
+          revenue: revenueByDay.get(k) || 0,
+          openSlots: open,
+          occupancyPct: occ,
+          capacity: cap,
+          reservedPeople: res,
+        },
+      ];
+    })
+  );
 
   /* Return */
   return NextResponse.json(
@@ -279,7 +313,7 @@ export async function GET(req) {
       occupancyMTDPct,
       pendingApprovals: pendingApprovals || 0,
       trend,
-
+      byDay,
       // Frontend aliases
       bookings: bookingsMTD,
       revenue: revenueMTD,
