@@ -125,12 +125,12 @@ export default function AdminDashboardPage() {
       },
       // NEW: revenue growth
       {
-        key: "addons",
-        icon: <PackagePlus size={20} />,
-        title: "Add-ons",
-        desc: "Sell extras & upgrades.",
-        onClick: () => go("/admin/addons"),
-        keywords: ["add-on", "extras", "upsell", "bundle"],
+        key: "checkins",
+        icon: <QrCode size={20} />,
+        title: "Check-ins",
+        desc: "QR/Roster check-ins & no-shows.",
+        onClick: () => go("/admin/checkins"),
+        keywords: ["checkin", "qr", "roster", "attendance", "no-show"],
       },
       {
         key: "pos",
@@ -173,13 +173,14 @@ export default function AdminDashboardPage() {
         onClick: () => go("/admin/loyalty"),
         keywords: ["loyalty", "credit", "tier", "points", "retention"],
       },
+
       {
-        key: "checkins",
-        icon: <QrCode size={20} />,
-        title: "Check-ins",
-        desc: "QR/Roster check-ins & no-shows.",
-        onClick: () => go("/admin/checkins"),
-        keywords: ["checkin", "qr", "roster", "attendance", "no-show"],
+        key: "addons",
+        icon: <PackagePlus size={20} />,
+        title: "Add-ons",
+        desc: "Sell extras & upgrades.",
+        onClick: () => go("/admin/addons"),
+        keywords: ["add-on", "extras", "upsell", "bundle"],
       },
       // NEW: operations & integrations
       {
@@ -323,8 +324,6 @@ export default function AdminDashboardPage() {
     "resources",
     "reviews",
     "partners",
-
-    "pos",
   ]);
   const DISABLED_HINT = {
     loyalty: "Coming soon",
