@@ -1,4 +1,4 @@
-// admin/components/BookingPricingEditor.jsx – Stripe-aware editor with discounts
+// admin/components/BookingPricingEditor.jsx – Stripe + Offline aware editor
 "use client";
 
 import React from "react";
@@ -21,11 +21,61 @@ import {
   Tag,
 } from "lucide-react";
 
+const DEFAULT_CURRENCY = "EUR";
+const EPSILON = 0.005;
+
+/* ----------------------- money / currency helpers ----------------------- */
+
+function fractionDigits(curr) {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: curr || DEFAULT_CURRENCY,
+    }).resolvedOptions().maximumFractionDigits;
+  } catch {
+    // fallback: most major currencies
+    return 2;
+  }
+}
+
+function toMinor(amount, curr) {
+  const fd = fractionDigits(curr);
+  return Math.round((Number(amount) || 0) * 10 ** fd);
+}
+
+function minorToMajor(amountMinor, curr) {
+  const fd = fractionDigits(curr);
+  return (Number(amountMinor) || 0) / 10 ** fd;
+}
+
+function formatMoney(n, c = DEFAULT_CURRENCY) {
+  if (n === null || n === undefined || n === "") return "—";
+  const num = Number(n);
+  if (!Number.isFinite(num)) return "—";
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: c || DEFAULT_CURRENCY,
+      currencyDisplay: "narrowSymbol",
+      maximumFractionDigits: 2,
+      minimumFractionDigits: 2,
+    }).format(num);
+  } catch {
+    return `${num.toFixed(2)} ${c}`;
+  }
+}
+
 /**
  * Props: { bookingId: string | number, onSaved?: (payload) => void }
+ *
+ * DB semantics:
+ *   Booking.totalPaidAmount = COMBINED paid (Stripe + offline).
+ * UI semantics:
+ *   - `totalPaidAmount` state = OFFLINE portion only.
+ *   - Combined = offline + stripeNetPaid (if same currency).
  */
 export default function BookingPricingEditor({ bookingId, onSaved }) {
-  // --- unchanged basics ---
+  // --- basics ---
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -38,7 +88,8 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
 
   const [unitPriceAdult, setUnitPriceAdult] = React.useState("");
   const [unitPriceKid, setUnitPriceKid] = React.useState("");
-  const [totalPaidAmount, setTotalPaidAmount] = React.useState("");
+  const [totalPaidAmount, setTotalPaidAmount] = React.useState(""); // OFFLINE portion (editor)
+  const [offlineTouched, setOfflineTouched] = React.useState(false); // user edited offline
 
   // Stripe bits
   const [piId, setPiId] = React.useState(null);
@@ -53,197 +104,216 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
   const [refundErr, setRefundErr] = React.useState("");
   const [refundOk, setRefundOk] = React.useState("");
 
-  // --- NEW: promo/discount state ---
+  // Promo/discount state
   const [promoCode, setPromoCode] = React.useState("");
   const [promoType, setPromoType] = React.useState(null); // 'amount' | 'percent' | null
   const [promoValue, setPromoValue] = React.useState(null); // number
   const [explicitDiscount, setExplicitDiscount] = React.useState(null); // number or null
 
+  // initialRef stores DB baseline & offline baseline
   const initialRef = React.useRef(null);
 
-  // Money helpers
+  // Money helpers tied to booking currency
   const money = React.useCallback(
-    (n, c = currency) => {
-      if (n === null || n === undefined || n === "") return "—";
-      const num = Number(n);
-      if (!Number.isFinite(num)) return "—";
-      try {
-        return new Intl.NumberFormat(undefined, {
-          style: "currency",
-          currency: c || "EUR",
-          currencyDisplay: "narrowSymbol",
-          maximumFractionDigits: 2,
-          minimumFractionDigits: 2,
-        }).format(num);
-      } catch {
-        return `${num.toFixed(2)} ${c}`;
-      }
-    },
+    (n, c = currency) => formatMoney(n, c || DEFAULT_CURRENCY),
     [currency]
   );
-  const cents = (dec) => Math.round((Number(dec) || 0) * 100);
-
- 
-const fractionDigits = (curr) =>
-  new Intl.NumberFormat(undefined, { style: "currency", currency: curr || "EUR" })
-    .resolvedOptions().maximumFractionDigits;
-
-const toMinor = (amount, curr) => {
-  const fd = fractionDigits(curr);
-  return Math.round((Number(amount) || 0) * 10 ** fd);
-};
-
-// replace your cents() with currency-aware variant or keep cents() for display-only.
 
   // ---------- totals (with discount) ----------
   const unitA = Number(unitPriceAdult || 0);
   const unitK = Number(unitPriceKid || 0);
+
   const estimateGross = React.useMemo(
     () => +(Number(adults || 0) * unitA + Number(kids || 0) * unitK).toFixed(2),
     [adults, kids, unitA, unitK]
   );
 
   const discountApplied = React.useMemo(() => {
-    // 1) explicitDiscount from DB wins (already computed at the time of booking)
+    // explicit discount overrides promo logic
     if (Number.isFinite(Number(explicitDiscount))) {
-      return Math.max(0, Math.min(estimateGross, Number(explicitDiscount)));
+      const disc = Number(explicitDiscount);
+      return Math.max(0, Math.min(estimateGross, +disc.toFixed(2)));
     }
-    // 2) derive from promoType/value if present
+
     const v = Number(promoValue);
     if (!promoType || !Number.isFinite(v) || v <= 0) return 0;
+
     if (promoType === "percent") {
-      return Math.max(0, Math.min(estimateGross, +(estimateGross * (v / 100)).toFixed(2)));
+      const raw = estimateGross * (v / 100);
+      return Math.max(0, Math.min(estimateGross, +raw.toFixed(2)));
     }
+
     if (promoType === "amount") {
       return Math.max(0, Math.min(estimateGross, +v.toFixed(2)));
     }
+
     return 0;
   }, [explicitDiscount, promoType, promoValue, estimateGross]);
 
   const estimateNet = React.useMemo(
-    () => +(Math.max(0, estimateGross - discountApplied)).toFixed(2),
+    () => +Math.max(0, estimateGross - discountApplied).toFixed(2),
     [estimateGross, discountApplied]
   );
 
-  // balance vs what admin has recorded as paid
-  const balance = React.useMemo(() => {
-    const paid = totalPaidAmount === "" ? 0 : Number(totalPaidAmount) || 0;
-    return +(estimateNet - paid).toFixed(2);
-  }, [estimateNet, totalPaidAmount]);
-
   // ---------- Stripe derived ----------
-// amount_received may be missing depending on how your API composes the object;
-// fall back to summing captured amounts on charges.
+  const fmtTs = (sec) =>
+    sec
+      ? new Date(sec * 1000).toLocaleString("en-GB", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : "-";
 
-const fmtTs = (sec) =>
-  sec ? new Date(sec * 1000).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "-";
-
-// Normalize refunds regardless of shape
-const refunds = React.useMemo(() => {
-  if (!stripe) return [];
-  let list = [];
-  if (Array.isArray(stripe.refunds)) list = stripe.refunds;
-  else if (Array.isArray(stripe?.refunds?.data)) list = stripe.refunds.data;
-  else if (Array.isArray(stripe?.charges?.data)) {
-    stripe.charges.data.forEach((c) => {
-      const rs = Array.isArray(c?.refunds?.data)
-        ? c.refunds.data
-        : Array.isArray(c?.refunds)
-        ? c.refunds
-        : [];
-      list.push(...rs);
-    });
-  }
-  return list.map((r) => ({
-    id: r.id,
-    amount: Number(r.amount || 0),
-    currency:
-      (r.currency ||
+  // Normalize refunds regardless of shape
+  const refunds = React.useMemo(() => {
+    if (!stripe) return [];
+    let list = [];
+    if (Array.isArray(stripe.refunds)) list = stripe.refunds;
+    else if (Array.isArray(stripe?.refunds?.data)) list = stripe.refunds.data;
+    else if (Array.isArray(stripe?.charges?.data)) {
+      stripe.charges.data.forEach((c) => {
+        const rs = Array.isArray(c?.refunds?.data)
+          ? c.refunds.data
+          : Array.isArray(c?.refunds)
+          ? c.refunds
+          : [];
+        list.push(...rs);
+      });
+    }
+    return list.map((r) => ({
+      id: r.id,
+      amount: Number(r.amount || 0),
+      currency: (
+        r.currency ||
         stripe.currency ||
         stripe?.charges?.data?.[0]?.currency ||
         currency ||
-        "EUR")?.toUpperCase(),
-    created: Number(r.created || 0),
-    status: r.status || "",
-    reason: r.reason || r?.metadata?.reason || "",
-  }));
-}, [stripe, currency]);
+        DEFAULT_CURRENCY
+      )?.toUpperCase(),
+      created: Number(r.created || 0),
+      status: r.status || "",
+      reason: r.reason || r?.metadata?.reason || "",
+    }));
+  }, [stripe, currency]);
 
-const stripeAmountReceivedCents = React.useMemo(() => {
-  if (!stripe) return 0;
-  if (stripe?.amount_received != null) return Number(stripe.amount_received);
-  const chs = stripe?.charges?.data;
-  if (Array.isArray(chs) && chs.length) {
-    return chs.reduce(
-      (sum, c) => sum + Number(c?.amount_captured ?? c?.amount ?? 0),
-      0
-    );
-  }
-  return 0;
-}, [stripe]);
+  const stripeAmountReceivedCents = React.useMemo(() => {
+    if (!stripe) return 0;
+    if (stripe?.amount_received != null) return Number(stripe.amount_received);
+    const chs = stripe?.charges?.data;
+    if (Array.isArray(chs) && chs.length) {
+      return chs.reduce(
+        (sum, c) => sum + Number(c?.amount_captured ?? c?.amount ?? 0),
+        0
+      );
+    }
+    return 0;
+  }, [stripe]);
 
+  const stripeRefundedCents = React.useMemo(
+    () => refunds.reduce((s, r) => s + (r.amount || 0), 0),
+    [refunds]
+  );
 
+  const stripeCurrency = (
+    stripe?.currency ||
+    stripe?.charges?.data?.[0]?.currency ||
+    currency ||
+    DEFAULT_CURRENCY
+  ).toUpperCase();
 
-// Sum from normalized refunds list
-const stripeRefundedCents = React.useMemo(
-  () => refunds.reduce((s, r) => s + (r.amount || 0), 0),
-  [refunds]
-);
+  const stripeSucceeded =
+    String(stripe?.status || "").toLowerCase() === "succeeded";
 
-// Prefer PI currency, else charge currency, else editor currency
-const stripeCurrency = (
-  stripe?.currency ||
-  stripe?.charges?.data?.[0]?.currency ||
-  currency ||
-  "EUR"
-).toUpperCase();
+  const stripeNetPaidCents = Math.max(
+    0,
+    stripeAmountReceivedCents - stripeRefundedCents
+  );
 
-  const stripeSucceeded = String(stripe?.status || "").toLowerCase() === "succeeded";
-  const stripeNetPaidCents = Math.max(0, stripeAmountReceivedCents - stripeRefundedCents);
-  const estimateNetCents = cents(estimateNet);
+  const stripeNetPaidDec = minorToMajor(stripeNetPaidCents, stripeCurrency);
 
-  // compare Stripe net vs discounted total
+  // Currency handling
+  const currencyMismatch =
+    Boolean(stripe) && stripeCurrency !== (currency || DEFAULT_CURRENCY);
+
+  // Comparisons must be in the SAME currency
   const stripeLessThanEstimate =
-    stripeSucceeded && estimateNetCents > 0 && stripeNetPaidCents < estimateNetCents;
+    stripeSucceeded &&
+    !currencyMismatch &&
+    stripeNetPaidCents < toMinor(estimateNet, stripeCurrency);
 
-  // lock when fully paid via Stripe against the discounted total
   const lockByStripe =
-    Boolean(piId) && stripeSucceeded && estimateNetCents > 0 && stripeNetPaidCents >= estimateNetCents;
+    Boolean(piId) &&
+    stripeSucceeded &&
+    !currencyMismatch &&
+    stripeNetPaidCents >= toMinor(estimateNet, stripeCurrency);
 
-  
-  // ---------- Auto-status preview uses NET ----------
+  // ---------- Combined paid (Stripe + Offline) ----------
+  const offlinePaid = totalPaidAmount === "" ? 0 : Number(totalPaidAmount) || 0;
+
+  const combinedPaid = currencyMismatch
+    ? offlinePaid
+    : +(offlinePaid + stripeNetPaidDec).toFixed(2);
+
+  const balanceCombined = +(estimateNet - combinedPaid).toFixed(2);
+
+  const remainderAfterStripe = currencyMismatch
+    ? estimateNet
+    : +Math.max(0, estimateNet - stripeNetPaidDec).toFixed(2);
+
+  // Block offline > remainder (same currency)
+  const offlineTooHigh =
+    piId &&
+    stripeSucceeded &&
+    !currencyMismatch &&
+    offlinePaid > remainderAfterStripe + EPSILON;
+
+  // ---------- Auto-status preview (combined net) ----------
   const nextStatusPreview = React.useMemo(() => {
-    const to2 = (n) =>
-      n === null || n === undefined || n === ""
-        ? 0
-        : Number.parseFloat(Number(n).toFixed(2));
-    const EPS = 0.005;
     const isCancelled = String(status).toLowerCase() === "cancelled";
-    const paidNum = totalPaidAmount === "" ? 0 : to2(totalPaidAmount);
-
     if (!isCancelled && estimateNet > 0) {
-      if (Math.abs(paidNum - estimateNet) < EPS) return "paid";
-      if (paidNum < estimateNet) return "pending";
+      if (Math.abs(combinedPaid - estimateNet) < EPSILON) return "paid";
+      if (combinedPaid < estimateNet) return "pending";
       return "paid"; // overpaid
     }
     return status;
-  }, [status, estimateNet, totalPaidAmount]);
+  }, [status, estimateNet, combinedPaid]);
 
   const dirty = React.useMemo(() => {
     const init = initialRef.current;
     if (!init) return false;
+
+    const combinedInit =
+      init.totalPaidAmountCombined === "" ||
+      init.totalPaidAmountCombined === null ||
+      init.totalPaidAmountCombined === undefined
+        ? 0
+        : Number(init.totalPaidAmountCombined) || 0;
+
+    const combinedNow = currencyMismatch
+      ? offlinePaid
+      : +(offlinePaid + stripeNetPaidDec).toFixed(2);
+
     return (
       init.currency !== currency ||
       init.status !== status ||
       String(init.unitPriceAdult ?? "") !== String(unitPriceAdult ?? "") ||
       String(init.unitPriceKid ?? "") !== String(unitPriceKid ?? "") ||
-      String(init.totalPaidAmount ?? "") !== String(totalPaidAmount ?? "")
+      combinedNow !== combinedInit
     );
-  }, [currency, status, unitPriceAdult, unitPriceKid, totalPaidAmount]);
+  }, [
+    currency,
+    status,
+    unitPriceAdult,
+    unitPriceKid,
+    offlinePaid,
+    currencyMismatch,
+    stripeNetPaidDec,
+  ]);
 
   // ---------- Load booking ----------
   React.useEffect(() => {
     let cancelled = false;
+
     (async () => {
       setLoading(true);
       setError("");
@@ -264,8 +334,11 @@ const stripeCurrency = (
         setKids(Number(ck) || 0);
 
         // status + currency
-        setStatus(item?.status || "confirmed");
-        setCurrency(item?.money?.currency || item?.currency || "EUR");
+        const itemStatus = item?.status || "confirmed";
+        const itemCurrency =
+          item?.money?.currency || item?.currency || DEFAULT_CURRENCY;
+        setStatus(itemStatus);
+        setCurrency(itemCurrency);
 
         // prices
         const pA = item?.unitPrices?.adult ?? item?.unitPriceAdult ?? 0;
@@ -273,43 +346,52 @@ const stripeCurrency = (
         setUnitPriceAdult(String(pA));
         setUnitPriceKid(String(pK));
 
-        // total paid (decimal)
-        const paid = item?.money?.totalPaidAmount ?? item?.totalPaidAmount ?? "";
-        setTotalPaidAmount(paid === null || paid === undefined ? "" : String(paid));
+        // total paid from DB (COMBINED, decimal)
+        const paid =
+          item?.money?.totalPaidAmount ?? item?.totalPaidAmount ?? "";
+        const paidStr = paid === null || paid === undefined ? "" : String(paid);
+
+        // For now, mirror the DB combined into offline field;
+        // once Stripe loads we will derive offline = combined - stripeNet
+        setTotalPaidAmount(paidStr);
+        setOfflineTouched(false);
 
         // Stripe PI
-        const pi = item?.payments?.stripePaymentIntentId || item?.stripePaymentIntentId || null;
+        const pi =
+          item?.payments?.stripePaymentIntentId ||
+          item?.stripePaymentIntentId ||
+          null;
         setPiId(pi || null);
 
-        // --- NEW: promo extraction (robust to varying shapes) ---
-        const pj = item?.promo?.json || item?.promoJson || item?.promo_json || {};
+        // promo extraction (robust to varying shapes)
+        const pj =
+          item?.promo?.json || item?.promoJson || item?.promo_json || {};
         const code =
-          item?.appliedPromoCode ||
-          item?.promo?.code ||
-          pj?.code ||
-          "";
-        const dType =
-          pj?.discountType ||
-          pj?.type ||
-          null;
-        const dValue =
-          (Number.isFinite(pj?.discountValue) ? Number(pj.discountValue) : null) ??
-          (Number.isFinite(pj?.value) ? Number(pj.value) : null);
-        const dAmount =
-          Number.isFinite(item?.discountAmount) ? Number(item.discountAmount) : null;
+          item?.appliedPromoCode || item?.promo?.code || pj?.code || "";
+        const dType = pj?.discountType || pj?.type || null;
+        const rawValue =
+          (Number.isFinite(pj?.discountValue)
+            ? Number(pj.discountValue)
+            : null) ?? (Number.isFinite(pj?.value) ? Number(pj.value) : null);
+        const dAmount = Number.isFinite(item?.discountAmount)
+          ? Number(item.discountAmount)
+          : null;
 
         setPromoCode(code || "");
         setPromoType(dType);
-        setPromoValue(dValue);
+        setPromoValue(rawValue);
         setExplicitDiscount(dAmount);
 
         // snapshot for dirty/reset
         initialRef.current = {
-          currency: item?.money?.currency || item?.currency || "EUR",
-          status: item?.status || "confirmed",
+          currency: itemCurrency,
+          status: itemStatus,
           unitPriceAdult: String(pA),
           unitPriceKid: String(pK),
-          totalPaidAmount: paid === null || paid === undefined ? "" : String(paid),
+          // DB combined baseline
+          totalPaidAmountCombined: paidStr,
+          // offline baseline (will be updated when Stripe is known)
+          totalPaidAmountOffline: paidStr,
         };
       } catch (e) {
         if (!cancelled) setError(e?.message || "Failed to load booking");
@@ -317,10 +399,37 @@ const stripeCurrency = (
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
   }, [bookingId]);
+
+  // ---------- After Stripe loads, derive OFFLINE portion from DB combined ----------
+  // offline = max(0, combinedFromDb - stripeNetPaidDec)
+  React.useEffect(() => {
+    const init = initialRef.current;
+    if (!init) return;
+
+    if (!stripe || !piId || currencyMismatch || offlineTouched) return;
+
+    const combinedInit =
+      init.totalPaidAmountCombined === "" ||
+      init.totalPaidAmountCombined === null ||
+      init.totalPaidAmountCombined === undefined
+        ? 0
+        : Number(init.totalPaidAmountCombined) || 0;
+
+    const offline = Math.max(0, +(combinedInit - stripeNetPaidDec).toFixed(2));
+
+    const offlineStr =
+      init.totalPaidAmountCombined === "" && offline === 0
+        ? ""
+        : offline.toFixed(2);
+
+    setTotalPaidAmount(offlineStr);
+    init.totalPaidAmountOffline = offlineStr;
+  }, [stripe, piId, stripeNetPaidDec, currencyMismatch, offlineTouched]);
 
   // ---------- Load Stripe ----------
   const refreshStripe = React.useCallback(async () => {
@@ -331,7 +440,9 @@ const stripeCurrency = (
     setStripeLoading(true);
     setStripeErr("");
     try {
-      const r = await fetch(`/api/admin/payments/${piId}`, { cache: "no-store" });
+      const r = await fetch(`/api/admin/payments/${piId}`, {
+        cache: "no-store",
+      });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error || "Failed to load Stripe payment");
       setStripe(j?.item || j);
@@ -350,7 +461,9 @@ const stripeCurrency = (
   // ---------- Save ----------
   async function save() {
     if (lockByStripe) {
-      setError("This booking is fully paid via Stripe. To change amounts, refund in Stripe instead.");
+      setError(
+        "This booking is fully paid via Stripe. To change amounts, refund in Stripe instead."
+      );
       return;
     }
 
@@ -376,19 +489,38 @@ const stripeCurrency = (
 
       const gross = +(A * UA + K * UK).toFixed(2);
 
-      // Use the same discount calculation we show in the UI
+      // Same discount logic as UI
       const disc = discountApplied; // already clamped
-      const net = +(Math.max(0, gross - disc)).toFixed(2);
+      const net = +Math.max(0, gross - disc).toFixed(2);
 
-      const paidNum = totalPaidAmount === "" ? 0 : nz(totalPaidAmount);
+      // offline portion (editor) and combined (DB)
+      const offline = totalPaidAmount === "" ? 0 : nz(totalPaidAmount);
+      const combined = currencyMismatch
+        ? offline
+        : +(offline + stripeNetPaidDec).toFixed(2);
 
-      const EPS = 0.005;
+      // Hard guard to avoid double-counting vs Stripe
+      if (piId && stripeSucceeded && !currencyMismatch) {
+        const maxOffline = remainderAfterStripe; // already 2dp
+        if (offline > maxOffline + EPSILON) {
+          throw new Error(
+            `Offline paid (${money(
+              offline,
+              currency
+            )}) exceeds remainder after Stripe (${money(
+              maxOffline,
+              currency
+            )}).`
+          );
+        }
+      }
+
       const isCancelled = String(status).toLowerCase() === "cancelled";
 
       let nextStatus = status;
       if (!isCancelled && net > 0) {
-        if (Math.abs(paidNum - net) < EPS) nextStatus = "paid";
-        else if (paidNum < net) nextStatus = "pending";
+        if (Math.abs(combined - net) < EPSILON) nextStatus = "paid";
+        else if (combined < net) nextStatus = "pending";
         else nextStatus = "paid";
       }
 
@@ -397,9 +529,11 @@ const stripeCurrency = (
         currency,
         unitPriceAdult: to2(unitPriceAdult),
         unitPriceKid: to2(unitPriceKid),
-        totalPaidAmount: to2(totalPaidAmount),
+        // IMPORTANT: DB gets COMBINED total (Stripe + offline)
+        totalPaidAmount: to2(combined),
       };
 
+      // basic validation
       for (const [k, v] of Object.entries(payload)) {
         if (["unitPriceAdult", "unitPriceKid", "totalPaidAmount"].includes(k)) {
           if (v !== null && !(Number.isFinite(v) && v >= 0)) {
@@ -418,13 +552,18 @@ const stripeCurrency = (
 
       setStatus(nextStatus);
       setOk("Saved");
+
+      // Update baseline snapshot
       initialRef.current = {
         currency,
         status: nextStatus,
         unitPriceAdult: String(unitPriceAdult),
         unitPriceKid: String(unitPriceKid),
-        totalPaidAmount: String(totalPaidAmount),
+        totalPaidAmountCombined: String(combined),
+        totalPaidAmountOffline: String(totalPaidAmount),
       };
+      setOfflineTouched(false);
+
       onSaved?.(j?.item || j);
     } catch (e) {
       setError(e?.message || "Failed to save changes");
@@ -435,8 +574,16 @@ const stripeCurrency = (
   }
 
   // ---------- Helpers ----------
-  function markFullyPaid() {
-    setTotalPaidAmount(estimateNet.toFixed(2)); // ← NET after discount
+  const handleOfflineChange = React.useCallback((val) => {
+    setOfflineTouched(true);
+    setTotalPaidAmount(val);
+  }, []);
+
+  function markRemainderPaidOffline() {
+    // Fill offline with remainder after Stripe (only if same currency)
+    const value = !currencyMismatch ? remainderAfterStripe : estimateNet;
+    setTotalPaidAmount(value.toFixed(2));
+    setOfflineTouched(true);
     setStatus("paid");
   }
 
@@ -447,11 +594,16 @@ const stripeCurrency = (
     setStatus(init.status);
     setUnitPriceAdult(init.unitPriceAdult);
     setUnitPriceKid(init.unitPriceKid);
-    setTotalPaidAmount(init.totalPaidAmount);
+    setTotalPaidAmount(
+      init.totalPaidAmountOffline ?? init.totalPaidAmountCombined ?? ""
+    );
+    setOfflineTouched(false);
   }
 
   function openRefundModal(amountDefaultCents) {
-    const dec = (Number(amountDefaultCents || 0) / 100).toFixed(2);
+    const dec = minorToMajor(amountDefaultCents || 0, stripeCurrency).toFixed(
+      2
+    );
     setRefundAmount(dec);
     setRefundErr("");
     setRefundOk("");
@@ -460,7 +612,7 @@ const stripeCurrency = (
 
   async function submitRefund() {
     if (!piId) return;
-    const amtCents = cents(refundAmount);
+    const amtCents = toMinor(refundAmount, stripeCurrency);
     if (!amtCents || amtCents <= 0) {
       setRefundErr("Enter a positive amount.");
       return;
@@ -500,7 +652,8 @@ const stripeCurrency = (
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [saving]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saving]); // intentionally not depending on `save` to keep behaviour stable
 
   const statusTone = (s) => {
     switch (s) {
@@ -515,24 +668,31 @@ const stripeCurrency = (
     }
   };
 
-  const disabledAll = loading || saving || (lockByStripe && !stripeLessThanEstimate);
+  const disabledAll =
+    loading || saving || (lockByStripe && !stripeLessThanEstimate);
 
   // ---------- UI ----------
   return (
-    <div className="rounded-2xl border border-black/5 bg-white/70 p-6 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5" >
+    <div className="rounded-2xl border border-black/5 bg-white/70 p-6 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Wallet2 className="h-5 w-5 text-[#a3845b]" />
           <h3 className="text-sm font-semibold uppercase tracking-wide opacity-70">
-            Pricing & Payment
+            Pricing &amp; Payment
           </h3>
         </div>
-        <div className={["rounded-full px-2.5 py-0.5 text-xs font-semibold", statusTone(status)].join(" ")} title="Current status">
+        <div
+          className={[
+            "rounded-full px-2.5 py-0.5 text-xs font-semibold",
+            statusTone(status),
+          ].join(" ")}
+          title="Current status"
+        >
           Status: {status}
         </div>
       </div>
 
-      {/* Stripe banner (unchanged except net logic) */}
+      {/* Stripe banner */}
       {piId && (
         <div className="mb-4 rounded-xl border border-[#e8e5df] bg-[#fcfbf8] p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -547,61 +707,111 @@ const stripeCurrency = (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> syncing…
                 </span>
               )}
-              {stripeErr && <span className="text-xs text-rose-600">({stripeErr})</span>}
+              {stripeErr && (
+                <span className="text-xs text-rose-600">({stripeErr})</span>
+              )}
             </div>
-            {stripe?.links?.dashboard_payment && (
-              <a
-                href={stripe.links.dashboard_payment}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-lg border border-[#e8e5df] bg-white px-2 py-1 text-xs text-[#5a4a3f] hover:bg-[#faf8f5]"
+            <div className="flex items-center gap-2">
+              {stripe?.links?.dashboard_payment && (
+                <a
+                  href={stripe.links.dashboard_payment}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg border border-[#e8e5df] bg-white px-2 py-1 text-xs text-[#5a4a3f] hover:bg-[#faf8f5]"
+                >
+                  Open in Stripe <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={refreshStripe}
+                className="inline-flex items-center gap-1 rounded-lg border border-[#e8e5df] bg-white px-2 py-1 text-xs hover:bg-[#faf8f5]"
+                title="Re-sync from Stripe"
               >
-                Open in Stripe <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            )}
+                <RefreshCw className="h-3.5 w-3.5" /> Re-sync
+              </button>
+            </div>
           </div>
+
+          {currencyMismatch && (
+            <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-amber-300/50 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-400/20 dark:bg-amber-900/20 dark:text-amber-100">
+              <Info className="h-3.5 w-3.5" />
+              Stripe is {stripeCurrency}, booking is {currency}. Totals are
+              shown separately (no FX conversion).
+            </div>
+          )}
 
           {stripe && (
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#7a6a58]">
               <span>
-                Collected: <strong className="text-[#3f342c]">{money(stripeAmountReceivedCents / 100, stripeCurrency)}</strong>
+                Collected:{" "}
+                <strong className="text-[#3f342c]">
+                  {money(
+                    minorToMajor(stripeAmountReceivedCents, stripeCurrency),
+                    stripeCurrency
+                  )}
+                </strong>
               </span>
-              <span>• Refunded: {money(stripeRefundedCents / 100, stripeCurrency)}</span>
-              <span>• Net: {money(stripeNetPaidCents / 100, stripeCurrency)}</span>
-              {stripeLessThanEstimate ? (
+              <span>
+                • Refunded:{" "}
+                {money(
+                  minorToMajor(stripeRefundedCents, stripeCurrency),
+                  stripeCurrency
+                )}
+              </span>
+              <span>
+                • Net:{" "}
+                {money(
+                  minorToMajor(stripeNetPaidCents, stripeCurrency),
+                  stripeCurrency
+                )}
+              </span>
+              {!currencyMismatch && stripeLessThanEstimate ? (
                 <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
                   Partially paid on Stripe (vs discounted total)
                 </span>
-              ) : lockByStripe ? (
+              ) : !currencyMismatch && lockByStripe ? (
                 <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-800">
                   Fully paid on Stripe (discounted total)
                 </span>
               ) : null}
             </div>
           )}
-{refunds.length > 0 && (
-  <div className="mt-2 rounded-lg border border-[#e8e5df] bg-white p-2">
-    <div className="mb-1 text-xs font-semibold text-[#3f342c]">Refunds</div>
-    <ul className="divide-y">
-      {refunds.map((r) => (
-        <li key={r.id} className="py-1.5 text-xs flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-[#7a6a58]">
-              <code className="rounded bg-[#fcfbf8] px-1 py-0.5">{r.id}</code>
-              <span className="mx-1">•</span>
-              <span className="capitalize">{r.status || "unknown"}</span>
-              {r.reason ? <span className="opacity-70"> — {r.reason}</span> : null}
+
+          {refunds.length > 0 && (
+            <div className="mt-2 rounded-lg border border-[#e8e5df] bg-white p-2">
+              <div className="mb-1 text-xs font-semibold text-[#3f342c]">
+                Refunds
+              </div>
+              <ul className="divide-y">
+                {refunds.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex items-center justify-between gap-3 py-1.5 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-[#7a6a58]">
+                        <code className="rounded bg-[#fcfbf8] px-1 py-0.5">
+                          {r.id}
+                        </code>
+                        <span className="mx-1">•</span>
+                        <span className="capitalize">
+                          {r.status || "unknown"}
+                        </span>
+                        {r.reason ? (
+                          <span className="opacity-70"> — {r.reason}</span>
+                        ) : null}
+                      </div>
+                      <div className="opacity-70">{fmtTs(r.created)}</div>
+                    </div>
+                    <div className="font-semibold text-rose-700">
+                      -{money(minorToMajor(r.amount, r.currency), r.currency)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <div className="opacity-70">{fmtTs(r.created)}</div>
-          </div>
-          <div className="font-semibold text-rose-700">
-            -{money(r.amount / 100, r.currency)}
-          </div>
-        </li>
-      ))}
-    </ul>
-  </div>
-)}
+          )}
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {stripeNetPaidCents > 0 && (
@@ -613,25 +823,28 @@ const stripeCurrency = (
                 <RotateCcw className="h-3.5 w-3.5" /> Refund…
               </button>
             )}
-            {stripeLessThanEstimate && (
+            {stripeLessThanEstimate && !currencyMismatch && (
               <button
                 type="button"
-                onClick={markFullyPaid}
+                onClick={markRemainderPaidOffline}
                 className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-medium hover:bg-black/5 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
                 title="Customer covered remainder offline"
               >
-                <Wallet className="h-3.5 w-3.5" /> Mark fully paid (offline)
+                <Wallet className="h-3.5 w-3.5" /> Mark remainder paid (offline)
               </button>
             )}
           </div>
         </div>
       )}
 
-      {/* Core form (fields are same, now disabled via lockByStripe) */}
+      {/* Core form */}
       {loading ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-20 animate-pulse rounded-xl border border-black/10 bg-black/5 dark:border-white/10 dark:bg-white/10" />
+            <div
+              key={i}
+              className="h-20 animate-pulse rounded-xl border border-black/10 bg-black/5 dark:border-white/10 dark:bg-white/10"
+            />
           ))}
         </div>
       ) : (
@@ -684,14 +897,20 @@ const stripeCurrency = (
             </Field>
 
             <Field
-              label="Total paid"
+              label="Offline paid (editor)"
               icon={CreditCard}
-              help={lockByStripe ? "Locked: fully paid via Stripe" : "Set the amount already collected."}
+              help={
+                lockByStripe
+                  ? "Locked: fully paid via Stripe"
+                  : currencyMismatch
+                  ? "Currencies differ: this field tracks offline in booking currency only."
+                  : "Set the amount collected offline (cash/bank/POS). Combined total = Stripe + Offline."
+              }
             >
               <div className="flex items-center gap-2">
                 <NumberInput
                   value={totalPaidAmount}
-                  onChange={setTotalPaidAmount}
+                  onChange={handleOfflineChange}
                   placeholder="0.00"
                   min={0}
                   step={0.01}
@@ -701,14 +920,33 @@ const stripeCurrency = (
                 {!lockByStripe && (
                   <button
                     type="button"
-                    onClick={markFullyPaid}
+                    onClick={markRemainderPaidOffline}
                     className="inline-flex items-center gap-1 rounded-full border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
-                    title="Set total paid equal to discounted total and mark status = paid"
+                    title={
+                      currencyMismatch
+                        ? "Currencies differ — fills with discounted total"
+                        : "Fill with remainder after Stripe"
+                    }
                   >
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Fully paid
+                    <CheckCircle2 className="h-3.5 w-3.5" />{" "}
+                    {currencyMismatch ? "Fill total" : "Fill remainder"}
                   </button>
                 )}
               </div>
+
+              {/* remainder helper + warning */}
+              {!currencyMismatch && piId && stripeSucceeded && (
+                <div
+                  className={`mt-1 text-xs ${
+                    offlineTooHigh ? "text-rose-600" : "text-[#7a6a58]"
+                  }`}
+                >
+                  Remainder after Stripe:{" "}
+                  <strong>{money(remainderAfterStripe, currency)}</strong>
+                  {offlineTooHigh &&
+                    " — reduce Offline paid or issue a Stripe refund."}
+                </div>
+              )}
             </Field>
 
             <Field
@@ -717,7 +955,7 @@ const stripeCurrency = (
               help={
                 lockByStripe
                   ? "Locked: fully paid via Stripe"
-                  : "Auto-adjusts on save against the discounted total."
+                  : "Auto-adjusts on save against the discounted total (Stripe + Offline)."
               }
             >
               <select
@@ -746,7 +984,9 @@ const stripeCurrency = (
               <div className="mb-1 text-xs uppercase tracking-wide opacity-60">
                 Total (after discounts)
               </div>
-              <div className="text-lg font-semibold">{money(estimateNet, currency)}</div>
+              <div className="text-lg font-semibold">
+                {money(estimateNet, currency)}
+              </div>
               <div className="mt-2 rounded-lg border border-[#efe9e0] bg-[#fcfbf8] p-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span>Subtotal</span>
@@ -756,7 +996,11 @@ const stripeCurrency = (
                   <span className="inline-flex items-center gap-1">
                     <Tag className="h-3.5 w-3.5" />
                     {promoCode ? `Discount (${promoCode})` : "Discount"}
-                    {promoType === "percent" && Number.isFinite(promoValue) ? ` — ${promoValue}%` : ""}
+                    {promoType === "percent" &&
+                    Number.isFinite(promoValue) &&
+                    promoValue > 0
+                      ? ` — ${promoValue}%`
+                      : ""}
                   </span>
                   <span>-{money(discountApplied, currency)}</span>
                 </div>
@@ -766,93 +1010,139 @@ const stripeCurrency = (
                 </div>
               </div>
               <div className="mt-1 text-xs opacity-70">
-                {adults}×{money(unitPriceAdult || 0, currency)} + {kids}×{money(unitPriceKid || 0, currency)}
+                {adults}×{money(unitPriceAdult || 0, currency)} + {kids}×
+                {money(unitPriceKid || 0, currency)}
               </div>
             </div>
 
             <div className="rounded-xl border border-black/10 bg-white/60 p-4 text-sm dark:border-white/10 dark:bg-white/5">
-              <div className="mb-1 text-xs uppercase tracking-wide opacity-60">Paid (editor)</div>
-              <div className="text-lg font-semibold">{money(totalPaidAmount || 0, currency)}</div>
+              <div className="mb-1 text-xs uppercase tracking-wide opacity-60">
+                Paid summary
+              </div>
+              <div className="text-xs text-[#7a6a58]">
+                Offline (editor):{" "}
+                <strong>{money(offlinePaid, currency)}</strong>
+              </div>
               {stripe && (
                 <div className="mt-1 text-xs text-[#7a6a58]">
-                  Stripe net: <strong>{money(stripeNetPaidCents / 100, stripeCurrency)}</strong>
+                  Stripe net:{" "}
+                  <strong>
+                    {money(
+                      minorToMajor(stripeNetPaidCents, stripeCurrency),
+                      stripeCurrency
+                    )}
+                  </strong>
                 </div>
               )}
               {refunds.length > 0 && (
-  <div className="text-xs text-[#7a6a58]">
-    Stripe refunded: <strong>{money(stripeRefundedCents / 100, stripeCurrency)}</strong>
-  </div>
-)}
-
+                <div className="text-xs text-[#7a6a58]">
+                  Stripe refunded:{" "}
+                  <strong>
+                    {money(
+                      minorToMajor(stripeRefundedCents, stripeCurrency),
+                      stripeCurrency
+                    )}
+                  </strong>
+                </div>
+              )}
+              {!currencyMismatch && (
+                <div className="mt-1 text-sm font-semibold text-[#3f342c]">
+                  Combined paid: {money(combinedPaid, currency)}
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-black/10 bg-white/60 p-4 text-sm dark:border-white/10 dark:bg-white/5">
-              <div className="mb-1 text-xs uppercase tracking-wide opacity-60">Balance</div>
+              <div className="mb-1 text-xs uppercase tracking-wide opacity-60">
+                Balance{" "}
+                {currencyMismatch ? "(booking currency)" : "(Stripe + offline)"}
+              </div>
               <div
                 className={[
                   "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm font-semibold",
-                  balance > 0
+                  balanceCombined > 0
                     ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
-                    : balance < 0
+                    : balanceCombined < 0
                     ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200"
                     : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200",
                 ].join(" ")}
-                title={balance > 0 ? "Amount due" : balance < 0 ? "Overpaid (credit)" : "Fully paid"}
+                title={
+                  balanceCombined > 0
+                    ? "Amount due"
+                    : balanceCombined < 0
+                    ? "Overpaid (credit)"
+                    : "Fully paid"
+                }
               >
-                {money(balance, currency)}
+                {money(balanceCombined, currency)}
               </div>
-              {balance < 0 && (
+              {balanceCombined < 0 && (
                 <div className="mt-2 rounded-lg border border-amber-300/40 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/20 dark:bg-amber-900/20 dark:text-amber-100">
-                  Overpaid by <strong>{money(Math.abs(balance), currency)}</strong>. Record a refund or keep as credit.
+                  Overpaid by{" "}
+                  <strong>{money(Math.abs(balanceCombined), currency)}</strong>.
+                  Record a refund or keep as credit.
                 </div>
               )}
             </div>
           </div>
 
-          {/* Footer actions */}
-        {/* Sticky Footer actions */}
-   <div className="sticky bottom-0 z-10 mt-6 border-t border-black/10 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/70 dark:border-white/10 dark:bg-[#0b0b0b]/70">
-     <div className="flex flex-wrap items-center justify-between gap-2 px-1 py-3">
-       {/* left messages (error/ok) */}
-       <div className="min-h-[32px]">
-         {error ? (
-           <div className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 dark:border-red-400/20 dark:bg-red-900/20 dark:text-red-200">
-             <Info className="h-3.5 w-3.5" /> {error}
-           </div>
-         ) : ok ? (
-           <div className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-900/20 dark:text-emerald-200">
-             <CheckCircle2 className="h-3.5 w-3.5" /> {ok}
-           </div>
-         ) : null}
-       </div>
-       {/* right buttons */}
-       <div className="flex items-center gap-2">
-         <button
-           type="button"
-           onClick={resetToInitial}
-           disabled={!dirty || saving}
-           className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm font-medium hover:bg-black/5 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
-           title="Revert all changes"
-         >
-           <RefreshCw className="h-4 w-4" /> Reset
-         </button>
-         <button
-           type="button"
-           onClick={save}
-           disabled={saving || !dirty || lockByStripe}
-           className="inline-flex items-center gap-2 rounded-full bg-[#a3845b] px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[#b79266] disabled:opacity-60"
-           title={lockByStripe ? "Locked: fully paid via Stripe" : "Save changes"}
-         >
-           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-           {saving ? "Saving…" : lockByStripe ? "Locked by Stripe" : "Save changes"}
-         </button>
-       </div>
-     </div>
-   </div>
+          {/* Sticky Footer actions */}
+          <div className="sticky bottom-0 z-10 mt-6 border-t border-black/10 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/70 dark:border-white/10 dark:bg-[#0b0b0b]/70">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1 py-3">
+              {/* left messages (error/ok) */}
+              <div className="min-h-[32px]">
+                {error ? (
+                  <div className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 dark:border-red-400/20 dark:bg-red-900/20 dark:text-red-200">
+                    <Info className="h-3.5 w-3.5" /> {error}
+                  </div>
+                ) : ok ? (
+                  <div className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-900/20 dark:text-emerald-200">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> {ok}
+                  </div>
+                ) : null}
+              </div>
+              {/* right buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={resetToInitial}
+                  disabled={!dirty || saving}
+                  className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm font-medium hover:bg-black/5 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+                  title="Revert all changes"
+                >
+                  <RefreshCw className="h-4 w-4" /> Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving || !dirty || lockByStripe || offlineTooHigh}
+                  className="inline-flex items-center gap-2 rounded-full bg-[#a3845b] px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[#b79266] disabled:opacity-60"
+                  title={
+                    lockByStripe
+                      ? "Locked: fully paid via Stripe"
+                      : offlineTooHigh
+                      ? "Offline paid exceeds remainder after Stripe"
+                      : "Save changes"
+                  }
+                >
+                  {saving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  {saving
+                    ? "Saving…"
+                    : lockByStripe
+                    ? "Locked by Stripe"
+                    : "Save changes"}
+                </button>
+              </div>
+            </div>
+          </div>
         </>
       )}
 
-      {/* Refund modal (unchanged) */}
+      {/* Refund modal */}
       {showRefund && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
@@ -867,7 +1157,13 @@ const stripeCurrency = (
           >
             <div className="mb-2 text-sm font-semibold">Issue refund</div>
             <div className="text-xs text-[#7a6a58]">
-              Net paid on Stripe: <strong>{money(stripeNetPaidCents / 100, stripeCurrency)}</strong>
+              Net paid on Stripe:{" "}
+              <strong>
+                {money(
+                  minorToMajor(stripeNetPaidCents, stripeCurrency),
+                  stripeCurrency
+                )}
+              </strong>
             </div>
             <label className="mt-3 block text-sm">
               <span className="text-[#3f342c]">Amount to refund</span>
@@ -887,7 +1183,9 @@ const stripeCurrency = (
                 ) : refundOk ? (
                   <span className="text-emerald-700">{refundOk}</span>
                 ) : (
-                  <span className="text-[#7a6a58]">Refunds are processed by Stripe.</span>
+                  <span className="text-[#7a6a58]">
+                    Refunds are processed by Stripe.
+                  </span>
                 )}
               </div>
               <div className="flex items-center gap-2">
@@ -905,7 +1203,11 @@ const stripeCurrency = (
                   onClick={submitRefund}
                   disabled={refundSaving}
                 >
-                  {refundSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                  {refundSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
                   {refundSaving ? "Refunding…" : "Refund"}
                 </button>
               </div>
@@ -944,11 +1246,22 @@ function StatCard({ icon: Icon, label, value }) {
   );
 }
 
-function NumberInput({ value, onChange, placeholder, min = 0, step = 0.01, prefix, disabled }) {
+function NumberInput({
+  value,
+  onChange,
+  placeholder,
+  min = 0,
+  step = 0.01,
+  prefix,
+  disabled,
+}) {
   return (
     <div className="relative">
       {prefix ? (
-        <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none text-sm opacity-70" aria-hidden="true">
+        <div
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none text-sm opacity-70"
+          aria-hidden="true"
+        >
           {prefix}
         </div>
       ) : null}
@@ -973,7 +1286,10 @@ function NumberInput({ value, onChange, placeholder, min = 0, step = 0.01, prefi
 function currencySymbol(c) {
   try {
     return (
-      new Intl.NumberFormat(undefined, { style: "currency", currency: c || "EUR" })
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: c || DEFAULT_CURRENCY,
+      })
         .formatToParts(0)
         .find((p) => p.type === "currency")?.value || ""
     );

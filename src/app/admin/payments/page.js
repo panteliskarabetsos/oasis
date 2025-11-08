@@ -2,12 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Calendar as CalIcon,
-  ChevronDown,
   Download,
   Filter,
   Loader2,
@@ -18,6 +16,8 @@ import {
   CreditCard,
   AlertCircle,
   Copy as CopyIcon,
+  CheckCircle2,
+  RotateCcw,
 } from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
@@ -79,6 +79,34 @@ function formatDate(d) {
   }
 }
 
+function formatDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getQuickRange(key) {
+  const now = new Date();
+  const tzNow = new Date(now.toLocaleString("en-US", { timeZone: ATHENS_TZ }));
+  const todayStr = formatDateInput(tzNow);
+
+  if (key === "today") {
+    return { from: todayStr, to: todayStr };
+  }
+  if (key === "7d") {
+    const start = new Date(tzNow);
+    start.setDate(start.getDate() - 6);
+    return { from: formatDateInput(start), to: todayStr };
+  }
+  if (key === "30d") {
+    const start = new Date(tzNow);
+    start.setDate(start.getDate() - 29);
+    return { from: formatDateInput(start), to: todayStr };
+  }
+  return { from: "", to: "" };
+}
+
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
 }
@@ -125,6 +153,12 @@ export default function PaymentsPage() {
   const [dateFrom, setDateFrom] = useState(searchParams.get("from") || "");
   const [dateTo, setDateTo] = useState(searchParams.get("to") || "");
 
+  // UI state for search input (debounced to q)
+  const [searchInput, setSearchInput] = useState(q);
+
+  // Filters panel (mobile)
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   // Cursor-based pagination
   const [pageIndex, setPageIndex] = useState(
     Math.max(0, Number(searchParams.get("page") || 1) - 1)
@@ -137,6 +171,9 @@ export default function PaymentsPage() {
   const [rows, setRows] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState(null);
+
+  // Copy feedback (for PI or email)
+  const [copiedValue, setCopiedValue] = useState("");
 
   // Auth gate
   const [auth, setAuth] = useState({ loading: true, ok: true });
@@ -174,6 +211,22 @@ export default function PaymentsPage() {
     router.replace(url);
   }, [paramsString, router]);
 
+  // Debounce search input -> q filter
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setPageIndex(0);
+      setCursorStack([null]);
+      setQ(searchInput.trim());
+    }, 400);
+
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  // Keep searchInput in sync if q changes from URL / reset
+  useEffect(() => {
+    setSearchInput(q);
+  }, [q]);
+
   // Label for date range
   const fromToLabel = useMemo(() => {
     if (!dateFrom && !dateTo) return "Any time";
@@ -183,6 +236,16 @@ export default function PaymentsPage() {
     const t = to ? to.toLocaleDateString("en-GB") : "…";
     return `${f} → ${t}`;
   }, [dateFrom, dateTo]);
+
+  const quickRanges = useMemo(
+    () => ({
+      any: { from: "", to: "" },
+      today: getQuickRange("today"),
+      "7d": getQuickRange("7d"),
+      "30d": getQuickRange("30d"),
+    }),
+    []
+  );
 
   function mapToRow(p) {
     const amountReceived =
@@ -197,11 +260,11 @@ export default function PaymentsPage() {
     else if (refundsTotal > 0 && refundsTotal < amountReceived)
       displayStatus = "partially_refunded";
 
-    // NEW: compute a fallback name from email if name is missing
+    // Fallback name from email if name is missing
     const apiName = p.customer?.name ?? null;
     const apiEmail = p.customer?.email ?? null;
     const fallbackName = apiEmail ? apiEmail.split("@")[0] : null;
-    const customer_name = apiName || fallbackName; // ← use fallback
+    const customer_name = apiName || fallbackName;
 
     return {
       id: p.id,
@@ -268,6 +331,7 @@ export default function PaymentsPage() {
 
   const goReset = () => {
     setQ("");
+    setSearchInput("");
     setStatus("");
     setDateFrom("");
     setDateTo("");
@@ -284,10 +348,24 @@ export default function PaymentsPage() {
   const goPrev = () => {
     if (pageIndex <= 0) return;
     setPageIndex((i) => Math.max(0, i - 1));
-    // cursorStack remains; pageIndex chooses the cursor to use
+  };
+
+  const handleQuickRange = (key) => {
+    if (key === "any") {
+      setDateFrom("");
+      setDateTo("");
+    } else {
+      const range = quickRanges[key];
+      if (!range) return;
+      setDateFrom(range.from);
+      setDateTo(range.to);
+    }
+    setPageIndex(0);
+    setCursorStack([null]);
   };
 
   const exportCSV = () => {
+    if (!rows.length) return;
     const headers = [
       "Date (Athens)",
       "Customer",
@@ -314,6 +392,29 @@ export default function PaymentsPage() {
     ]);
     downloadCSV(`payments_${Date.now()}.csv`, [headers, ...data]);
   };
+
+  const stats = useMemo(() => {
+    if (!rows || !rows.length) {
+      return { totalAmount: 0, succeededCount: 0, refundedCount: 0 };
+    }
+    let totalAmount = 0;
+    let succeededCount = 0;
+    let refundedCount = 0;
+    rows.forEach((p) => {
+      const amt = Number(p.amount_cents) || 0;
+      totalAmount += amt;
+      if (p.status === "succeeded") succeededCount += 1;
+      if (p.status === "refunded" || p.status === "partially_refunded") {
+        refundedCount += 1;
+      }
+    });
+    return { totalAmount, succeededCount, refundedCount };
+  }, [rows]);
+
+  const isFiltered = Boolean(
+    q || status || dateFrom || dateTo || pageIndex > 0
+  );
+  const showSummary = !loading && !error && rows.length > 0;
 
   if (auth.loading) {
     return (
@@ -360,36 +461,110 @@ export default function PaymentsPage() {
             <ArrowLeft className="h-4 w-4" />
             Admin
           </Link>
-          <h1 className="text-2xl font-semibold tracking-tight text-[#3f342c]">
-            Payments
-          </h1>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-[#3f342c]">
+              Payments
+            </h1>
+            <p className="mt-1 text-xs text-[#7a6a58]">
+              Search, filter and export Stripe payments linked to your bookings.
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={exportCSV}
-            className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#faf8f5]"
+            disabled={!rows.length || loading}
+            className={classNames(
+              "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm",
+              !rows.length || loading
+                ? "cursor-not-allowed border-[#eeeae3] bg-[#f9f6f0] text-[#c1b8ae]"
+                : "border-[#e8e5df] bg-white text-[#5a4a3f] hover:bg-[#faf8f5]"
+            )}
           >
             <Download className="h-4 w-4" /> Export CSV
           </button>
           <button
             onClick={goReset}
-            className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#faf8f5]"
+            disabled={!isFiltered}
+            className={classNames(
+              "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm",
+              !isFiltered
+                ? "cursor-not-allowed border-[#eeeae3] bg-[#f9f6f0] text-[#c1b8ae]"
+                : "border-[#e8e5df] bg-white text-[#5a4a3f] hover:bg-[#faf8f5]"
+            )}
           >
-            <RefreshCcw className="h-4 w-4" /> Reset
+            <RefreshCcw className="h-4 w-4" /> Reset filters
           </button>
         </div>
       </div>
 
+      {/* Summary cards (current page) */}
+      {showSummary && (
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <SummaryCard
+            icon={<CreditCard className="h-5 w-5 text-[#7a6a58]" />}
+            label="Total (this page)"
+            value={formatMoney(stats.totalAmount, rows[0]?.currency || "EUR")}
+            helper="Sum of amounts for visible payments"
+          />
+          <SummaryCard
+            icon={<CheckCircle2 className="h-5 w-5 text-emerald-600" />}
+            label="Succeeded"
+            value={`${stats.succeededCount} payment${
+              stats.succeededCount === 1 ? "" : "s"
+            }`}
+            helper="Completed and captured payments"
+          />
+          <SummaryCard
+            icon={<RotateCcw className="h-5 w-5 text-sky-600" />}
+            label="Refunded"
+            value={`${stats.refundedCount} payment${
+              stats.refundedCount === 1 ? "" : "s"
+            }`}
+            helper="Fully or partially refunded"
+          />
+        </div>
+      )}
+
+      {/* Filters toggle (mobile) */}
+      <div className="mt-6 flex items-center justify-between gap-3 sm:hidden">
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((v) => !v)}
+          className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-[#fcf9f4] px-3 py-2 text-xs text-[#5a4a3f]"
+        >
+          <Filter className="h-4 w-4" />
+          <span>{filtersOpen ? "Hide filters" : "Show filters"}</span>
+        </button>
+        <div className="text-[11px] text-right text-[#7a6a58]">
+          <div>{fromToLabel}</div>
+          {status && (
+            <div className="mt-0.5">
+              Status:{" "}
+              <span className="font-medium">
+                {STATUS_OPTIONS.find((s) => s.value === status)?.label ||
+                  status}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Filters */}
-      <div className="mt-6 grid grid-cols-1 gap-3 rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-        <div className="col-span-2 flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3">
+      <div
+        className={classNames(
+          "mt-3 sm:mt-6 gap-3 rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-4",
+          filtersOpen
+            ? "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5"
+            : "hidden sm:grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5"
+        )}
+      >
+        <div className="col-span-1 sm:col-span-2 flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3">
           <Search className="h-4 w-4 text-[#7a6a58]" />
           <input
-            value={q}
+            value={searchInput}
             onChange={(e) => {
-              setQ(e.target.value);
-              setPageIndex(0);
-              setCursorStack([null]);
+              setSearchInput(e.target.value);
             }}
             placeholder="Search name, email, booking, PI…"
             className="h-10 w-full bg-transparent text-sm outline-none placeholder:text-[#a09386]"
@@ -439,6 +614,43 @@ export default function PaymentsPage() {
             ))}
           </select>
         </div>
+
+        {/* Quick range chips */}
+        <div className="col-span-1 sm:col-span-2 md:col-span-3 lg:col-span-5 flex flex-wrap items-center gap-2 text-xs text-[#7a6a58]">
+          <span className="font-medium text-[#5a4a3f]">Quick range:</span>
+          {[
+            { key: "any", label: "Any time" },
+            { key: "today", label: "Today" },
+            { key: "7d", label: "Last 7 days" },
+            { key: "30d", label: "Last 30 days" },
+          ].map((opt) => {
+            let isActive = false;
+            if (opt.key === "any") {
+              isActive = !dateFrom && !dateTo;
+            } else {
+              const range = quickRanges[opt.key];
+              if (range) {
+                isActive =
+                  dateFrom === range.from && dateTo === range.to && !!dateFrom;
+              }
+            }
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => handleQuickRange(opt.key)}
+                className={classNames(
+                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1",
+                  isActive
+                    ? "border-[#3f342c] bg-[#3f342c] text-white"
+                    : "border-[#e8e5df] bg-white text-[#5a4a3f] hover:bg-[#faf8f5]"
+                )}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Content */}
@@ -449,7 +661,9 @@ export default function PaymentsPage() {
             <span className="font-medium text-[#3f342c]">{pageIndex + 1}</span>
             {hasMore ? "" : " (end)"}
           </p>
-          <p className="hidden sm:block">Date range: {fromToLabel}</p>
+          <p className="hidden sm:block">
+            Date range: <span className="font-medium">{fromToLabel}</span>
+          </p>
         </div>
 
         {loading ? (
@@ -487,7 +701,7 @@ export default function PaymentsPage() {
                         {formatDate(p.created_at)}
                       </div>
                       {p.stripe_payment_intent_id && (
-                        <div className="mt-0.5 flex items-center gap-1 text-xs text-[#a09386]">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-[#a09386]">
                           <span>PI:</span>
                           <code className="rounded bg-[#f6f2ec] px-1 py-0.5">
                             {p.stripe_payment_intent_id}
@@ -497,13 +711,27 @@ export default function PaymentsPage() {
                               const ok = await copyToClipboard(
                                 p.stripe_payment_intent_id || ""
                               );
-                              if (ok) window.alert("Copied");
+                              if (ok) {
+                                setCopiedValue(p.stripe_payment_intent_id);
+                                setTimeout(() => {
+                                  setCopiedValue((current) =>
+                                    current === p.stripe_payment_intent_id
+                                      ? ""
+                                      : current
+                                  );
+                                }, 1500);
+                              }
                             }}
                             className="ml-1 inline-flex items-center rounded p-0.5 hover:bg-[#f1ebe3]"
-                            title="Copy"
+                            title="Copy Payment Intent ID"
                           >
                             <CopyIcon className="h-3.5 w-3.5" />
                           </button>
+                          {copiedValue === p.stripe_payment_intent_id && (
+                            <span className="text-[10px] font-medium text-emerald-700">
+                              Copied
+                            </span>
+                          )}
                         </div>
                       )}
                     </td>
@@ -511,8 +739,45 @@ export default function PaymentsPage() {
                       <div className="font-medium text-[#3f342c]">
                         {p.customer_name || "—"}
                       </div>
-                      <div className="text-xs text-[#7a6a58]">
-                        {p.customer_email || "—"}
+                      <div className="mt-0.5 flex items-center gap-1 text-xs text-[#7a6a58]">
+                        {p.customer_email ? (
+                          <>
+                            <a
+                              href={`mailto:${p.customer_email}`}
+                              className="hover:underline"
+                            >
+                              {p.customer_email}
+                            </a>
+                            <button
+                              onClick={async () => {
+                                const ok = await copyToClipboard(
+                                  p.customer_email || ""
+                                );
+                                if (ok) {
+                                  setCopiedValue(p.customer_email);
+                                  setTimeout(() => {
+                                    setCopiedValue((current) =>
+                                      current === p.customer_email
+                                        ? ""
+                                        : current
+                                    );
+                                  }, 1500);
+                                }
+                              }}
+                              className="inline-flex items-center rounded p-0.5 hover:bg-[#f1ebe3]"
+                              title="Copy email"
+                            >
+                              <CopyIcon className="h-3.5 w-3.5" />
+                            </button>
+                            {copiedValue === p.customer_email && (
+                              <span className="text-[10px] font-medium text-emerald-700">
+                                Copied
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          "—"
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -572,9 +837,10 @@ export default function PaymentsPage() {
         )}
 
         {/* Footer / Pagination */}
-        <div className="flex items-center justify-between border-t border-[#eeeae3] px-4 py-3 text-sm">
+        <div className="flex flex-col gap-2 border-t border-[#eeeae3] px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="text-[#7a6a58]">
-            Page {pageIndex + 1} {hasMore ? "" : "(end)"}
+            Page {pageIndex + 1} {hasMore ? "" : "(end)"} •{" "}
+            {rows.length ? `${rows.length} payments on this page` : "No data"}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -658,7 +924,10 @@ function StatusBadge({ status }) {
       text: "Canceled",
       cls: "bg-zinc-50 text-zinc-700 border-zinc-200",
     },
-    failed: { text: "Failed", cls: "bg-rose-50 text-rose-700 border-rose-200" },
+    failed: {
+      text: "Failed",
+      cls: "bg-rose-50 text-rose-700 border-rose-200",
+    },
   };
 
   const meta = map[status] || {
@@ -676,5 +945,22 @@ function StatusBadge({ status }) {
       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />{" "}
       {meta.text}
     </span>
+  );
+}
+
+function SummaryCard({ icon, label, value, helper }) {
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] px-4 py-3">
+      <div className="mt-0.5">{icon}</div>
+      <div>
+        <p className="text-[11px] font-medium tracking-wide text-[#7a6a58] uppercase">
+          {label}
+        </p>
+        <p className="mt-1 text-base font-semibold text-[#3f342c]">{value}</p>
+        {helper && (
+          <p className="mt-0.5 text-[11px] text-[#a09386]">{helper}</p>
+        )}
+      </div>
+    </div>
   );
 }
