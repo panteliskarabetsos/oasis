@@ -9,15 +9,13 @@ import {
   Users,
   Heart,
   Sparkles,
-  Calendar,
   Mail,
   Loader2,
   CheckCircle2,
-  AlertCircle,
   MapPin,
 } from "lucide-react";
 
-import React, { useState } from "react";
+import React from "react";
 
 export default function About() {
   const features = [
@@ -36,14 +34,14 @@ export default function About() {
       icon: <Users className="h-5 w-5" aria-hidden />,
       text: "We connect guests and locals through shared meals, workshops, and slow adventures.",
     },
+    {
+      title: "Wellbeing",
+      icon: <Heart className="h-5 w-5" aria-hidden />,
+      text: "Mindful practices and nature-first design to help you reconnect with yourself.",
+    },
   ];
 
-  const badges = [
-    {
-      label: "Launching",
-      value: "2025",
-      icon: <Calendar className="h-4 w-4" aria-hidden />,
-    },
+  const quickFacts = [
     {
       label: "Base",
       value: "Chania, Crete",
@@ -53,6 +51,11 @@ export default function About() {
       label: "Focus",
       value: "Slow Travel",
       icon: <Heart className="h-4 w-4" aria-hidden />,
+    },
+    {
+      label: "Approach",
+      value: "Small groups",
+      icon: <Users className="h-4 w-4" aria-hidden />,
     },
   ];
 
@@ -86,19 +89,8 @@ export default function About() {
         <div className="absolute inset-0 opacity-[0.06] [background:radial-gradient(circle_at_center,rgba(0,0,0,0.35)_1px,transparent_1px)] [background-size:20px_20px] dark:opacity-[0.12]" />
       </div>
 
-      {/* Launch banner */}
-      <div className="relative z-10 border-b border-black/5 bg-white/70 py-2 text-center text-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
-        <span className="inline-flex items-center gap-2 px-3 py-1">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#a3845b]" />
-          <span className="font-medium">We’re opening this year</span>
-          <span className="opacity-70">
-            — subscribe to our newsletter for early access
-          </span>
-        </span>
-      </div>
-
-      {/* Hero */}
-      <section className="relative z-10 px-6 pb-10 pt-24 md:px-10 md:pt-28 lg:pt-32">
+      {/* Hero — refined, no opening references */}
+      <section className="relative z-10 px-6 pb-12 pt-24 md:px-10 md:pt-28 lg:pt-32">
         <div className="mx-auto grid max-w-6xl grid-cols-1 items-start gap-10 lg:grid-cols-[1.05fr_0.95fr]">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -108,37 +100,30 @@ export default function About() {
           >
             <div className="inline-flex items-center gap-2 rounded-full border border-[#c7b8a6]/60 bg-white/60 px-3 py-1 text-xs text-[#6a5a49] backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-[#d8cdbf]">
               <span className="inline-block h-2 w-2 rounded-full bg-[#a3845b]" />
-              Opening in 2025 • Chania, Crete
+              Chania • Crete
             </div>
+
             <h1 className="mt-5 font-serif text-4xl leading-[1.08] md:text-5xl lg:text-6xl">
-              A new kind of <span className="text-[#a3845b]">Oasis</span> for
-              slow travel
+              Slow travel, rooted in{" "}
+              <span className="text-[#a3845b]">Crete</span>
             </h1>
             <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-[#4a4a4a] dark:text-[#cfc9be]">
-              We’re launching immersive, small-group experiences rooted in the
-              rhythms of Crete—where nature, craft, and community meet.
+              Immersive, small-group experiences where nature, craft, and
+              community meet. Designed with local hosts and guided by a gentle
+              pace.
             </p>
 
-            {/* Badge strip */}
+            {/* Quick facts */}
             <div className="mt-6 grid max-w-xl grid-cols-3 gap-3">
-              {badges.map((b) => (
+              {quickFacts.map((f) => (
                 <div
-                  key={b.label}
+                  key={f.label}
                   className="flex items-center gap-2 rounded-xl border border-black/5 bg-white/70 px-3 py-2 text-sm shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5"
                 >
-                  <span className="text-[#a3845b]">{b.icon}</span>
-                  <span className="font-medium">{b.value}</span>
+                  <span className="text-[#a3845b]">{f.icon}</span>
+                  <span className="font-medium">{f.value}</span>
                 </div>
               ))}
-            </div>
-
-            {/* Newsletter */}
-            <div className="mt-7">
-              <NewsletterForm />
-              <p className="mt-2 text-xs text-[#6b5a49] opacity-80 dark:text-[#cbbca8]">
-                Join our newsletter for exclusive updates and insights.
-                Unsubscribe Anytime.
-              </p>
             </div>
 
             <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -146,14 +131,14 @@ export default function About() {
                 href="/experiences"
                 className="group inline-flex items-center gap-2 rounded-full bg-[#a3845b] px-6 py-3 font-medium text-white shadow-lg shadow-[#a3845b]/20 transition-transform hover:-translate-y-0.5 hover:bg-[#b79266]"
               >
-                Preview experiences
+                Explore experiences
                 <Sparkles className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
               <Link
                 href="/contact"
                 className="inline-flex items-center rounded-full border border-[#a3845b]/50 bg-white/60 px-6 py-3 font-medium text-[#5a4a3f] backdrop-blur hover:border-[#a3845b] dark:border-white/15 dark:bg-white/5 dark:text-[#e9e4da]"
               >
-                Get in touch
+                Contact us
               </Link>
             </div>
           </motion.div>
@@ -182,7 +167,7 @@ export default function About() {
         </div>
       </section>
 
-      {/* What Oasis Means */}
+      {/* Ethos */}
       <section className="relative z-10 border-y border-black/5 bg-[#efe8de] px-6 py-20 dark:border-white/10 dark:bg-[#161616] md:px-10">
         <motion.div
           className="mx-auto grid max-w-6xl grid-cols-1 items-start gap-10 lg:grid-cols-2"
@@ -192,49 +177,41 @@ export default function About() {
           transition={{ duration: 0.6 }}
         >
           <div>
-            <h2 className="font-serif text-3xl md:text-4xl">
-              What “Oasis” Means
-            </h2>
+            <h2 className="font-serif text-3xl md:text-4xl">Our Ethos</h2>
             <p className="mt-4 text-[17px] leading-relaxed text-[#4a4a4a] dark:text-[#cfc9be]">
-              An oasis is a peaceful retreat at the heart of nature — a place to
+              An oasis is a peaceful retreat at the heart of nature—a place to
               pause, replenish, and return to yourself. Through sunrise yoga,
               olive harvesting, slow food, and creative workshops, we offer a
               sanctuary where you can breathe and belong.
             </p>
             <ul className="mt-6 grid gap-3 text-sm text-[#5a4a3f] dark:text-[#e8dccd] sm:grid-cols-2">
-              <li className="flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 ring-1 ring-[#a3845b]/20 backdrop-blur dark:bg-white/5">
-                <Heart className="h-4 w-4" /> Mindful practices
-              </li>
-              <li className="flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 ring-1 ring-[#a3845b]/20 backdrop-blur dark:bg-white/5">
-                <Leaf className="h-4 w-4" /> Nature-first design
-              </li>
-              <li className="flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 ring-1 ring-[#a3845b]/20 backdrop-blur dark:bg-white/5">
-                <Users className="h-4 w-4" /> Community-led
-              </li>
-              <li className="flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 ring-1 ring-[#a3845b]/20 backdrop-blur dark:bg-white/5">
-                <Shield className="h-4 w-4" /> Locally crafted
-              </li>
+              {features.map((f) => (
+                <li
+                  key={f.title}
+                  className="flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 ring-1 ring-[#a3845b]/20 backdrop-blur dark:bg-white/5"
+                >
+                  {f.icon} {f.title}
+                </li>
+              ))}
             </ul>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            {badges.map((b, i) => (
+          <div className="grid grid-cols-2 gap-4">
+            {features.slice(0, 4).map((f, i) => (
               <motion.div
-                key={b.label}
+                key={f.title}
                 initial={{ opacity: 0, y: 10 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.08 }}
-                className="rounded-2xl border border-black/5 bg-white/70 p-6 text-center shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5"
+                transition={{ duration: 0.5, delay: i * 0.06 }}
+                className="rounded-2xl border border-black/5 bg-white/70 p-6 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5"
               >
                 <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-[#a3845b]/10 text-[#a3845b]">
-                  {b.icon}
+                  {f.icon}
                 </div>
-                <div className="mt-2 text-2xl font-semibold text-[#a3845b] md:text-3xl">
-                  {b.value}
-                </div>
-                <div className="mt-1 text-xs uppercase tracking-wide text-[#6b5a49] opacity-80 dark:text-[#cbbca8]">
-                  {b.label}
+                <div className="mt-2 text-lg font-semibold">{f.title}</div>
+                <div className="mt-1 text-sm text-[#6b5a49] dark:text-[#cbbca8]">
+                  {f.text}
                 </div>
               </motion.div>
             ))}
@@ -242,7 +219,7 @@ export default function About() {
         </motion.div>
       </section>
 
-      {/* Roadmap to Opening */}
+      {/* Story */}
       <section className="relative z-10 px-6 py-20 md:px-10">
         <motion.div
           className="mx-auto max-w-6xl"
@@ -251,32 +228,10 @@ export default function About() {
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.6 }}
         >
-          <h3 className="text-center font-serif text-3xl md:text-4xl">
-            Roadmap to Opening
-          </h3>
-          <div className="mt-12 grid gap-10 lg:grid-cols-2 lg:gap-14">
-            <div className="relative space-y-10 border-l border-[#a3845b]/30 pl-6">
-              <TimelineItem
-                title="Space & partner curation"
-                text="Selecting venues and local partners across Chania & countryside."
-              />
-              <TimelineItem
-                title="Pilot experiences"
-                text="Small test groups for fine-tuning flow, safety, and storytelling."
-              />
-              <TimelineItem
-                title="Soft opening"
-                text="Limited launches with early-bird guests from the newsletter."
-              />
-              <TimelineItem
-                title="Grand opening"
-                text="Full program rollout with seasonal calendar."
-                last
-              />
-            </div>
+          <div className="grid gap-10 lg:grid-cols-2 lg:gap-14">
             <div className="relative rounded-3xl border border-black/5 bg-white/70 p-6 backdrop-blur dark:border-white/10 dark:bg-white/5">
               <Image
-                src="/about-landscape.jpg"
+                src="/olive-1.jpg"
                 alt="Cretan landscape"
                 width={1200}
                 height={800}
@@ -284,6 +239,19 @@ export default function About() {
                 className="h-auto w-full rounded-2xl object-cover shadow-sm"
                 priority
               />
+            </div>
+            <div className="space-y-4">
+              <h3 className="font-serif text-3xl md:text-4xl">Our Story</h3>
+              <p className="text-[15px] leading-relaxed text-[#4a4a4a] dark:text-[#cfc9be]">
+                Oasis began with a simple idea: travel can be gentler, deeper,
+                and more connected. We partner with local growers, cooks, and
+                makers to create experiences that honor place and people.
+              </p>
+              <p className="text-[15px] leading-relaxed text-[#4a4a4a] dark:text-[#cfc9be]">
+                Whether it’s a farm-to-table afternoon in a mountain village or
+                sunrise movement by the sea, each gathering is intimate,
+                unhurried, and thoughtfully designed.
+              </p>
             </div>
           </div>
         </motion.div>
@@ -351,7 +319,7 @@ export default function About() {
             {[
               {
                 q: "How often do you email?",
-                a: "About once a month. We’ll share stories from Crete, opening dates, and member perks.",
+                a: "About once a month. We’ll share stories from Crete, dates, and member perks.",
               },
               {
                 q: "Can I unsubscribe?",
@@ -387,11 +355,10 @@ export default function About() {
           />
           <div className="relative flex flex-col items-center rounded-3xl border border-[#a3845b]/30 bg-white/70 px-6 py-14 text-center shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5 md:px-12">
             <h4 className="font-serif text-3xl md:text-4xl">
-              Join the Oasis Newsletter
+              Get stories from Crete
             </h4>
             <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-[#4a4a4a] dark:text-[#cfc9be]">
-              join our newsletter for exclusive updates and insights.
-              Unsubscribe Anytime.
+              Join our newsletter for updates and insights. Unsubscribe anytime.
             </p>
             <div className="mt-6 w-full max-w-lg">
               <NewsletterForm compact />
@@ -400,7 +367,7 @@ export default function About() {
         </div>
       </section>
 
-      {/* Sticky newsletter bar */}
+      {/* Sticky newsletter bar — copy neutralized */}
       <StickyNewsletter />
     </main>
   );
@@ -419,19 +386,6 @@ function MosaicImage({ src, alt }) {
         className="object-cover transition-transform duration-500 hover:scale-[1.04]"
         priority={false}
       />
-    </div>
-  );
-}
-
-function TimelineItem({ title, text, last }) {
-  return (
-    <div className="relative pl-6">
-      <span className="absolute -left-[9px] top-1 block h-4 w-4 rounded-full border-2 border-white bg-[#a3845b] shadow ring-2 ring-[#a3845b]/30 dark:border-[#0f0f0f]" />
-      <h4 className="text-lg font-semibold">{title}</h4>
-      <p className="mt-1 text-[15px] leading-relaxed text-[#4a4a4a] dark:text-[#cfc9be]">
-        {text}
-      </p>
-      {!last && <div className="mt-6 h-8 w-px bg-[#a3845b]/30" />}
     </div>
   );
 }
@@ -527,7 +481,7 @@ function StickyNewsletter() {
       <div className="rounded-2xl border border-[#a3845b]/30 bg-white/80 p-3 shadow-lg backdrop-blur dark:border-white/10 dark:bg-white/10">
         <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
           <p className="text-center text-sm text-[#5a4a3f] sm:text-left dark:text-[#e9e4da]">
-            Opening this year in Chania — subscribe for early access & stories.
+            Stories and seasonal notes from Crete—subscribe for updates.
           </p>
           <div className="w-full max-w-sm">
             <NewsletterForm compact />

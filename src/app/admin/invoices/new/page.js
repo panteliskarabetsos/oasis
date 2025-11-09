@@ -1,4 +1,3 @@
-// FILE: app/admin/invoices/new/page.jsx
 "use client";
 
 import { useMemo, useState } from "react";
@@ -33,14 +32,6 @@ const COUNTRIES = [
   { code: "US", name: "United States" },
 ];
 
-const TAX_ID_TYPES = [
-  { value: "eu_vat", label: "EU VAT" },
-  { value: "gb_vat", label: "UK VAT" },
-  { value: "us_ein", label: "US EIN" },
-  { value: "au_abn", label: "AU ABN" },
-  { value: "nz_gst", label: "NZ GST" },
-];
-
 export default function NewInvoicePage() {
   const router = useRouter();
 
@@ -51,7 +42,6 @@ export default function NewInvoicePage() {
   const [businessName, setBusinessName] = useState("");
   const [phone, setPhone] = useState("");
   const [taxId, setTaxId] = useState("");
-  const [taxIdType, setTaxIdType] = useState("eu_vat");
 
   const [address, setAddress] = useState({
     line1: "",
@@ -63,51 +53,50 @@ export default function NewInvoicePage() {
   });
 
   // ----- Invoice core -----
-  const [currency, setCurrency] = useState("eur");
-  const [collectionMethod, setCollectionMethod] = useState("send_invoice");
-  const [daysUntilDue, setDaysUntilDue] = useState(7);
-  const [memo, setMemo] = useState("");
-  const [paymentStatus, setPaymentStatus] = useState("due"); // "due" | "paid"
+  const [series, setSeries] = useState("A");
+  const [currency, setCurrency] = useState("EUR");
+  const [issueDate, setIssueDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [dueDate, setDueDate] = useState("");
+  const [notes, setNotes] = useState("");
 
-  const [items, setItems] = useState([{ description: "", amount: "", quantity: 1 }]);
+  // Line items: description, unit_price, quantity, vat_rate
+  const [items, setItems] = useState([
+    { description: "", unit_price: "", quantity: 1, vat_rate: 24 },
+  ]);
 
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState(null);
 
   // -------- helpers --------
   const addItem = () =>
-    setItems((s) => [...s, { description: "", amount: "", quantity: 1 }]);
+    setItems((s) => [
+      ...s,
+      { description: "", unit_price: "", quantity: 1, vat_rate: 24 },
+    ]);
   const removeItem = (i) => setItems((s) => s.filter((_, idx) => idx !== i));
   const updateItem = (i, patch) =>
-    setItems((s) => s.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+    setItems((s) =>
+      s.map((row, idx) => (idx === i ? { ...row, ...patch } : row))
+    );
   const updateAddr = (patch) => setAddress((a) => ({ ...a, ...patch }));
 
-  const total = useMemo(
-    () =>
-      items.reduce((sum, it) => {
-        const amt = parseFloat(it.amount || "0");
-        const qty = parseInt(it.quantity || "1", 10) || 1;
-        return sum + (isNaN(amt) ? 0 : amt) * qty;
-      }, 0),
-    [items]
-  );
-
-  async function markPaidNow(invoiceId, note = "Recorded offline payment") {
-    if (!invoiceId) return;
-    const res = await fetch(`/api/admin/invoices/${invoiceId}/mark-paid`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ note }),
-    });
-    const ct = res.headers.get("content-type") || "";
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || "Failed to mark as paid");
+  const preview = useMemo(() => {
+    let subtotal = 0;
+    let tax = 0;
+    for (const it of items) {
+      const qty = Number(it.quantity || 0);
+      const unit = Number(it.unit_price || 0);
+      const rate = Number(it.vat_rate || 0) / 100;
+      const base = Math.max(0, qty * unit);
+      const t = base * rate;
+      subtotal += base;
+      tax += t;
     }
-    const data = ct.includes("application/json") ? await res.json() : {};
-    setCreated((c) => ({ ...c, ...data })); // status => "paid"
-    return data;
-  }
+    const total = subtotal + tax;
+    return { subtotal, tax, total };
+  }, [items]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -115,44 +104,56 @@ export default function NewInvoicePage() {
     setCreated(null);
 
     try {
-      const payload = {
-        customer: {
-          type: customerType,
-          email: customerEmail.trim(),
-          name:
-            customerType === "business"
-              ? (businessName || customerName || "").trim()
-              : (customerName || "").trim(),
-          business_name: customerType === "business" ? businessName.trim() : undefined,
-          phone: phone.trim() || undefined,
-          address: {
-            line1: address.line1 || undefined,
-            line2: address.line2 || undefined,
-            city: address.city || undefined,
-            state: address.state || undefined,
-            postal_code: address.postal_code || undefined,
-            country: address.country || undefined,
-          },
-          tax_id: taxId.trim() || undefined,
-          tax_id_type: taxId ? taxIdType : undefined,
+      const buyer = {
+        name: customerType === "business" ? customerName : customerName,
+        business_name: customerType === "business" ? businessName : undefined,
+        email: customerEmail.trim(),
+        phone: phone.trim() || undefined,
+        vat: taxId.trim() || undefined,
+        address: {
+          line1: address.line1 || undefined,
+          line2: address.line2 || undefined,
+          city: address.city || undefined,
+          state: address.state || undefined,
+          postal_code: address.postal_code || undefined,
+          country: address.country || undefined,
         },
-        currency,
-        collection_method: collectionMethod,
-        days_until_due:
-          collectionMethod === "send_invoice" ? Number(daysUntilDue) || 7 : undefined,
-        memo,
-        items: items
-          .filter((i) => i.description && i.amount)
-          .map((i) => ({
-            description: i.description,
-            amount: Number(i.amount),
-            quantity: Number(i.quantity || 1),
-          })),
       };
 
-      const res = await fetch("/api/admin/invoices", {
+      const lines = items
+        .filter((i) => i.description && Number(i.unit_price) > 0)
+        .map((i) => ({
+          description: i.description,
+          unit_price: Number(i.unit_price),
+          quantity: Number(i.quantity || 1),
+          vat_rate: Number(i.vat_rate || 0),
+        }));
+
+      if (!buyer.email) throw new Error("Customer email is required");
+      if (lines.length === 0)
+        throw new Error("Add at least one line with a positive amount");
+
+      const payload = {
+        series,
+        currency,
+        issue_date: issueDate
+          ? new Date(`${issueDate}T12:00:00`).toISOString()
+          : undefined,
+        due_date: dueDate
+          ? new Date(`${dueDate}T12:00:00`).toISOString()
+          : undefined,
+        buyer,
+        lines,
+        notes,
+        finalize: true,
+      };
+
+      const res = await fetch("/api/admin/invoices2", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         body: JSON.stringify(payload),
       });
 
@@ -162,21 +163,14 @@ export default function NewInvoicePage() {
         throw new Error(text || "Failed to create invoice");
       }
       const data = ct.includes("application/json") ? await res.json() : null;
-      if (!data || !data.id) throw new Error("Invalid API response: missing invoice id");
+      if (!data || !data.id)
+        throw new Error("Invalid API response: missing invoice id");
 
       setCreated(data);
 
-      // If already paid, immediately mark invoice as paid offline
-      if (paymentStatus === "paid") {
-        try {
-          await markPaidNow(data.id, "Created as paid (offline)");
-        } catch (e) {
-          alert(e.message);
-        }
-      }
-
-      // ➜ Go to the invoice details page
-      router.push(`/admin/invoices/${data.id}`);
+      // Open PDF in new tab then go back to list
+      window.open(`/api/admin/invoices2/${data.id}/pdf`, "_blank");
+      router.push("/admin/invoices");
       return;
     } catch (err) {
       alert(err.message || String(err));
@@ -185,28 +179,30 @@ export default function NewInvoicePage() {
     }
   }
 
-  // Keep this for the post-create quick action (if user stays on page for any reason)
   async function sendInvoiceNow() {
     if (!created?.id) return;
     try {
-      const res = await fetch(`/api/admin/invoices/${created.id}/send`, {
+      const res = await fetch(`/api/admin/invoices2/${created.id}/send`, {
         method: "POST",
         headers: { Accept: "application/json" },
       });
       const ct = res.headers.get("content-type") || "";
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(`Failed to send invoice (status ${res.status}). ${text.slice(0, 160)}`);
+        throw new Error(
+          `Failed to send invoice (status ${res.status}). ${text.slice(0, 160)}`
+        );
       }
       const data = ct.includes("application/json") ? await res.json() : null;
       if (data) setCreated((c) => ({ ...c, ...data }));
-      alert("Invoice sent via Stripe.");
+      alert("Invoice sent.");
     } catch (e) {
       alert(e.message || String(e));
     }
   }
 
-  const actionDisabled = submitting || items.every((i) => !i.description || !i.amount);
+  const actionDisabled =
+    submitting || items.every((i) => !i.description || !i.unit_price);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#fcf9f4] to-white">
@@ -221,8 +217,8 @@ export default function NewInvoicePage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link
-              href="/admin"
-              aria-label="Back to dashboard"
+              href="/admin/invoices"
+              aria-label="Back to invoices"
               className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#fcf9f4] shadow-sm"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -233,36 +229,10 @@ export default function NewInvoicePage() {
                 Create Invoice
               </h1>
               <p className="text-xs sm:text-sm text-neutral-600">
-                Fill in billing details, add line items, and generate a Stripe invoice.
+                Fill in billing details, add line items, and generate a PDF
+                invoice.
               </p>
             </div>
-          </div>
-
-          {/* Payment status segmented */}
-          <div className="hidden md:inline-flex rounded-xl border border-neutral-300 bg-white p-1 text-sm shadow-sm">
-            <button
-              type="button"
-              onClick={() => setPaymentStatus("due")}
-              className={`px-3 py-1.5 rounded-lg transition ${
-                paymentStatus === "due"
-                  ? "bg-neutral-100 font-medium text-neutral-900"
-                  : "text-neutral-700 hover:bg-neutral-50"
-              }`}
-            >
-              Due
-            </button>
-            <button
-              type="button"
-              onClick={() => setPaymentStatus("paid")}
-              className={`px-3 py-1.5 rounded-lg transition ${
-                paymentStatus === "paid"
-                  ? "bg-emerald-50 font-medium text-emerald-700 ring-1 ring-emerald-200"
-                  : "text-neutral-700 hover:bg-neutral-50"
-              }`}
-              title="Invoice will be created and immediately marked as paid (offline)"
-            >
-              Already paid
-            </button>
           </div>
         </div>
       </div>
@@ -288,28 +258,6 @@ export default function NewInvoicePage() {
                   <User2 className="h-5 w-5 text-neutral-500" />
                 )}
                 <h2 className="text-base sm:text-lg font-medium">Bill To</h2>
-              </div>
-              {/* Mobile payment status */}
-              <div className="md:hidden inline-flex rounded-lg border border-neutral-300 bg-white p-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setPaymentStatus("due")}
-                  className={`px-2.5 py-1 rounded-md ${
-                    paymentStatus === "due" ? "bg-neutral-100 font-medium" : ""
-                  }`}
-                >
-                  Due
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentStatus("paid")}
-                  className={`px-2.5 py-1 rounded-md ${
-                    paymentStatus === "paid" ? "bg-neutral-100 font-medium" : ""
-                  }`}
-                  title="Invoice will be created and immediately marked as paid (offline)"
-                >
-                  Paid
-                </button>
               </div>
             </div>
 
@@ -364,7 +312,9 @@ export default function NewInvoicePage() {
                 </Field>
 
                 <Field
-                  label={customerType === "business" ? "Contact Name" : "Full Name"}
+                  label={
+                    customerType === "business" ? "Contact Name" : "Full Name"
+                  }
                   icon={<User2 className="h-4 w-4" />}
                 >
                   <input
@@ -400,30 +350,17 @@ export default function NewInvoicePage() {
                   />
                 </Field>
 
-                <div className="grid gap-4 sm:grid-cols-[1fr_160px]">
-                  <Field label="Tax ID" icon={<Hash className="h-4 w-4" />}>
-                    <input
-                      type="text"
-                      value={taxId}
-                      onChange={(e) => setTaxId(e.target.value)}
-                      placeholder={customerType === "business" ? "e.g. EL123456789" : ""}
-                      className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
-                    />
-                  </Field>
-                  <Field label="Tax ID Type">
-                    <select
-                      value={taxIdType}
-                      onChange={(e) => setTaxIdType(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
-                    >
-                      {TAX_ID_TYPES.map((t) => (
-                        <option key={t.value} value={t.value}>
-                          {t.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
+                <Field label="Tax ID" icon={<Hash className="h-4 w-4" />}>
+                  <input
+                    type="text"
+                    value={taxId}
+                    onChange={(e) => setTaxId(e.target.value)}
+                    placeholder={
+                      customerType === "business" ? "e.g. EL123456789" : ""
+                    }
+                    className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                  />
+                </Field>
               </div>
 
               {/* Address */}
@@ -470,7 +407,9 @@ export default function NewInvoicePage() {
                   <input
                     type="text"
                     value={address.postal_code}
-                    onChange={(e) => updateAddr({ postal_code: e.target.value })}
+                    onChange={(e) =>
+                      updateAddr({ postal_code: e.target.value })
+                    }
                     className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                   />
                 </Field>
@@ -498,87 +437,48 @@ export default function NewInvoicePage() {
                 <CalendarClock className="h-5 w-5 text-neutral-500" />
                 <h2 className="text-base sm:text-lg font-medium">Invoice</h2>
               </div>
-              {paymentStatus === "paid" && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 text-xs">
-                  <CheckCircle2 className="h-4 w-4" /> Will be recorded as paid (offline)
-                </span>
-              )}
             </div>
 
             <div className="px-5 sm:px-6 py-5 grid gap-4 sm:grid-cols-2">
+              <Field label="Series">
+                <input
+                  value={series}
+                  onChange={(e) => setSeries(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                />
+              </Field>
               <Field label="Currency">
                 <select
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                 >
-                  <option value="eur">EUR</option>
-                  <option value="usd">USD</option>
-                  <option value="gbp">GBP</option>
+                  <option value="EUR">EUR</option>
+                  <option value="USD">USD</option>
+                  <option value="GBP">GBP</option>
                 </select>
               </Field>
+              <Field label="Issue date">
+                <input
+                  type="date"
+                  value={issueDate}
+                  onChange={(e) => setIssueDate(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                />
+              </Field>
+              <Field label="Due date (optional)">
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                />
+              </Field>
 
-              <div className="block">
-                <span className="text-sm font-medium text-neutral-800">Collection Method</span>
-                <div className="mt-2 flex items-center gap-3 flex-wrap">
-                  <label
-                    className={`inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg border transition ${
-                      paymentStatus === "paid" ? "opacity-60" : ""
-                    } ${
-                      collectionMethod === "send_invoice"
-                        ? "border-[#d6d0c7] bg-[#fcfbf8]"
-                        : "border-transparent hover:bg-neutral-50"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="cm"
-                      className="accent-[#6f5a3a]"
-                      checked={collectionMethod === "send_invoice"}
-                      onChange={() => setCollectionMethod("send_invoice")}
-                      disabled={paymentStatus === "paid"}
-                    />
-                    <span className="text-sm">Send invoice (email)</span>
-                  </label>
-
-                  <label
-                    className={`inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg border transition ${
-                      paymentStatus === "paid" ? "opacity-60" : ""
-                    } ${
-                      collectionMethod === "charge_automatically"
-                        ? "border-[#d6d0c7] bg-[#fcfbf8]"
-                        : "border-transparent hover:bg-neutral-50"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="cm"
-                      className="accent-[#6f5a3a]"
-                      checked={collectionMethod === "charge_automatically"}
-                      onChange={() => setCollectionMethod("charge_automatically")}
-                      disabled={paymentStatus === "paid"}
-                    />
-                    <span className="text-sm">Charge automatically</span>
-                  </label>
-                </div>
-              </div>
-
-              {collectionMethod === "send_invoice" && paymentStatus !== "paid" && (
-                <Field label="Days Until Due">
-                  <input
-                    type="number"
-                    min={1}
-                    value={daysUntilDue}
-                    onChange={(e) => setDaysUntilDue(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
-                  />
-                </Field>
-              )}
-
-              <Field label="Memo / Notes" className="sm:col-span-2">
+              <Field label="Notes" className="sm:col-span-2">
                 <textarea
-                  value={memo}
-                  onChange={(e) => setMemo(e.target.value)}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
                   rows={3}
                   className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                 />
@@ -600,31 +500,36 @@ export default function NewInvoicePage() {
             </div>
 
             <div className="px-5 sm:px-6 py-5 space-y-3">
-              <div className="hidden sm:grid grid-cols-[1fr_160px_120px_80px] text-xs text-neutral-500 px-1">
+              <div className="hidden sm:grid grid-cols-[1fr_160px_120px_120px_80px] text-xs text-neutral-500 px-1">
                 <div>Description</div>
-                <div>Amount</div>
+                <div>Unit price</div>
                 <div>Qty</div>
+                <div>VAT %</div>
                 <div>Action</div>
               </div>
 
               {items.map((it, idx) => (
                 <div
                   key={idx}
-                  className="grid gap-3 sm:grid-cols-[1fr_160px_120px_80px] items-start"
+                  className="grid gap-3 sm:grid-cols-[1fr_160px_120px_120px_80px] items-start"
                 >
                   <input
                     placeholder="Description"
                     value={it.description}
-                    onChange={(e) => updateItem(idx, { description: e.target.value })}
+                    onChange={(e) =>
+                      updateItem(idx, { description: e.target.value })
+                    }
                     className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                   />
                   <input
                     type="number"
                     step="0.01"
                     min="0"
-                    placeholder="Amount"
-                    value={it.amount}
-                    onChange={(e) => updateItem(idx, { amount: e.target.value })}
+                    placeholder="Unit price"
+                    value={it.unit_price}
+                    onChange={(e) =>
+                      updateItem(idx, { unit_price: e.target.value })
+                    }
                     className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                   />
                   <input
@@ -632,7 +537,20 @@ export default function NewInvoicePage() {
                     min="1"
                     placeholder="Qty"
                     value={it.quantity}
-                    onChange={(e) => updateItem(idx, { quantity: e.target.value })}
+                    onChange={(e) =>
+                      updateItem(idx, { quantity: e.target.value })
+                    }
+                    className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="VAT %"
+                    value={it.vat_rate}
+                    onChange={(e) =>
+                      updateItem(idx, { vat_rate: e.target.value })
+                    }
                     className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                   />
                   <button
@@ -647,9 +565,25 @@ export default function NewInvoicePage() {
               ))}
 
               <div className="flex items-center justify-between pt-4 mt-2 border-t border-neutral-200">
-                <span className="text-sm text-neutral-600">Total (preview)</span>
+                <span className="text-sm text-neutral-600">
+                  Subtotal (preview)
+                </span>
+                <span className="text-sm font-medium">
+                  {currency} {preview.subtotal.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-600">Tax (preview)</span>
+                <span className="text-sm font-medium">
+                  {currency} {preview.tax.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-2 mt-2 border-t border-neutral-200">
+                <span className="text-sm text-neutral-800">
+                  Total (preview)
+                </span>
                 <span className="text-lg font-semibold tracking-tight">
-                  {currency.toUpperCase()} {total.toFixed(2)}
+                  {currency} {preview.total.toFixed(2)}
                 </span>
               </div>
             </div>
@@ -659,11 +593,9 @@ export default function NewInvoicePage() {
           <div className="lg:hidden">
             <PrimaryActions
               submitting={submitting}
-              paymentStatus={paymentStatus}
               actionDisabled={actionDisabled}
               created={created}
               sendInvoiceNow={sendInvoiceNow}
-              markPaidNow={markPaidNow}
             />
           </div>
         </div>
@@ -675,37 +607,33 @@ export default function NewInvoicePage() {
               <h3 className="text-base font-medium mb-4">Summary</h3>
               <dl className="space-y-2 text-sm">
                 <div className="flex items-center justify-between">
-                  <dt className="text-neutral-600">Payment status</dt>
-                  <dd className="font-medium capitalize">
-                    {paymentStatus === "paid" ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-700">
-                        <CheckCircle2 className="h-4 w-4" /> paid (offline)
-                      </span>
-                    ) : (
-                      "due"
-                    )}
+                  <dt className="text-neutral-600">Series</dt>
+                  <dd className="font-medium">{series}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-neutral-600">Issue date</dt>
+                  <dd className="font-medium">{issueDate || "—"}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-neutral-600">Due date</dt>
+                  <dd className="font-medium">{dueDate || "—"}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-neutral-600">Subtotal</dt>
+                  <dd className="font-medium">
+                    {currency} {preview.subtotal.toFixed(2)}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between">
-                  <dt className="text-neutral-600">Collection</dt>
+                  <dt className="text-neutral-600">Tax</dt>
                   <dd className="font-medium">
-                    {paymentStatus === "paid"
-                      ? "—"
-                      : collectionMethod === "send_invoice"
-                      ? "Send invoice"
-                      : "Charge automatically"}
+                    {currency} {preview.tax.toFixed(2)}
                   </dd>
                 </div>
-                {collectionMethod === "send_invoice" && paymentStatus !== "paid" && (
-                  <div className="flex items-center justify-between">
-                    <dt className="text-neutral-600">Due in</dt>
-                    <dd className="font-medium">{Number(daysUntilDue)} days</dd>
-                  </div>
-                )}
                 <div className="flex items-center justify-between pt-2 mt-2 border-t border-neutral-200">
                   <dt className="text-neutral-600">Total</dt>
                   <dd className="text-lg font-semibold tracking-tight">
-                    {currency.toUpperCase()} {total.toFixed(2)}
+                    {currency} {preview.total.toFixed(2)}
                   </dd>
                 </div>
               </dl>
@@ -713,18 +641,17 @@ export default function NewInvoicePage() {
               <div className="mt-5">
                 <PrimaryActions
                   submitting={submitting}
-                  paymentStatus={paymentStatus}
                   actionDisabled={actionDisabled}
                   created={created}
                   sendInvoiceNow={sendInvoiceNow}
-                  markPaidNow={markPaidNow}
                 />
               </div>
             </div>
 
-            {created?.number && (
+            {created?.invoiceNo && (
               <p className="text-sm text-neutral-600">
-                Invoice <span className="font-medium">{created.number}</span> — {created.status}
+                Invoice <span className="font-medium">{created.invoiceNo}</span>{" "}
+                — {created.status}
               </p>
             )}
           </div>
@@ -749,11 +676,9 @@ function Field({ label, children, icon, className = "" }) {
 
 function PrimaryActions({
   submitting,
-  paymentStatus,
   actionDisabled,
   created,
   sendInvoiceNow,
-  markPaidNow,
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -761,54 +686,41 @@ function PrimaryActions({
         type="submit"
         disabled={actionDisabled}
         className="rounded-xl bg-[#6f5a3a] px-4 py-2 text-white hover:opacity-95 disabled:opacity-50 shadow-sm"
-        title={actionDisabled ? "Add at least one line item with amount" : "Create invoice"}
+        title={
+          actionDisabled
+            ? "Add at least one line item with amount"
+            : "Create invoice"
+        }
       >
-        {submitting ? "Creating…" : paymentStatus === "paid" ? "Create & Mark Paid" : "Create invoice"}
+        {submitting ? "Creating…" : "Create & Open PDF"}
       </button>
 
       {created?.id && (
         <>
-          {created?.hosted_invoice_url && (
-            <a
-              href={created.hosted_invoice_url}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
-            >
-              Open invoice
-            </a>
-          )}
-          {created?.invoice_pdf && (
-            <a
-              href={created.invoice_pdf}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
-            >
-              Download PDF
-            </a>
-          )}
-          {created?.collection_method === "send_invoice" && created?.status !== "paid" && (
-            <button
-              type="button"
-              onClick={sendInvoiceNow}
-              className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
-            >
-              Send via Stripe
-            </button>
-          )}
+          <a
+            href={`/api/admin/invoices2/${created.id}/pdf`}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
+          >
+            Open PDF
+          </a>
+          <a
+            href={`/api/admin/invoices2/${created.id}/download`}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
+          >
+            Download PDF
+          </a>
+          <button
+            type="button"
+            onClick={sendInvoiceNow}
+            className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
+          >
+            Send via email
+          </button>
         </>
-      )}
-
-      {created?.id && created?.status !== "paid" && (
-        <button
-          type="button"
-          onClick={() => markPaidNow(created.id)}
-          className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
-          title="Record an offline payment (cash/bank transfer)"
-        >
-          Mark as Paid (offline)
-        </button>
       )}
     </div>
   );

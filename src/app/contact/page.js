@@ -82,7 +82,7 @@ export default function Contact() {
               <ContactCard
                 icon={<Mail className="h-5 w-5" aria-hidden />}
                 label="Email"
-                value="hello@youroasis.gr"
+                value="info@youroasis.gr"
               />
               <ContactCard
                 icon={<Phone className="h-5 w-5" aria-hidden />}
