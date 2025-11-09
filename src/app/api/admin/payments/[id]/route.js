@@ -20,12 +20,12 @@ const sum = (xs, f) =>
 /**
  * GET /api/admin/payments/[id]
  * Normalizes a Stripe PaymentIntent into a stable shape for the admin UI:
- * - item.refunds: flat list of refunds across all charges
- * - item.charges.data: simplified charges snapshot
+ * - item.refunds: flat list of refunds for this PI
+ * - item.charges.data: simplified charges snapshot (with per-charge refunds)
  * - item.aggregates: amounts in smallest currency unit ("cents")
  * - item.links: dashboard URLs
  */
-export async function GET(_req, { params }) {
+export async function GET(_req, context) {
   try {
     const key = process.env.STRIPE_SECRET_KEY;
     if (!key) return bad("Missing STRIPE_SECRET_KEY", 500);
@@ -33,7 +33,8 @@ export async function GET(_req, { params }) {
     const Stripe = (await import("stripe")).default;
     const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
 
-    const { id } = params || {};
+    // Next 15: params can be async – always await
+    const { id } = (await context.params) || {};
     if (!id || !String(id).startsWith("pi_")) {
       return bad("Invalid payment id", 400);
     }
@@ -50,15 +51,12 @@ export async function GET(_req, { params }) {
           "customer",
           "payment_method",
           "latest_charge",
-          "latest_charge.refunds",
           "latest_charge.balance_transaction",
           "charges.data",
-          "charges.data.refunds",
           "charges.data.balance_transaction",
         ],
       });
     } catch (e) {
-      // Stripe "resource_missing" -> 404 instead of generic 500
       if (e?.code === "resource_missing" || e?.statusCode === 404) {
         return bad("Payment not found", 404);
       }
@@ -68,12 +66,14 @@ export async function GET(_req, { params }) {
     const charges = Array.isArray(pi?.charges?.data) ? pi.charges.data : [];
     const firstCharge = charges[0] || asObj(pi.latest_charge) || null;
 
-    // Collect all refunds across all charges
-    const allRefunds = charges.flatMap((c) =>
-      Array.isArray(c?.refunds?.data) ? c.refunds.data : []
-    );
+    // --- Fetch refunds directly from Stripe for this PaymentIntent ---
+    const refundsList = await stripe.refunds.list({
+      payment_intent: pi.id,
+      limit: 100,
+    });
+    const allRefundsRaw = refundsList?.data || [];
 
-    const refundsTotalCents = sum(allRefunds, (r) => Number(r.amount || 0));
+    const refundsTotalCents = sum(allRefundsRaw, (r) => Number(r.amount || 0));
 
     // Compute robust received / captured
     const amountCapturedTotalCents = sum(charges, (c) =>
@@ -130,7 +130,6 @@ export async function GET(_req, { params }) {
       if (createSupabaseAdmin) {
         const admin = createSupabaseAdmin();
 
-        // Direct Booking match
         const { data: b } = await admin
           .from("Booking")
           .select("id, stripePaymentIntentId")
@@ -139,7 +138,6 @@ export async function GET(_req, { params }) {
           .maybeSingle();
         if (b?.id) booking_id = b.id;
 
-        // Else, match via BookingDraft convertedBookingId
         if (!booking_id) {
           const { data: d } = await admin
             .from("BookingDraft")
@@ -152,7 +150,7 @@ export async function GET(_req, { params }) {
         }
       }
     } catch {
-      // DB lookup is helpful but not required for this endpoint
+      // non-fatal
     }
 
     if (!booking_id) {
@@ -162,25 +160,39 @@ export async function GET(_req, { params }) {
       }
     }
 
-    // Simplified charges snapshot for the UI (currency kept per-charge)
-    const chargesSimple = charges.map((c) => ({
-      id: c.id,
-      amount: Number(c.amount ?? 0),
-      amount_captured: Number(c.amount_captured ?? c.amount ?? 0),
-      currency: c.currency,
-      paid: !!c.paid,
-      status: c.status,
-      created: c.created,
-      refunds: (c?.refunds?.data || []).map((r) => ({
-        id: r.id,
-        amount: Number(r.amount ?? 0),
-        status: r.status,
-        created: r.created,
-        currency: r.currency,
-        reason: r.reason || r?.metadata?.reason || null,
-      })),
-      receipt_url: c?.receipt_url || null,
+    // Map refunds into a clean, flat structure for the UI
+    const allRefunds = allRefundsRaw.map((r) => ({
+      id: r.id,
+      amount: Number(r.amount ?? 0),
+      status: r.status,
+      created: r.created,
+      currency: r.currency,
+      reason: r.reason || r?.metadata?.reason || null,
+      charge: r.charge || null,
     }));
+
+    // Simplified charges snapshot with per-charge refunds
+    const chargesSimple = charges.map((c) => {
+      const chargeRefunds = allRefunds.filter((r) => r.charge === c.id);
+      return {
+        id: c.id,
+        amount: Number(c.amount ?? 0),
+        amount_captured: Number(c.amount_captured ?? c.amount ?? 0),
+        currency: c.currency,
+        paid: !!c.paid,
+        status: c.status,
+        created: c.created,
+        refunds: chargeRefunds.map((r) => ({
+          id: r.id,
+          amount: r.amount,
+          status: r.status,
+          created: r.created,
+          currency: r.currency,
+          reason: r.reason,
+        })),
+        receipt_url: c?.receipt_url || null,
+      };
+    });
 
     // Item shape (backwards compatible fields + normalized aggregates)
     const item = {
@@ -203,15 +215,8 @@ export async function GET(_req, { params }) {
       receipt_url: ch?.receipt_url || firstCharge?.receipt_url || null,
       metadata: pi.metadata || {},
 
-      // NORMALIZED refunds across all charges (frontend can use this directly)
-      refunds: allRefunds.map((r) => ({
-        id: r.id,
-        amount: Number(r.amount ?? 0),
-        status: r.status,
-        created: r.created,
-        currency: r.currency,
-        reason: r.reason || r?.metadata?.reason || null,
-      })),
+      // FLAT list of refunds used by BookingPricingEditor
+      refunds: allRefunds,
 
       // Include charges (so existing UI fallbacks still work)
       charges: { data: chargesSimple },
@@ -223,8 +228,6 @@ export async function GET(_req, { params }) {
         amount_captured_total_cents: amountCapturedTotalCents,
         refunds_total_cents: refundsTotalCents,
         net_cents: netCents,
-        // Practical upper bound; real Stripe limit is per-charge,
-        // but for admin UI this is the amount still "paid" after refunds.
         available_to_refund_cents: netCents,
         currency: (pi.currency || "").toUpperCase(),
         succeeded: String(pi.status || "").toLowerCase() === "succeeded",

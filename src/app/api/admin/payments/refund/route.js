@@ -14,14 +14,17 @@ const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 async function requireAdmin() {
   const supa = await createSupabaseServer();
-  if (!supa) return { error: true, response: bad("Server not configured", 500) };
+  if (!supa)
+    return { error: true, response: bad("Server not configured", 500) };
 
   const { data, error } = await supa.auth.getUser();
   const user = data?.user;
-  if (error || !user) return { error: true, response: bad("Unauthorized", 401) };
+  if (error || !user)
+    return { error: true, response: bad("Unauthorized", 401) };
 
   const admin = createSupabaseAdmin();
-  if (!admin) return { error: true, response: bad("Server not configured", 500) };
+  if (!admin)
+    return { error: true, response: bad("Server not configured", 500) };
 
   const { data: profile } = await admin
     .from("User")
@@ -45,7 +48,6 @@ function assertStripe() {
   const key = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || "";
   if (!key) throw new Error("Stripe not configured");
   const stripe = new Stripe(key, {
-    // lock an API version if you use one across the app; otherwise Stripe account default is used
     apiVersion: "2024-06-20",
   });
   return stripe;
@@ -65,33 +67,58 @@ export async function POST(req) {
 
   const payment_intent = String(body?.payment_intent || "").trim();
   const charge = String(body?.charge || "").trim(); // optional fallback
-  const amount_cents_raw = body?.amount_cents;
+
+  // Normalise amount to a number (cents)
+  const rawAmount = body?.amount_cents;
+  const amount_cents_raw =
+    rawAmount === undefined || rawAmount === null
+      ? undefined
+      : Number(rawAmount);
+
   const reason = body?.reason; // 'duplicate' | 'fraudulent' | 'requested_by_customer'
-  const metadata = (body?.metadata && typeof body.metadata === "object") ? body.metadata : undefined;
+  const metadata =
+    body?.metadata && typeof body.metadata === "object"
+      ? body.metadata
+      : undefined;
 
   if (!payment_intent && !charge) {
     return bad("Provide payment_intent (preferred) or charge", 422);
   }
-  if (amount_cents_raw !== undefined && (!Number.isInteger(amount_cents_raw) || amount_cents_raw <= 0)) {
-    return bad("amount_cents must be a positive integer (in the smallest currency unit)", 422);
+
+  if (
+    amount_cents_raw !== undefined &&
+    (!Number.isFinite(amount_cents_raw) ||
+      !Number.isInteger(amount_cents_raw) ||
+      amount_cents_raw <= 0)
+  ) {
+    return bad(
+      "amount_cents must be a positive integer (in the smallest currency unit)",
+      422
+    );
   }
 
   try {
     const stripe = assertStripe();
 
     // Retrieve the target – prefer payment_intent logic (it handles multiple charges)
-    let currency, amount_received_cents = 0, refunded_so_far_cents = 0, piIdForRefund = null, chargeIdForRefund = null;
+    let currency,
+      amount_received_cents = 0,
+      refunded_so_far_cents = 0,
+      piIdForRefund = null,
+      chargeIdForRefund = null;
 
     if (payment_intent) {
       const pi = await stripe.paymentIntents.retrieve(payment_intent);
       if (!pi) return bad("Payment Intent not found", 404);
 
       currency = (pi.currency || "").toUpperCase();
+      // amount_received is the amount actually collected
       amount_received_cents = Number(pi.amount_received || 0);
       piIdForRefund = pi.id;
 
       // Sum refunds across the PI (paginate just in case)
       refunded_so_far_cents = await sumRefundsForPaymentIntent(stripe, pi.id);
+
       if (!amount_received_cents) {
         return bad("Nothing received on this Payment Intent to refund", 409);
       }
@@ -111,19 +138,29 @@ export async function POST(req) {
       }
     }
 
-    const refundable_cents = Math.max(0, amount_received_cents - refunded_so_far_cents);
+    const refundable_cents = Math.max(
+      0,
+      amount_received_cents - refunded_so_far_cents
+    );
     if (refundable_cents <= 0) {
       return bad("Already fully refunded", 409);
     }
 
-    const amount_cents = amount_cents_raw === undefined ? refundable_cents : amount_cents_raw;
+    const amount_cents =
+      amount_cents_raw === undefined ? refundable_cents : amount_cents_raw;
+
     if (amount_cents > refundable_cents) {
-      return bad(`Amount exceeds refundable remainder (${refundable_cents} ${currency} cents)`, 422);
+      return bad(
+        `Amount exceeds refundable remainder (${refundable_cents} ${currency} cents)`,
+        422
+      );
     }
 
     // Create refund – prefer `payment_intent` param when available
     const createParams = {
-      ...(piIdForRefund ? { payment_intent: piIdForRefund } : { charge: chargeIdForRefund }),
+      ...(piIdForRefund
+        ? { payment_intent: piIdForRefund }
+        : { charge: chargeIdForRefund }),
       amount: amount_cents,
       ...(reason ? { reason } : {}),
       ...(metadata ? { metadata } : {}),
@@ -145,9 +182,9 @@ export async function POST(req) {
       },
     });
   } catch (e) {
-    // surface Stripe error messages helpfully
     const msg = e?.raw?.message || e?.message || "Refund failed";
-    const code = e?.statusCode && Number.isInteger(e.statusCode) ? e.statusCode : 500;
+    const code =
+      e?.statusCode && Number.isInteger(e.statusCode) ? e.statusCode : 500;
     console.error("/api/admin/payments/refund POST error", e);
     return bad(msg, code);
   }
@@ -161,6 +198,7 @@ export async function OPTIONS() {
 async function sumRefundsForPaymentIntent(stripe, paymentIntentId) {
   let total = 0;
   let starting_after;
+
   // walk through pages (unlikely to have many, but safe)
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -169,14 +207,17 @@ async function sumRefundsForPaymentIntent(stripe, paymentIntentId) {
       limit: 100,
       ...(starting_after ? { starting_after } : {}),
     });
+
     for (const r of page.data || []) {
       total += Number(r.amount || 0);
     }
+
     if (page.has_more && page.data?.length) {
       starting_after = page.data[page.data.length - 1].id;
     } else {
       break;
     }
   }
+
   return total;
 }

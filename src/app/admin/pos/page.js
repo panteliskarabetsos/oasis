@@ -1063,8 +1063,9 @@ export default function POSPage() {
                 <FieldRow icon={<User className="h-4 w-4" />}>
                   <input
                     value={custName}
+                    required
                     onChange={(e) => setCustName(e.target.value)}
-                    placeholder="Full name"
+                    placeholder="Full name"ß
                     className={clsx(
                       "w-full rounded-md border bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2",
                       RING,
