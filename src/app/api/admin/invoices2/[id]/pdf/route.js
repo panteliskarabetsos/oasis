@@ -7,6 +7,8 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 /* ───────── helpers ───────── */
 const ok = (d, s = 200, headers = {}) =>
@@ -44,6 +46,81 @@ async function requireAdmin() {
   if (error || (row?.role ?? "user") !== "admin")
     return { error: true, response: bad("Forbidden", 403) };
   return { error: false };
+}
+
+/* Try to embed a brand logo (PNG/JPG) */
+async function tryEmbedLogo(pdf, req, seller) {
+  const candidates = [];
+  if (seller?.logoUrl) candidates.push(seller.logoUrl);
+  if (process.env.BRAND_LOGO_URL) candidates.push(process.env.BRAND_LOGO_URL);
+
+  // public/ fallbacks
+  const pub = path.join(process.cwd(), "public");
+  candidates.push(path.join(pub, "/brand/logo.png"));
+  candidates.push(path.join(pub, "logo.png"));
+  candidates.push(path.join(pub, "/brand/logo.jpg"));
+  candidates.push(path.join(pub, "logo.jpg"));
+
+  for (const src of candidates) {
+    try {
+      let bytes = null;
+
+      if (/^https?:\/\//i.test(src)) {
+        const res = await fetch(src);
+        if (!res.ok) continue;
+        const ab = await res.arrayBuffer();
+        bytes = new Uint8Array(ab);
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("png"))
+          return { img: await pdf.embedPng(bytes), type: "png" };
+        if (ct.includes("jpeg") || ct.includes("jpg"))
+          return { img: await pdf.embedJpg(bytes), type: "jpg" };
+        // attempt to sniff by magic if content-type is missing
+        if (bytes[0] === 0x89 && bytes[1] === 0x50)
+          return { img: await pdf.embedPng(bytes), type: "png" };
+        if (bytes[0] === 0xff && bytes[1] === 0xd8)
+          return { img: await pdf.embedJpg(bytes), type: "jpg" };
+      } else {
+        const buf = await fs.readFile(src);
+        if (buf[0] === 0x89 && buf[1] === 0x50)
+          return { img: await pdf.embedPng(buf), type: "png" };
+        if (buf[0] === 0xff && buf[1] === 0xd8)
+          return { img: await pdf.embedJpg(buf), type: "jpg" };
+      }
+    } catch {
+      // ignore this candidate
+    }
+  }
+  return null;
+}
+
+/* Basic soft wrap for text to a max width */
+function wrapLines(text, font, size, maxWidth, maxLines = 3) {
+  const words = String(text || "").split(/\s+/);
+  const lines = [];
+  let cur = "";
+
+  for (const w of words) {
+    const trial = cur ? cur + " " + w : w;
+    if (font.widthOfTextAtSize(trial, size) <= maxWidth) {
+      cur = trial;
+    } else {
+      if (cur) lines.push(cur);
+      cur = w;
+      if (lines.length === maxLines - 1) break;
+    }
+  }
+  if (lines.length < maxLines && cur) lines.push(cur);
+  if (lines.length === maxLines && words.length > 0) {
+    // ellipsize the last line if overflowed
+    let last = lines[lines.length - 1];
+    const ell = "…";
+    while (font.widthOfTextAtSize(last + ell, size) > maxWidth && last.length) {
+      last = last.slice(0, -1);
+    }
+    lines[lines.length - 1] = last + ell;
+  }
+  return lines;
 }
 
 /* ───────── GET /api/admin/invoices2/[id]/pdf ───────── */
@@ -116,6 +193,7 @@ export async function GET(req, ctx) {
     name: "Oasis",
     email: "hello@oasis.example",
     phone: "",
+    logoUrl: process.env.BRAND_LOGO_URL || undefined,
     address: {
       line1: "123 Example Street",
       city: "Heraklion",
@@ -125,7 +203,7 @@ export async function GET(req, ctx) {
     },
   };
 
-  const pdfBytes = await buildPdf({ inv, items, seller });
+  const pdfBytes = await buildPdf({ inv, items, seller, req });
   const filename = `${formatInv(inv.series, inv.number)}.pdf`;
 
   return ok(Buffer.from(pdfBytes), 200, {
@@ -135,14 +213,14 @@ export async function GET(req, ctx) {
   });
 }
 
-/* ───────── PDF builder (improved layout) ───────── */
-async function buildPdf({ inv, items, seller }) {
+/* ───────── PDF builder (branded header + logo) ───────── */
+async function buildPdf({ inv, items, seller, req }) {
   const pdf = await PDFDocument.create();
   let page = pdf.addPage(A4);
   let { width, height } = page.getSize();
-  const setPage = (p) => {
-    page = p;
-    ({ width, height } = p.getSize());
+  const newPage = () => {
+    page = pdf.addPage(A4);
+    ({ width, height } = page.getSize());
   };
 
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -158,45 +236,86 @@ async function buildPdf({ inv, items, seller }) {
   // Header band
   page.drawRectangle({
     x: 0,
-    y: height - 110,
+    y: height - 120,
     width,
-    height: 110,
+    height: 120,
     color: brand,
   });
+
+  // Try embed logo
+  let logoObj = null;
+  try {
+    logoObj = await tryEmbedLogo(pdf, req, seller);
+  } catch {}
+  const padding = 40;
+
+  // Left block: logo + title
+  let leftX = padding;
+  const titleY = height - 70;
+  if (logoObj?.img) {
+    // keep logo within max box (120x48)
+    const maxW = 140;
+    const maxH = 48;
+    const { width: iw, height: ih } = logoObj.img.size();
+    const scale = Math.min(maxW / iw, maxH / ih, 1);
+    const w = iw * scale;
+    const h = ih * scale;
+    const y = height - 56 - h / 2;
+    page.drawRectangle({
+      x: leftX - 6,
+      y: y - 6,
+      width: w + 12,
+      height: h + 12,
+      color: rgb(1, 1, 1),
+      opacity: 0.08,
+    }); // soft plate
+    page.drawImage(logoObj.img, { x: leftX, y, width: w, height: h });
+    leftX += w + 16;
+  }
+
   page.drawText("INVOICE", {
-    x: 40,
-    y: height - 72,
+    x: leftX,
+    y: titleY,
     size: 26,
     font: bold,
     color: rgb(1, 1, 1),
   });
+  if (seller?.name) {
+    page.drawText(seller.name, {
+      x: leftX,
+      y: titleY - 18,
+      size: 11,
+      font: font,
+      color: rgb(1, 1, 1),
+      opacity: 0.9,
+    });
+  }
 
-  // Right meta in header (No + Status chip)
+  // Right meta: number + status chip
   const invNo = formatInv(inv.series, inv.number);
   const right = (text, y, size = 11, f = font, c = rgb(1, 1, 1)) => {
     const w = f.widthOfTextAtSize(text, size);
-    page.drawText(text, { x: width - 40 - w, y, size, font: f, color: c });
+    page.drawText(text, { x: width - padding - w, y, size, font: f, color: c });
   };
   right(`No: ${invNo}`, height - 38);
-  // Status chip
   const status = UC(inv.status || "");
-  const chipW = bold.widthOfTextAtSize(status, 9) + 16;
+  const chipW = Math.ceil(bold.widthOfTextAtSize(status, 9) + 18);
   page.drawRectangle({
-    x: width - 40 - chipW,
-    y: height - 58,
+    x: width - padding - chipW,
+    y: height - 62,
     width: chipW,
-    height: 16,
+    height: 18,
     color: rgb(1, 1, 1),
   });
   page.drawText(status, {
-    x: width - 40 - chipW + 8,
-    y: height - 55,
+    x: width - padding - chipW + 9,
+    y: height - 59,
     size: 9,
     font: bold,
     color: brand,
   });
 
-  // Optional “PAID” watermark
+  // Optional watermark
   if (status === "PAID") {
     const wm = "PAID";
     const wmSize = 100;
@@ -205,79 +324,59 @@ async function buildPdf({ inv, items, seller }) {
       y: height / 2,
       size: wmSize,
       font: bold,
-      color: rgb(0.8, 0.3, 0.3),
+      color: rgb(0.7, 0.2, 0.2),
       opacity: 0.08,
       rotate: degrees(25),
     });
   }
 
   // Addresses row
-  const yTop = height - 140;
-  const colGap = 280;
+  const yTop = height - 150;
+  const colGap = 300;
+
+  // helper for wrapping one block
+  const drawBlock = (title, lines, x, y0) => {
+    page.drawText(title, { x, y: y0, size: 12, font: bold, color: ink });
+    let y = y0 - 16;
+    for (const line of lines) {
+      y = y - 14;
+      page.drawText(line, { x, y, size: 10, font: font, color: sub });
+    }
+    return y - 4;
+  };
 
   // Seller
-  page.drawText("From", { x: 40, y: yTop, size: 12, font: bold, color: ink });
-  let y = yTop - 16;
-  const addrLine = [
-    seller.address?.line1,
-    seller.address?.line2,
-    seller.address?.city,
-    seller.address?.state,
-    seller.address?.postal_code,
-    seller.address?.country,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const wrap = (
-    t,
-    x,
-    y0,
-    maxWidth,
-    lh = 12,
-    size = 10,
-    f = font,
-    color = sub
-  ) => {
-    // quick single-line + truncate (keeps it fast & predictable)
-    const text = String(t || "");
-    const maxChars = Math.floor(maxWidth / (size * 0.55));
-    const shown =
-      text.length > maxChars ? text.slice(0, maxChars - 1) + "…" : text;
-    page.drawText(shown, { x, y: y0, size, font: f, color });
-    return y0 - lh;
-  };
-  y = wrap(seller.name, 40, y, 240);
-  if (seller.email) y = wrap(seller.email, 40, y, 240);
-  if (seller.phone) y = wrap(seller.phone, 40, y, 240);
-  y = wrap(addrLine, 40, y, 240);
+  const sa = seller.address || {};
+  const sellerLines = [
+    seller.name,
+    seller.email || "",
+    seller.phone || "",
+    [sa.line1, sa.line2, sa.city, sa.state, sa.postal_code, sa.country]
+      .filter(Boolean)
+      .join(", "),
+  ].filter(Boolean);
 
   // Buyer
-  let yR = yTop;
-  const bx = 40 + colGap;
-  page.drawText("Bill To", { x: bx, y: yR, size: 12, font: bold, color: ink });
-  yR -= 16;
   const buyer = inv.buyer || {};
-  const buyerAddr = [
-    buyer.address?.line1,
-    buyer.address?.line2,
-    buyer.address?.city,
-    buyer.address?.state,
-    buyer.address?.postal_code,
-    buyer.address?.country,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  yR = wrap(buyer.business_name || buyer.name || "", bx, yR, 260);
-  if (buyer.email) yR = wrap(buyer.email, bx, yR, 260);
-  yR = wrap(buyerAddr, bx, yR, 260);
+  const ba = buyer.address || {};
+  const buyerLines = [
+    buyer.business_name || buyer.name || "",
+    buyer.email || "",
+    [ba.line1, ba.line2, ba.city, ba.state, ba.postal_code, ba.country]
+      .filter(Boolean)
+      .join(", "),
+  ].filter(Boolean);
 
-  // Meta panel (No / Issue / Due / Currency)
-  const metaY = Math.min(y, yR) - 14;
-  const cardH = 48;
+  const leftEndY = drawBlock("From", sellerLines, padding, yTop);
+  const rightEndY = drawBlock("Bill To", buyerLines, padding + colGap, yTop);
+
+  // Meta panel
+  const metaY = Math.min(leftEndY, rightEndY) - 10;
+  const cardH = 52;
   page.drawRectangle({
-    x: 40,
+    x: padding,
     y: metaY - cardH,
-    width: width - 80,
+    width: width - padding * 2,
     height: cardH,
     color: panel,
   });
@@ -288,7 +387,7 @@ async function buildPdf({ inv, items, seller }) {
 
   const issue = new Date(inv.issue_date);
   const due = inv.due_date ? new Date(inv.due_date) : null;
-  const colX = [60, 220, 380, 500]; // 4 columns
+  const colX = [padding + 20, padding + 220, padding + 390, padding + 520];
   label("Invoice No", colX[0]);
   value(invNo, colX[0]);
   label("Issue Date", colX[1]);
@@ -301,57 +400,49 @@ async function buildPdf({ inv, items, seller }) {
   label("Currency", colX[3]);
   value(UC(inv.currency || "EUR"), colX[3]);
 
-  // Table header
-  let tableY = metaY - cardH - 24;
-  const col = { desc: 40, qty: 330, unit: 400, vat: 470, total: 540 };
+  // Table
+  let y = metaY - cardH - 28;
+  const col = {
+    desc: padding,
+    qty: 330,
+    unit: 400,
+    vat: 470,
+    total: width - padding - 60,
+  };
   const hline = (yy) =>
     page.drawLine({
-      start: { x: 40, y: yy },
-      end: { x: width - 40, y: yy },
+      start: { x: padding, y: yy },
+      end: { x: width - padding, y: yy },
       thickness: 0.6,
       color: line,
     });
 
-  hline(tableY + 14);
-  page.drawText("Description", {
-    x: col.desc,
-    y: tableY,
-    size: 10,
-    font: bold,
-    color: ink,
-  });
-  page.drawText("Qty", {
-    x: col.qty,
-    y: tableY,
-    size: 10,
-    font: bold,
-    color: ink,
-  });
-  page.drawText("Unit", {
-    x: col.unit,
-    y: tableY,
-    size: 10,
-    font: bold,
-    color: ink,
-  });
-  page.drawText("VAT%", {
-    x: col.vat,
-    y: tableY,
-    size: 10,
-    font: bold,
-    color: ink,
-  });
-  page.drawText("Line Total", {
-    x: col.total,
-    y: tableY,
-    size: 10,
-    font: bold,
-    color: ink,
-  });
-  hline(tableY - 2);
-  let yRow = tableY - 18;
+  const drawTableHeader = () => {
+    hline(y + 14);
+    page.drawText("Description", {
+      x: col.desc,
+      y,
+      size: 10,
+      font: bold,
+      color: ink,
+    });
+    page.drawText("Qty", { x: col.qty, y, size: 10, font: bold, color: ink });
+    page.drawText("Unit", { x: col.unit, y, size: 10, font: bold, color: ink });
+    page.drawText("VAT%", { x: col.vat, y, size: 10, font: bold, color: ink });
+    page.drawText("Line Total", {
+      x: col.total,
+      y,
+      size: 10,
+      font: bold,
+      color: ink,
+    });
+    hline(y - 2);
+    y -= 18;
+  };
 
-  const alignRight = (
+  drawTableHeader();
+
+  const rightCell = (
     text,
     xRight,
     size = 10,
@@ -362,114 +453,94 @@ async function buildPdf({ inv, items, seller }) {
     const w = f.widthOfTextAtSize(text, size);
     page.drawText(text, {
       x: xRight + (widthCol - w),
-      y: yRow,
+      y,
       size,
       font: f,
       color: c,
     });
   };
 
-  // Rows (with zebra background)
+  const bottomPad = 160;
   let rowIndex = 0;
-  const bottomPad = 150;
-  for (const it of items) {
-    if (yRow < bottomPad) {
-      setPage(pdf.addPage(A4));
-      // repeat header on new page
-      yRow = height - 80;
-      page.drawText("Description", {
-        x: col.desc,
-        y: yRow,
-        size: 10,
-        font: bold,
-        color: ink,
-      });
-      page.drawText("Qty", {
-        x: col.qty,
-        y: yRow,
-        size: 10,
-        font: bold,
-        color: ink,
-      });
-      page.drawText("Unit", {
-        x: col.unit,
-        y: yRow,
-        size: 10,
-        font: bold,
-        color: ink,
-      });
-      page.drawText("VAT%", {
-        x: col.vat,
-        y: yRow,
-        size: 10,
-        font: bold,
-        color: ink,
-      });
-      page.drawText("Line Total", {
-        x: col.total,
-        y: yRow,
-        size: 10,
-        font: bold,
-        color: ink,
-      });
-      hline(yRow - 2);
-      yRow -= 18;
-      rowIndex = 0;
-    }
 
-    // zebra
+  for (const it of items) {
+    // row zebra
     if (rowIndex % 2 === 1) {
       page.drawRectangle({
-        x: 40,
-        y: yRow - 2,
-        width: width - 80,
+        x: padding,
+        y: y - 2,
+        width: width - padding * 2,
         height: 16,
         color: panel,
-        opacity: 1,
       });
     }
 
-    const desc = String(it.description || "").slice(0, 95);
-    page.drawText(desc, {
+    // wrap description to max 2 lines
+    const descMaxWidth = col.qty - col.desc - 12;
+    const descLines = wrapLines(it.description, font, 10, descMaxWidth, 2);
+    // draw first line
+    page.drawText(descLines[0] || "", {
       x: col.desc,
-      y: yRow,
+      y,
       size: 10,
-      font: font,
+      font,
       color: ink,
     });
-
     page.drawText(String(it.quantity), {
       x: col.qty,
-      y: yRow,
+      y,
       size: 10,
-      font: font,
+      font,
       color: sub,
     });
-    alignRight(money(it.unit_price, inv.currency), col.unit, 10, font, sub);
-    alignRight(String(r2(it.vat_rate)), col.vat, 10, font, sub);
-    alignRight(money(it.total_amount, inv.currency), col.total, 10, bold, ink);
+    rightCell(money(it.unit_price, inv.currency), col.unit, 10, font, sub);
+    rightCell(String(r2(it.vat_rate)), col.vat, 10, font, sub);
+    rightCell(money(it.total_amount, inv.currency), col.total, 10, bold, ink);
 
-    yRow -= 16;
+    // second line (if any)
+    let rowHeight = 16;
+    if (descLines.length > 1) {
+      const y2 = y - 12;
+      page.drawText(descLines[1], {
+        x: col.desc,
+        y: y2,
+        size: 10,
+        font,
+        color: sub,
+      });
+      rowHeight = 24;
+    }
+
+    y -= rowHeight;
     rowIndex++;
+
+    // page break
+    if (y < bottomPad) {
+      newPage();
+      y = height - 90;
+      drawTableHeader();
+      rowIndex = 0;
+    }
   }
 
   // Totals card (right)
-  yRow -= 6;
-  hline(yRow + 12);
-  const cardX = width - 260;
-  const cardH2 = 70;
+  y -= 6;
+  hline(y + 12);
+  const cardX = width - padding - 240;
+  const cardW = 240;
+  const cardH2 = 78;
   page.drawRectangle({
     x: cardX,
-    y: yRow - cardH2,
-    width: 220,
+    y: y - cardH2,
+    width: cardW,
     height: cardH2,
     color: panel,
   });
   const row = (label, val, boldRow = false) => {
-    yRow -= 16;
+    y -= 16;
     page.drawText(label, {
       x: cardX + 12,
-      y: yRow,
+      y,
       size: 10,
       font: boldRow ? bold : font,
       color: ink,
@@ -477,8 +548,8 @@ async function buildPdf({ inv, items, seller }) {
     const f = boldRow ? bold : font;
     const w = f.widthOfTextAtSize(val, 10);
     page.drawText(val, {
-      x: cardX + 208 - w,
-      y: yRow,
+      x: cardX + cardW - 12 - w,
+      y,
       size: 10,
       font: f,
       color: ink,
@@ -488,37 +559,33 @@ async function buildPdf({ inv, items, seller }) {
   row("VAT", money(inv.tax_total ?? 0, inv.currency));
   row("Total", money(inv.total ?? 0, inv.currency), true);
 
-  // Notes (full width)
+  // Notes
   if (inv.notes) {
-    yRow -= 18;
-    page.drawText("Notes", {
-      x: 40,
-      y: yRow,
-      size: 10,
-      font: bold,
-      color: ink,
-    });
-    yRow -= 14;
-    page.drawText(String(inv.notes), {
-      x: 40,
-      y: yRow,
-      size: 10,
-      font: font,
-      color: sub,
-      maxWidth: width - 80,
-      lineHeight: 12,
-    });
+    y -= 18;
+    page.drawText("Notes", { x: padding, y, size: 10, font: bold, color: ink });
+    y -= 14;
+
+    const maxWidth = width - padding * 2;
+    const lines = wrapLines(String(inv.notes), font, 10, maxWidth, 6);
+    for (const ln of lines) {
+      page.drawText(ln, { x: padding, y, size: 10, font, color: sub });
+      y -= 12;
+      if (y < 60) {
+        newPage();
+        y = height - 60;
+      }
+    }
   }
 
   // Footer
   page.drawText("This is a first-party invoice (no AADE submission yet).", {
-    x: 40,
+    x: padding,
     y: 40,
     size: 9,
-    font: font,
+    font,
     color: sub,
   });
-  page.drawText(seller.name, { x: 40, y: 28, size: 9, font: font, color: sub });
+  page.drawText(seller.name, { x: padding, y: 28, size: 9, font, color: sub });
 
   return pdf.save();
 }
