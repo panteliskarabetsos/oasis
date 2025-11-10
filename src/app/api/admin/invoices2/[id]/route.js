@@ -1,4 +1,4 @@
-// src/app/api/admin/invoices2/route.js
+// src/app/api/admin/invoices2/[id]/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -6,6 +6,302 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
+// add near the top with your other imports:
+import Stripe from "stripe";
+
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" })
+  : null;
+
+const asArr = (x) => (Array.isArray(x) ? x : []);
+const moneyFromCharge = (ch) => {
+  const cents =
+    typeof ch.amount_captured === "number" && ch.amount_captured > 0
+      ? ch.amount_captured
+      : ch.amount;
+  return Number(cents || 0) / 100;
+};
+const UC = (s, d = "") => String(s ?? d).toUpperCase();
+
+/* -------- GET (single by id) -------- */
+export async function GET(req, ctx) {
+  const gate = await requireAdmin();
+  if (gate?.error) return gate.response;
+
+  const admin = createSupabaseAdmin();
+  if (!admin) return bad("Server not configured", 500);
+
+  const { id: idParam } = await ctx.params;
+  const id = Number(idParam);
+  if (!Number.isFinite(id) || id <= 0) return bad("Invalid invoice id", 400);
+
+  // params
+  const url = new URL(req.url);
+  const sp = url.searchParams;
+  const expand = (sp.get("expand") || "none").toLowerCase(); // none|lines|payments|all
+  const includeStripeParam = (sp.get("includeStripe") || "").toLowerCase();
+  const includeStripe = includeStripeParam
+    ? ["1", "true", "yes"].includes(includeStripeParam)
+    : expand === "payments" || expand === "all";
+
+  // base columns from the view
+  const cols = [
+    "id",
+    "series",
+    "number",
+    "invoice_no",
+    "status",
+    "currency",
+    "issue_date",
+    "due_date",
+    "buyer",
+    "seller",
+    "notes",
+    "subtotal",
+    "tax_total",
+    "total",
+    "taxes",
+    "mark",
+    "paid_at",
+    "payment_method",
+    "booking_id",
+    "pdf_path",
+    "stripe_payment_intent_id",
+    "stripe_invoice_id",
+    "created_at",
+    "updated_at",
+    "startTime",
+    "guests",
+    "amount_paid",
+    "balance",
+    "paid",
+    "overdue",
+    "buyer_name",
+    "buyer_business_name",
+    "buyer_email",
+    "buyer_phone",
+    "buyer_vat",
+  ].join(", ");
+
+  const { data: row, error: e0 } = await admin
+    .from("admin_invoice_money")
+    .select(cols)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (e0) return bad(e0.message || "Failed to load invoice", 500);
+  if (!row) return bad("Invoice not found", 404);
+
+  /* --- optional expansions (DB) --- */
+  let lines = [];
+  if (expand === "lines" || expand === "all") {
+    const { data: lineRows, error: le } = await admin
+      .from("invoice_line")
+      .select(
+        "id, invoice_id, description, quantity, unit_price, vat_rate, discount_percent, line_subtotal, line_tax, line_total"
+      )
+      .eq("invoice_id", id)
+      .order("id");
+    if (le) return bad(le.message || "Failed to load lines", 500);
+    lines = lineRows || [];
+  }
+
+  let payments = [];
+  if (expand === "payments" || expand === "all") {
+    const { data: pays, error: pe } = await admin
+      .from("payment")
+      .select(
+        "id, invoice_id, booking_id, method, amount, currency, reference, processed_at, notes"
+      )
+      .eq("invoice_id", id)
+      .order("processed_at", { ascending: true });
+    if (pe) return bad(pe.message || "Failed to load payments", 500);
+    payments = pays || [];
+  }
+
+  /* --- Stripe enrichment (optional) --- */
+  let stripePayments = [];
+  if (
+    stripe &&
+    (expand === "payments" || expand === "all") &&
+    includeStripe &&
+    (row.stripe_payment_intent_id || row.stripe_invoice_id)
+  ) {
+    const piId = row.stripe_payment_intent_id;
+    const siId = row.stripe_invoice_id;
+    let stripePaid = 0;
+
+    // PaymentIntent charges
+    if (piId) {
+      try {
+        const pi = await stripe.paymentIntents.retrieve(piId, {
+          expand: ["charges.data"],
+        });
+        const charges = asArr(pi?.charges?.data);
+        for (const ch of charges) {
+          if (ch?.status === "succeeded" && ch?.paid) {
+            const amt = moneyFromCharge(ch);
+            stripePayments.push({
+              source: "stripe",
+              method: ch.payment_method_details?.type || "card",
+              reference: ch.id,
+              amount: amt,
+              currency: UC(ch.currency || ""),
+              processed_at: new Date(
+                (ch.created || pi.created) * 1000
+              ).toISOString(),
+              notes: "Stripe charge",
+            });
+            stripePaid += amt;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // Stripe Invoice fallback
+    if (siId && stripePaid === 0) {
+      try {
+        const si = await stripe.invoices.retrieve(siId, {
+          expand: ["payment_intent", "charge"],
+        });
+        if (si?.amount_paid > 0) {
+          const amt = Number(si.amount_paid) / 100;
+          stripePayments.push({
+            source: "stripe",
+            method: "invoice",
+            reference: si.id,
+            amount: amt,
+            currency: UC(si.currency || ""),
+            processed_at: new Date(
+              (si.status_transitions?.paid_at || si.created) * 1000
+            ).toISOString(),
+            notes: "Stripe invoice",
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  // Merge payments & recompute money
+  const EPS = 0.005;
+  const mergedPayments = (() => {
+    if (!payments.length && !stripePayments.length) return [];
+    const seen = new Set(payments.map((p) => p.reference).filter(Boolean));
+    const all = payments.concat(
+      stripePayments.filter((p) =>
+        p.reference ? !seen.has(p.reference) : true
+      )
+    );
+    all.sort((a, b) =>
+      String(a.processed_at || "").localeCompare(String(b.processed_at || ""))
+    );
+    return all;
+  })();
+
+  const amount = Number(row.total || 0);
+  const alreadyPaid = Number(row.amount_paid || 0);
+  const stripeExtra = stripePayments.reduce(
+    (s, p) => s + (Number(p.amount) || 0),
+    0
+  );
+  const amountPaid = alreadyPaid + stripeExtra;
+  const balanceRaw = amount - amountPaid;
+  const balance = balanceRaw > EPS ? balanceRaw : 0;
+  const paidByStatus = String(row.status || "").toLowerCase() === "paid";
+  const paidByTs = Boolean(row.paid_at);
+  const paid = row.paid === true || paidByStatus || paidByTs || balance === 0;
+
+  // “items” for details page (use canonical lines if present; else try invoice.items JSON)
+  let items = [];
+  if (lines.length) {
+    items = lines.map((l) => ({
+      description: String(l.description || ""),
+      amount: Number(l.unit_price || 0),
+      quantity: Number(l.quantity || 1),
+    }));
+  } else if (row?.buyer || row?.seller) {
+    // if your invoice table stores items JSON on the row, try to read it via a direct fetch
+    const { data: invRow } = await admin
+      .from("invoice")
+      .select("items")
+      .eq("id", id)
+      .maybeSingle();
+    if (invRow?.items && Array.isArray(invRow.items)) {
+      items = invRow.items.map((it) => ({
+        description: String(it.description || ""),
+        amount: Number(it.unit_price ?? it.amount ?? 0),
+        quantity: Number(it.quantity || 1),
+      }));
+    }
+  }
+
+  // shape single record
+  const address =
+    row.buyer && typeof row.buyer === "object" && row.buyer.address
+      ? row.buyer.address
+      : {};
+
+  const data = {
+    source: "db",
+    id: row.id,
+    number: row.number,
+    series: row.series,
+    invoiceNo: row.invoice_no,
+    status: row.status,
+    currency: UC(row.currency || "EUR"),
+    createdAt: row.issue_date,
+    startTime: row.startTime ?? null,
+    guests: row.guests ?? null,
+
+    amount,
+    amountPaid,
+    balance,
+    paid,
+
+    customer: {
+      name: row.buyer_name || row.buyer_business_name || "",
+      email: row.buyer_email || "",
+      phone: row.buyer_phone || "",
+      vat: row.buyer_vat || "",
+      address,
+    },
+
+    items, // for the details page
+
+    meta: {
+      series: row.series,
+      number: row.number,
+      issue_date: row.issue_date,
+      due_date: row.due_date,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      paid_at: row.paid_at,
+      payment_method: row.payment_method,
+      booking_id: row.booking_id,
+      pdf_path: row.pdf_path,
+      mark: row.mark,
+      stripe_payment_intent_id: row.stripe_payment_intent_id,
+      stripe_invoice_id: row.stripe_invoice_id,
+      notes: row.notes,
+      taxes: row.taxes,
+      subtotal: row.subtotal,
+      tax_total: row.tax_total,
+      total: row.total,
+      buyer: row.buyer,
+      seller: row.seller,
+      overdue: !!row.overdue,
+    },
+  };
+
+  if (expand === "lines" || expand === "all") data.lines = lines;
+  if (expand === "payments" || expand === "all") data.payments = mergedPayments;
+
+  return ok({ data });
+}
 
 const ok = (d, s = 200, headers = {}) =>
   new NextResponse(JSON.stringify(d), {
