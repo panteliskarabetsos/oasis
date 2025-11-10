@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Ban,
   Trash2,
+  ExternalLink,
 } from "lucide-react";
 
 /**
@@ -24,7 +25,7 @@ import {
  *
  * API compatibility:
  *  - First-party invoices (v2): /api/admin/invoices2  (defaults to expand=all)
- *  - Legacy Stripe view:       /api/admin/invoices    (kept as-is)
+ *  - Stripe-only (via invoices2): add ?includeStripe=1 to return Stripe dataset
  */
 export default function AdminInvoicesPage() {
   const router = useRouter();
@@ -57,6 +58,7 @@ export default function AdminInvoicesPage() {
 
   // Data source tab
   const [mode, setMode] = React.useState("fp"); // 'fp' | 'stripe'
+  const isStripe = mode === "stripe";
 
   // Per-row busy state
   const [busy, setBusy] = React.useState({ id: null, type: "" });
@@ -75,6 +77,11 @@ export default function AdminInvoicesPage() {
       try {
         setLoading(true);
         setError("");
+
+        const modeParams = isStripe
+          ? { expand: "payments", includeStripe: "1" } // Stripe-only dataset
+          : { expand: "payments" }; // FP view
+
         const { data, meta } = await fetchInvoices({
           q: debouncedSearch,
           status,
@@ -82,10 +89,10 @@ export default function AdminInvoicesPage() {
           to: dateTo,
           p: page,
           per: pageSize,
-          apiBase:
-            mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2",
-          expand: mode === "stripe" ? undefined : "all",
+          apiBase: "/api/admin/invoices2",
+          ...modeParams,
         });
+
         if (cancelled) return;
         setRows(sortClient(data)); // initial client sort
         setTotal(meta.total || 0);
@@ -121,47 +128,91 @@ export default function AdminInvoicesPage() {
   }, [debouncedSearch, status, dateFrom, dateTo, mode]);
 
   // --- Metrics (based on current rows) ---
-  // --- Metrics (based on current rows) ---
   const metrics = React.useMemo(() => {
     let pagePaid = 0;
     let pageBalance = 0;
     let paidCount = 0;
-
     for (const r of rows) {
       const m = deriveMoney(r);
       pagePaid += m.paidAmount;
       pageBalance += m.balance;
       if (m.paid) paidCount++;
     }
-
     return {
       totalResults: total,
-      pageAmount: pageTotal, // server-computed page amount
-      pagePaidAmount: pagePaid, // consistent with row logic
-      pageOutstanding: pageBalance, // ditto
+      pageAmount: pageTotal,
+      pagePaidAmount: pagePaid,
+      pageOutstanding: pageBalance,
       paidCount,
     };
   }, [rows, total, pageTotal]);
 
-  // --- Row actions ---
-  function openPdf(id) {
-    const base =
-      mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
-    window.open(`${base}/${id}/pdf`, "_blank");
+  // --- Row actions helpers ---
+  function stripeLinks(inv) {
+    const stripeId =
+      inv?.meta?.stripe_invoice_id ||
+      (typeof inv?.id === "string" && inv.id.startsWith("in_") ? inv.id : null);
+    // If backend adds these later, we'll use them; otherwise dashboard fallback.
+    const hosted =
+      inv?.meta?.hosted_invoice_url || inv?.hosted_invoice_url || null;
+    const pdf = inv?.meta?.invoice_pdf || inv?.invoice_pdf || null;
+    const dash = stripeId
+      ? `https://dashboard.stripe.com/invoices/${stripeId}`
+      : null;
+    return { hosted, pdf, dash, stripeId };
   }
-  function downloadPdf(id) {
-    const base =
-      mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
-    window.open(`${base}/${id}/download`, "_blank");
+
+  function openInvoice(inv) {
+    if (isStripe) {
+      const { hosted, dash } = stripeLinks(inv);
+      window.open(
+        hosted || dash || "https://dashboard.stripe.com/invoices",
+        "_blank"
+      );
+    } else {
+      router.push(`/admin/invoices/${inv.id}`);
+    }
   }
+
+  function openPdf(inv) {
+    if (isStripe) {
+      const { pdf, hosted, dash } = stripeLinks(inv);
+      window.open(
+        pdf || hosted || dash || "https://dashboard.stripe.com/invoices",
+        "_blank"
+      );
+    } else {
+      window.open(`/api/admin/invoices2/${inv.id}/pdf`, "_blank");
+    }
+  }
+
+  function downloadPdf(inv) {
+    if (isStripe) {
+      const { pdf, hosted, dash } = stripeLinks(inv);
+      window.open(
+        pdf || hosted || dash || "https://dashboard.stripe.com/invoices",
+        "_blank"
+      );
+    } else {
+      window.open(`/api/admin/invoices2/${inv.id}/download`, "_blank");
+    }
+  }
+
   async function sendInvoice(id) {
+    if (isStripe) {
+      // For Stripe, we can't safely send via our FP route; open the Stripe invoice instead.
+      return window.open(
+        `https://dashboard.stripe.com/invoices/${id}`,
+        "_blank"
+      );
+    }
     try {
       setOk("");
       setError("");
       setBusy({ id, type: "send" });
-      const base =
-        mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
-      const res = await fetch(`${base}/${id}/send`, { method: "POST" });
+      const res = await fetch(`/api/admin/invoices2/${id}/send`, {
+        method: "POST",
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json().catch(() => ({}));
       setOk(json?.message || "Invoice email queued.");
@@ -173,34 +224,32 @@ export default function AdminInvoicesPage() {
   }
 
   async function markPaid(id, opts = {}) {
+    if (isStripe) {
+      // Manage payments in Stripe; open invoice in dashboard.
+      return window.open(
+        `https://dashboard.stripe.com/invoices/${id}`,
+        "_blank"
+      );
+    }
     try {
       setOk("");
       setError("");
       setBusy({ id, type: "mark" });
-
-      // simple confirm; tweak as you wish
       if (!opts.skipConfirm) {
         const go = window.confirm("Mark this invoice as paid?");
         if (!go) return;
       }
-
-      const base =
-        mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
-      const res = await fetch(`${base}/${id}/mark-paid`, {
+      const res = await fetch(`/api/admin/invoices2/${id}/mark-paid`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           method: opts.method || "cash",
           reference: opts.reference || undefined,
-          // amount: optional (defaults to outstanding)
-          // processed_at: optional ISO
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json().catch(() => ({}));
       setOk(json?.message || "Invoice marked as paid.");
-
-      // Refresh the list
       setRefreshTick((t) => t + 1);
     } catch (e) {
       setError(e?.message || "Failed to mark invoice as paid.");
@@ -210,6 +259,12 @@ export default function AdminInvoicesPage() {
   }
 
   async function voidInvoice(id) {
+    if (isStripe) {
+      return window.open(
+        `https://dashboard.stripe.com/invoices/${id}`,
+        "_blank"
+      );
+    }
     try {
       setOk("");
       setError("");
@@ -218,9 +273,9 @@ export default function AdminInvoicesPage() {
       );
       if (!confirm) return;
       setBusy({ id, type: "void" });
-      const base =
-        mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
-      const res = await fetch(`${base}/${id}/void`, { method: "POST" });
+      const res = await fetch(`/api/admin/invoices2/${id}/void`, {
+        method: "POST",
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json().catch(() => ({}));
       setOk(json?.message || "Invoice voided.");
@@ -233,6 +288,12 @@ export default function AdminInvoicesPage() {
   }
 
   async function deleteInvoice(id) {
+    if (isStripe) {
+      return window.open(
+        `https://dashboard.stripe.com/invoices/${id}`,
+        "_blank"
+      );
+    }
     try {
       setOk("");
       setError("");
@@ -241,9 +302,9 @@ export default function AdminInvoicesPage() {
       );
       if (!confirm) return;
       setBusy({ id, type: "delete" });
-      const base =
-        mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
-      const res = await fetch(`${base}/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/invoices2/${id}`, {
+        method: "DELETE",
+      });
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
         throw new Error(msg?.error || `HTTP ${res.status}`);
@@ -258,6 +319,29 @@ export default function AdminInvoicesPage() {
     }
   }
 
+  // Status options (switch per mode)
+  const fpStatuses = [
+    "all",
+    "paid",
+    "pending",
+    "confirmed",
+    "cancelled",
+    "approved",
+    "rejected",
+    "completed",
+    "finalized",
+    "draft",
+    "sent",
+  ];
+  const stripeStatuses = [
+    "all",
+    "draft",
+    "open",
+    "paid",
+    "void",
+    "uncollectible",
+  ];
+
   // --- Render ---
   return (
     <div className="p-6 md:p-8">
@@ -269,7 +353,7 @@ export default function AdminInvoicesPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Search, export CSV, and drill into{" "}
-            {mode === "stripe" ? "Stripe payments" : "first-party invoices"}.
+            {isStripe ? "Stripe payments" : "first-party invoices"}.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -281,10 +365,10 @@ export default function AdminInvoicesPage() {
                   status,
                   from: dateFrom,
                   to: dateTo,
-                  apiBase:
-                    mode === "stripe"
-                      ? "/api/admin/invoices"
-                      : "/api/admin/invoices2",
+                  apiBase: "/api/admin/invoices2",
+                  ...(isStripe
+                    ? { expand: "payments", includeStripe: "1" }
+                    : { expand: "payments" }),
                 }),
                 "_blank"
               )
@@ -293,12 +377,14 @@ export default function AdminInvoicesPage() {
           >
             <Download className="h-4 w-4" /> Export CSV
           </button>
-          <Link
-            href="/admin/invoices/new"
-            className="inline-flex items-center gap-2 rounded-xl bg-black text-white px-3.5 py-2 text-sm hover:bg-zinc-800"
-          >
-            <Plus className="h-4 w-4" /> New Invoice
-          </Link>
+          {!isStripe && (
+            <Link
+              href="/admin/invoices/new"
+              className="inline-flex items-center gap-2 rounded-xl bg-black text-white px-3.5 py-2 text-sm hover:bg-zinc-800"
+            >
+              <Plus className="h-4 w-4" /> New Invoice
+            </Link>
+          )}
         </div>
       </div>
 
@@ -308,7 +394,7 @@ export default function AdminInvoicesPage() {
           <button
             onClick={() => setMode("fp")}
             className={`px-3 py-1.5 text-sm rounded-lg ${
-              mode === "fp"
+              !isStripe
                 ? "bg-black text-white"
                 : "text-zinc-700 hover:bg-zinc-50"
             }`}
@@ -318,7 +404,7 @@ export default function AdminInvoicesPage() {
           <button
             onClick={() => setMode("stripe")}
             className={`px-3 py-1.5 text-sm rounded-lg ${
-              mode === "stripe"
+              isStripe
                 ? "bg-black text-white"
                 : "text-zinc-700 hover:bg-zinc-50"
             }`}
@@ -360,32 +446,28 @@ export default function AdminInvoicesPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={
-              mode === "stripe"
-                ? "Search booking id, email, name, Stripe…"
+              isStripe
+                ? "Search number, email, name, Stripe…"
                 : "Search invoice no, customer, email…"
             }
             className="w-full bg-transparent outline-none text-sm"
           />
         </div>
+
         <div className="lg:col-span-3">
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
             className="w-full rounded-xl border px-3 py-2 bg-white text-sm"
           >
-            <option value="all">All statuses</option>
-            <option value="paid">paid</option>
-            <option value="pending">pending</option>
-            <option value="confirmed">confirmed</option>
-            <option value="cancelled">cancelled</option>
-            <option value="approved">approved</option>
-            <option value="rejected">rejected</option>
-            <option value="completed">completed</option>
-            <option value="finalized">finalized</option>
-            <option value="draft">draft</option>
-            <option value="sent">sent</option>
+            {(isStripe ? stripeStatuses : fpStatuses).map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
           </select>
         </div>
+
         <div className="lg:col-span-3 grid grid-cols-2 gap-2">
           <input
             type="date"
@@ -400,6 +482,7 @@ export default function AdminInvoicesPage() {
             className="rounded-xl border px-3 py-2 bg-white text-sm"
           />
         </div>
+
         <div className="lg:col-span-2 flex items-center justify-end gap-2">
           <div className="text-sm text-zinc-500">
             {total} result{total === 1 ? "" : "s"}
@@ -496,8 +579,9 @@ export default function AdminInvoicesPage() {
                   <tr key={inv.id} className="border-t hover:bg-zinc-50/60">
                     <Td className="font-medium">
                       <button
-                        onClick={() => router.push(`/admin/invoices/${inv.id}`)}
+                        onClick={() => openInvoice(inv)}
                         className="underline underline-offset-4 hover:text-zinc-900"
+                        title={isStripe ? "Open in Stripe" : "Open invoice"}
                       >
                         {inv.invoiceNo}
                       </button>
@@ -510,6 +594,11 @@ export default function AdminInvoicesPage() {
                         {!paid && overdue && (
                           <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">
                             <AlertTriangle className="h-3 w-3" /> Overdue
+                          </span>
+                        )}
+                        {isStripe && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">
+                            Stripe
                           </span>
                         )}
                       </div>
@@ -545,8 +634,8 @@ export default function AdminInvoicesPage() {
 
                     {/* Guests */}
                     <Td className="text-right text-zinc-600">
-                      {mode === "stripe"
-                        ? Number(inv.numberOfPeople ?? inv.counts?.total ?? 1)
+                      {isStripe
+                        ? "—"
                         : typeof inv.guests === "number"
                         ? inv.guests
                         : "—"}
@@ -573,98 +662,129 @@ export default function AdminInvoicesPage() {
                     {/* Actions */}
                     <Td className="text-right">
                       <div className="inline-flex items-center gap-1">
+                        {/* Open */}
                         <button
                           className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                          onClick={() => openPdf(inv.id)}
-                          aria-label="Open PDF"
-                          title="Open PDF"
+                          onClick={() => openPdf(inv)}
+                          aria-label="Open"
+                          title={isStripe ? "Open invoice" : "Open PDF"}
                         >
                           <FileText className="h-4 w-4" />
                         </button>
+
+                        {/* Download */}
                         <button
                           className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                          onClick={() => downloadPdf(inv.id)}
-                          aria-label="Download PDF"
+                          onClick={() => downloadPdf(inv)}
+                          aria-label="Download"
                           title="Download PDF"
                         >
                           <Download className="h-4 w-4" />
                         </button>
-                        <button
-                          className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                          onClick={() => sendInvoice(inv.id)}
-                          aria-label="Send invoice"
-                          title="Send invoice"
-                          disabled={busy.id === inv.id && busy.type === "send"}
-                        >
-                          {busy.id === inv.id && busy.type === "send" ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Mail className="h-4 w-4" />
-                          )}
-                        </button>
-                        {!paid && (
+
+                        {/* Send / Mark / Void / Delete */}
+                        {!isStripe && (
+                          <>
+                            <button
+                              className="px-2 py-1 rounded-lg hover:bg-zinc-100"
+                              onClick={() => sendInvoice(inv.id)}
+                              aria-label="Send invoice"
+                              title="Send invoice"
+                              disabled={
+                                busy.id === inv.id && busy.type === "send"
+                              }
+                            >
+                              {busy.id === inv.id && busy.type === "send" ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Mail className="h-4 w-4" />
+                              )}
+                            </button>
+
+                            {!paid && (
+                              <button
+                                className="px-2 py-1 rounded-lg hover:bg-zinc-100"
+                                onClick={() => markPaid(inv.id)}
+                                aria-label="Mark as paid"
+                                title="Mark as paid"
+                                disabled={
+                                  busy.id === inv.id && busy.type === "mark"
+                                }
+                              >
+                                {busy.id === inv.id && busy.type === "mark" ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="h-4 w-4" />
+                                )}
+                              </button>
+                            )}
+
+                            {!deriveMoney(inv).paid &&
+                              String(inv.status || "").toLowerCase() !==
+                                "void" &&
+                              (!Array.isArray(inv.payments) ||
+                                inv.payments.length === 0) && (
+                                <button
+                                  className="px-2 py-1 rounded-lg hover:bg-zinc-100 text-amber-700"
+                                  onClick={() => voidInvoice(inv.id)}
+                                  aria-label="Void invoice"
+                                  title="Void invoice"
+                                  disabled={
+                                    busy.id === inv.id && busy.type === "void"
+                                  }
+                                >
+                                  {busy.id === inv.id &&
+                                  busy.type === "void" ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Ban className="h-4 w-4" />
+                                  )}
+                                </button>
+                              )}
+
+                            {["draft", "void"].includes(
+                              String(inv.status || "").toLowerCase()
+                            ) &&
+                              (!Array.isArray(inv.payments) ||
+                                inv.payments.length === 0) && (
+                                <button
+                                  className="px-2 py-1 rounded-lg hover:bg-zinc-100 text-rose-700"
+                                  onClick={() => deleteInvoice(inv.id)}
+                                  aria-label="Delete invoice"
+                                  title="Delete invoice"
+                                  disabled={
+                                    busy.id === inv.id && busy.type === "delete"
+                                  }
+                                >
+                                  {busy.id === inv.id &&
+                                  busy.type === "delete" ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                </button>
+                              )}
+                          </>
+                        )}
+
+                        {/* Stripe-only: quick open in dashboard */}
+                        {isStripe && (
                           <button
                             className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                            onClick={() => markPaid(inv.id)}
-                            aria-label="Mark as paid"
-                            title="Mark as paid"
-                            disabled={
-                              busy.id === inv.id && busy.type === "mark"
+                            onClick={() =>
+                              window.open(
+                                `https://dashboard.stripe.com/invoices/${
+                                  inv?.meta?.stripe_invoice_id || inv.id
+                                }`,
+                                "_blank"
+                              )
                             }
+                            aria-label="Open in Stripe"
+                            title="Open in Stripe"
                           >
-                            {busy.id === inv.id && busy.type === "mark" ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="h-4 w-4" />
-                            )}
+                            <ExternalLink className="h-4 w-4" />
                           </button>
                         )}
-                        {/* Void (FP invoices only, not paid, not already void, and with no payments array) */}
-                        {mode === "fp" &&
-                          !deriveMoney(inv).paid &&
-                          String(inv.status || "").toLowerCase() !== "void" &&
-                          (!Array.isArray(inv.payments) ||
-                            inv.payments.length === 0) && (
-                            <button
-                              className="px-2 py-1 rounded-lg hover:bg-zinc-100 text-amber-700"
-                              onClick={() => voidInvoice(inv.id)}
-                              aria-label="Void invoice"
-                              title="Void invoice"
-                              disabled={
-                                busy.id === inv.id && busy.type === "void"
-                              }
-                            >
-                              {busy.id === inv.id && busy.type === "void" ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Ban className="h-4 w-4" />
-                              )}
-                            </button>
-                          )}
-
-                        {/* Delete (FP invoices only, only when draft or void and no payments) */}
-                        {mode === "fp" &&
-                          ["draft", "void"].includes(
-                            String(inv.status || "").toLowerCase()
-                          ) &&
-                          (!Array.isArray(inv.payments) ||
-                            inv.payments.length === 0) && (
-                            <button
-                              className="px-2 py-1 rounded-lg hover:bg-zinc-100 text-rose-700"
-                              onClick={() => deleteInvoice(inv.id)}
-                              aria-label="Delete invoice"
-                              title="Delete invoice"
-                              disabled={
-                                busy.id === inv.id && busy.type === "delete"
-                              }
-                            >
-                              {busy.id === inv.id && busy.type === "delete" ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </button>
-                          )}
                       </div>
                     </Td>
                   </tr>
@@ -846,7 +966,17 @@ function Td({ children, className = "" }) {
 }
 
 // --- Fetching & utils ---
-async function fetchInvoices({ q, status, from, to, p, per, apiBase, expand }) {
+async function fetchInvoices({
+  q,
+  status,
+  from,
+  to,
+  p,
+  per,
+  apiBase,
+  expand,
+  includeStripe,
+}) {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (status) params.set("status", status);
@@ -855,6 +985,7 @@ async function fetchInvoices({ q, status, from, to, p, per, apiBase, expand }) {
   if (p) params.set("p", String(p));
   if (per) params.set("per", String(per));
   if (expand) params.set("expand", expand);
+  if (includeStripe) params.set("includeStripe", includeStripe);
 
   const res = await fetch(`${apiBase}?${params.toString()}`, {
     cache: "no-store",
@@ -872,7 +1003,16 @@ async function fetchInvoices({ q, status, from, to, p, per, apiBase, expand }) {
   return { data, meta };
 }
 
-function buildCsvUrl({ q, status = "all", from, to, ids, apiBase }) {
+function buildCsvUrl({
+  q,
+  status = "all",
+  from,
+  to,
+  ids,
+  apiBase,
+  expand,
+  includeStripe,
+}) {
   const params = new URLSearchParams();
   params.set("format", "csv");
   if (ids) params.set("ids", ids);
@@ -880,6 +1020,8 @@ function buildCsvUrl({ q, status = "all", from, to, ids, apiBase }) {
   if (status) params.set("status", status);
   if (from) params.set("from", from);
   if (to) params.set("to", to);
+  if (expand) params.set("expand", expand);
+  if (includeStripe) params.set("includeStripe", includeStripe);
   return `${apiBase}?${params.toString()}`;
 }
 
@@ -896,6 +1038,9 @@ function statusBadge(s = "") {
     finalized: "bg-sky-50 text-sky-700 border-sky-200",
     draft: "bg-zinc-50 text-zinc-700 border-zinc-200",
     sent: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    open: "bg-sky-50 text-sky-700 border-sky-200",
+    void: "bg-zinc-50 text-zinc-700 border-zinc-200",
+    uncollectible: "bg-amber-50 text-amber-700 border-amber-200",
   };
   const cls = map[key] || "bg-zinc-50 text-zinc-700 border-zinc-200";
   const label = key ? key[0].toUpperCase() + key.slice(1) : "—";
@@ -948,34 +1093,28 @@ function sumPayments(arr = []) {
   return arr.reduce((s, p) => s + (Number(p?.amount) || 0), 0);
 }
 
-/** Prefer server-provided fields from /api/admin/invoices2 (view), with safe fallbacks. */
 /** Prefer server-provided fields; fall back to payments & status. */
 function deriveMoney(inv) {
-  // amount (server field first)
   const amount = Number(
     inv.amount ?? inv.total ?? inv.meta?.total ?? inv.totalAmount ?? 0
   );
 
-  // paidAmount from: explicit field -> legacy stripe field -> payments sum
   const paidAmount = Number(
     (typeof inv.amountPaid === "number" && inv.amountPaid) ??
       inv.totalPaidAmount ??
       sumPayments(Array.isArray(inv.payments) ? inv.payments : [])
   );
 
-  // treat tiny residuals as zero
   const EPS = 0.005;
   const balanceRaw = amount - paidAmount;
   const balance = balanceRaw > EPS ? balanceRaw : 0;
 
-  // paid by explicit boolean, by status, by timestamp, or by (near-)zero balance
   const status = String(inv.status || "").toLowerCase();
   const paidByStatus = status === "paid";
   const paidByTimestamp = Boolean(inv?.meta?.paid_at || inv?.paid_at);
   const paid =
     inv.paid === true || paidByStatus || paidByTimestamp || balance === 0;
 
-  // overdue (use meta.due_date if present, else top-level)
   const dueISO = inv?.meta?.due_date ?? inv?.due_date;
   const overdue =
     !paid && dueISO ? new Date(dueISO).getTime() < Date.now() : false;
