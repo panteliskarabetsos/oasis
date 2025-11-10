@@ -72,7 +72,7 @@ export async function POST(req) {
 
   // 3) Aggregate booked seats from real reservations (Booking)
   const { data: bookings, error: bookErr } = await admin
-    .from("Booking")
+    .from("booking")
     .select("scheduleSlotId, numberOfPeople, status")
     .eq("scheduleSlotId", scheduleSlotId);
   if (bookErr) {

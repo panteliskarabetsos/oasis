@@ -15,7 +15,7 @@ const isInt = (n) =>
 
 async function countConfirmedBookings(admin, slotId) {
   const { count, error } = await admin
-    .from("Booking")
+    .from("booking")
     .select("id", { head: true, count: "exact" })
     .eq("scheduleSlotId", slotId)
     .in("status", Array.from(COUNT_STATUSES));
@@ -53,7 +53,7 @@ export async function POST(req, ctx) {
 
   // ---- Try BOOKING first
   const { data: booking, error: bErr } = await admin
-    .from("Booking")
+    .from("booking")
     .select("*")
     .eq("id", entityId)
     .maybeSingle();
@@ -119,10 +119,10 @@ export async function POST(req, ctx) {
     if (refundId) patch.stripeRefundId = refundId;
     if (requestRefund && (refundId || reason)) patch.refundedAt = nowIso;
 
-    let upd = await admin.from("Booking").update(patch).eq("id", entityId);
+    let upd = await admin.from("booking").update(patch).eq("id", entityId);
     if (upd.error && String(upd.error.code) === "42703") {
       const fb = await admin
-        .from("Booking")
+        .from("booking")
         .update({ status: "cancelled", updatedAt: nowIso })
         .eq("id", entityId);
       if (fb.error) return bad("Failed to cancel booking", 500);

@@ -1,6 +1,7 @@
+// src/app/admin/invoices/new/page.js
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,6 +17,7 @@ import {
   CalendarClock,
   FileText,
   CheckCircle2,
+  Loader2,
 } from "lucide-react";
 
 const COUNTRIES = [
@@ -32,13 +34,22 @@ const COUNTRIES = [
   { code: "US", name: "United States" },
 ];
 
+const PAYMENT_METHODS = [
+  { key: "cash", label: "Cash" },
+  { key: "card", label: "Card" },
+  { key: "bank_transfer", label: "Bank transfer" },
+  { key: "gift_card", label: "Gift card" },
+  { key: "voucher", label: "Voucher" },
+  { key: "other", label: "Other" },
+];
+
 export default function NewInvoicePage() {
   const router = useRouter();
 
   // ----- Billing party -----
   const [customerType, setCustomerType] = useState("individual"); // "individual" | "business"
   const [customerEmail, setCustomerEmail] = useState("");
-  const [customerName, setCustomerName] = useState(""); // person name or contact
+  const [customerName, setCustomerName] = useState(""); // person/contact name
   const [businessName, setBusinessName] = useState("");
   const [phone, setPhone] = useState("");
   const [taxId, setTaxId] = useState("");
@@ -61,42 +72,132 @@ export default function NewInvoicePage() {
   const [dueDate, setDueDate] = useState("");
   const [notes, setNotes] = useState("");
 
+  // Options
+  const [finalizeNow, setFinalizeNow] = useState(true);
+  const [sendAfterCreate, setSendAfterCreate] = useState(false);
+
+  // Record payment right after creation
+  const [recordPayment, setRecordPayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const num = (v) =>
+    v === "" || v === null || v === undefined ? 0 : Number(v) || 0;
+  const toGross = (net, vat) => num(net) * (1 + num(vat) / 100);
+  const toNet = (gross, vat) => {
+    const r = 1 + num(vat) / 100;
+    return r === 0 ? 0 : num(gross) / r;
+  };
+
   // Line items: description, unit_price, quantity, vat_rate
+  // Line items: description, unit_price (net), unit_price_gross (incl VAT), quantity, vat_rate
   const [items, setItems] = useState([
-    { description: "", unit_price: "", quantity: 1, vat_rate: 24 },
+    {
+      description: "",
+      unit_price: "", // NET (before VAT)
+      unit_price_gross: "", // GROSS (after VAT)
+      quantity: 1,
+      vat_rate: 24,
+      lastEdited: "net", // "net" | "gross"
+    },
   ]);
 
-  const [submitting, setSubmitting] = useState(false);
-  const [created, setCreated] = useState(null);
-
-  // -------- helpers --------
   const addItem = () =>
     setItems((s) => [
       ...s,
-      { description: "", unit_price: "", quantity: 1, vat_rate: 24 },
+      {
+        description: "",
+        unit_price: "",
+        unit_price_gross: "",
+        quantity: 1,
+        vat_rate: 24,
+        lastEdited: "net",
+      },
     ]);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [created, setCreated] = useState(null);
+  const [sending, setSending] = useState(false);
+
+  // -------- helpers --------
+
   const removeItem = (i) => setItems((s) => s.filter((_, idx) => idx !== i));
   const updateItem = (i, patch) =>
     setItems((s) =>
-      s.map((row, idx) => (idx === i ? { ...row, ...patch } : row))
+      s.map((row, idx) => {
+        if (idx !== i) return row;
+        const next = { ...row, ...patch };
+
+        // Auto-sync logic
+        const vat = num(next.vat_rate);
+
+        // If user just changed gross
+        if ("unit_price_gross" in patch) {
+          next.lastEdited = "gross";
+          const net = toNet(next.unit_price_gross, vat);
+          next.unit_price = Number.isFinite(net) ? String(net.toFixed(2)) : "";
+        }
+
+        // If user just changed net
+        if ("unit_price" in patch) {
+          next.lastEdited = "net";
+          const gross = toGross(next.unit_price, vat);
+          next.unit_price_gross = Number.isFinite(gross)
+            ? String(gross.toFixed(2))
+            : "";
+        }
+
+        // If VAT changed, recompute the other side based on lastEdited
+        if ("vat_rate" in patch) {
+          if (next.lastEdited === "gross") {
+            const net = toNet(next.unit_price_gross, vat);
+            next.unit_price = Number.isFinite(net)
+              ? String(net.toFixed(2))
+              : next.unit_price;
+          } else {
+            const gross = toGross(next.unit_price, vat);
+            next.unit_price_gross = Number.isFinite(gross)
+              ? String(gross.toFixed(2))
+              : next.unit_price_gross;
+          }
+        }
+
+        return next;
+      })
     );
+
   const updateAddr = (patch) => setAddress((a) => ({ ...a, ...patch }));
 
   const preview = useMemo(() => {
     let subtotal = 0;
     let tax = 0;
     for (const it of items) {
-      const qty = Number(it.quantity || 0);
-      const unit = Number(it.unit_price || 0);
-      const rate = Number(it.vat_rate || 0) / 100;
-      const base = Math.max(0, qty * unit);
-      const t = base * rate;
+      const qty = num(it.quantity);
+      const net = num(it.unit_price); // NET
+      const vat = num(it.vat_rate) / 100;
+      const base = Math.max(0, qty * net);
       subtotal += base;
-      tax += t;
+      tax += base * vat;
     }
     const total = subtotal + tax;
     return { subtotal, tax, total };
   }, [items]);
+
+  // Keep payment amount in sync with preview total when toggled on
+  useEffect(() => {
+    if (recordPayment) {
+      setPaymentAmount((prev) =>
+        prev ? prev : Number(preview.total.toFixed(2))
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordPayment, preview.total]);
+
+  function ensureUpper(s) {
+    return String(s || "")
+      .trim()
+      .toUpperCase();
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -104,9 +205,19 @@ export default function NewInvoicePage() {
     setCreated(null);
 
     try {
+      // Basic validations
+      if (!customerEmail.trim()) throw new Error("Customer email is required");
+      if (customerType === "business" && !String(businessName || "").trim()) {
+        throw new Error("Business name is required for business customers");
+      }
+
       const buyer = {
-        name: customerType === "business" ? customerName : customerName,
-        business_name: customerType === "business" ? businessName : undefined,
+        // For business invoices, store both company and contact; name is the contact name, business_name the company
+        name: String(customerName || "").trim() || undefined,
+        business_name:
+          customerType === "business"
+            ? String(businessName || "").trim()
+            : undefined,
         email: customerEmail.trim(),
         phone: phone.trim() || undefined,
         vat: taxId.trim() || undefined,
@@ -121,21 +232,21 @@ export default function NewInvoicePage() {
       };
 
       const lines = items
-        .filter((i) => i.description && Number(i.unit_price) > 0)
+        .filter((i) => i.description && num(i.unit_price) > 0)
         .map((i) => ({
           description: i.description,
-          unit_price: Number(i.unit_price),
-          quantity: Number(i.quantity || 1),
-          vat_rate: Number(i.vat_rate || 0),
+          unit_price: num(i.unit_price), // NET
+          quantity: Math.max(1, num(i.quantity)),
+          vat_rate: Math.max(0, num(i.vat_rate)),
         }));
 
-      if (!buyer.email) throw new Error("Customer email is required");
       if (lines.length === 0)
         throw new Error("Add at least one line with a positive amount");
 
+      // Build payload for create
       const payload = {
-        series,
-        currency,
+        series: ensureUpper(series || "A"),
+        currency: ensureUpper(currency || "EUR"),
         issue_date: issueDate
           ? new Date(`${issueDate}T12:00:00`).toISOString()
           : undefined,
@@ -145,9 +256,10 @@ export default function NewInvoicePage() {
         buyer,
         lines,
         notes,
-        finalize: true,
+        finalize: Boolean(finalizeNow),
       };
 
+      // Create invoice
       const res = await fetch("/api/admin/invoices2", {
         method: "POST",
         headers: {
@@ -158,19 +270,74 @@ export default function NewInvoicePage() {
       });
 
       const ct = res.headers.get("content-type") || "";
+      const isJson = ct.includes("application/json");
+      const data = isJson ? await res.json() : null;
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Failed to create invoice");
+        const msg =
+          (isJson && data?.error) ||
+          (await res.text().catch(() => "")) ||
+          "Failed to create invoice";
+        throw new Error(msg);
       }
-      const data = ct.includes("application/json") ? await res.json() : null;
       if (!data || !data.id)
         throw new Error("Invalid API response: missing invoice id");
 
       setCreated(data);
 
-      // Open PDF in new tab then go back to list
+      // Optionally record payment (ONLY if finalized)
+      if (recordPayment && finalizeNow) {
+        const amt = Number(paymentAmount || 0);
+        if (!(amt > 0)) {
+          throw new Error("Payment amount must be positive");
+        }
+        const payRes = await fetch(
+          `/api/admin/invoices2/${data.id}/mark-paid`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              method: paymentMethod,
+              amount: amt,
+              notes: paymentNotes || undefined,
+            }),
+          }
+        );
+        if (!payRes.ok) {
+          const t = await payRes.text().catch(() => "");
+          throw new Error(
+            `Invoice created but failed to record payment (HTTP ${
+              payRes.status
+            }). ${t.slice(0, 200)}`
+          );
+        }
+      }
+
+      // Open PDF
       window.open(`/api/admin/invoices2/${data.id}/pdf`, "_blank");
-      router.push("/admin/invoices");
+
+      // Optionally send email (ONLY if finalized)
+      if (sendAfterCreate && finalizeNow) {
+        try {
+          const sendRes = await fetch(`/api/admin/invoices2/${data.id}/send`, {
+            method: "POST",
+            headers: { Accept: "application/json" },
+          });
+          if (!sendRes.ok) {
+            const t = await sendRes.text().catch(() => "");
+            console.warn(
+              `Invoice created but sending email failed: HTTP ${sendRes.status} ${t}`
+            );
+          }
+        } catch (e) {
+          console.warn("Send email error:", e);
+        }
+      }
+
+      // Go back to list
+      // router.push("/admin/invoices");
       return;
     } catch (err) {
       alert(err.message || String(err));
@@ -178,10 +345,10 @@ export default function NewInvoicePage() {
       setSubmitting(false);
     }
   }
-
   async function sendInvoiceNow() {
-    if (!created?.id) return;
+    if (!created?.id || sending) return;
     try {
+      setSending(true);
       const res = await fetch(`/api/admin/invoices2/${created.id}/send`, {
         method: "POST",
         headers: { Accept: "application/json" },
@@ -198,6 +365,8 @@ export default function NewInvoicePage() {
       alert("Invoice sent.");
     } catch (e) {
       alert(e.message || String(e));
+    } finally {
+      setSending(false);
     }
   }
 
@@ -500,9 +669,10 @@ export default function NewInvoicePage() {
             </div>
 
             <div className="px-5 sm:px-6 py-5 space-y-3">
-              <div className="hidden sm:grid grid-cols-[1fr_160px_120px_120px_80px] text-xs text-neutral-500 px-1">
+              <div className="hidden sm:grid grid-cols-[1fr_150px_150px_100px_100px_80px] text-xs text-neutral-500 px-1">
                 <div>Description</div>
-                <div>Unit price</div>
+                <div>Unit price (net)</div>
+                <div>Unit price (incl. VAT)</div>
                 <div>Qty</div>
                 <div>VAT %</div>
                 <div>Action</div>
@@ -511,8 +681,9 @@ export default function NewInvoicePage() {
               {items.map((it, idx) => (
                 <div
                   key={idx}
-                  className="grid gap-3 sm:grid-cols-[1fr_160px_120px_120px_80px] items-start"
+                  className="grid gap-3 sm:grid-cols-[1fr_150px_150px_100px_100px_80px] items-start"
                 >
+                  {/* Description */}
                   <input
                     placeholder="Description"
                     value={it.description}
@@ -521,17 +692,34 @@ export default function NewInvoicePage() {
                     }
                     className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                   />
+
+                  {/* Unit price (NET) */}
                   <input
                     type="number"
                     step="0.01"
                     min="0"
-                    placeholder="Unit price"
+                    placeholder="Net"
                     value={it.unit_price}
                     onChange={(e) =>
                       updateItem(idx, { unit_price: e.target.value })
                     }
                     className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                   />
+
+                  {/* Unit price (GROSS) */}
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Incl. VAT"
+                    value={it.unit_price_gross}
+                    onChange={(e) =>
+                      updateItem(idx, { unit_price_gross: e.target.value })
+                    }
+                    className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                  />
+
+                  {/* Qty */}
                   <input
                     type="number"
                     min="1"
@@ -542,6 +730,8 @@ export default function NewInvoicePage() {
                     }
                     className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                   />
+
+                  {/* VAT % */}
                   <input
                     type="number"
                     step="0.01"
@@ -553,13 +743,14 @@ export default function NewInvoicePage() {
                     }
                     className="rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
                   />
+
+                  {/* Remove */}
                   <button
                     type="button"
                     onClick={() => removeItem(idx)}
                     className="justify-self-start inline-flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
                   >
                     <Trash2 className="h-4 w-4" />
-                    <span className="hidden sm:inline">Remove</span>
                   </button>
                 </div>
               ))}
@@ -596,11 +787,25 @@ export default function NewInvoicePage() {
               actionDisabled={actionDisabled}
               created={created}
               sendInvoiceNow={sendInvoiceNow}
+              sending={sending}
+              finalizeNow={finalizeNow}
+              setFinalizeNow={setFinalizeNow}
+              sendAfterCreate={sendAfterCreate}
+              setSendAfterCreate={setSendAfterCreate}
+              recordPayment={recordPayment}
+              setRecordPayment={setRecordPayment}
+              paymentMethod={paymentMethod}
+              setPaymentMethod={setPaymentMethod}
+              paymentAmount={paymentAmount}
+              setPaymentAmount={setPaymentAmount}
+              paymentNotes={paymentNotes}
+              setPaymentNotes={setPaymentNotes}
+              currency={currency}
             />
           </div>
         </div>
 
-        {/* RIGHT: Sticky summary */}
+        {/* RIGHT: Sticky summary + options */}
         <aside className="lg:col-span-4">
           <div className="lg:sticky lg:top-20 space-y-4">
             <div className="rounded-2xl border border-[#ece9e2] bg-white shadow-sm p-5">
@@ -638,12 +843,117 @@ export default function NewInvoicePage() {
                 </div>
               </dl>
 
+              {/* Options */}
+              <div className="mt-5 space-y-3 border-t border-neutral-200 pt-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="accent-[#6f5a3a]"
+                    checked={finalizeNow}
+                    onChange={(e) => setFinalizeNow(e.target.checked)}
+                  />
+                  Finalize now (recommended)
+                </label>
+
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="accent-[#6f5a3a]"
+                    checked={sendAfterCreate}
+                    onChange={(e) => setSendAfterCreate(e.target.checked)}
+                    disabled={!finalizeNow}
+                    title={
+                      !finalizeNow
+                        ? "Finalize the invoice to enable sending"
+                        : undefined
+                    }
+                  />
+                  Send after create
+                </label>
+
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="accent-[#6f5a3a]"
+                      checked={recordPayment}
+                      onChange={(e) => setRecordPayment(e.target.checked)}
+                      disabled={!finalizeNow}
+                      title={
+                        !finalizeNow
+                          ? "Finalize the invoice to record payment"
+                          : undefined
+                      }
+                    />
+                    Record payment now
+                  </label>
+
+                  {recordPayment && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <span className="text-xs text-neutral-600">Method</span>
+                        <select
+                          value={paymentMethod}
+                          onChange={(e) => setPaymentMethod(e.target.value)}
+                          className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                        >
+                          {PAYMENT_METHODS.map((m) => (
+                            <option key={m.key} value={m.key}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <span className="text-xs text-neutral-600">
+                          Amount ({currency})
+                        </span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={paymentAmount}
+                          onChange={(e) =>
+                            setPaymentAmount(Number(e.target.value || 0))
+                          }
+                          className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="text-xs text-neutral-600">Notes</span>
+                        <input
+                          type="text"
+                          placeholder="Optional payment note"
+                          value={paymentNotes}
+                          onChange={(e) => setPaymentNotes(e.target.value)}
+                          className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:ring-4 focus:ring-neutral-200"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="mt-5">
                 <PrimaryActions
                   submitting={submitting}
                   actionDisabled={actionDisabled}
                   created={created}
                   sendInvoiceNow={sendInvoiceNow}
+                  sending={sending}
+                  finalizeNow={finalizeNow}
+                  setFinalizeNow={setFinalizeNow}
+                  sendAfterCreate={sendAfterCreate}
+                  setSendAfterCreate={setSendAfterCreate}
+                  recordPayment={recordPayment}
+                  setRecordPayment={setRecordPayment}
+                  paymentMethod={paymentMethod}
+                  setPaymentMethod={setPaymentMethod}
+                  paymentAmount={paymentAmount}
+                  setPaymentAmount={setPaymentAmount}
+                  paymentNotes={paymentNotes}
+                  setPaymentNotes={setPaymentNotes}
+                  currency={currency}
                 />
               </div>
             </div>
@@ -679,49 +989,69 @@ function PrimaryActions({
   actionDisabled,
   created,
   sendInvoiceNow,
+  sending,
+  finalizeNow,
+  setFinalizeNow,
+  sendAfterCreate,
+  setSendAfterCreate,
+  recordPayment,
+  setRecordPayment,
+  paymentMethod,
+  setPaymentMethod,
+  paymentAmount,
+  setPaymentAmount,
+  paymentNotes,
+  setPaymentNotes,
+  currency,
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <button
-        type="submit"
-        disabled={actionDisabled}
-        className="rounded-xl bg-[#6f5a3a] px-4 py-2 text-white hover:opacity-95 disabled:opacity-50 shadow-sm"
-        title={
-          actionDisabled
-            ? "Add at least one line item with amount"
-            : "Create invoice"
-        }
-      >
-        {submitting ? "Creating…" : "Create & Open PDF"}
-      </button>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          disabled={actionDisabled}
+          className="rounded-xl bg-[#6f5a3a] px-4 py-2 text-white hover:opacity-95 disabled:opacity-50 shadow-sm"
+          title={
+            actionDisabled
+              ? "Add at least one line item with amount"
+              : "Create invoice"
+          }
+        >
+          {submitting ? "Creating…" : "Create & Open PDF"}
+        </button>
 
-      {created?.id && (
-        <>
-          <a
-            href={`/api/admin/invoices2/${created.id}/pdf`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
-          >
-            Open PDF
-          </a>
-          <a
-            href={`/api/admin/invoices2/${created.id}/download`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
-          >
-            Download PDF
-          </a>
-          <button
-            type="button"
-            onClick={sendInvoiceNow}
-            className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
-          >
-            Send via email
-          </button>
-        </>
-      )}
+        {created?.id && (
+          <>
+            <a
+              href={`/api/admin/invoices2/${created.id}/pdf`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
+            >
+              Open PDF
+            </a>
+            <a
+              href={`/api/admin/invoices2/${created.id}/download`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm"
+              disabled={sending}
+            >
+              Download PDF
+            </a>
+            <button
+              type="button"
+              onClick={sendInvoiceNow}
+              className="rounded-xl border border-neutral-300 bg-white px-4 py-2 hover:bg-neutral-50 shadow-sm inline-flex items-center gap-2 disabled:opacity-50"
+              disabled={sending}
+            >
+              Send via email
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {sending ? "Sending…" : "Send via email"}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

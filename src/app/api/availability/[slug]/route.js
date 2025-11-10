@@ -105,10 +105,9 @@ export async function POST(req, { params }) {
       return sum + adults + kids;
     }, 0);
 
-    // ✅ BOOKED seats from Booking (confirmed, paid reservations)
     // Robust: prefer numberOfPeople; else fall back to adultsCount+kidsCount; else counts JSON.
     const { data: bookings, error: bErr } = await admin
-      .from("Booking")
+      .from("booking")
       .select("numberOfPeople, adultsCount, kidsCount, counts")
       .eq("scheduleSlotId", slot.id);
     if (bErr) {

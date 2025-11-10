@@ -49,7 +49,7 @@ export async function GET(req) {
 
     // 2) Bookings that OCCUPY seats (filtered by status)
     const { data: bookings, error: bookErr } = await admin
-      .from("Booking")
+      .from("booking")
       .select(
         "scheduleSlotId, numberOfPeople, adultsCount, kidsCount, counts, status"
       )

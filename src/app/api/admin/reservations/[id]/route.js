@@ -13,14 +13,17 @@ const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 async function requireAdmin() {
   const supa = await createSupabaseServer();
-  if (!supa) return { error: true, response: bad("Server not configured", 500) };
+  if (!supa)
+    return { error: true, response: bad("Server not configured", 500) };
 
   const { data, error } = await supa.auth.getUser();
   const user = data?.user;
-  if (error || !user) return { error: true, response: bad("Unauthorized", 401) };
+  if (error || !user)
+    return { error: true, response: bad("Unauthorized", 401) };
 
   const admin = createSupabaseAdmin();
-  if (!admin) return { error: true, response: bad("Server not configured", 500) };
+  if (!admin)
+    return { error: true, response: bad("Server not configured", 500) };
 
   const { data: profile } = await admin
     .from("User")
@@ -53,7 +56,7 @@ export async function GET(req, ctx) {
 
     // ---------- Try finalized Booking ----------
     const { data: b, error: bErr } = await supa
-      .from("Booking")
+      .from("booking")
       .select(
         `*,
          ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)),
@@ -90,16 +93,23 @@ export async function GET(req, ctx) {
         adults,
         kids,
         teens,
-        total: isNum(countsRaw?.total) ? countsRaw.total : Math.max(0, adults + kids),
+        total: isNum(countsRaw?.total)
+          ? countsRaw.total
+          : Math.max(0, adults + kids),
       };
 
-      const totalPaidAmount = isNum(b?.totalPaidAmount) ? b.totalPaidAmount : null;
+      const totalPaidAmount = isNum(b?.totalPaidAmount)
+        ? b.totalPaidAmount
+        : null;
       const currency = (b?.currency || "EUR").toString().toUpperCase();
       const scheduleSlotId = b?.scheduleSlotId ?? slot?.id ?? null;
       const startTime = slot?.date ?? b?.startTime ?? null;
-      const experienceId = slot?.experienceId ?? b?.experienceId ?? exDirect?.id ?? null;
-      const experienceName = exFromSlot?.name || exDirect?.name || b?.customExperienceName || null;
-      const experienceLocation = exFromSlot?.location ?? exDirect?.location ?? null;
+      const experienceId =
+        slot?.experienceId ?? b?.experienceId ?? exDirect?.id ?? null;
+      const experienceName =
+        exFromSlot?.name || exDirect?.name || b?.customExperienceName || null;
+      const experienceLocation =
+        exFromSlot?.location ?? exDirect?.location ?? null;
 
       // guest: prefer joined user, fall back to primary_contact snapshot
       const guestName =
@@ -262,7 +272,8 @@ export async function GET(req, ctx) {
         name:
           (pc?.name ??
             pc?.fullName ??
-            [pc?.firstName, pc?.lastName].filter(Boolean).join(" ")) || null,
+            [pc?.firstName, pc?.lastName].filter(Boolean).join(" ")) ||
+          null,
         email: pc?.email ?? null,
         phone: pc?.phone ?? null,
       },
@@ -299,12 +310,19 @@ export async function PATCH(req, ctx) {
   }
 
   // accept flat or nested payloads
-  const pickFirst = (...vals) => vals.find((v) => v !== undefined && v !== null);
+  const pickFirst = (...vals) =>
+    vals.find((v) => v !== undefined && v !== null);
 
-  const unitPriceAdult = pickFirst(body.unitPriceAdult, body?.unitPrices?.adult);
+  const unitPriceAdult = pickFirst(
+    body.unitPriceAdult,
+    body?.unitPrices?.adult
+  );
   const unitPriceKid = pickFirst(body.unitPriceKid, body?.unitPrices?.kid);
 
-  const totalPaidAmount = pickFirst(body.totalPaidAmount, body?.money?.totalPaidAmount);
+  const totalPaidAmount = pickFirst(
+    body.totalPaidAmount,
+    body?.money?.totalPaidAmount
+  );
   const totalAmount = pickFirst(body.totalAmount, body?.money?.totalAmount); // for drafts
   const currency = pickFirst(body.currency, body?.money?.currency);
   const statusRaw = pickFirst(body.status);
@@ -318,7 +336,7 @@ export async function PATCH(req, ctx) {
 
   // ---- Is it a finalized Booking? ----
   const { data: existsBooking, error: bExistsErr } = await supa
-    .from("Booking")
+    .from("booking")
     .select("id")
     .eq("id", rid)
     .maybeSingle();
@@ -328,15 +346,20 @@ export async function PATCH(req, ctx) {
     const patch = {};
     if (status) patch.status = status;
     if (currency) patch.currency = String(currency).toUpperCase();
-    if (unitPriceAdult !== undefined) patch.unitPriceAdult = numOrNull(unitPriceAdult);
-    if (unitPriceKid !== undefined) patch.unitPriceKid = numOrNull(unitPriceKid);
-    if (totalPaidAmount !== undefined) patch.totalPaidAmount = numOrNull(totalPaidAmount);
+    if (unitPriceAdult !== undefined)
+      patch.unitPriceAdult = numOrNull(unitPriceAdult);
+    if (unitPriceKid !== undefined)
+      patch.unitPriceKid = numOrNull(unitPriceKid);
+    if (totalPaidAmount !== undefined)
+      patch.totalPaidAmount = numOrNull(totalPaidAmount);
 
     const { data, error } = await supa
-      .from("Booking")
+      .from("booking")
       .update(patch)
       .eq("id", rid)
-      .select("id, unitPriceAdult, unitPriceKid, totalPaidAmount, currency, status, updatedAt")
+      .select(
+        "id, unitPriceAdult, unitPriceKid, totalPaidAmount, currency, status, updatedAt"
+      )
       .maybeSingle();
 
     if (error) {
@@ -357,8 +380,10 @@ export async function PATCH(req, ctx) {
 
   const dUpdate = {};
   if (status) dUpdate.status = status;
-  if (unitPriceAdult !== undefined) dUpdate.unitPriceAdult = numOrNull(unitPriceAdult);
-  if (unitPriceKid !== undefined) dUpdate.unitPriceKid = numOrNull(unitPriceKid);
+  if (unitPriceAdult !== undefined)
+    dUpdate.unitPriceAdult = numOrNull(unitPriceAdult);
+  if (unitPriceKid !== undefined)
+    dUpdate.unitPriceKid = numOrNull(unitPriceKid);
 
   // drafts: compute totalAmount if prices change and not provided
   if (totalAmount !== undefined) {
@@ -405,7 +430,7 @@ export async function DELETE(req, { params }) {
   try {
     // 1) Try Booking
     const { data: b, error: bErr } = await supa
-      .from("Booking")
+      .from("booking")
       .select("id, status")
       .eq("id", rid)
       .maybeSingle(); // ← don't auto-404
@@ -421,7 +446,7 @@ export async function DELETE(req, { params }) {
       }
 
       const { error: delErr } = await supa
-        .from("Booking")
+        .from("booking")
         .delete()
         .eq("id", rid)
         .single();
@@ -606,11 +631,15 @@ function extractPromoFromRow(row, unitPrices, counts) {
       const parsed = parsePromoFromNotes(row.notes);
       if (parsed) {
         if (!code && parsed.code) code = parsed.code;
-        if (!discountType && parsed.discountType) discountType = parsed.discountType;
+        if (!discountType && parsed.discountType)
+          discountType = parsed.discountType;
         if (discountValue == null && parsed.discountValue != null) {
           discountValue = parsed.discountValue;
         }
-        if ((!discountAmount || discountAmount <= 0) && parsed.discountAmount != null) {
+        if (
+          (!discountAmount || discountAmount <= 0) &&
+          parsed.discountAmount != null
+        ) {
           discountAmount = parsed.discountAmount;
         }
       }

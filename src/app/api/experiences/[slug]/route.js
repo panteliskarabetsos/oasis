@@ -91,7 +91,7 @@ export async function GET(_req, ctx) {
 
     // 3) Load bookings ONLY in occupying statuses for those slots
     const { data: occRows, error: bErr } = await admin
-      .from("Booking")
+      .from("booking")
       .select("scheduleSlotId, status")
       .in("scheduleSlotId", slotIds)
       .in("status", COUNT_STATUSES);

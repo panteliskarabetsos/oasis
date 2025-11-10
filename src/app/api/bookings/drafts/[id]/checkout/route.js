@@ -141,7 +141,7 @@ export async function POST(req, ctx) {
   const now = new Date();
 
   const { data: bookings, error: bErr } = await admin
-    .from("Booking")
+    .from("booking")
     .select("numberOfPeople,status")
     .eq("scheduleSlotId", slot.id);
   if (bErr) return bad("Server error", 500);

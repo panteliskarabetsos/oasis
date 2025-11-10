@@ -212,7 +212,7 @@ export async function POST(req, ctx) {
   let bookingId = null;
   if (stripePaymentIntentId) {
     const { data: bByPI } = await admin
-      .from("Booking")
+      .from("booking")
       .select("id")
       .eq("stripePaymentIntentId", stripePaymentIntentId)
       .maybeSingle();
@@ -220,7 +220,7 @@ export async function POST(req, ctx) {
   }
   if (!bookingId && stripeSessionId) {
     const { data: bByCS } = await admin
-      .from("Booking")
+      .from("booking")
       .select("id")
       .eq("stripeSessionId", stripeSessionId)
       .maybeSingle();
@@ -249,7 +249,7 @@ export async function POST(req, ctx) {
   // ----- Insert booking if missing -----
   if (!bookingId) {
     const ins = await admin
-      .from("Booking")
+      .from("booking")
       .insert({
         userId: ensuredUserId ?? null,
         scheduleSlotId: draft.scheduleSlotId,
@@ -287,13 +287,13 @@ export async function POST(req, ctx) {
       // race: try fetch by stripe ids again
       const ref = stripePaymentIntentId
         ? await admin
-            .from("Booking")
+            .from("booking")
             .select("id")
             .eq("stripePaymentIntentId", stripePaymentIntentId)
             .maybeSingle()
         : stripeSessionId
         ? await admin
-            .from("Booking")
+            .from("booking")
             .select("id")
             .eq("stripeSessionId", stripeSessionId)
             .maybeSingle()
@@ -309,7 +309,7 @@ export async function POST(req, ctx) {
   } else if (ensuredUserId) {
     // If we found an existing booking, we can still backfill userId once.
     await admin
-      .from("Booking")
+      .from("booking")
       .update({ userId: ensuredUserId })
       .eq("id", bookingId);
   }
@@ -347,7 +347,7 @@ export async function POST(req, ctx) {
         if (giftAppliedCents > 0) {
           // Merge gift card into booking discount + promoJson
           const { data: cur } = await admin
-            .from("Booking")
+            .from("booking")
             .select("discountAmount, appliedPromoCode, promoJson")
             .eq("id", bookingId)
             .maybeSingle();
@@ -388,7 +388,7 @@ export async function POST(req, ctx) {
           };
 
           await admin
-            .from("Booking")
+            .from("booking")
             .update({
               discountAmount: newDiscountAmount,
               appliedPromoCode,
@@ -455,7 +455,7 @@ export async function POST(req, ctx) {
   // ----- Send confirmation email (idempotent) -----
   try {
     const { data: b } = await admin
-      .from("Booking")
+      .from("booking")
       .select('id, "confirmationEmailSentAt"')
       .eq("id", bookingId)
       .maybeSingle();
@@ -493,7 +493,7 @@ export async function POST(req, ctx) {
 
       if (sendRes?.sent) {
         const stamp = await admin
-          .from("Booking")
+          .from("booking")
           .update({ confirmationEmailSentAt: new Date().toISOString() })
           .eq("id", bookingId);
 
@@ -534,7 +534,7 @@ export async function POST(req, ctx) {
 
 async function getBookingRow(admin, id) {
   const { data, error } = await admin
-    .from("Booking")
+    .from("booking")
     .select("*")
     .eq("id", id)
     .maybeSingle();

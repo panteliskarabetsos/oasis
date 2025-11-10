@@ -73,7 +73,7 @@ function peopleFromBookingRow(b) {
 /** Sum numberOfPeople for confirmed/paid bookings in a slot */
 async function sumConfirmedPeople(admin, slotId) {
   const { data, error } = await admin
-    .from("Booking")
+    .from("booking")
     .select("numberOfPeople, counts, status")
     .eq("scheduleSlotId", slotId);
   if (error) throw error;
@@ -122,7 +122,7 @@ export async function PATCH(request, ctx) {
 
     // Try Booking first — we need its people count for capacity check
     const { data: booking, error: bErr } = await admin
-      .from("Booking")
+      .from("booking")
       .select("id, scheduleSlotId, status, numberOfPeople, counts")
       .eq("id", entityId)
       .maybeSingle();
@@ -186,7 +186,7 @@ export async function PATCH(request, ctx) {
 
       // Move the booking
       const { data: updated, error: updErr } = await admin
-        .from("Booking")
+        .from("booking")
         .update({ scheduleSlotId: targetSlotId, updatedAt: nowISO })
         .eq("id", entityId)
         .select("*")

@@ -94,7 +94,7 @@ export async function GET(req) {
     if (status !== "draft") {
       // inside GET, replace the Booking select with this:
       let bq = supa
-        .from("Booking")
+        .from("booking")
         .select(
           `
     id, "userId", "createdAt", "updatedAt",
@@ -307,7 +307,7 @@ export async function POST(req) {
 
     // ---- insert Booking ----
     const { data: booking, error: insErr } = await supa
-      .from("Booking")
+      .from("booking")
       .insert(row)
       .select(
         `

@@ -64,7 +64,7 @@ export async function GET(_req, ctx) {
   let booking = null;
   if (draft.convertedBookingId) {
     const { data: bData, error: bErr } = await admin
-      .from("Booking")
+      .from("booking")
       .select(
         `
         id,

@@ -13,17 +13,18 @@ import {
   Loader2,
   Search,
   Mail,
+  AlertTriangle,
+  Ban,
+  Trash2,
 } from "lucide-react";
 
 /**
- * /admin/invoices — Admin-facing invoices list
+ * /admin/invoices — Admin-facing invoices list (improved)
  * JS-only (no TS)
  *
- * Endpoints:
- *   - First‑party invoices (v2): /api/admin/invoices2
- *   - Stripe payments (legacy bookings): /api/admin/invoices
- *
- * Both endpoints return a compatible row shape used below.
+ * API compatibility:
+ *  - First-party invoices (v2): /api/admin/invoices2  (defaults to expand=all)
+ *  - Legacy Stripe view:       /api/admin/invoices    (kept as-is)
  */
 export default function AdminInvoicesPage() {
   const router = useRouter();
@@ -33,14 +34,15 @@ export default function AdminInvoicesPage() {
   const [error, setError] = React.useState("");
   const [ok, setOk] = React.useState("");
 
-  const [rows, setRows] = React.useState([]); // API page rows
+  const [rows, setRows] = React.useState([]);
   const [total, setTotal] = React.useState(0);
   const [pageTotal, setPageTotal] = React.useState(0);
   const [apiCurrency, setApiCurrency] = React.useState("EUR");
+  const [refreshTick, setRefreshTick] = React.useState(0);
 
   // Filters
   const [search, setSearch] = React.useState("");
-  const [status, setStatus] = React.useState("all"); // API expects "all" for no filter
+  const [status, setStatus] = React.useState("all");
   const [dateFrom, setDateFrom] = React.useState(""); // yyyy-mm-dd
   const [dateTo, setDateTo] = React.useState("");
 
@@ -49,17 +51,24 @@ export default function AdminInvoicesPage() {
   const [pageSize, setPageSize] = React.useState(25);
   const [totalPages, setTotalPages] = React.useState(1);
 
-  // Sorting (client-side for the current page only)
+  // Sorting (client-side only)
   const [sortKey, setSortKey] = React.useState("createdAt");
   const [sortDir, setSortDir] = React.useState("desc"); // asc|desc
 
-  // Data source tab: 'fp' (first-party invoices v2) or 'stripe' (bookings payments)
-  const [mode, setMode] = React.useState("fp");
+  // Data source tab
+  const [mode, setMode] = React.useState("fp"); // 'fp' | 'stripe'
 
-  // Per-row busy state (e.g., sending)
+  // Per-row busy state
   const [busy, setBusy] = React.useState({ id: null, type: "" });
 
-  // Re-fetch when filters/paging change
+  // Debounced search
+  const [debouncedSearch, setDebouncedSearch] = React.useState(search);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Fetch (do NOT re-fetch on sort; sorting is client-only)
   React.useEffect(() => {
     let cancelled = false;
     async function run() {
@@ -67,7 +76,7 @@ export default function AdminInvoicesPage() {
         setLoading(true);
         setError("");
         const { data, meta } = await fetchInvoices({
-          q: search,
+          q: debouncedSearch,
           status,
           from: dateFrom,
           to: dateTo,
@@ -75,12 +84,12 @@ export default function AdminInvoicesPage() {
           per: pageSize,
           apiBase:
             mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2",
+          expand: mode === "stripe" ? undefined : "all",
         });
         if (cancelled) return;
-        setRows(sortClient(data));
+        setRows(sortClient(data)); // initial client sort
         setTotal(meta.total || 0);
-        const tp = Math.max(1, Math.ceil((meta.total || 0) / meta.perPage));
-        setTotalPages(tp);
+        setTotalPages(Math.max(1, Math.ceil((meta.total || 0) / meta.perPage)));
         setPageTotal(meta.pageTotal || 0);
         setApiCurrency(meta.currency || "EUR");
       } catch (e) {
@@ -95,35 +104,41 @@ export default function AdminInvoicesPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    search,
+    debouncedSearch,
     status,
     dateFrom,
     dateTo,
     page,
     pageSize,
-    sortKey,
-    sortDir,
     mode,
+    refreshTick,
   ]);
 
-  // Reset to page 1 when any filter changes (except page/per)
+  // Reset to page 1 when filters change
   React.useEffect(() => {
     setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status, dateFrom, dateTo, mode]);
+  }, [debouncedSearch, status, dateFrom, dateTo, mode]);
 
-  // --- Metrics (based on API response) ---
+  // --- Metrics (based on current rows) ---
+  // --- Metrics (based on current rows) ---
   const metrics = React.useMemo(() => {
-    const paidCount = rows.filter(
-      (r) => (r.status || "").toLowerCase() === "paid"
-    ).length;
-    const unpaidAmount = rows
-      .filter((r) => (r.status || "").toLowerCase() !== "paid")
-      .reduce((s, r) => s + Number(r.totalPaidAmount || 0), 0);
+    let pagePaid = 0;
+    let pageBalance = 0;
+    let paidCount = 0;
+
+    for (const r of rows) {
+      const m = deriveMoney(r);
+      pagePaid += m.paidAmount;
+      pageBalance += m.balance;
+      if (m.paid) paidCount++;
+    }
+
     return {
       totalResults: total,
-      pageAmount: pageTotal,
-      pageUnpaidAmount: unpaidAmount,
+      pageAmount: pageTotal, // server-computed page amount
+      pagePaidAmount: pagePaid, // consistent with row logic
+      pageOutstanding: pageBalance, // ditto
       paidCount,
     };
   }, [rows, total, pageTotal]);
@@ -157,6 +172,92 @@ export default function AdminInvoicesPage() {
     }
   }
 
+  async function markPaid(id, opts = {}) {
+    try {
+      setOk("");
+      setError("");
+      setBusy({ id, type: "mark" });
+
+      // simple confirm; tweak as you wish
+      if (!opts.skipConfirm) {
+        const go = window.confirm("Mark this invoice as paid?");
+        if (!go) return;
+      }
+
+      const base =
+        mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
+      const res = await fetch(`${base}/${id}/mark-paid`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method: opts.method || "cash",
+          reference: opts.reference || undefined,
+          // amount: optional (defaults to outstanding)
+          // processed_at: optional ISO
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json().catch(() => ({}));
+      setOk(json?.message || "Invoice marked as paid.");
+
+      // Refresh the list
+      setRefreshTick((t) => t + 1);
+    } catch (e) {
+      setError(e?.message || "Failed to mark invoice as paid.");
+    } finally {
+      setBusy({ id: null, type: "" });
+    }
+  }
+
+  async function voidInvoice(id) {
+    try {
+      setOk("");
+      setError("");
+      const confirm = window.confirm(
+        "Void this invoice? This will set status to 'void'."
+      );
+      if (!confirm) return;
+      setBusy({ id, type: "void" });
+      const base =
+        mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
+      const res = await fetch(`${base}/${id}/void`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json().catch(() => ({}));
+      setOk(json?.message || "Invoice voided.");
+      setRefreshTick((t) => t + 1);
+    } catch (e) {
+      setError(e?.message || "Failed to void invoice.");
+    } finally {
+      setBusy({ id: null, type: "" });
+    }
+  }
+
+  async function deleteInvoice(id) {
+    try {
+      setOk("");
+      setError("");
+      const confirm = window.confirm(
+        "Delete this invoice permanently? Allowed only for DRAFT or VOID without payments."
+      );
+      if (!confirm) return;
+      setBusy({ id, type: "delete" });
+      const base =
+        mode === "stripe" ? "/api/admin/invoices" : "/api/admin/invoices2";
+      const res = await fetch(`${base}/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const msg = await res.json().catch(() => ({}));
+        throw new Error(msg?.error || `HTTP ${res.status}`);
+      }
+      const json = await res.json().catch(() => ({}));
+      setOk(json?.message || "Invoice deleted.");
+      setRefreshTick((t) => t + 1);
+    } catch (e) {
+      setError(e?.message || "Failed to delete invoice.");
+    } finally {
+      setBusy({ id: null, type: "" });
+    }
+  }
+
   // --- Render ---
   return (
     <div className="p-6 md:p-8">
@@ -168,7 +269,7 @@ export default function AdminInvoicesPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Search, export CSV, and drill into{" "}
-            {mode === "stripe" ? "Stripe payments" : "first‑party invoices"}.
+            {mode === "stripe" ? "Stripe payments" : "first-party invoices"}.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -176,7 +277,7 @@ export default function AdminInvoicesPage() {
             onClick={() =>
               window.open(
                 buildCsvUrl({
-                  q: search,
+                  q: debouncedSearch,
                   status,
                   from: dateFrom,
                   to: dateTo,
@@ -236,7 +337,7 @@ export default function AdminInvoicesPage() {
         />
         <MetricCard
           icon={<Users className="h-5 w-5" />}
-          label="Paid this page"
+          label="Paid (count)"
           value={metrics.paidCount}
         />
         <MetricCard
@@ -246,8 +347,8 @@ export default function AdminInvoicesPage() {
         />
         <MetricCard
           icon={<CheckCircle2 className="h-5 w-5" />}
-          label="Unpaid (this page)"
-          value={formatCurrency(metrics.pageUnpaidAmount, apiCurrency)}
+          label="Outstanding (this page)"
+          value={formatCurrency(metrics.pageOutstanding, apiCurrency)}
         />
       </div>
 
@@ -336,20 +437,36 @@ export default function AdminInvoicesPage() {
                 Start
               </Th>
               <Th
-                onSort={() => toggleSort("numberOfPeople")}
-                active={sortKey === "numberOfPeople"}
+                onSort={() => toggleSort("guests")}
+                active={sortKey === "guests"}
                 dir={sortDir}
                 className="text-right"
               >
                 Guests
               </Th>
               <Th
-                onSort={() => toggleSort("totalPaidAmount")}
-                active={sortKey === "totalPaidAmount"}
+                onSort={() => toggleSort("amount")}
+                active={sortKey === "amount"}
                 dir={sortDir}
                 className="text-right"
               >
                 Amount
+              </Th>
+              <Th
+                onSort={() => toggleSort("amountPaid")}
+                active={sortKey === "amountPaid"}
+                dir={sortDir}
+                className="text-right"
+              >
+                Paid
+              </Th>
+              <Th
+                onSort={() => toggleSort("balance")}
+                active={sortKey === "balance"}
+                dir={sortDir}
+                className="text-right"
+              >
+                Balance
               </Th>
               <Th>Status</Th>
               <Th className="text-right">Actions</Th>
@@ -358,7 +475,7 @@ export default function AdminInvoicesPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="py-10 text-center text-zinc-500">
+                <td colSpan={10} className="py-10 text-center text-zinc-500">
                   <div className="inline-flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" /> Loading
                     invoices…
@@ -367,80 +484,192 @@ export default function AdminInvoicesPage() {
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-zinc-500">
+                <td colSpan={10} className="py-12 text-center text-zinc-500">
                   No invoices found.
                 </td>
               </tr>
             ) : (
-              rows.map((inv) => (
-                <tr key={inv.id} className="border-t hover:bg-zinc-50/60">
-                  <Td className="font-medium">
-                    <button
-                      onClick={() => router.push(`/admin/invoices/${inv.id}`)}
-                      className="underline underline-offset-4 hover:text-zinc-900"
-                    >
-                      {inv.invoiceNo}
-                    </button>
-                  </Td>
-                  <Td>
-                    <div className="leading-tight">
-                      <div className="font-medium">
-                        {inv.customer?.name || "—"}
-                      </div>
-                      <div className="text-xs text-zinc-500">
-                        {inv.customer?.email || ""}
-                      </div>
-                    </div>
-                  </Td>
-                  <Td className="text-zinc-600">{formatDate(inv.createdAt)}</Td>
-                  <Td className="text-zinc-600">
-                    {formatDate(inv.startTime) || "—"}
-                  </Td>
-                  <Td className="text-right text-zinc-600">
-                    {mode === "stripe" ? Number(inv.numberOfPeople || 1) : "—"}
-                  </Td>
-                  <Td className="text-right font-medium">
-                    {formatCurrency(
-                      inv.totalPaidAmount,
-                      inv.currency || apiCurrency
-                    )}
-                  </Td>
-                  <Td>{statusBadge(inv.status)}</Td>
-                  <Td className="text-right">
-                    <div className="inline-flex items-center gap-1">
+              rows.map((inv) => {
+                const { amount, paidAmount, balance, paid, overdue } =
+                  deriveMoney(inv);
+                return (
+                  <tr key={inv.id} className="border-t hover:bg-zinc-50/60">
+                    <Td className="font-medium">
                       <button
-                        className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                        onClick={() => openPdf(inv.id)}
-                        aria-label="Open PDF"
-                        title="Open PDF"
+                        onClick={() => router.push(`/admin/invoices/${inv.id}`)}
+                        className="underline underline-offset-4 hover:text-zinc-900"
                       >
-                        <FileText className="h-4 w-4" />
+                        {inv.invoiceNo}
                       </button>
-                      <button
-                        className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                        onClick={() => downloadPdf(inv.id)}
-                        aria-label="Download PDF"
-                        title="Download PDF"
-                      >
-                        <Download className="h-4 w-4" />
-                      </button>
-                      <button
-                        className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                        onClick={() => sendInvoice(inv.id)}
-                        aria-label="Send invoice"
-                        title="Send invoice"
-                        disabled={busy.id === inv.id && busy.type === "send"}
-                      >
-                        {busy.id === inv.id && busy.type === "send" ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Mail className="h-4 w-4" />
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        {paid && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" /> Paid
+                          </span>
                         )}
-                      </button>
-                    </div>
-                  </Td>
-                </tr>
-              ))
+                        {!paid && overdue && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">
+                            <AlertTriangle className="h-3 w-3" /> Overdue
+                          </span>
+                        )}
+                      </div>
+                    </Td>
+
+                    {/* Customer */}
+                    <Td>
+                      <div className="leading-tight">
+                        <div className="font-medium">
+                          {inv.customer?.name || "—"}
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          {inv.customer?.email || ""}
+                          {inv.customer?.phone
+                            ? ` · ${inv.customer.phone}`
+                            : ""}
+                          {inv.customer?.vat
+                            ? ` · VAT: ${inv.customer.vat}`
+                            : ""}
+                        </div>
+                      </div>
+                    </Td>
+
+                    {/* Created */}
+                    <Td className="text-zinc-600">
+                      {formatDate(inv.createdAt)}
+                    </Td>
+
+                    {/* Start */}
+                    <Td className="text-zinc-600">
+                      {formatDateTime(inv.startTime)}
+                    </Td>
+
+                    {/* Guests */}
+                    <Td className="text-right text-zinc-600">
+                      {mode === "stripe"
+                        ? Number(inv.numberOfPeople ?? inv.counts?.total ?? 1)
+                        : typeof inv.guests === "number"
+                        ? inv.guests
+                        : "—"}
+                    </Td>
+
+                    {/* Amount / Paid / Balance */}
+                    <Td className="text-right font-medium">
+                      {formatCurrency(amount, inv.currency || apiCurrency)}
+                    </Td>
+                    <Td className="text-right text-zinc-700">
+                      {formatCurrency(paidAmount, inv.currency || apiCurrency)}
+                    </Td>
+                    <Td
+                      className={`text-right ${
+                        balance > 0 ? "text-rose-600" : "text-zinc-700"
+                      }`}
+                    >
+                      {formatCurrency(balance, inv.currency || apiCurrency)}
+                    </Td>
+
+                    {/* Status */}
+                    <Td>{statusBadge(inv.status)}</Td>
+
+                    {/* Actions */}
+                    <Td className="text-right">
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          className="px-2 py-1 rounded-lg hover:bg-zinc-100"
+                          onClick={() => openPdf(inv.id)}
+                          aria-label="Open PDF"
+                          title="Open PDF"
+                        >
+                          <FileText className="h-4 w-4" />
+                        </button>
+                        <button
+                          className="px-2 py-1 rounded-lg hover:bg-zinc-100"
+                          onClick={() => downloadPdf(inv.id)}
+                          aria-label="Download PDF"
+                          title="Download PDF"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                        <button
+                          className="px-2 py-1 rounded-lg hover:bg-zinc-100"
+                          onClick={() => sendInvoice(inv.id)}
+                          aria-label="Send invoice"
+                          title="Send invoice"
+                          disabled={busy.id === inv.id && busy.type === "send"}
+                        >
+                          {busy.id === inv.id && busy.type === "send" ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Mail className="h-4 w-4" />
+                          )}
+                        </button>
+                        {!paid && (
+                          <button
+                            className="px-2 py-1 rounded-lg hover:bg-zinc-100"
+                            onClick={() => markPaid(inv.id)}
+                            aria-label="Mark as paid"
+                            title="Mark as paid"
+                            disabled={
+                              busy.id === inv.id && busy.type === "mark"
+                            }
+                          >
+                            {busy.id === inv.id && busy.type === "mark" ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+                        {/* Void (FP invoices only, not paid, not already void, and with no payments array) */}
+                        {mode === "fp" &&
+                          !deriveMoney(inv).paid &&
+                          String(inv.status || "").toLowerCase() !== "void" &&
+                          (!Array.isArray(inv.payments) ||
+                            inv.payments.length === 0) && (
+                            <button
+                              className="px-2 py-1 rounded-lg hover:bg-zinc-100 text-amber-700"
+                              onClick={() => voidInvoice(inv.id)}
+                              aria-label="Void invoice"
+                              title="Void invoice"
+                              disabled={
+                                busy.id === inv.id && busy.type === "void"
+                              }
+                            >
+                              {busy.id === inv.id && busy.type === "void" ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Ban className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
+
+                        {/* Delete (FP invoices only, only when draft or void and no payments) */}
+                        {mode === "fp" &&
+                          ["draft", "void"].includes(
+                            String(inv.status || "").toLowerCase()
+                          ) &&
+                          (!Array.isArray(inv.payments) ||
+                            inv.payments.length === 0) && (
+                            <button
+                              className="px-2 py-1 rounded-lg hover:bg-zinc-100 text-rose-700"
+                              onClick={() => deleteInvoice(inv.id)}
+                              aria-label="Delete invoice"
+                              title="Delete invoice"
+                              disabled={
+                                busy.id === inv.id && busy.type === "delete"
+                              }
+                            >
+                              {busy.id === inv.id && busy.type === "delete" ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
+                      </div>
+                    </Td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -508,17 +737,68 @@ export default function AdminInvoicesPage() {
   function sortClient(data, key = sortKey, dir = sortDir) {
     const arr = [...data];
     const d = dir === "asc" ? 1 : -1;
+
+    // Prefer server fields; fall back to derived
+    if (key === "amount" || key === "amountPaid" || key === "balance") {
+      arr.sort((a, b) => {
+        const av =
+          key === "amount"
+            ? Number(a.amount ?? a.total ?? a.meta?.total ?? 0)
+            : key === "amountPaid"
+            ? Number(
+                typeof a.amountPaid === "number"
+                  ? a.amountPaid
+                  : sumPayments(a.payments)
+              )
+            : Number(
+                typeof a.balance === "number"
+                  ? a.balance
+                  : Math.max(
+                      0,
+                      Number(a.amount ?? a.total ?? a.meta?.total ?? 0) -
+                        (typeof a.amountPaid === "number"
+                          ? a.amountPaid
+                          : sumPayments(a.payments))
+                    )
+              );
+
+        const bv =
+          key === "amount"
+            ? Number(b.amount ?? b.total ?? b.meta?.total ?? 0)
+            : key === "amountPaid"
+            ? Number(
+                typeof b.amountPaid === "number"
+                  ? b.amountPaid
+                  : sumPayments(b.payments)
+              )
+            : Number(
+                typeof b.balance === "number"
+                  ? b.balance
+                  : Math.max(
+                      0,
+                      Number(b.amount ?? b.total ?? b.meta?.total ?? 0) -
+                        (typeof b.amountPaid === "number"
+                          ? b.amountPaid
+                          : sumPayments(b.payments))
+                    )
+              );
+        return (av - bv) * d;
+      });
+      return arr;
+    }
+
+    const numericKeys = new Set(["guests", "numberOfPeople"]);
+    if (numericKeys.has(key)) {
+      arr.sort((a, b) => (Number(a[key] ?? 0) - Number(b[key] ?? 0)) * d);
+      return arr;
+    }
+
+    const time = (v) => Date.parse(v ?? "");
     arr.sort((a, b) => {
-      const va = a[key];
-      const vb = b[key];
-      if (key === "totalPaidAmount" || key === "numberOfPeople") {
-        return (Number(va) - Number(vb)) * d;
-      }
-      // string or date
-      const aIsDate = !isNaN(new Date(va));
-      const bIsDate = !isNaN(new Date(vb));
-      if (aIsDate && bIsDate) return (new Date(va) - new Date(vb)) * d;
-      return String(va || "").localeCompare(String(vb || "")) * d;
+      const at = time(a[key]);
+      const bt = time(b[key]);
+      if (!Number.isNaN(at) && !Number.isNaN(bt)) return (at - bt) * d;
+      return String(a[key] ?? "").localeCompare(String(b[key] ?? "")) * d;
     });
     return arr;
   }
@@ -566,14 +846,15 @@ function Td({ children, className = "" }) {
 }
 
 // --- Fetching & utils ---
-async function fetchInvoices({ q, status, from, to, p, per, apiBase }) {
+async function fetchInvoices({ q, status, from, to, p, per, apiBase, expand }) {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
-  if (status) params.set("status", status); // "all" passes through
+  if (status) params.set("status", status);
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (p) params.set("p", String(p));
   if (per) params.set("per", String(per));
+  if (expand) params.set("expand", expand);
 
   const res = await fetch(`${apiBase}?${params.toString()}`, {
     cache: "no-store",
@@ -648,4 +929,60 @@ function formatDate(iso) {
   } catch {
     return iso;
   }
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function sumPayments(arr = []) {
+  return arr.reduce((s, p) => s + (Number(p?.amount) || 0), 0);
+}
+
+/** Prefer server-provided fields from /api/admin/invoices2 (view), with safe fallbacks. */
+/** Prefer server-provided fields; fall back to payments & status. */
+function deriveMoney(inv) {
+  // amount (server field first)
+  const amount = Number(
+    inv.amount ?? inv.total ?? inv.meta?.total ?? inv.totalAmount ?? 0
+  );
+
+  // paidAmount from: explicit field -> legacy stripe field -> payments sum
+  const paidAmount = Number(
+    (typeof inv.amountPaid === "number" && inv.amountPaid) ??
+      inv.totalPaidAmount ??
+      sumPayments(Array.isArray(inv.payments) ? inv.payments : [])
+  );
+
+  // treat tiny residuals as zero
+  const EPS = 0.005;
+  const balanceRaw = amount - paidAmount;
+  const balance = balanceRaw > EPS ? balanceRaw : 0;
+
+  // paid by explicit boolean, by status, by timestamp, or by (near-)zero balance
+  const status = String(inv.status || "").toLowerCase();
+  const paidByStatus = status === "paid";
+  const paidByTimestamp = Boolean(inv?.meta?.paid_at || inv?.paid_at);
+  const paid =
+    inv.paid === true || paidByStatus || paidByTimestamp || balance === 0;
+
+  // overdue (use meta.due_date if present, else top-level)
+  const dueISO = inv?.meta?.due_date ?? inv?.due_date;
+  const overdue =
+    !paid && dueISO ? new Date(dueISO).getTime() < Date.now() : false;
+
+  return { amount, paidAmount, balance, paid, overdue };
+}
+
+function isPaid(inv) {
+  return deriveMoney(inv).paid;
 }
