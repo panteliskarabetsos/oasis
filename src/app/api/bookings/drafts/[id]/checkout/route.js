@@ -65,6 +65,30 @@ async function createPIWithSmartAPM(stripe, baseParams) {
   }
 }
 
+async function safeExpireSession(stripe, sessionId) {
+  if (!sessionId) return;
+  try {
+    const s = await stripe.checkout.sessions.retrieve(sessionId);
+    if (s?.status === "open") await stripe.checkout.sessions.expire(sessionId);
+  } catch {}
+}
+async function safeCancelPI(stripe, piId) {
+  if (!piId) return;
+  try {
+    const pi = await stripe.paymentIntents.retrieve(piId);
+    if (
+      [
+        "requires_payment_method",
+        "requires_confirmation",
+        "requires_action",
+        "processing",
+      ].includes(pi?.status)
+    ) {
+      await stripe.paymentIntents.cancel(piId);
+    }
+  } catch {}
+}
+
 async function updatePIKeepMode(stripe, piId, baseParams) {
   // IMPORTANT: do not send automatic_payment_methods nor payment_method_types here
   // Stripe keeps whatever mode the PI was created with.
@@ -268,6 +292,9 @@ export async function POST(req, ctx) {
 
   // Zero total → mark paid and send confirmation
   if (finalTotalCents === 0) {
+    // Ensure any previous Stripe artifacts can't be reused
+    await safeExpireSession(stripe, draft.stripeSessionId);
+    await safeCancelPI(stripe, draft.stripePaymentIntentId);
     const newExpiresAt = new Date(
       Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000
     ).toISOString();
@@ -276,6 +303,7 @@ export async function POST(req, ctx) {
       .update({
         status: "paid",
         stripeSessionId: null,
+        stripePaymentIntentId: null,
         expiresAt: newExpiresAt,
         updatedAt: new Date().toISOString(),
         totalAmount: 0,
@@ -286,14 +314,18 @@ export async function POST(req, ctx) {
       .eq("id", draftId);
 
     const origin = computeOrigin(req);
-    return ok({
-      // for checkout mode we’d return url; for elements we return redirectUrl.
-      url: `${origin}/booking/${draftId}/confirmation`,
-      redirectUrl: `${origin}/booking/${draftId}/confirmation`,
+    const redirectUrl = `${origin}/booking/${draftId}/confirmation`;
+    // send both keys for compatibility; client uses redirectUrl
+    return NextResponse.json({
+      mode: "free",
+      redirectUrl,
+      url: redirectUrl,
       discounted: !!promo,
       discountCents,
       finalTotalCents,
-    });
+      amountCents: 0,
+      currency,
+    }); // 200 OK
   }
 
   // Common: extend hold window + mark "checkout" state
@@ -487,7 +519,7 @@ export async function POST(req, ctx) {
 
     const customerEmail = draft.primary_contact?.email ?? undefined;
 
-    const session = await stripe.checkout.sessions.create(
+    session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
         line_items,
@@ -509,6 +541,7 @@ export async function POST(req, ctx) {
           // copy promo metadata so your confirm route can read it from the PI reliably
           metadata: promoMeta,
         },
+        payment_method_collection: "if_required",
       },
       { idempotencyKey: idemKey }
     );

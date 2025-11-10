@@ -17,22 +17,20 @@ export async function POST(req, ctx) {
   const draftId = Number(id);
   if (!Number.isFinite(draftId) || draftId <= 0) return bad("Invalid draft id");
 
-  // Accept both querystring AND JSON body
+  // Read identifiers from query OR JSON body
   const url = new URL(req.url);
   const qsSessionId = url.searchParams.get("session_id") || "";
   const qsPI = url.searchParams.get("payment_intent") || "";
   const body = (await req.json().catch(() => ({}))) || {};
   const sessionId = body.session_id || qsSessionId;
   const payment_intent = body.payment_intent || qsPI;
+  const origin = originFromReq(req);
 
-  if (!sessionId && !payment_intent) {
-    return bad("Missing session_id or payment_intent");
-  }
-
+  // DB
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
 
-  // Load draft
+  // Load draft (include promo columns so we can merge)
   const { data: draft, error: dErr } = await admin
     .from("BookingDraft")
     .select(
@@ -40,15 +38,19 @@ export async function POST(req, ctx) {
       id, status, counts, attendees, experienceId, scheduleSlotId,
       primary_contact, "unitPriceAdult", "unitPriceKid",
       "totalAmount", "stripeSessionId", "stripePaymentIntentId",
-      "convertedBookingId", currency
+      "convertedBookingId", currency,
+      promoJson, "appliedPromoCode", "discountAmount"
     `
     )
     .eq("id", draftId)
     .maybeSingle();
 
-  if (dErr || !draft) return bad("Draft not found", 404);
+  if (dErr || !draft) {
+    console.warn("[confirm] Draft not found", { draftId, dErr });
+    return bad("Draft not found", 404);
+  }
 
-  // Already converted?
+  // If we already converted, short-circuit
   if (draft.convertedBookingId) {
     return ok({
       converted: true,
@@ -57,11 +59,10 @@ export async function POST(req, ctx) {
     });
   }
 
-  const key = process.env.STRIPE_SECRET_KEY || "";
-  if (!key) return bad("Stripe not configured", 500);
-  const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
-
-  // ----- Verify payment (handle both flows) -----
+  // ===== Stripe verification (supports three paths) =====
+  // A) Checkout success (session_id)
+  // B) Elements (payment_intent)
+  // C) Zero-total path: draft already marked "paid" with total 0 (no Stripe ids)
   let paid = false;
   let paidCents = 0;
   let currency = (draft.currency || "eur").toLowerCase();
@@ -69,15 +70,65 @@ export async function POST(req, ctx) {
   let stripePaymentIntentId = draft.stripePaymentIntentId || null;
   let emailForReceipt = draft?.primary_contact?.email || null;
 
-  // Keep references for later (email rendering)
   let checkoutSession = null;
   let intent = null;
 
-  if (sessionId) {
+  // C) FREE path (no session/PI, but draft is already "paid")
+  if (!sessionId && !payment_intent) {
+    if (String(draft.status || "").toLowerCase() === "paid") {
+      paid = true;
+      paidCents = Math.round(Number(draft.totalAmount || 0) * 100) || 0;
+    } else {
+      return NextResponse.json(
+        {
+          error: "Payment not found",
+          redirectUrl: `${origin}/booking/${draftId}/payment?failed=1&reason=no_identifiers`,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
+  // Only initialize Stripe if we actually need to talk to it
+  let stripe = null;
+  const needStripe = !!(sessionId || payment_intent);
+  if (needStripe) {
+    const key = process.env.STRIPE_SECRET_KEY || "";
+    if (!key) return bad("Stripe not configured", 500);
+    stripe = new Stripe(key, { apiVersion: "2024-06-20" });
+  }
+
+  if (stripe && sessionId) {
     const s = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["payment_intent", "customer_details"],
     });
     checkoutSession = s;
+    const piObj =
+      typeof s.payment_intent === "object" ? s.payment_intent : null;
+    const piStatus = piObj?.status || "";
+    const isFailure =
+      s?.status === "expired" ||
+      s?.payment_status === "unpaid" ||
+      ["requires_payment_method", "canceled"].includes(piStatus);
+
+    if (isFailure) {
+      const reason =
+        s?.status === "expired"
+          ? "expired"
+          : s?.payment_status === "unpaid"
+          ? "unpaid"
+          : piStatus || "failed";
+      return NextResponse.json(
+        {
+          error: "Payment failed",
+          reason,
+          redirectUrl: `${origin}/booking/${draftId}/payment?failed=1&reason=${encodeURIComponent(
+            reason
+          )}`,
+        },
+        { status: 409 }
+      );
+    }
 
     stripeSessionId = s.id;
     emailForReceipt =
@@ -97,9 +148,31 @@ export async function POST(req, ctx) {
       typeof s.payment_intent === "string"
         ? s.payment_intent
         : s.payment_intent?.id || stripePaymentIntentId;
-  } else if (payment_intent) {
+  } else if (stripe && payment_intent) {
     const pi = await stripe.paymentIntents.retrieve(payment_intent);
     intent = pi;
+    if (["requires_payment_method", "canceled"].includes(pi.status)) {
+      return NextResponse.json(
+        {
+          error: "Payment failed",
+          reason: pi.status,
+          redirectUrl: `${origin}/booking/${draftId}/payment?failed=1&reason=${pi.status}`,
+        },
+        { status: 409 }
+      );
+    }
+    if (pi.status === "requires_action") {
+      return NextResponse.json(
+        {
+          error: "Action required",
+          reason: "requires_action",
+          redirectUrl: `${origin}/booking/${draftId}/payment?action_required=1&pi=${encodeURIComponent(
+            pi.id
+          )}`,
+        },
+        { status: 409 }
+      );
+    }
 
     stripePaymentIntentId = pi.id;
     emailForReceipt = emailForReceipt || pi?.receipt_email || null;
@@ -109,10 +182,13 @@ export async function POST(req, ctx) {
     paidCents =
       typeof pi.amount_received === "number"
         ? pi.amount_received
-        : pi.amount || 0;
+        : typeof pi.amount === "number"
+        ? pi.amount
+        : 0;
     currency = (pi.currency || currency).toLowerCase();
   }
 
+  // Normalize promo metadata from Stripe (if any)
   const meta =
     (checkoutSession?.payment_intent &&
       typeof checkoutSession.payment_intent === "object" &&
@@ -129,23 +205,26 @@ export async function POST(req, ctx) {
   ).toUpperCase();
   const promoType = (meta.promo_type || "").toLowerCase(); // "percent" | "amount" | ""
   const promoValue = meta.promo_value != null ? String(meta.promo_value) : null;
+
+  // Final-success indicator (for post-payment side effects)
   const isFinalPaid =
+    (!sessionId && !payment_intent) /* free */ ||
     (checkoutSession && checkoutSession.payment_status === "paid") ||
     (intent && intent.status === "succeeded");
 
+  // Build promoFromPI (if metadata present)
   const promoFromPI = promoCode
     ? {
         code: promoCode,
         discountType: promoType || undefined,
         discountValue: promoValue != null ? Number(promoValue) : undefined,
         currency: promoCurrency,
-        // keep the raw cents too
         discountCents,
-        source: meta.source || undefined, // (set in checkout if you added it)
+        source: meta.source || undefined,
       }
     : null;
-  // right after you compute promoFromPI, mergedPromo, mergedDiscountAmount, promoCurrency, etc.
-  // Merge with any promo already on the draft (from checkout step)
+
+  // Merge Stripe promo w/ what we already stamped on the draft
   const mergedPromo =
     promoFromPI ||
     (draft?.promoJson
@@ -154,20 +233,19 @@ export async function POST(req, ctx) {
           code: draft.appliedPromoCode || draft.promoJson.code,
         }
       : null);
+
   const mergedDiscountAmount =
     promoFromPI?.discountCents != null
       ? promoFromPI.discountCents / 100
       : Number(draft?.discountAmount || 0);
+
+  // Gift card hints
   const giftMeta =
     mergedPromo && String(mergedPromo.source || "").toLowerCase() === "giftcard"
       ? mergedPromo
       : null;
-
   const giftCardId = giftMeta?.giftcard?.id ?? (meta.giftcard_id || null);
-
   const giftCardCode = giftMeta?.code || meta.giftcard_code || null;
-
-  // amount (in cents) we expect to apply from the gift card
   const giftApplyCentsRaw =
     Number(
       (giftMeta && giftMeta.discountCents) ??
@@ -175,7 +253,6 @@ export async function POST(req, ctx) {
         meta.giftcard_apply_cents ??
         0
     ) || 0;
-
   const giftCurrency = (
     giftMeta?.currency ||
     promoCurrency ||
@@ -183,7 +260,7 @@ export async function POST(req, ctx) {
     "EUR"
   ).toUpperCase();
 
-  // Persist onto the draft so it’s always visible in DB
+  // Persist promo snapshot onto the draft (best effort)
   try {
     await admin
       .from("BookingDraft")
@@ -195,7 +272,7 @@ export async function POST(req, ctx) {
       .eq("id", draftId);
   } catch {}
 
-  // Mark draft as paid (intermediate), store Stripe ids
+  // Stamp draft as paid + store Stripe ids (idempotent)
   const nowIso = new Date().toISOString();
   await admin
     .from("BookingDraft")
@@ -204,12 +281,13 @@ export async function POST(req, ctx) {
       updatedAt: nowIso,
       stripeSessionId: stripeSessionId || null,
       stripePaymentIntentId: stripePaymentIntentId || null,
-      totalAmount: paidCents / 100,
+      totalAmount: paidCents / 100, // 0 for free path is fine
     })
     .eq("id", draftId);
 
-  // ----- Idempotency: reuse existing Booking if already created for these Stripe ids -----
+  // ===== Idempotent booking creation =====
   let bookingId = null;
+
   if (stripePaymentIntentId) {
     const { data: bByPI } = await admin
       .from("booking")
@@ -227,7 +305,6 @@ export async function POST(req, ctx) {
     bookingId = bByCS?.id || bookingId;
   }
 
-  // Compute booking snapshot
   const A = Number(draft.counts?.adults || 0);
   const K = Number(draft.counts?.kids || 0);
   const numberOfPeople = A + K;
@@ -239,14 +316,14 @@ export async function POST(req, ctx) {
     .eq("id", draft.scheduleSlotId)
     .maybeSingle();
 
-  // (Optional) resolve/attach a user to the booking
+  // Resolve/attach userId (email-first)
   const ensuredUserId = await ensureDraftUserId(
     admin,
     draft,
     checkoutSession || intent
   );
 
-  // ----- Insert booking if missing -----
+  // Insert booking if missing (race-safe)
   if (!bookingId) {
     const ins = await admin
       .from("booking")
@@ -284,7 +361,7 @@ export async function POST(req, ctx) {
       .single();
 
     if (ins.error) {
-      // race: try fetch by stripe ids again
+      // Likely a race: try to recover by refetching by known Stripe keys
       const ref = stripePaymentIntentId
         ? await admin
             .from("booking")
@@ -307,19 +384,18 @@ export async function POST(req, ctx) {
       bookingId = ins.data.id;
     }
   } else if (ensuredUserId) {
-    // If we found an existing booking, we can still backfill userId once.
+    // Backfill user on existing booking
     await admin
       .from("booking")
       .update({ userId: ensuredUserId })
       .eq("id", bookingId);
   }
 
-  // >>> Gift card: redeem + persist on booking <<<
-  let giftAppliedCents = 0;
-
+  // Gift card redeem (once) then merge into booking’s discount fields
   try {
+    let giftAppliedCents = 0;
+
     if (isFinalPaid && (giftCardId || giftCardCode)) {
-      // Prefer explicit amount from metadata; otherwise infer from promo
       const fallbackFromPromo =
         String(mergedPromo?.source || "").toLowerCase() === "giftcard"
           ? promoFromPI?.discountCents ??
@@ -340,20 +416,17 @@ export async function POST(req, ctx) {
           code: giftCardCode || null,
           amountCents: expectedGiftCents,
           currency: giftCurrency,
-          notes: `Auto-redeem on booking ${bookingId} (draft ${draftId}) via checkout`,
+          notes: `Auto-redeem on booking ${bookingId} (draft ${draftId}) via confirm`,
           tryRpc: true,
         });
 
         if (giftAppliedCents > 0) {
-          // Merge gift card into booking discount + promoJson
           const { data: cur } = await admin
             .from("booking")
             .select("discountAmount, appliedPromoCode, promoJson")
             .eq("id", bookingId)
             .maybeSingle();
 
-          // If mergedPromo already *is* a giftcard, store exactly what was redeemed.
-          // Otherwise add the gift amount on top of any existing promo discounts.
           const existingDiscount = Number(cur?.discountAmount || 0);
           const giftAmount = giftAppliedCents / 100;
           const newDiscountAmount =
@@ -361,14 +434,11 @@ export async function POST(req, ctx) {
               ? giftAmount
               : existingDiscount + giftAmount;
 
-          // Build appliedPromoCode (keep existing, append GIFT:CODE once)
           const giftTag = giftCardCode ? `GIFT:${giftCardCode}` : "GIFT";
           const appliedCodes = new Set(
             [cur?.appliedPromoCode, mergedPromo?.code, giftTag].filter(Boolean)
           );
-          const appliedPromoCode = Array.from(appliedCodes).join(" + ");
 
-          // Merge promoJson with a stable "giftcard" node
           const prevJson =
             cur?.promoJson && typeof cur.promoJson === "object"
               ? cur.promoJson
@@ -391,7 +461,7 @@ export async function POST(req, ctx) {
             .from("booking")
             .update({
               discountAmount: newDiscountAmount,
-              appliedPromoCode,
+              appliedPromoCode: Array.from(appliedCodes).join(" + "),
               promoJson,
             })
             .eq("id", bookingId);
@@ -402,7 +472,7 @@ export async function POST(req, ctx) {
     console.warn("[confirm] gift card redeem/persist failed:", e?.message || e);
   }
 
-  // ----- Flip draft → converted and link booking -----
+  // Flip draft → converted and link booking
   const upd2 = await admin
     .from("BookingDraft")
     .update({
@@ -419,12 +489,12 @@ export async function POST(req, ctx) {
     console.error("[confirm] failed to set converted", upd2.error);
   }
 
-  // Fetch booking row to derive a human code (if your schema has one)
+  // Build a human-friendly booking code
   const bookingRow = await getBookingRow(admin, bookingId);
   const bookingCode =
     deriveBookingCode(bookingRow) || `BK-${String(bookingId).padStart(6, "0")}`;
 
-  // Fetch Experience + Slot for email contents
+  // Load Experience + Slot (for email)
   const [{ data: expRow }, { data: slotRow }] = await Promise.all([
     admin
       .from("Experience")
@@ -438,7 +508,7 @@ export async function POST(req, ctx) {
       .maybeSingle(),
   ]);
 
-  // ----- Increment promo usage ONCE when payment is final-success -----
+  // Increment promo usage ONCE on final success
   try {
     if (isFinalPaid && promoCode) {
       await incrementPromoUsageOnce(admin, {
@@ -452,7 +522,7 @@ export async function POST(req, ctx) {
     console.warn("[confirm] promo usage increment failed:", e?.message || e);
   }
 
-  // ----- Send confirmation email (idempotent) -----
+  // Send confirmation email (idempotent)
   try {
     const { data: b } = await admin
       .from("booking")
@@ -461,7 +531,6 @@ export async function POST(req, ctx) {
       .maybeSingle();
 
     if (!b?.confirmationEmailSentAt) {
-      // Choose best recipient
       const toEmail =
         emailForReceipt ||
         checkoutSession?.customer_details?.email ||
@@ -469,7 +538,6 @@ export async function POST(req, ctx) {
         intent?.receipt_email ||
         null;
 
-      // Provide a "session-like" object if we don't have checkoutSession
       const sessionLike =
         checkoutSession &&
         checkoutSession.amount_total != null &&
@@ -483,7 +551,7 @@ export async function POST(req, ctx) {
       const sendRes = await sendBookingConfirmation({
         to: toEmail,
         draft, // BookingDraft row
-        session: sessionLike, // used only to format totals/currency
+        session: sessionLike, // minimal shape for totals/currency
         experience: expRow || null,
         slot: slotRow || null,
         bookingCode,
@@ -508,7 +576,7 @@ export async function POST(req, ctx) {
     console.error("[confirm] confirmation email failed:", e?.message);
   }
 
-  // ----- Redeem promo/voucher (idempotent) -----
+  // Log a redemption row (if you keep one) — idempotent-ish
   try {
     if (isFinalPaid && promoCode) {
       await redeemPromoOnce(admin, {
@@ -581,6 +649,21 @@ function extractPaidAmountAndCurrency(session, draftTotal) {
   const currency = (pi?.currency || session?.currency || "eur").toUpperCase();
 
   return { amount, currency };
+}
+
+function originFromReq(req) {
+  let envUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.SITE_URL ||
+    ""
+  ).trim();
+  if (envUrl) {
+    if (!/^https?:\/\//i.test(envUrl)) envUrl = `https://${envUrl}`;
+    const u = new URL(envUrl);
+    return `${u.protocol}//${u.host}`.replace(/\/$/, "");
+  }
+  const u = new URL(req.url);
+  return `${u.protocol}//${u.host}`.replace(/\/$/, "");
 }
 
 // Email-first identity resolver that *never* falls back to a random user.

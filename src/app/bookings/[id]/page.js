@@ -28,10 +28,22 @@ import {
   Maximize2,
   CheckCircle2,
   AlertCircle,
+  Share2,
+  Printer,
+  Navigation,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 import QRCode from "qrcode";
 
+/**
+ * Booking Details — refined UI/UX
+ * - Ambient, soft background and glass cards
+ * - Clear status with icon + subtle progress bar
+ * - Action toolbar (Add to Calendar, .ics, Directions, Share)
+ * - Ticket-like QR card with copy/share/print
+ * - Better empty/error states
+ * - Small a11y touches & focus styles
+ */
 export default function BookingDetailsPage({ params }) {
   const { id } = useUnwrap(params);
   const router = useRouter();
@@ -40,6 +52,7 @@ export default function BookingDetailsPage({ params }) {
   const [booking, setBooking] = useState(null);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
 
   // redirect if no session
   useEffect(() => {
@@ -119,6 +132,11 @@ export default function BookingDetailsPage({ params }) {
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startUtc}/${endUtc}&details=${details}&location=${location}`;
   }, [dateObj, durationMin, booking, exp]);
 
+  const mapHref = useMemo(
+    () => (exp?.location ? toMapHref(exp.location) : "#"),
+    [exp]
+  );
+
   // ---------- QR support ----------
   const qrValue = useMemo(() => getQrValue(booking), [booking]);
   const shouldShowQr =
@@ -133,11 +151,17 @@ export default function BookingDetailsPage({ params }) {
   } = useQrDataUrl(shouldShowQr ? qrValue : null);
   const canRenderQrImage = !!qrDataUrl && !qrLoading && !qrError;
 
+  // copy feedback
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+
   if (loading || fetching) {
     return (
       <FullScreenCenter>
-        <Loader2 className="w-6 h-6 animate-spin mr-2" />
-        Loading booking...
+        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading booking...
       </FullScreenCenter>
     );
   }
@@ -148,24 +172,35 @@ export default function BookingDetailsPage({ params }) {
       {/* ambient background */}
       <div
         aria-hidden
-        className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(25rem_25rem_at_20%_-10%,#fff1d6_0%,transparent_60%),radial-gradient(30rem_30rem_at_120%_10%,#e7f7f7_0%,transparent_55%)]"
+        className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(28rem_28rem_at_10%_-10%,#fff1d6_0%,transparent_60%),radial-gradient(34rem_34rem_at_120%_10%,#e7f7f7_0%,transparent_55%)]"
       />
 
-      <main className="max-w-5xl mx-auto pt-24 sm:pt-28 px-4 sm:px-6 pb-16">
-        <div className="mb-6 flex items-center gap-3">
-          <Link
-            href="/bookings"
-            className="inline-flex items-center gap-2 text-[#5a4a3f] hover:underline"
-          >
-            <ChevronLeft className="w-4 h-4" /> Back to My Bookings
-          </Link>
+      <main className="max-w-5xl mx-auto pt-20 sm:pt-24 px-4 sm:px-6 pb-28">
+        {/* Header / breadcrumb */}
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/bookings"
+              className="inline-flex items-center gap-2 text-[#5a4a3f] hover:underline"
+            >
+              <ChevronLeft className="w-4 h-4" /> Back to My Bookings
+            </Link>
+            {booking?.id && (
+              <span className="hidden sm:inline-flex items-center gap-1 text-xs rounded-full bg-[#f3efe8] px-2 py-1 border border-[#e8e2d9]">
+                <CalendarDays className="w-3.5 h-3.5" />
+                <span>Ref: {getPublicBookingRef(booking)}</span>
+              </span>
+            )}
+          </div>
+          {/* Status pill with icon */}
+          <StatusPill when={dateObj} durationMin={durationMin} />
         </div>
 
         {error ? (
           <ErrorCard message={error} />
         ) : (
           <div className="space-y-6">
-            {/* Title & status */}
+            {/* Title */}
             <header className="flex items-start justify-between gap-4">
               <div>
                 <h1 className="text-3xl sm:text-4xl font-extrabold text-[#5a4a3f] font-serif tracking-tight">
@@ -175,13 +210,15 @@ export default function BookingDetailsPage({ params }) {
                   Booking ID: {booking?.id}
                 </p>
               </div>
-              <StatusPill when={dateObj} durationMin={durationMin} />
             </header>
 
-            {/* Main grid: left details, right check-in */}
+            {/* subtle status progress */}
+            <StatusProgressBar status={status} />
+
+            {/* Main grid */}
             <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Details card */}
-              <div className="lg:col-span-2 bg-white border border-[#e4ddd3] rounded-2xl p-6 shadow-md">
+              <div className="lg:col-span-2 bg-white/90 backdrop-blur border border-[#e4ddd3] rounded-2xl p-6 shadow-md">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-[#5a4a3f]">
                   <InfoRow
                     icon={<CalendarDays className="w-5 h-5 text-[#8b6f47]" />}
@@ -201,7 +238,9 @@ export default function BookingDetailsPage({ params }) {
                     <InfoRow
                       icon={<MapPin className="w-5 h-5 text-[#8b6f47]" />}
                     >
-                      <span>{exp.location}</span>
+                      <span className="truncate" title={exp.location}>
+                        {exp.location}
+                      </span>
                     </InfoRow>
                   )}
 
@@ -257,7 +296,7 @@ export default function BookingDetailsPage({ params }) {
                     onClick={() =>
                       downloadICS(booking, exp, dateObj, durationMin)
                     }
-                    className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] text-white px-5 py-2 font-medium hover:bg-[#a78b62] transition-all"
+                    className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] text-white px-5 py-2 font-medium hover:bg-[#a78b62] transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#8b6f47]"
                   >
                     <Download className="w-4 h-4" /> Download .ics
                   </button>
@@ -266,10 +305,30 @@ export default function BookingDetailsPage({ params }) {
                     href={gcalHref}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2 text-[#5a4a3f] hover:bg-[#f6f1e6]"
+                    className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2 text-[#5a4a3f] hover:bg-[#f6f1e6] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#e8e2d9]"
                   >
                     <ExternalLink className="w-4 h-4" /> Add to Google Calendar
                   </a>
+
+                  {exp?.location && (
+                    <a
+                      href={mapHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2 text-[#5a4a3f] hover:bg-[#f1efe8]"
+                    >
+                      <Navigation className="w-4 h-4" /> Directions
+                    </a>
+                  )}
+
+                  {canShare() && (
+                    <button
+                      onClick={() => shareBooking(booking, exp, dateObj)}
+                      className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2 text-[#5a4a3f] hover:bg-[#f6f1e6]"
+                    >
+                      <Share2 className="w-4 h-4" /> Share
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -285,12 +344,34 @@ export default function BookingDetailsPage({ params }) {
                   endsAt={status.endAt}
                   ongoing={status.ongoing}
                   canRenderQrImage={canRenderQrImage}
+                  onCopy={() => setCopied(true)}
                 />
+                {/* tiny toast */}
+                <div
+                  aria-live="polite"
+                  className={`pointer-events-none transition-all duration-300 ${
+                    copied
+                      ? "opacity-100 translate-y-0"
+                      : "opacity-0 translate-y-2"
+                  } mt-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 w-fit mx-auto`}
+                >
+                  Copied!
+                </div>
               </div>
             </section>
           </div>
         )}
       </main>
+
+      {/* Sticky mobile toolbar */}
+      {!error && (
+        <MobileToolbar
+          onIcs={() => downloadICS(booking, exp, dateObj, durationMin)}
+          gcalHref={gcalHref}
+          mapHref={mapHref}
+          share={() => canShare() && shareBooking(booking, exp, dateObj)}
+        />
+      )}
     </div>
   );
 }
@@ -463,17 +544,36 @@ function parseDurationToMinutes(input) {
   return null;
 }
 
-/* ---------- QR helpers ---------- */
+/* ---------- map/share helpers ---------- */
+function toMapHref(location) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    location
+  )}`;
+}
+
+function canShare() {
+  if (typeof navigator === "undefined") return false;
+  return !!navigator.share;
+}
+
+function shareBooking(booking, exp, dateObj) {
+  if (!canShare()) return;
+  const title = exp?.name || "Reservation";
+  const text = dateObj ? `${title} — ${format(dateObj, "PPPP p")}` : title;
+  const url = typeof window !== "undefined" ? window.location.href : "";
+  navigator.share({ title, text, url }).catch(() => {});
+}
+
 /* ---------- QR helpers ---------- */
 function getPublicBookingRef(b) {
   // Prefer a human-friendly public ref if your API provides one
   const ref =
-    b?.publicId || // e.g., "BK-000258"
-    b?.bookingRef || // e.g., "BK-000258"
-    b?.bookingCode || // alternate naming
-    b?.reference || // alternate naming
-    b?.code || // if you already store it here
-    (Number.isFinite(b?.id) ? `BK-${String(b.id).padStart(6, "0")}` : ""); // fallback from id
+    b?.publicId ||
+    b?.bookingRef ||
+    b?.bookingCode ||
+    b?.reference ||
+    b?.code ||
+    (Number.isFinite(b?.id) ? `BK-${String(b.id).padStart(6, "0")}` : "");
   return ref;
 }
 
@@ -481,7 +581,6 @@ function getQrValue(b) {
   if (!b) return "";
   const ref = getPublicBookingRef(b);
   if (!ref) return "";
-  // Use env if available, else hardcode as requested
   const base =
     (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_SITE_URL) ||
     "https://www.youroasis.gr";
@@ -556,17 +655,36 @@ function ErrorCard({ message }) {
 function StatusPill({ when, durationMin = 60 }) {
   const { upcoming, ongoing } = statusFlags(when, durationMin);
   const tone = upcoming
-    ? "bg-cyan-100 text-cyan-700"
+    ? "bg-cyan-100 text-cyan-700 border-cyan-200"
     : ongoing
-    ? "bg-amber-100 text-amber-800"
-    : "bg-emerald-100 text-emerald-700";
+    ? "bg-amber-100 text-amber-800 border-amber-200"
+    : "bg-emerald-100 text-emerald-700 border-emerald-200";
   const label = upcoming ? "Upcoming" : ongoing ? "Ongoing" : "Completed";
+  const Icon = upcoming ? CalendarDays : ongoing ? Clock : CheckCircle2;
   return (
     <span
-      className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${tone}`}
+      className={`inline-flex items-center gap-1.5 shrink-0 rounded-full px-3 py-1 text-xs font-semibold border ${tone}`}
     >
-      {label}
+      <Icon className="w-3.5 h-3.5" /> {label}
     </span>
+  );
+}
+
+function StatusProgressBar({ status }) {
+  const pct = status.ongoing ? 66 : status.past ? 100 : 33;
+  return (
+    <div className="h-1.5 bg-[#eee7dc] rounded-full overflow-hidden">
+      <div
+        className={`h-full transition-all duration-700 ${
+          status.ongoing
+            ? "bg-gradient-to-r from-amber-300 to-amber-500"
+            : status.past
+            ? "bg-emerald-400"
+            : "bg-cyan-300"
+        }`}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
   );
 }
 
@@ -589,6 +707,7 @@ function CheckInCard({
   endsAt,
   ongoing,
   canRenderQrImage,
+  onCopy,
 }) {
   if (!visible) {
     return (
@@ -607,7 +726,10 @@ function CheckInCard({
   }
 
   return (
-    <div className="rounded-2xl border border-[#e4ddd3] bg-[linear-gradient(180deg,#fffdf8,rgba(255,255,255,0.9))] shadow-md p-5">
+    <div
+      className="rounded-2xl border border-[#e4ddd3] shadow-md p-5 relative bg-[radial-gradient(1rem_1rem_at_0%_1rem,transparent_98%,#fff_100%),radial-gradient(1rem_1rem_at_100%_1rem,transparent_98%,#fff_100%),linear-gradient(180deg,#fffdf8,rgba(255,255,255,0.9))] bg-[length:1rem_1rem,1rem_1rem,auto] bg-[position:0_1rem,calc(100%-0px)_1rem,0_0] bg-no-repeat"
+      title="Your ticket"
+    >
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <QrCode className="w-5 h-5 text-[#8b6f47]" />
@@ -642,7 +764,6 @@ function CheckInCard({
             draggable={false}
           />
         ) : (
-          // Safety net for the "empty src" frame between renders
           <div className="h-[220px] flex items-center justify-center text-xs text-[#7c6f60]">
             Preparing QR…
           </div>
@@ -653,12 +774,14 @@ function CheckInCard({
           </span>
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => navigator.clipboard?.writeText(codeText)}
+              onClick={() => {
+                navigator.clipboard?.writeText(codeText);
+                onCopy?.();
+              }}
               className="inline-flex items-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-2 py-1 hover:bg-[#f6f1e6]"
               title="Copy code"
             >
-              <Copy className="w-3.5 h-3.5" />
-              Copy
+              <Copy className="w-3.5 h-3.5" /> Copy
             </button>
             {canRenderQrImage && (
               <button
@@ -666,10 +789,18 @@ function CheckInCard({
                 className="inline-flex items-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-2 py-1 hover:bg-[#f6f1e6]"
                 title="Open larger"
               >
-                <Maximize2 className="w-3.5 h-3.5" />
-                View
+                <Maximize2 className="w-3.5 h-3.5" /> View
               </button>
             )}
+            <button
+              onClick={() =>
+                printTicket({ qrDataUrl, codeText, startsAt, endsAt })
+              }
+              className="inline-flex items-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-2 py-1 hover:bg-[#f6f1e6]"
+              title="Print ticket"
+            >
+              <Printer className="w-3.5 h-3.5" /> Print
+            </button>
           </div>
         </div>
       </div>
@@ -682,10 +813,6 @@ function CheckInCard({
             ? format(endsAt, "p")
             : "the end of your slot"}
           .
-        </li>
-        <li className="flex items-start gap-2">
-          <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600" />
-          If scanners fail, staff can use the code text as a fallback.
         </li>
       </ul>
     </div>
@@ -705,4 +832,81 @@ function openQrInNewTab(dataUrl) {
       win.document.close();
     }
   } catch {}
+}
+
+function printTicket({ qrDataUrl, codeText, startsAt, endsAt }) {
+  const when =
+    startsAt && isValid(startsAt) ? `${format(startsAt, "PPPP p")}` : "";
+  const until = endsAt && isValid(endsAt) ? `${format(endsAt, "p")}` : "";
+  const html = `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Booking Ticket</title>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+    .card{max-width:640px;margin:24px auto;padding:24px;border:1px solid #e4ddd3;border-radius:16px}
+    .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .muted{color:#6b6256;font-size:12px}
+    img{width:220px;height:220px}
+    .code{font-size:12px;color:#6b6256;word-break:break-all}
+    @media print{.noprint{display:none}}
+  </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="row"><div><strong>Check-in QR</strong></div><div class="muted">${when}${
+    until ? ` · until ${until}` : ""
+  }</div></div>
+      <div style="border:1px solid #eee;padding:16px;border-radius:12px;text-align:center">
+        ${
+          qrDataUrl
+            ? `<img src="${qrDataUrl}" alt="QR"/>`
+            : `<div style="height:220px;display:flex;align-items:center;justify-content:center;color:#6b6256">QR unavailable</div>`
+        }
+        <div class="row" style="margin-top:8px"><span class="code">${
+          codeText || ""
+        }</span></div>
+      </div>
+    </div>
+    <div class="noprint" style="text-align:center;margin-bottom:24px"><button onclick="window.print()">Print</button></div>
+  </body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
+}
+
+function MobileToolbar({ onIcs, gcalHref, mapHref, share }) {
+  return (
+    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-20 bg-white/95 backdrop-blur border-t border-[#e4ddd3]">
+      <div className="max-w-5xl mx-auto px-4 py-3 grid grid-cols-4 gap-2 text-xs">
+        <button
+          onClick={onIcs}
+          className="inline-flex items-center justify-center gap-1 rounded-full bg-[#8b6f47] text-white px-3 py-2 font-medium"
+        >
+          <Download className="w-4 h-4" /> .ics
+        </button>
+        <a
+          href={gcalHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center justify-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-3 py-2 text-[#5a4a3f]"
+        >
+          <ExternalLink className="w-4 h-4" /> GCal
+        </a>
+        <a
+          href={mapHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center justify-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-3 py-2 text-[#5a4a3f]"
+        >
+          <Navigation className="w-4 h-4" /> Go
+        </a>
+        <button
+          onClick={share}
+          className="inline-flex items-center justify-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-3 py-2 text-[#5a4a3f]"
+        >
+          <Share2 className="w-4 h-4" /> Share
+        </button>
+      </div>
+    </div>
+  );
 }

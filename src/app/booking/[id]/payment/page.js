@@ -1,3 +1,4 @@
+// src/app/booking/[id]/payment/page.js
 "use client";
 
 import {
@@ -83,7 +84,10 @@ export default function PaymentPage() {
               "Failed to load booking."
           );
 
-        const data = await res.json();
+        let data = {};
+        try {
+          data = await res.json();
+        } catch {}
         const d = data?.draft || data; // normalize
 
         // If this draft is already paid/converted, jump to confirmation.
@@ -297,7 +301,11 @@ export default function PaymentPage() {
   useEffect(() => {
     (async () => {
       if (!Number.isFinite(draftId) || draftId <= 0) return;
+
       try {
+        setError("");
+        setClientSecret("");
+        setPiInfo({ amountCents: 0, currency: "eur" });
         const res = await fetch(`/api/bookings/drafts/${draftId}/checkout`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -308,7 +316,7 @@ export default function PaymentPage() {
         });
         const data = await res.json();
 
-        if (res.status === 409 && data?.redirectUrl) {
+        if (data?.redirectUrl) {
           window.location.replace(data.redirectUrl);
           return;
         }
@@ -321,6 +329,8 @@ export default function PaymentPage() {
           currency: (data.currency || "eur").toLowerCase(),
         });
       } catch (e) {
+        setClientSecret("");
+        setPiInfo({ amountCents: 0, currency: "eur" });
         setError(e.message || "Could not initialize payment.");
       }
     })();

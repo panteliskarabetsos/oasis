@@ -35,6 +35,29 @@ export default function BookingConfirmationPage() {
   const [bookingDbStatus, setBookingDbStatus] = useState("");
   const [confirmedBookingId, setConfirmedBookingId] = useState(null);
   const [confirming, setConfirming] = useState(false);
+
+  const freeConfirmTriedRef = useRef(false);
+
+  async function confirmNow(draftId, opts = {}) {
+    try {
+      const res = await fetch(`/api/bookings/drafts/${draftId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(opts),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j?.bookingId) setConfirmedBookingId(j.bookingId);
+      if (j?.bookingCode) setBookingCode(String(j.bookingCode));
+      if (j?.status) setBookingDbStatus(String(j.status));
+      // If backend says it's converted, stop polling; otherwise nudge
+      if (!(j?.converted && j?.bookingId)) setTries((t) => t + 1);
+      return j;
+    } catch {
+      // non-fatal; polling continues
+      return null;
+    }
+  }
+
   // Utilities
   const deriveFallbackCode = (id) =>
     id ? `BK-${String(id).padStart(6, "0")}` : "";
@@ -66,6 +89,31 @@ export default function BookingConfirmationPage() {
     return deriveFallbackCode(id);
   }
 
+  async function confirmNow(draftId, opts = {}) {
+    try {
+      const res = await fetch(`/api/bookings/drafts/${draftId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(opts),
+      });
+      const j = await res.json().catch(() => ({}));
+
+      // NEW: follow backend’s redirectUrl on failure
+      if (res.status === 409 && j?.redirectUrl) {
+        window.location.replace(j.redirectUrl);
+        return j;
+      }
+
+      if (j?.bookingId) setConfirmedBookingId(j.bookingId);
+      if (j?.bookingCode) setBookingCode(String(j.bookingCode));
+      if (j?.status) setBookingDbStatus(String(j.status));
+      if (!(j?.converted && j?.bookingId)) setTries((t) => t + 1);
+      return j;
+    } catch {
+      return null;
+    }
+  }
+
   useEffect(() => {
     const pi = qs.get("payment_intent");
     const sid = qs.get("session_id");
@@ -79,19 +127,12 @@ export default function BookingConfirmationPage() {
       try {
         setConfirming(true);
         setError("");
-        const res = await fetch(`/api/bookings/drafts/${draftId}/confirm`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            payment_intent: pi || undefined,
-            session_id: sid || undefined,
-          }),
+        const data = await confirmNow(draftId, {
+          payment_intent: pi || undefined,
+          session_id: sid || undefined,
         });
-        const data = await res.json().catch(() => ({}));
-
         if (!alive) return;
-
-        if (!res.ok && res.status !== 202) {
+        if (data?.error) {
           throw new Error(data?.error || "Could not finalize booking");
         }
 
@@ -150,7 +191,11 @@ export default function BookingConfirmationPage() {
           }
           return; // stop polling
         }
-
+        if (status === "paid" && !freeConfirmTriedRef.current) {
+          freeConfirmTriedRef.current = true;
+          await confirmNow(draftId); // no session/PI needed
+          return; // let next poll pick up any state change
+        }
         // keep polling while not finalized (up to ~48s)
         if (tries < 12) {
           timerRef.current = window.setTimeout(() => {
