@@ -86,7 +86,7 @@ export async function GET(req) {
 
     // 2) Load confirmed/paid bookings for these slots
     const { data: bRows, error: bErr } = await supa
-      .from("Booking")
+      .from("booking")
       .select("scheduleSlotId, status, numberOfPeople, counts")
       .in("scheduleSlotId", slotIds);
     if (bErr) throw bErr;

@@ -70,7 +70,7 @@ export async function GET() {
     let rowsByUserId = [];
     if (appUser?.id) {
       const { data, error } = await admin
-        .from("Booking")
+        .from("booking")
         .select(SELECT_BOOKING)
         .eq("userId", appUser.id)
         .order("createdAt", { ascending: false });
@@ -85,7 +85,7 @@ export async function GET() {
     let rowsByEmail = [];
     if (authEmail) {
       const { data, error } = await admin
-        .from("Booking")
+        .from("booking")
         .select(SELECT_BOOKING)
         .ilike("primary_contact->>email", authEmail)
         .order("createdAt", { ascending: false });

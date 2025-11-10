@@ -131,7 +131,7 @@ export async function POST(req) {
     };
 
     const { data: booking, error } = await supa
-      .from("Booking")
+      .from("booking")
       .insert(row)
       .select(
         `

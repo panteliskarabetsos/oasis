@@ -1,103 +1,62 @@
-// src/app/api/admin/invoices2/[id]/pdf/route.js
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
+// FILE: src/lib/pdf/buildInvoicePdf.js
 import "server-only";
-import { NextResponse } from "next/server";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { createSupabaseServer } from "@/lib/supabase/server";
 import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
 import fs from "node:fs/promises";
 import path from "node:path";
-
-/* ───────── helpers ───────── */
-const ok = (d, s = 200, headers = {}) =>
-  new NextResponse(d, { status: s, headers });
-const bad = (m, s = 400) =>
-  ok(JSON.stringify({ error: m }), s, {
-    "content-type": "application/json; charset=utf-8",
-  });
 
 const UC = (s, d = "") => String(s ?? d).toUpperCase();
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const A4 = [595.28, 841.89];
 
-const parseJSON = (v, fallback = {}) => {
-  if (!v) return fallback;
-  if (typeof v === "object") return v;
-  try {
-    return JSON.parse(v);
-  } catch {
-    return fallback;
-  }
-};
-const parseArray = (v) => (Array.isArray(v) ? v : parseJSON(v, []));
+const money = (n, ccy = "EUR") =>
+  new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: UC(ccy),
+    maximumFractionDigits: 2,
+  }).format(Number(n || 0));
 
-function formatInv(series, number) {
-  return `${UC(series)}-${String(number).padStart(5, "0")}`;
-}
+const formatInv = (series, number) =>
+  `${UC(series)}-${String(number).padStart(5, "0")}`;
 
-async function requireAdmin() {
-  const supa = await createSupabaseServer();
-  const {
-    data: { user },
-  } = await supa.auth.getUser();
-  if (!user) return { error: true, response: bad("Unauthorized", 401) };
-  const { data: row, error } = await supa
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (error || (row?.role ?? "user") !== "admin")
-    return { error: true, response: bad("Forbidden", 403) };
-  return { error: false };
-}
-
-/* Try to embed a brand logo (PNG/JPG) */
+/* ---------------- logo helpers ---------------- */
 async function tryEmbedLogo(pdf, seller) {
   const candidates = [];
   if (seller?.logoUrl) candidates.push(seller.logoUrl);
   if (process.env.BRAND_LOGO_URL) candidates.push(process.env.BRAND_LOGO_URL);
-
   const pub = path.join(process.cwd(), "public");
-  candidates.push(path.join(pub, "brand", "logo1.png"));
-  candidates.push(path.join(pub, "logo1.png"));
-  candidates.push(path.join(pub, "brand", "logo1.jpg"));
-  candidates.push(path.join(pub, "logo1.jpg"));
-
+  candidates.push(
+    path.join(pub, "brand-logo.png"),
+    path.join(pub, "logo.png"),
+    path.join(pub, "brand-logo.jpg"),
+    path.join(pub, "logo.jpg")
+  );
   for (const src of candidates) {
     try {
+      let bytes;
       if (/^https?:\/\//i.test(src)) {
         const res = await fetch(src);
         if (!res.ok) continue;
-        const ab = await res.arrayBuffer();
-        const bytes = new Uint8Array(ab);
-        const ct = res.headers.get("content-type") || "";
-        if (ct.includes("png") || (bytes[0] === 0x89 && bytes[1] === 0x50)) {
-          return { img: await pdf.embedPng(bytes), type: "png" };
-        }
-        if (
-          ct.includes("jpeg") ||
-          ct.includes("jpg") ||
-          (bytes[0] === 0xff && bytes[1] === 0xd8)
-        ) {
-          return { img: await pdf.embedJpg(bytes), type: "jpg" };
-        }
+        bytes = new Uint8Array(await res.arrayBuffer());
       } else {
-        const buf = await fs.readFile(src);
-        if (buf[0] === 0x89 && buf[1] === 0x50)
-          return { img: await pdf.embedPng(buf), type: "png" };
-        if (buf[0] === 0xff && buf[1] === 0xd8)
-          return { img: await pdf.embedJpg(buf), type: "jpg" };
+        bytes = await fs.readFile(src);
+      }
+      if (bytes?.length >= 2) {
+        if (bytes[0] === 0x89 && bytes[1] === 0x50)
+          return { img: await pdf.embedPng(bytes) };
+        if (bytes[0] === 0xff && bytes[1] === 0xd8)
+          return { img: await pdf.embedJpg(bytes) };
       }
     } catch {}
   }
   return null;
 }
 
-/* Basic soft wrap */
-function wrapLines(text, font, size, maxWidth, maxLines = 3) {
-  const words = String(text || "").split(/\s+/);
+/* ---------------- text helpers ---------------- */
+function wrapLines(text, font, size, maxWidth, maxLines = 2) {
+  const words = String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   const lines = [];
   let cur = "";
   for (const w of words) {
@@ -106,282 +65,137 @@ function wrapLines(text, font, size, maxWidth, maxLines = 3) {
     else {
       if (cur) lines.push(cur);
       cur = w;
-      if (lines.length === maxLines - 1) break;
+      if (lines.length >= maxLines - 1) break;
     }
   }
-  if (lines.length < maxLines && cur) lines.push(cur);
-  if (lines.length === maxLines && words.length > 0) {
+  if (cur) lines.push(cur);
+  if (lines.length > maxLines) lines.length = maxLines;
+  if (lines.length === maxLines && words.length) {
     let last = lines[lines.length - 1];
-    const ell = "…";
-    while (font.widthOfTextAtSize(last + ell, size) > maxWidth && last.length) {
+    while (font.widthOfTextAtSize(last + "…", size) > maxWidth && last.length)
       last = last.slice(0, -1);
-    }
-    lines[lines.length - 1] = last + ell;
+    lines[lines.length - 1] = last + "…";
   }
   return lines;
 }
 
-/* Wrapped info block */
-function drawBlockWrapped(
-  page,
-  { title, rows, x, y0, font, bold, ink, sub, maxWidth }
-) {
-  page.drawText(title, { x, y: y0, size: 12, font: bold, color: ink });
-  let y = y0 - 16;
-  const lineH = 12;
-  for (const raw of rows) {
-    const parts = wrapLines(String(raw || ""), font, 10, maxWidth, 4);
-    for (const part of parts) {
-      page.drawText(part, { x, y, size: 10, font, color: sub });
-      y -= lineH;
-    }
-    y -= 2;
-  }
-  return y - 2;
-}
+/* ---------------- items normalization ----------------
+   Accepts any of:
+   - { line_subtotal, line_tax, line_total }
+   - { base_amount, tax_amount, total_amount }
+   - or computes from quantity/unit_price/vat_rate.
+------------------------------------------------------ */
+function normalizeItems(items = [], currency = "EUR") {
+  const norm = [];
+  for (const raw of items) {
+    const qty = Math.max(1, Number(raw.quantity ?? raw.qty ?? 1));
+    const unit = Number(
+      raw.unit_price ?? raw.unit ?? raw.amount ?? raw.unit_amount ?? 0
+    );
+    const vatRate = Number(
+      raw.vat_rate ?? raw.vatPercent ?? raw.vat_pct ?? raw.vat ?? 0
+    );
+    const desc =
+      String(
+        raw.description ??
+          raw.desc ??
+          raw.label ??
+          raw.name ??
+          raw.title ??
+          raw.itemName ??
+          raw.productName ??
+          ""
+      ).trim() || "Item";
 
-/* ───────── GET /api/admin/invoices2/[id]/pdf ───────── */
-export async function GET(req, ctx) {
-  // Next 15: params must be awaited
-  const { id: idParam } = await ctx.params;
-  const id = Number(idParam);
-  if (!Number.isFinite(id) || id <= 0) return bad("Invalid invoice id", 400);
+    // prefer DB-computed fields
+    let base = Number(raw.line_subtotal ?? raw.base_amount ?? NaN);
+    let tax = Number(raw.line_tax ?? raw.tax_amount ?? NaN);
+    let total = Number(raw.line_total ?? raw.total_amount ?? NaN);
 
-  const gate = await requireAdmin();
-  if (gate?.error) return gate.response;
+    // compute if missing or NaN
+    if (!Number.isFinite(base))
+      base = r2(qty * unit * (1 - Number(raw.discount_percent ?? 0) / 100));
+    if (!Number.isFinite(tax)) tax = r2(base * (vatRate / 100));
+    if (!Number.isFinite(total)) total = r2(base + tax);
 
-  const admin = createSupabaseAdmin();
-  if (!admin) return bad("Server not configured", 500);
-
-  // Pull extra meta so we can render everything
-  const { data: inv, error: e1 } = await admin
-    .from("invoice")
-    .select(
-      [
-        "id",
-        "series",
-        "number",
-        "status",
-        "currency",
-        "issue_date",
-        "due_date",
-        "seller",
-        "buyer",
-        "notes",
-        "subtotal",
-        "tax_total",
-        "total",
-        "taxes",
-        "payment_method",
-        "paid_at",
-        "booking_id",
-        "stripe_payment_intent_id",
-        "stripe_invoice_id",
-        "mark",
-      ].join(", ")
-    )
-    .eq("id", id)
-    .maybeSingle();
-
-  if (e1) return bad(e1.message || "Failed to load invoice", 500);
-  if (!inv) return bad("Invoice not found", 404);
-
-  // Lines
-  let items = [];
-  try {
-    const { data: lines, error: e2 } = await admin
-      .from("invoice_line")
-      .select(
-        "id, description, quantity, unit_price, vat_rate, discount_percent, line_subtotal, line_tax, line_total"
-      )
-      .eq("invoice_id", id)
-      .order("id", { ascending: true });
-
-    if (e2) throw e2;
-
-    items = (lines || []).map((l) => {
-      const qty = Math.max(1, Number(l?.quantity ?? 1));
-      const unit = Number(l?.unit_price ?? 0);
-      const vat = Math.max(0, Number(l?.vat_rate ?? 0));
-      const base = Number(l?.line_subtotal ?? r2(qty * unit));
-      const tax = Number(l?.line_tax ?? r2(base * (vat / 100)));
-      const tot = Number(l?.line_total ?? r2(base + tax));
-      return {
-        description: String(l?.description || "Item"),
-        quantity: qty,
-        unit_price: unit,
-        vat_rate: vat,
-        base_amount: base,
-        tax_amount: tax,
-        total_amount: tot,
-        discount_percent: Number(l?.discount_percent ?? 0),
-      };
+    norm.push({
+      description: desc,
+      quantity: qty,
+      unit_price: unit,
+      vat_rate: vatRate,
+      line_subtotal: base,
+      line_tax: tax,
+      line_total: total,
+      // keep originals for reference
+      _currency: currency,
     });
-  } catch {
-    items = [];
   }
-
-  const taxesArr = parseArray(inv.taxes);
-  if (!items.length) {
-    const base = Number(inv.subtotal || 0);
-    const tax = Number(inv.tax_total || 0);
-    let vatPct = 0;
-    if (Array.isArray(taxesArr) && taxesArr.length === 1) {
-      vatPct =
-        Number(
-          taxesArr[0]?.rate ??
-            taxesArr[0]?.percent ??
-            taxesArr[0]?.vat_rate ??
-            0
-        ) || 0;
-    } else if (base > 0) {
-      vatPct = r2((tax / base) * 100);
-    }
-    items = [
-      {
-        description: "Invoice total",
-        quantity: 1,
-        unit_price: base || Number(inv.total || 0),
-        vat_rate: vatPct,
-        base_amount: base || Number(inv.total || 0),
-        tax_amount: tax || 0,
-        total_amount: Number(inv.total || 0),
-      },
-    ];
-  }
-
-  // Seller: prefer inv.seller if present
-  const sellerDefault = {
-    name: "Oasis",
-    email: "info@youroasis.gr",
-    phone: "",
-    logoUrl: process.env.BRAND_LOGO_URL || undefined,
-    address: {
-      line1: "Chania st. 12",
-      city: "Chania",
-      state: "Crete",
-      postal_code: "73100",
-      country: "GR",
-    },
-  };
-  const sellerFromInv = parseJSON(inv.seller, {});
-  const seller = {
-    ...sellerDefault,
-    ...sellerFromInv,
-    address: {
-      ...(sellerDefault.address || {}),
-      ...(sellerFromInv.address || {}),
-    },
-  };
-
-  const pdfBytes = await buildPdf({ inv, items, seller, taxesArr });
-  const filename = `${formatInv(inv.series, inv.number)}.pdf`;
-
-  // inline vs download
-  const url = new URL(req.url);
-  const dlParam =
-    url.searchParams.get("dl") ?? url.searchParams.get("download");
-  const shouldDownload =
-    typeof dlParam === "string" &&
-    /^(1|true|yes|y|attachment|download)$/i.test(dlParam);
-
-  return ok(Buffer.from(pdfBytes), 200, {
-    "content-type": "application/pdf",
-    "content-disposition": `${
-      shouldDownload ? "attachment" : "inline"
-    }; filename="${filename}"`,
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-  });
+  return norm.length ? norm : null;
 }
 
-/* ───────── PDF builder (branded header + logo) ───────── */
-async function buildPdf({ inv, items, seller, taxesArr = [] }) {
+function fallbackSingleItem(inv = {}) {
+  const base = Number(inv?.subtotal ?? 0);
+  const tax = Number(inv?.tax_total ?? 0);
+  const tot = Number(inv?.total ?? base + tax);
+  const vatRate = base > 0 ? r2((tax / base) * 100) : 0;
+  return [
+    {
+      description: "Services",
+      quantity: 1,
+      unit_price: base || tot,
+      vat_rate: vatRate,
+      line_subtotal: base || tot,
+      line_tax: tax,
+      line_total: tot,
+    },
+  ];
+}
+
+/* =================== MAIN BUILDER =================== */
+export default async function buildInvoicePdf({
+  inv = {},
+  items = [],
+  seller = {},
+}) {
   const pdf = await PDFDocument.create();
   let page = pdf.addPage(A4);
   let { width, height } = page.getSize();
   const newPage = () => {
     page = pdf.addPage(A4);
     ({ width, height } = page.getSize());
+    drawTableHeader(); // repeat on each new page
+    drawFooterPageNo();
   };
 
-  // Fonts: try Unicode (Greek), fallback to Helvetica
-  let font, bold;
-  try {
-    const fontsDir = path.join(process.cwd(), "public", "fonts");
-    const regularBytes = await fs.readFile(
-      path.join(fontsDir, "NotoSans-Regular.ttf")
-    );
-    const boldBytes = await fs.readFile(
-      path.join(fontsDir, "NotoSans-Bold.ttf")
-    );
-    font = await pdf.embedFont(regularBytes, { subset: true });
-    bold = await pdf.embedFont(boldBytes, { subset: true });
-  } catch {
-    font = await pdf.embedFont(StandardFonts.Helvetica);
-    bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  }
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
-  // Palette & utils
-  const brand = rgb(0x6f / 255, 0x5a / 255, 0x3a / 255);
+  /* palette */
+  const brand = rgb(0x6f / 255, 0x5a / 255, 0x3a / 255); // Oasis brown
   const ink = rgb(0.09, 0.08, 0.07);
   const sub = rgb(0.42, 0.4, 0.36);
-  const line = rgb(0.92, 0.91, 0.89);
+  const divider = rgb(0.92, 0.91, 0.89);
   const panel = rgb(0.99, 0.98, 0.96);
-  const padding = 40;
+  const pad = 40;
 
-  const CURRENCY = UC(inv.currency || "EUR");
-  const fmtMoney = new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: CURRENCY,
-    maximumFractionDigits: 2,
-  });
-  const money = (n) => fmtMoney.format(Number(n || 0));
-
-  const fmtDate = new Intl.DateTimeFormat("el-GR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-  const fmtDateTime = new Intl.DateTimeFormat("el-GR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  const asDateLabel = (v) => {
-    const d = new Date(v);
-    return Number.isNaN(+d) ? String(v ?? "—") : fmtDate.format(d);
-  };
-  const asDateTimeLabel = (v) => {
-    const d = new Date(v);
-    return Number.isNaN(+d) ? String(v ?? "—") : fmtDateTime.format(d);
-  };
-
-  // Header band
+  /* header band */
   page.drawRectangle({
     x: 0,
-    y: height - 120,
+    y: height - 130,
     width,
-    height: 120,
+    height: 130,
     color: brand,
   });
-  let logoObj = null;
-  try {
-    logoObj = await tryEmbedLogo(pdf, seller);
-  } catch {}
+  let leftX = pad;
+  const titleY = height - 72;
 
-  let leftX = padding;
-  const titleY = height - 70;
-  if (logoObj?.img) {
-    const maxW = 140;
-    const maxH = 48;
-    const { width: iw, height: ih } = logoObj.img.size();
-    const scale = Math.min(maxW / iw, maxH / ih, 1);
-    const w = iw * scale;
-    const h = ih * scale;
-    const y = height - 56 - h / 2;
+  const logo = await tryEmbedLogo(pdf, seller);
+  if (logo?.img) {
+    const { width: iw, height: ih } = logo.img.size();
+    const scale = Math.min(140 / iw, 50 / ih, 1);
+    const w = iw * scale,
+      h = ih * scale,
+      y = height - 62 - h / 2;
     page.drawRectangle({
       x: leftX - 6,
       y: y - 6,
@@ -390,18 +204,18 @@ async function buildPdf({ inv, items, seller, taxesArr = [] }) {
       color: rgb(1, 1, 1),
       opacity: 0.08,
     });
-    page.drawImage(logoObj.img, { x: leftX, y, width: w, height: h });
+    page.drawImage(logo.img, { x: leftX, y, width: w, height: h });
     leftX += w + 16;
   }
 
   page.drawText("INVOICE", {
     x: leftX,
     y: titleY,
-    size: 26,
+    size: 28,
     font: bold,
     color: rgb(1, 1, 1),
   });
-  if (seller?.name) {
+  if (seller?.name)
     page.drawText(seller.name, {
       x: leftX,
       y: titleY - 18,
@@ -410,57 +224,57 @@ async function buildPdf({ inv, items, seller, taxesArr = [] }) {
       color: rgb(1, 1, 1),
       opacity: 0.9,
     });
-  }
 
   const invNo = formatInv(inv.series, inv.number);
-  const right = (text, y, size = 11, f = font, c = rgb(1, 1, 1)) => {
-    const w = f.widthOfTextAtSize(text, size);
-    page.drawText(text, { x: width - padding - w, y, size, font: f, color: c });
+  const rightText = (t, y, s = 11, f = font, c = rgb(1, 1, 1)) => {
+    const w = f.widthOfTextAtSize(t, s);
+    page.drawText(t, { x: width - pad - w, y, size: s, font: f, color: c });
   };
-  right(`No: ${invNo}`, height - 38);
-  const status = UC(inv.status || "");
-  const chipW = Math.ceil(bold.widthOfTextAtSize(status, 9) + 18);
-  page.drawRectangle({
-    x: width - padding - chipW,
-    y: height - 62,
-    width: chipW,
-    height: 18,
-    color: rgb(1, 1, 1),
-  });
-  page.drawText(status, {
-    x: width - padding - chipW + 9,
-    y: height - 59,
-    size: 9,
-    font: bold,
-    color: brand,
-  });
+  rightText(`No: ${invNo}`, height - 38);
 
-  // Watermark by status
-  const watermarks = {
-    PAID: { c: rgb(0.1, 0.6, 0.2), o: 0.08 },
-    CANCELLED: { c: rgb(0.8, 0.2, 0.2), o: 0.08 },
-    DRAFT: { c: rgb(0.2, 0.3, 0.7), o: 0.06 },
-  };
-  const wm = watermarks[status];
-  if (wm) {
-    const T = status;
-    const sz = 96;
-    const w = bold.widthOfTextAtSize(T, sz);
-    page.drawText(T, {
-      x: width / 2 - w / 2,
-      y: height / 2,
-      size: sz,
+  // status chip
+  const status = UC(inv.status || "");
+  if (status) {
+    const chipW = Math.ceil(bold.widthOfTextAtSize(status, 9) + 18);
+    page.drawRectangle({
+      x: width - pad - chipW,
+      y: height - 62,
+      width: chipW,
+      height: 18,
+      color: rgb(1, 1, 1),
+    });
+    page.drawText(status, {
+      x: width - pad - chipW + 9,
+      y: height - 59,
+      size: 9,
       font: bold,
-      color: wm.c,
-      opacity: wm.o,
+      color: brand,
+    });
+  }
+  if (status === "PAID") {
+    page.drawText("PAID", {
+      x: width / 2 - bold.widthOfTextAtSize("PAID", 100) / 2,
+      y: height / 2,
+      size: 100,
+      font: bold,
+      color: rgb(0.7, 0.2, 0.2),
+      opacity: 0.08,
       rotate: degrees(25),
     });
   }
 
-  // Addresses
-  const yTop = height - 150;
+  /* parties block */
+  const yTop = height - 160;
   const colGap = 300;
-  const blockMaxWidth = 260;
+  const drawBlock = (title, lines, x, y0) => {
+    page.drawText(title, { x, y: y0, size: 12, font: bold, color: ink });
+    let y = y0 - 12;
+    for (const ln of lines) {
+      y -= 12;
+      page.drawText(ln, { x, y, size: 10, font, color: sub });
+    }
+    return y - 2;
+  };
 
   const sa = seller.address || {};
   const sellerLines = [
@@ -472,166 +286,100 @@ async function buildPdf({ inv, items, seller, taxesArr = [] }) {
       .join(", "),
   ].filter(Boolean);
 
-  const buyerObj = parseJSON(inv.buyer);
-  const ba = buyerObj.address || {};
-  const addr = [
-    ba.line1 ?? buyerObj.address_line1 ?? buyerObj.address1,
-    ba.line2 ?? buyerObj.address_line2 ?? buyerObj.address2,
-    ba.city ?? buyerObj.city,
-    ba.state ?? buyerObj.region ?? buyerObj.province ?? buyerObj.state,
-    ba.postal_code ?? buyerObj.postcode ?? buyerObj.zip ?? buyerObj.postalCode,
-    ba.country ?? buyerObj.country ?? buyerObj.country_code,
-  ]
-    .filter(Boolean)
-    .join(", ");
-
+  const buyer = inv.buyer || {};
+  const ba = buyer.address || {};
   const buyerLines = [
-    buyerObj.business_name ||
-      buyerObj.company ||
-      buyerObj.company_name ||
-      buyerObj.name ||
-      "",
-    buyerObj.email || "",
-    buyerObj.phone || buyerObj.telephone || buyerObj.mobile || "",
-    buyerObj.vat || buyerObj.afm || buyerObj.tax_id || buyerObj.taxNumber || "",
-    addr,
+    buyer.business_name || buyer.name || "",
+    buyer.email || "",
+    buyer.phone || "",
+    buyer.vat ? `VAT: ${buyer.vat}` : "",
+    [ba.line1, ba.line2, ba.city, ba.state, ba.postal_code, ba.country]
+      .filter(Boolean)
+      .join(", "),
   ].filter(Boolean);
 
-  const leftEndY = drawBlockWrapped(page, {
-    title: "From",
-    rows: sellerLines,
-    x: padding,
-    y0: yTop,
-    font,
-    bold,
-    ink,
-    sub,
-    maxWidth: blockMaxWidth,
-  });
-  const rightEndY = drawBlockWrapped(page, {
-    title: "Bill To",
-    rows: buyerLines,
-    x: padding + colGap,
-    y0: yTop,
-    font,
-    bold,
-    ink,
-    sub,
-    maxWidth: blockMaxWidth,
-  });
+  const leftEndY = drawBlock("From", sellerLines, pad, yTop);
+  const rightEndY = drawBlock("Bill To", buyerLines, pad + colGap, yTop);
 
-  // Meta panel (4-col grid)
+  /* meta card */
   const metaY = Math.min(leftEndY, rightEndY) - 10;
-  const cardX = padding;
-  const cardW = width - padding * 2;
-  const cardH = 56;
-
+  const cardH = 52;
   page.drawRectangle({
-    x: cardX,
+    x: pad,
     y: metaY - cardH,
-    width: cardW,
+    width: width - pad * 2,
     height: cardH,
     color: panel,
   });
 
+  const cols = 4;
+  const inner = width - pad * 2 - 40;
+  const cw = inner / cols;
+  const xs = Array.from({ length: cols }, (_, i) => pad + 20 + i * cw);
   const label = (t, x) =>
     page.drawText(t, { x, y: metaY - 14, size: 9, font: bold, color: sub });
-  const value = (t, x) =>
+  const val = (t, x) =>
     page.drawText(t, { x, y: metaY - 28, size: 11, font, color: ink });
 
-  const innerPad = 20;
-  const gapMeta = 24;
-  const colWMeta = (cardW - innerPad * 2 - gapMeta * 3) / 4;
-  const colX = [
-    cardX + innerPad,
-    cardX + innerPad + colWMeta + gapMeta,
-    cardX + innerPad + (colWMeta + gapMeta) * 2,
-    cardX + innerPad + (colWMeta + gapMeta) * 3,
-  ];
+  const issue = new Date(inv.issue_date);
+  const due = inv.due_date ? new Date(inv.due_date) : null;
+  label("Invoice No", xs[0]);
+  val(invNo, xs[0]);
+  label("Issue Date", xs[1]);
+  val(
+    isNaN(issue) ? String(inv.issue_date) : issue.toLocaleDateString(),
+    xs[1]
+  );
+  label("Due Date", xs[2]);
+  val(due ? due.toLocaleDateString() : "—", xs[2]);
+  label("Currency", xs[3]);
+  val(UC(inv.currency || "EUR"), xs[3]);
 
-  label("Invoice No", colX[0]);
-  value(invNo, colX[0]);
-  label("Issue Date", colX[1]);
-  value(asDateLabel(inv.issue_date), colX[1]);
-  label("Due Date", colX[2]);
-  value(inv.due_date ? asDateLabel(inv.due_date) : "—", colX[2]);
-  label("Currency", colX[3]);
-  value(CURRENCY, colX[3]);
-
-  /* =======================
-     TABLE LAYOUT — no overlap
-     ======================= */
-  let y = metaY - cardH - 28;
-
-  const tableX = padding;
-  const tableW = width - padding * 2;
-
-  // fixed widths with gaps to guarantee separation
-  const qtyW = 44;
-  const unitW = 96;
-  const vatW = 56;
-  const totalW = 104;
-  const gap = 10;
-
-  const descW = tableW - (qtyW + unitW + vatW + totalW + gap * 4); // leftover for description
-
-  const COL = {
-    desc: { x: tableX, w: descW },
-    qty: { x: tableX + descW + gap, w: qtyW },
-    unit: { x: tableX + descW + gap + qtyW + gap, w: unitW },
-    vat: {
-      x: tableX + descW + gap + qtyW + gap + unitW + gap,
-      w: vatW,
-    },
-    total: {
-      x: tableX + descW + gap + qtyW + gap + unitW + gap + vatW + gap,
-      w: totalW,
-    },
+  /* table positions */
+  let y = metaY - cardH - 26;
+  const col = {
+    desc: pad,
+    qty: 330,
+    unit: 400,
+    vat: 470,
+    total: width - pad - 70,
   };
-
   const hline = (yy) =>
     page.drawLine({
-      start: { x: tableX, y: yy },
-      end: { x: tableX + tableW, y: yy },
+      start: { x: pad, y: yy },
+      end: { x: width - pad, y: yy },
       thickness: 0.6,
-      color: line,
+      color: divider,
     });
 
-  const drawHeader = () => {
+  function drawTableHeader() {
     hline(y + 14);
-    // left header
     page.drawText("Description", {
-      x: COL.desc.x,
+      x: col.desc,
       y,
       size: 10,
       font: bold,
       color: ink,
     });
-    // right headers aligned to column right edges
-    const hRight = (label, col) => {
-      const w = bold.widthOfTextAtSize(label, 10);
-      page.drawText(label, {
-        x: col.x + col.w - w,
-        y,
-        size: 10,
-        font: bold,
-        color: ink,
-      });
-    };
-    hRight("Qty", COL.qty);
-    hRight("Unit Price", COL.unit);
-    hRight("VAT%", COL.vat);
-    hRight("Line Total", COL.total);
+    page.drawText("Qty", { x: col.qty, y, size: 10, font: bold, color: ink });
+    page.drawText("Unit", { x: col.unit, y, size: 10, font: bold, color: ink });
+    page.drawText("VAT%", { x: col.vat, y, size: 10, font: bold, color: ink });
+    page.drawText("Line Total", {
+      x: col.total,
+      y,
+      size: 10,
+      font: bold,
+      color: ink,
+    });
     hline(y - 2);
     y -= 18;
-  };
+  }
+  drawTableHeader();
 
-  drawHeader();
-
-  const drawRightCell = (text, col, f = font, c = sub, size = 10) => {
+  const rightCell = (text, xRight, widthCol, size = 10, f = font, c = sub) => {
     const w = f.widthOfTextAtSize(text, size);
     page.drawText(text, {
-      x: col.x + col.w - w,
+      x: xRight + (widthCol - w),
       y,
       size,
       font: f,
@@ -639,186 +387,126 @@ async function buildPdf({ inv, items, seller, taxesArr = [] }) {
     });
   };
 
-  const bottomPad = 160;
+  // normalize items (critical fix)
+  const itemsNorm =
+    normalizeItems(items, inv.currency) || fallbackSingleItem(inv);
+
+  const bottomPad = 170;
   let rowIndex = 0;
 
-  for (const it of items) {
-    // zebra
-    if (rowIndex % 2 === 1) {
+  for (const it of itemsNorm) {
+    const zebra = rowIndex % 2 === 1;
+    const descMax = col.qty - col.desc - 12;
+    const lines = wrapLines(it.description, font, 10, descMax, 2);
+
+    if (zebra)
       page.drawRectangle({
-        x: tableX,
+        x: pad,
         y: y - 2,
-        width: tableW,
-        height: 16,
+        width: width - pad * 2,
+        height: 16 * lines.length,
         color: panel,
       });
-    }
 
-    // description (wrap up to 2 lines within descW)
-    const descLines = wrapLines(it.description, font, 10, COL.desc.w - 4, 2);
-
-    page.drawText(descLines[0] || "", {
-      x: COL.desc.x,
+    // description + second line faint
+    page.drawText(lines[0] || "", {
+      x: col.desc,
       y,
       size: 10,
       font,
       color: ink,
     });
-
-    drawRightCell(String(it.quantity), COL.qty);
-    drawRightCell(money(it.unit_price), COL.unit);
-    drawRightCell(String(r2(it.vat_rate)), COL.vat);
-    drawRightCell(money(it.total_amount), COL.total, bold, ink);
-
-    let rowH = 16;
-    if (descLines.length > 1) {
-      page.drawText(descLines[1], {
-        x: COL.desc.x,
+    if (lines[1]) {
+      page.drawText(lines[1], {
+        x: col.desc,
         y: y - 12,
         size: 10,
         font,
         color: sub,
       });
-      rowH = 24;
     }
 
+    // numbers
+    page.drawText(String(it.quantity), {
+      x: col.qty,
+      y,
+      size: 10,
+      font,
+      color: sub,
+    });
+    rightCell(money(it.unit_price, inv.currency), col.unit, 60);
+    rightCell(String(r2(it.vat_rate)), col.vat, 50);
+    rightCell(money(it.line_total, inv.currency), col.total, 70, 10, bold, ink);
+
+    // row height
+    const rowH = lines[1] ? 24 : 16;
     y -= rowH;
     rowIndex++;
 
+    // page break
     if (y < bottomPad) {
+      // footer before breaking
+      drawTotalsPanel(true);
+      // now actually add the page & reset y
       newPage();
-      y = height - 90;
-      drawHeader();
-      rowIndex = 0;
+      y = height - 120;
     }
   }
 
-  // Totals card (right)
-  y -= 6;
-  hline(y + 12);
-  const cardX2 = width - padding - 240;
-  const cardW2 = 240;
-  const cardH2 = 78;
-  page.drawRectangle({
-    x: cardX2,
-    y: y - cardH2,
-    width: cardW2,
-    height: cardH2,
-    color: panel,
-  });
-  const row = (label, val, strong = false) => {
-    y -= 16;
-    page.drawText(label, {
-      x: cardX2 + 12,
-      y,
-      size: 10,
-      font: strong ? bold : font,
-      color: ink,
-    });
-    const f = strong ? bold : font;
-    const w = f.widthOfTextAtSize(val, 10);
-    page.drawText(val, {
-      x: cardX2 + cardW2 - 12 - w,
-      y,
-      size: 10,
-      font: f,
-      color: ink,
-    });
-  };
-  row("Subtotal", money(inv.subtotal ?? 0));
-  row("VAT", money(inv.tax_total ?? 0));
-  row("Total", money(inv.total ?? 0), true);
-
-  // Tax breakdown (optional)
-  const hasTaxBreakdown = Array.isArray(taxesArr) && taxesArr.length > 0;
-  if (hasTaxBreakdown) {
-    const txY0 = y - 8;
-    page.drawText("Tax breakdown", {
-      x: padding,
-      y: txY0,
-      size: 10,
-      font: bold,
-      color: ink,
-    });
-    let ty = txY0 - 14;
-    for (const t of taxesArr) {
-      const name =
-        t?.name ??
-        t?.label ??
-        `VAT ${String(t?.rate ?? t?.percent ?? t?.vat_rate ?? 0)}%`;
-      const rate = Number(t?.rate ?? t?.percent ?? t?.vat_rate ?? 0);
-      const amt = Number(t?.amount ?? t?.tax ?? t?.value ?? 0);
-      const lineText = `${name} (${rate}%)`;
-      const w = font.widthOfTextAtSize(lineText, 10);
-      page.drawText(lineText, {
-        x: padding + 12,
-        y: ty,
-        size: 10,
-        font,
-        color: sub,
+  /* totals panel */
+  function drawTotalsPanel(drawCard = false) {
+    if (drawCard) hline(y + 12);
+    const cardX = width - pad - 260,
+      cardW = 260,
+      cardH2 = 84;
+    if (drawCard)
+      page.drawRectangle({
+        x: cardX,
+        y: y - cardH2,
+        width: cardW,
+        height: cardH2,
+        color: panel,
       });
-      const v = fmtMoney.format(amt);
-      const vw = font.widthOfTextAtSize(v, 10);
-      page.drawText(v, {
-        x: padding + 12 + 280 - vw,
-        y: ty,
+
+    const totRow = (label, valTxt, b = false) => {
+      y -= 18;
+      page.drawText(label, {
+        x: cardX + 12,
+        y,
         size: 10,
-        font,
-        color: sub,
+        font: b ? bold : font,
+        color: ink,
       });
-      ty -= 14;
-      if (ty < 70) {
-        newPage();
-        y = height - 70;
-      }
-    }
-    y = Math.min(y, ty);
+      const f = b ? bold : font;
+      const tw = f.widthOfTextAtSize(valTxt, 10);
+      page.drawText(valTxt, {
+        x: cardX + cardW - 12 - tw,
+        y,
+        size: 10,
+        font: f,
+        color: ink,
+      });
+    };
+
+    totRow("Subtotal", money(inv.subtotal ?? 0, inv.currency));
+    totRow("VAT", money(inv.tax_total ?? 0, inv.currency));
+    totRow("Total", money(inv.total ?? 0, inv.currency), true);
   }
 
-  // Payment details (optional)
-  const payLines = [];
-  if (inv.payment_method)
-    payLines.push(`Payment method: ${String(inv.payment_method)}`);
-  if (inv.paid_at) payLines.push(`Paid at: ${asDateTimeLabel(inv.paid_at)}`);
-  if (inv.booking_id) payLines.push(`Booking ID: ${String(inv.booking_id)}`);
-  if (inv.stripe_payment_intent_id)
-    payLines.push(`Stripe PI: ${String(inv.stripe_payment_intent_id)}`);
-  if (inv.stripe_invoice_id)
-    payLines.push(`Stripe Invoice: ${String(inv.stripe_invoice_id)}`);
-  if (inv.mark) payLines.push(`Mark: ${String(inv.mark)}`);
-
-  if (payLines.length) {
-    y -= 10;
-    page.drawText("Payment details", {
-      x: padding,
-      y,
-      size: 10,
-      font: bold,
-      color: ink,
-    });
-    y -= 12;
-    for (const ln of payLines) {
-      const parts = wrapLines(ln, font, 10, width - padding * 2, 3);
-      for (const part of parts) {
-        page.drawText(part, { x: padding + 12, y, size: 10, font, color: sub });
-        y -= 12;
-        if (y < 60) {
-          newPage();
-          y = height - 60;
-        }
-      }
-    }
+  if (y < 120) {
+    newPage();
+    y = height - 120;
   }
+  drawTotalsPanel(true);
 
-  // Notes
+  /* notes */
   if (inv.notes) {
-    y -= 6;
-    page.drawText("Notes", { x: padding, y, size: 10, font: bold, color: ink });
+    y -= 20;
+    page.drawText("Notes", { x: pad, y, size: 10, font: bold, color: ink });
     y -= 14;
-    const maxWidth = width - padding * 2;
-    const lines = wrapLines(String(inv.notes), font, 10, maxWidth, 20);
+    const lines = wrapLines(String(inv.notes), font, 10, width - pad * 2, 8);
     for (const ln of lines) {
-      page.drawText(ln, { x: padding, y, size: 10, font, color: sub });
+      page.drawText(ln, { x: pad, y, size: 10, font, color: sub });
       y -= 12;
       if (y < 60) {
         newPage();
@@ -827,15 +515,35 @@ async function buildPdf({ inv, items, seller, taxesArr = [] }) {
     }
   }
 
-  // Footer
+  /* footer */
+  function drawFooterPageNo() {
+    const pageIndex = pdf.getPageIndices().length;
+    const pNo = `Page ${pageIndex}`;
+    const tw = font.widthOfTextAtSize(pNo, 9);
+    page.drawText(pNo, {
+      x: width - pad - tw,
+      y: 24,
+      size: 9,
+      font,
+      color: sub,
+    });
+  }
+
   page.drawText("This is a first-party invoice (no AADE submission yet).", {
-    x: padding,
+    x: pad,
     y: 40,
     size: 9,
     font,
     color: sub,
   });
-  page.drawText(seller.name, { x: padding, y: 28, size: 9, font, color: sub });
+  page.drawText(seller.name || "", {
+    x: pad,
+    y: 28,
+    size: 9,
+    font,
+    color: sub,
+  });
+  drawFooterPageNo();
 
   return pdf.save();
 }

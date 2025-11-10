@@ -41,7 +41,7 @@ async function computeUsage(admin, slotIds) {
 
   // Sum seats from bookings (all rows are confirmed by definition)
   const { data: bookings, error: bookErr } = await admin
-    .from("Booking")
+    .from("booking")
     .select("scheduleSlotId, numberOfPeople")
     .in("scheduleSlotId", idList);
 
@@ -355,7 +355,7 @@ export async function DELETE(req) {
 
   // Any confirmed bookings?
   const { count: bookingCount, error: bookErr } = await admin
-    .from("Booking")
+    .from("booking")
     .select("id", { count: "exact", head: true })
     .eq("scheduleSlotId", id)
     .in("status", COUNT_BOOKING_STATUSES);

@@ -274,7 +274,7 @@ export async function POST(req) {
 
       // Dedupe: if this PI already produced a booking, return it
       const { data: existing, error: exErr } = await supabase
-        .from("Booking")
+        .from("booking")
         .select("id")
         .eq("stripePaymentIntentId", piId)
         .maybeSingle();
@@ -430,7 +430,7 @@ export async function POST(req) {
     };
 
     const { data: created, error: insertErr } = await supabase
-      .from("Booking")
+      .from("booking")
       .insert(insertPayload)
       .select("id")
       .single();

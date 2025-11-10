@@ -7,7 +7,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 
-const TBL_BOOKING = "Booking";
+const TBL_BOOKING = "booking";
 const TBL_EXPERIENCE = "Experience";
 
 /* ---------------------------------------------

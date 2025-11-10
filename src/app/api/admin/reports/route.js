@@ -111,7 +111,7 @@ export async function GET(req) {
   `;
 
   let bookingsQ = admin
-    .from("Booking")
+    .from("booking")
     .select(bookingSelect)
     .gte("createdAt", from.toISOString())
     .lte("createdAt", to.toISOString())
