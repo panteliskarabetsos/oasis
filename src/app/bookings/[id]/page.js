@@ -53,6 +53,7 @@ export default function BookingDetailsPage({ params }) {
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [downloadingTicket, setDownloadingTicket] = useState(false);
 
   // redirect if no session
   useEffect(() => {
@@ -96,6 +97,41 @@ export default function BookingDetailsPage({ params }) {
       aborted = true;
     };
   }, [user, id]);
+
+  async function handleDownloadTicket() {
+    if (!booking?.id || typeof window === "undefined") return;
+
+    try {
+      setDownloadingTicket(true);
+
+      const res = await fetch(`/api/bookings/${booking.id}/invoice`, {
+        method: "GET",
+      });
+
+      if (!res.ok) {
+        console.error("Failed to download ticket PDF");
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      const ref = getPublicBookingRef(booking) || booking.id;
+
+      a.href = url;
+      a.download = `ticket-${ref}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error downloading ticket:", err);
+    } finally {
+      setDownloadingTicket(false);
+    }
+  }
 
   const when = useMemo(() => (booking ? whenISO(booking) : null), [booking]);
 
@@ -291,15 +327,26 @@ export default function BookingDetailsPage({ params }) {
                 )}
 
                 {/* Actions */}
+                {/* Actions */}
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <button
-                    onClick={() =>
-                      downloadICS(booking, exp, dateObj, durationMin)
-                    }
-                    className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] text-white px-5 py-2 font-medium hover:bg-[#a78b62] transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#8b6f47]"
-                  >
-                    <Download className="w-4 h-4" /> Download .ics
-                  </button>
+                  {booking?.id && (
+                    <button
+                      onClick={handleDownloadTicket}
+                      disabled={downloadingTicket}
+                      className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] text-white px-5 py-2 font-medium hover:bg-[#a78b62] transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#8b6f47]"
+                    >
+                      {downloadingTicket ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" /> Preparing
+                          ticket…
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" /> Download ticket (PDF)
+                        </>
+                      )}
+                    </button>
+                  )}
 
                   <a
                     href={gcalHref}
