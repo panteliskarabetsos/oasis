@@ -36,6 +36,7 @@ import {
   Building2,
   PackagePlus,
   Boxes,
+  ShoppingCart,
 } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
@@ -176,6 +177,14 @@ export default function AdminDashboardPage() {
         desc: "Sell walk-ins & extras in person.",
         onClick: () => go("/admin/pos"),
         keywords: ["pos", "walk-in", "terminal", "in-person", "upsell"],
+      },
+      {
+        key: "e-shop",
+        icon: <ShoppingCart size={20} aria-hidden />,
+        title: "e-Shop",
+        desc: "Manage your online store & product sales.",
+        onClick: () => go("/admin/eshop"),
+        keywords: ["eshop", "products", "online", "inventory", "upsell"],
       },
       {
         key: "vouchers",
