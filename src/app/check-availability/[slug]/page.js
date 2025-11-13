@@ -309,25 +309,10 @@ export default function CheckAvailabilityPage() {
 
   /* Day content with small availability dot */
   const DayContent = (props) => {
-    const { date, activeModifiers } = props;
-    const isSelected = !!activeModifiers?.selected;
-    const hasAvailability =
-      !!activeModifiers?.plenty ||
-      !!activeModifiers?.some ||
-      !!activeModifiers?.few;
-
+    const { children } = props;
     return (
-      <span
-        className={[
-          "relative inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9",
-          "rounded-full text-[13px]",
-          isSelected ? "font-semibold" : hasAvailability ? "font-medium" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-      >
-        {props.children}
-        <DayDot date={date} countsByYMD={countsByYMD} />
+      <span className="relative inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 rounded-full text-[13px]">
+        {children}
       </span>
     );
   };
@@ -489,25 +474,21 @@ export default function CheckAvailabilityPage() {
         <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-8 sm:pt-10">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
             {/* Left: Calendar */}
-            {/* Left: Calendar */}
             <section
-              className={`relative rounded-3xl border border-[#e8e5df] bg-white/95 p-6 sm:p-7 shadow-[0_14px_34px_rgba(90,74,63,0.10)] ${
+              className={`relative rounded-3xl border border-[#ece6dc] bg-white/95 p-6 sm:p-7 shadow-[0_14px_34px_rgba(90,74,63,0.08)] ${
                 pausedNow ? "opacity-75" : ""
               }`}
             >
               {/* Header row: selected date + quick actions */}
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-col gap-1">
-                  <span className="text-[11px] uppercase tracking-[0.18em] text-[#b09f8a]">
+                  <span className="text-[11px] uppercase tracking-[0.16em] text-[#b09f8a]">
                     Step 1
                   </span>
                   <div className="flex items-center gap-2">
                     <h2 className="font-serif text-lg text-[#5a4a3f]">
                       Choose your date
                     </h2>
-                    <span className="hidden sm:inline-block rounded-full bg-[#f4ede3] px-2 py-0.5 text-[10px] text-[#7a6a58]">
-                      Live availability
-                    </span>
                   </div>
 
                   <div className="mt-1">
@@ -559,65 +540,68 @@ export default function CheckAvailabilityPage() {
                 </div>
               ) : (
                 <>
-                  <DayPicker
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={(d) => !pausedNow && setSelectedDate(d || null)}
-                    showOutsideDays
-                    fixedWeeks
-                    captionLayout="dropdown-buttons"
-                    fromMonth={new Date()}
-                    toMonth={
-                      new Date(new Date().setMonth(new Date().getMonth() + 6))
-                    }
-                    fromYear={new Date().getFullYear()}
-                    toYear={new Date().getFullYear() + 1}
-                    locale={enGB}
-                    modifiers={{
-                      plenty: availabilityBuckets.plenty,
-                      some: availabilityBuckets.some,
-                      few: availabilityBuckets.few,
-                      weekend: { dayOfWeek: [0, 6] },
-                    }}
-                    disabled={[
-                      { before: new Date() },
-                      (date) => !availableDates.some((d) => isSameDay(d, date)),
-                    ]}
-                    className="w-full max-w-md mx-auto"
-                    classNames={{
-                      root: "rdp-root w-full",
-                      caption:
-                        "rdp-caption mb-4 flex items-center justify-between rounded-xl bg-[#f7f3ed] px-3 py-2 border border-[#ece6dc]",
-                      caption_label:
-                        "text-sm sm:text-base font-serif text-[#5a4a3f] tracking-tight",
-                      nav: "rdp-nav flex items-center gap-2",
-                      nav_button:
-                        "rdp-nav_button h-8 w-8 grid place-items-center rounded-full border border-[#e0dcd4] bg-white hover:bg-[#faf7f1] text-[#5a4a3f] text-sm",
-                      table:
-                        "rdp-table w-full border-separate border-spacing-y-1 border-spacing-x-1",
-                      head_row: "rdp-head_row",
-                      head_cell:
-                        "rdp-head_cell text-[11px] font-semibold text-[#7a6a58] pb-2 uppercase tracking-[0.16em]",
-                      row: "rdp-row",
-                      cell: "rdp-cell text-center align-middle h-10 w-10 [&_.rdp-day_selected]:!bg-[#8b6f47] [&_.rdp-day_selected]:!text-white",
-                      day: "rdp-day !rounded-full focus:outline-none focus:ring-2 focus:ring-[#cbb89e] transition-all duration-150 text-[13px]",
-                      day_selected:
-                        "rdp-day_selected !bg-[#8b6f47] !text-white !rounded-full hover:!bg-[#7a5f3a] shadow-sm scale-[1.02]",
-                      day_today:
-                        "rdp-day_today border border-[#8b6f47] !rounded-full text-[#5a4a3f] bg-[#f7f1e6]",
-                      day_outside: "rdp-day_outside text-[#cbbfae]",
-                      day_disabled:
-                        "rdp-day_disabled text-[#c7c0b6] opacity-60 line-through",
-                    }}
-                    modifiersClassNames={{
-                      plenty:
-                        "bg-[#e8f3ec] hover:bg-[#e2efe7] text-[#30433a] border border-[#c7dece]",
-                      some: "bg-[#f4efe5] hover:bg-[#efe8dd] text-[#4a4136] border border-[#e1d6c5]",
-                      few: "ring-1 ring-amber-400 bg-[#fff8ea] hover:bg-[#fff3d7] text-[#5a4a3f] border border-amber-200",
-                      weekend: "bg-[#fbf6f0]",
-                    }}
-                    components={{ DayContent }}
-                  />
+                  <div className="mt-1 flex justify-center">
+                    <DayPicker
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={(d) => !pausedNow && setSelectedDate(d || null)}
+                      showOutsideDays
+                      fixedWeeks
+                      captionLayout="buttons"
+                      fromMonth={new Date()}
+                      toMonth={
+                        new Date(new Date().setMonth(new Date().getMonth() + 6))
+                      }
+                      fromYear={new Date().getFullYear()}
+                      toYear={new Date().getFullYear() + 1}
+                      locale={enGB}
+                      modifiers={{
+                        plenty: availabilityBuckets.plenty,
+                        some: availabilityBuckets.some,
+                        few: availabilityBuckets.few,
+                        weekend: { dayOfWeek: [0, 6] },
+                      }}
+                      disabled={[
+                        { before: new Date() },
+                        (date) =>
+                          !availableDates.some((d) => isSameDay(d, date)),
+                      ]}
+                      className="inline-block"
+                      classNames={{
+                        root: "rdp-root",
+                        caption:
+                          "rdp-caption mb-4 flex items-center justify-between text-[#141010]",
+                        caption_label:
+                          "text-lg font-serif font-semibold tracking-tight",
+                        nav: "rdp-nav flex items-center gap-2",
+                        nav_button:
+                          "rdp-nav_button h-8 w-8 grid place-items-center rounded-full border border-transparent hover:border-[#e4ddcf] hover:bg-[#faf6ff] text-[#6f4aff] text-sm",
+                        table:
+                          "rdp-table border-separate border-spacing-y-1 border-spacing-x-1",
+                        head_row: "rdp-head_row",
+                        head_cell:
+                          "rdp-head_cell text-[11px] font-medium text-[#a59686] pb-2 uppercase tracking-[0.16em]",
+                        row: "rdp-row",
+                        cell: "rdp-cell text-center align-middle h-10 w-10 [&_.rdp-day_selected]:!bg-white",
+                        day: "rdp-day !rounded-full focus:outline-none focus:ring-2 focus:ring-[#cbb89e] transition-all duration-150 text-[13px] text-[#4a4136]",
+                        day_selected:
+                          "rdp-day_selected !bg-white !text-[#141010] !rounded-[0.85rem] outline outline-2 outline-[#6f4aff] shadow-sm font-semibold",
+                        day_today:
+                          "rdp-day_today border border-[#6f4aff] !rounded-[0.85rem] text-[#6f4aff] font-semibold bg-white",
+                        day_outside: "rdp-day_outside text-[#d3c6b8]",
+                        day_disabled:
+                          "rdp-day_disabled text-[#d3c6b8] opacity-60 line-through",
+                      }}
+                      modifiersClassNames={{
+                        plenty:
+                          "bg-[#e0f1e6] hover:bg-[#d7ecde] text-[#1f4b33]",
+                        some: "bg-[#f2ebe0] hover:bg-[#ece2d4] text-[#4a4136]",
+                        few: "bg-[#fff4d7] hover:bg-[#ffeed0] text-[#5a4a3f] ring-1 ring-[#f3c766]",
+                        weekend: "bg-[#faf6f0]",
+                      }}
+                      components={{ DayContent }}
+                    />
+                  </div>
 
                   <Legend />
 
@@ -627,7 +611,6 @@ export default function CheckAvailabilityPage() {
                 </>
               )}
 
-              {/* Paused overlay */}
               {pausedNow && (
                 <>
                   <div className="pointer-events-none absolute inset-0 rounded-3xl" />
@@ -1088,33 +1071,23 @@ function SelectedDatePill({ date, onClear }) {
 function Legend() {
   return (
     <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-[11px] text-[#7a6a58]">
-      <LegendChip
-        swatchClass="bg-[#e8f3ec] ring-1 ring-[#bcd8c8]"
-        label="Plenty"
-      />
-      <LegendChip
-        swatchClass="bg-[#f4efe5] ring-1 ring-[#e1d6c5]"
-        label="Some"
-      />
-      <LegendChip
-        swatchClass="bg-[#fff8ea] ring-1 ring-amber-400"
-        label="Few left"
-      />
-      <LegendChip circle swatchClass="border border-[#8b6f47]" label="Today" />
-      <LegendChip swatchClass="bg-[#fbf6f0]" label="Weekend" wide />
+      <LegendChip label="Plenty" swatchClass="bg-[#cfe7d7]" />
+      <LegendChip label="Some" swatchClass="bg-[#e7dbca]" />
+      <LegendChip label="Few left" swatchClass="bg-[#f7da8a]" />
+      <LegendChip label="Today" swatchClass="bg-[#6f4aff]" />
+      <LegendChip label="Weekend" swatchClass="bg-[#f3ebdf]" wide />
     </div>
   );
 }
 
-function LegendChip({ swatchClass, label, circle = false, wide = false }) {
+function LegendChip({ label, swatchClass, wide = false }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f7f3ed] px-2.5 py-1 border border-[#ebe4d8]">
       <span
         className={[
-          "inline-block",
-          circle ? "h-2.5 w-2.5 rounded-full" : "h-2 w-3 rounded",
+          "inline-block rounded-full",
+          wide ? "h-2 w-5" : "h-2.5 w-2.5",
           swatchClass,
-          wide ? "w-5" : "",
         ]
           .filter(Boolean)
           .join(" ")}

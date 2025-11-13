@@ -142,7 +142,6 @@ export default function AttendeesPage() {
           setPcName(pc.name || "");
           setPcEmail(pc.email || "");
           setPcPhone(pc.phone || "");
-          // If a primary contact already exists, respect it and turn OFF auto-link (can be re-enabled by the user)
           if (pc.name) setAutoPcFromFirstAdult(false);
         }
 
@@ -158,7 +157,7 @@ export default function AttendeesPage() {
           lastName: existing[i]?.lastName || "",
           age: existing[i]?.age ?? "",
           allergies: existing[i]?.allergies || "",
-          category: cat, // lock to chosen counts
+          category: cat,
         }));
 
         setAttendees(initial);
@@ -266,34 +265,34 @@ export default function AttendeesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_right,rgba(233,227,217,0.6),transparent_45%),linear-gradient(to_bottom,#f7f3ed,#f4f1ec)]">
+    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_right,rgba(233,227,217,0.7),transparent_45%),linear-gradient(to_bottom,#f7f3ed,#f4f1ec)]">
       {/* Top bar */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 sm:pt-10">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => router.back()}
-              className="inline-flex items-center gap-2 text-[#725b3b] text-sm border border-[#8b6f47]/50 rounded-full px-4 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4b89f] focus-visible:ring-offset-2"
+              className="inline-flex items-center gap-2 text-[#725b3b] text-sm border border-[#8b6f47]/50 rounded-full px-4 py-2 bg-white/70 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4b89f] focus-visible:ring-offset-2"
             >
               <ArrowLeft size={16} />
               Back
             </button>
             <span className="hidden sm:inline-flex items-center gap-2 text-xs text-[#7a6a58] pl-2">
               <Users size={14} className="opacity-80" />
-              Attendees
+              Step 2 · Attendees
             </span>
           </div>
 
-          {/* Stepper */}
           <Stepper current={2} />
         </div>
       </div>
 
       {/* Header */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 mt-6">
-        <div className="relative overflow-hidden rounded-3xl border border-[#e5e0d8] bg-[#fcf9f4]">
-          <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-[#e9e3d9] opacity-60 blur-3xl" />
+        <div className="relative overflow-hidden rounded-3xl border border-[#e5e0d8] bg-[#fcf9f4]/95 shadow-[0_16px_40px_rgba(90,74,63,0.10)]">
+          <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-[#e9e3d9] opacity-70 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-[#e1d6c5] opacity-60 blur-3xl" />
           <div className="relative z-10 p-6 sm:p-8">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-start gap-3">
@@ -301,10 +300,13 @@ export default function AttendeesPage() {
                   <Users className="h-5 w-5 text-[#8b6f47]" />
                 </div>
                 <div>
-                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#5a4a3f] tracking-tight">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-[#b09f8a]">
+                    Guest details
+                  </p>
+                  <h1 className="mt-1 text-2xl sm:text-3xl font-serif font-semibold text-[#5a4a3f] tracking-tight">
                     {experience?.name || "Your booking"}
                   </h1>
-                  <div className="mt-1 flex flex-wrap items-center gap-4 text-sm text-[#6b5e53]">
+                  <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-[#6b5e53]">
                     {experience?.location && (
                       <span className="inline-flex items-center gap-1.5">
                         <MapPin size={14} className="text-[#8b6f47]" />
@@ -325,8 +327,8 @@ export default function AttendeesPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl border border-[#e0dcd4] bg-white px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
+              <div className="flex flex-col items-end gap-3">
+                <div className="rounded-xl border border-[#e0dcd4] bg-white/80 px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
                   Group:{" "}
                   <span className="font-semibold">
                     {counts.adults}A{counts.kids ? ` • ${counts.kids}K` : ""}
@@ -335,7 +337,7 @@ export default function AttendeesPage() {
                 <button
                   type="button"
                   onClick={() => router.back()}
-                  className="hidden sm:inline-flex items-center text-xs px-3 py-2 rounded-lg border border-[#e0dcd4] text-[#6b5e53] hover:bg-white shadow-sm gap-1"
+                  className="hidden sm:inline-flex items-center text-xs px-3 py-2 rounded-lg border border-[#e0dcd4] text-[#6b5e53] bg-white/80 hover:bg-white shadow-sm gap-1"
                 >
                   <Edit3 size={14} /> Edit group
                 </button>
@@ -364,22 +366,32 @@ export default function AttendeesPage() {
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-10">
             {/* Left: Attendee forms */}
             <section className="lg:col-span-2 space-y-4">
-              <div className="flex items-center justify-between text-xs text-[#6b5e53] pl-1">
-                <span>
-                  Explorer:{" "}
-                  <strong>
-                    {completedCount}/{expectedTotal}
-                  </strong>{" "}
-                  completed
-                </span>
-                <Progress value={progressPct} />
-              </div>
+              <header className="flex items-center justify-between gap-3 pl-1">
+                <div>
+                  <h2 className="text-sm sm:text-base font-semibold text-[#5a4a3f]">
+                    Guest information
+                  </h2>
+                  <p className="mt-0.5 text-[11px] text-[#7a6a58] max-w-md">
+                    We’ll only use this to keep everyone safe and to contact you
+                    about this booking.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-[#6b5e53]">
+                  <span>
+                    Guests completed:{" "}
+                    <strong>
+                      {completedCount}/{expectedTotal}
+                    </strong>
+                  </span>
+                  <Progress value={progressPct} />
+                </div>
+              </header>
 
               {attendees.map((a, idx) => (
                 <details
                   key={idx}
                   open
-                  className="group rounded-2xl border border-[#e8e5df] bg-white p-0 shadow-sm transition-colors"
+                  className="group rounded-3xl border border-[#e8e5df] bg-white/95 p-0 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5"
                 >
                   <summary className="flex list-none items-center justify-between gap-3 cursor-pointer select-none px-5 py-4">
                     <div className="flex items-center gap-3">
@@ -388,7 +400,7 @@ export default function AttendeesPage() {
                       </div>
                       <div>
                         <h3 className="text-sm font-semibold text-[#5a4a3f] flex items-center gap-2">
-                          Explorer {idx + 1}
+                          Guest {idx + 1}
                           <span className="inline-block rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
                             {labelForCategory(a.category)}
                           </span>
@@ -401,7 +413,7 @@ export default function AttendeesPage() {
                         <p className="text-[11px] text-[#7a6a58]">
                           {a.firstName && a.lastName
                             ? `${a.firstName} ${a.lastName}`
-                            : "Tap to fill details"}
+                            : "Tap to fill guest details"}
                         </p>
                       </div>
                     </div>
@@ -511,7 +523,7 @@ export default function AttendeesPage() {
                   {experience?.name && (
                     <div className="font-medium">{experience.name}</div>
                   )}
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {experience?.location && (
                       <span className="inline-flex items-center gap-1.5">
                         <MapPin size={14} className="text-[#8b6f47]" />
@@ -520,7 +532,7 @@ export default function AttendeesPage() {
                     )}
                   </div>
                   {when && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <CalendarDays size={14} className="text-[#8b6f47]" />
                       {when.dateLabel}
                       <span className="inline-flex items-center gap-1.5 ml-3">
@@ -555,7 +567,7 @@ export default function AttendeesPage() {
                 {/* Completion meter */}
                 <div className="mt-4">
                   <div className="flex items-center justify-between text-xs text-[#6b5e53]">
-                    <span>Attendee details completion</span>
+                    <span>Guest details completion</span>
                     <span>{progressPct}%</span>
                   </div>
                   <div className="mt-1 h-1.5 rounded-full bg-[#e6e0d5] overflow-hidden">
@@ -675,7 +687,7 @@ export default function AttendeesPage() {
                       </>
                     ) : (
                       <>
-                        <CreditCard className="w-5 h-5" /> Continue to Payment
+                        <CreditCard className="w-5 h-5" /> Continue to payment
                       </>
                     )}
                   </button>
@@ -745,7 +757,6 @@ function Stepper({ current = 2 }) {
           const active = s.id <= current;
           return (
             <li key={s.id} className="relative flex-1 flex items-center">
-              {/* line */}
               {i !== 0 && (
                 <div
                   className={`h-1.5 w-full rounded-full mx-2 ${
@@ -753,12 +764,11 @@ function Stepper({ current = 2 }) {
                   }`}
                 />
               )}
-              {/* dot */}
               <div
                 className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm ${
                   active
                     ? "bg-[#8b6f47] border-[#7a5f3a] text-white"
-                    : "bg-white border-[#e0dcd4]"
+                    : "bg-white/80 border-[#e0dcd4]"
                 }`}
                 aria-current={s.id === current ? "step" : undefined}
               >
@@ -832,7 +842,6 @@ function isValidEmail(email = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
-// Replaced validate(...) with schema that matches your API rules
 function validate(attendees, counts, primaryContact) {
   const issues = [];
   const expected = Number(counts.adults || 0) + Number(counts.kids || 0);
