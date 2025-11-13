@@ -1,4 +1,3 @@
-// src/app/check-availability/[slug]/page.js
 "use client";
 
 import { enGB } from "date-fns/locale";
@@ -308,13 +307,30 @@ export default function CheckAvailabilityPage() {
 
   const step = !selectedDate ? 1 : !selectedSlotId ? 2 : 3;
 
-  /* ---------------------- Local DayContent with availability dot --------------------- */
-  const DayContent = (props) => (
-    <span className="relative inline-flex items-center justify-center w-7 h-7">
-      {props.children}
-      <DayDot date={props.date} countsByYMD={countsByYMD} />
-    </span>
-  );
+  /* Day content with small availability dot */
+  const DayContent = (props) => {
+    const { date, activeModifiers } = props;
+    const isSelected = !!activeModifiers?.selected;
+    const hasAvailability =
+      !!activeModifiers?.plenty ||
+      !!activeModifiers?.some ||
+      !!activeModifiers?.few;
+
+    return (
+      <span
+        className={[
+          "relative inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9",
+          "rounded-full text-[13px]",
+          isSelected ? "font-semibold" : hasAvailability ? "font-medium" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {props.children}
+        <DayDot date={date} countsByYMD={countsByYMD} />
+      </span>
+    );
+  };
 
   const tz = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -324,511 +340,555 @@ export default function CheckAvailabilityPage() {
   const priceLiveId = useId();
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#f7f3ed] to-[#f4f1ec]">
-      {/* Top bar */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 ">
-        <div className="flex items-center justify-between py-4">
-          <button
-            onClick={() => router.back()}
-            className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#8b6f47]/70 rounded-full px-4 py-2 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
-          >
-            <ArrowLeft size={16} />
-            Back
-          </button>
-          {experience?.name && (
-            <div className="hidden sm:flex items-center gap-2 text-[#6b5e53] text-sm">
-              <Users className="w-4 h-4" /> Max {MAX_PER_BOOKING}/booking
-            </div>
-          )}
-        </div>
+    <main className="relative min-h-screen bg-gradient-to-b from-[#f4f1ec] via-[#faf9f7] to-[#f4f1ec] text-[#2f2f2f] overflow-x-clip">
+      {/* Ambient blobs */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute -top-32 left-10 h-64 w-64 rounded-full bg-[#e8dfcf]/80 blur-3xl" />
+        <div className="absolute top-40 -right-24 h-72 w-72 rounded-full bg-[#d7c6af]/70 blur-3xl" />
+        <div className="absolute bottom-[-5rem] left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-[#e7dcc9]/60 blur-3xl" />
+        <div className="absolute inset-0 opacity-[0.06] [background:radial-gradient(circle_at_center,rgba(90,74,63,0.45)_1px,transparent_1px)] [background-size:26px_26px]" />
       </div>
 
-      {/* Header banner */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 mt-2">
-        <div className="relative overflow-hidden rounded-3xl border border-[#e5e0d8] bg-[#fcf9f4]">
-          <div className="absolute inset-0 bg-gradient-to-r from-[#efe9df] via-transparent to-[#efe9df] pointer-events-none" />
-          {firstImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={firstImage}
-              alt={experience?.name || "Experience"}
-              className="absolute inset-0 h-full w-full object-cover opacity-20"
-            />
-          ) : null}
-
-          <div className="relative z-10 p-6 sm:p-8">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-full bg-[#efeae2] p-2">
-                  <CalendarDays className="h-5 w-5 text-[#8b6f47]" />
-                </div>
-                <div>
-                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#5a4a3f]">
-                    {experience?.name || "Experience"}
-                  </h1>
-                  {experience?.location ? (
-                    <p className="mt-1 flex items-center gap-2 text-sm text-[#6b5e53]">
-                      <MapPin size={14} className="text-[#8b6f47]" />
-                      {experience.location}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              {fromPrice !== null ? (
-                <div className="mt-3 sm:mt-0 rounded-xl border border-[#e0dcd4] bg-white px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
-                  From{" "}
-                  <span className="font-semibold">{formatEuro(fromPrice)}</span>{" "}
-                  / person
-                </div>
-              ) : null}
-            </div>
-
-            {/* Stepper */}
-            <div className="mt-5">
-              <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm">
-                <Step label="Choose date" active={step >= 1} done={step > 1} />
-                <Step label="Choose time" active={step >= 2} done={step > 2} />
-                <Step label="Group size" active={step >= 3} />
-              </div>
-              {/* Progress bar */}
-              <div className="mt-3 h-1.5 w-full rounded-full bg-[#ece6dc]">
-                <div
-                  className="h-1.5 rounded-full bg-[#8b6f47] transition-all"
-                  style={{ width: `${(step / 3) * 100}%` }}
-                  aria-hidden
-                />
-              </div>
-            </div>
-
-            {/* Info / Pause banner */}
-            {settingsLoading ? (
-              <div
-                className="mt-4 flex items-center gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm"
-                aria-busy
-              >
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#8b6f47]" />
-                Loading booking status…
-              </div>
-            ) : pausedNow ? (
-              <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#f1d7d7] bg-[#fff6f6] px-3 py-2 text-xs text-[#7a4a4a] shadow-sm">
-                <PauseCircle size={14} className="mt-0.5 text-[#b14545]" />
-                <div>
-                  <p className="font-medium">
-                    Bookings are temporarily paused.
-                  </p>
-                  {globalSettings.bookingsPausedUntil ? (
-                    <p>
-                      Resuming after{" "}
-                      <span className="font-semibold">
-                        {format(
-                          new Date(globalSettings.bookingsPausedUntil),
-                          "PPpp"
-                        )}
-                      </span>
-                      .
-                    </p>
-                  ) : null}
-                  {globalSettings.bookingsPausedMessage ? (
-                    <p className="mt-1">
-                      {globalSettings.bookingsPausedMessage}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
-                <Info size={14} className="mt-0.5 text-[#8b6f47]" />
-                <p>
-                  Pick a date and time, then set your group split. You’ll fill
-                  attendee details on the next page.
-                </p>
-                <span className="ml-auto text-[11px] text-[#8b6f47]">
-                  Times shown in {tz}
-                </span>
+      <div className="relative pt-20 sm:pt-24 pb-24">
+        {/* Top bar */}
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="flex items-center justify-between pb-4">
+            <button
+              onClick={() => router.back()}
+              className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#cbb89e] rounded-full px-4 py-2 bg-white/80 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
+            >
+              <ArrowLeft size={16} />
+              Back
+            </button>
+            {experience?.name && (
+              <div className="hidden sm:flex items-center gap-2 text-[#6b5e53] text-sm">
+                <Users className="w-4 h-4" /> Max {MAX_PER_BOOKING} / booking
               </div>
             )}
           </div>
         </div>
-      </div>
 
-      {/* Content */}
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 pb-28 sm:pb-16">
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-10">
-          {/* Left: Calendar */}
-          <section
-            className={`relative rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm ${
-              pausedNow ? "opacity-75" : ""
-            }`}
-          >
-            {/* Header row: selected date + quick actions */}
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                {selectedDate ? (
-                  <SelectedDatePill
-                    date={selectedDate}
-                    onClear={() => setSelectedDate(null)}
-                  />
-                ) : (
-                  <span className="text-xs text-[#7a6a58]">
-                    Pick a date to see times
-                  </span>
-                )}
-              </div>
+        {/* Header banner */}
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="relative overflow-hidden rounded-[2rem] border border-[#e5e0d8] bg-[#fcf9f4] shadow-[0_16px_40px_rgba(90,74,63,0.12)]">
+            <div className="absolute inset-0 bg-gradient-to-r from-[#efe9df] via-transparent to-[#efe9df]" />
+            {firstImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={firstImage}
+                alt={experience?.name || "Experience"}
+                className="absolute inset-0 h-full w-full object-cover opacity-20"
+              />
+            ) : null}
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedDate(new Date())}
-                  className="rounded-full border border-[#e0dcd4] px-3 py-1.5 text-xs text-[#5a4a3f] hover:bg-[#faf7f1] focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
-                >
-                  Today
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const d = earliestDayWithAvailability(availableSlots);
-                    if (d && !pausedNow) setSelectedDate(d);
-                  }}
-                  className="rounded-full bg-[#8b6f47] px-3 py-1.5 text-xs text-white hover:bg-[#7a5f3a] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
-                  disabled={!hasAnySlots}
-                >
-                  First available
-                </button>
-              </div>
-            </div>
-
-            {loadingSlots ? (
-              <SkeletonCalendar />
-            ) : !hasAnySlots ? (
-              <div className="py-8 text-center text-[#5a4a3f]">
-                <p className="font-medium">No upcoming availability yet.</p>
-                <p className="text-sm text-[#7a6a5a] mt-1">
-                  Please check back soon or reach out for custom dates.
-                </p>
-              </div>
-            ) : (
-              <>
-                <DayPicker
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={(d) => !pausedNow && setSelectedDate(d || null)}
-                  showOutsideDays
-                  fixedWeeks
-                  captionLayout="dropdown-buttons"
-                  fromMonth={new Date()}
-                  toMonth={
-                    new Date(new Date().setMonth(new Date().getMonth() + 6))
-                  }
-                  fromYear={new Date().getFullYear()}
-                  toYear={new Date().getFullYear() + 1}
-                  locale={enGB}
-                  modifiers={{
-                    plenty: availabilityBuckets.plenty,
-                    some: availabilityBuckets.some,
-                    few: availabilityBuckets.few,
-                    weekend: { dayOfWeek: [0, 6] },
-                  }}
-                  disabled={[
-                    { before: new Date() },
-                    (date) => !availableDates.some((d) => isSameDay(d, date)),
-                  ]}
-                  classNames={{
-                    root: "rdp-root w-full",
-                    caption:
-                      "rdp-caption mb-3 flex items-center justify-between",
-                    caption_label:
-                      "text-sm font-semibold text-[#5a4a3f] px-2 py-1 rounded-lg bg-[#f7f3ed] border border-[#ece6dc]",
-                    nav: "rdp-nav flex items-center gap-2",
-                    nav_button:
-                      "rdp-nav_button h-8 w-8 grid place-items-center rounded-lg border border-[#e0dcd4] hover:bg-[#faf7f1] text-[#5a4a3f]",
-                    table:
-                      "rdp-table w-full border-separate border-spacing-y-1",
-                    head_cell:
-                      "rdp-head_cell text-[11px] font-medium text-[#7a6a58] pb-1",
-                    row: "rdp-row",
-                    cell: "rdp-cell text-center align-middle h-10 w-10 [&_.rdp-day_selected]:!bg-[#8b6f47] [&_.rdp-day_selected]:!text-white",
-                    day: "rdp-day !rounded-full focus:outline-none focus:ring-2 focus:ring-[#cbb89e]",
-                    day_selected:
-                      "rdp-day_selected !bg-[#8b6f47] !text-white !rounded-full hover:!bg-[#7a5f3a]",
-                    day_today:
-                      "rdp-day_today border border-[#8b6f47] !rounded-full text-[#5a4a3f]",
-                    day_outside: "rdp-day_outside text-[#cbbfae]",
-                    day_disabled: "rdp-day_disabled text-[#c7c0b6] opacity-60",
-                  }}
-                  modifiersClassNames={{
-                    plenty: "bg-[#e8f3ec] hover:bg-[#e2efe7] text-[#30433a]",
-                    some: "bg-[#f4efe5] hover:bg-[#efe8dd] text-[#4a4136]",
-                    few: "ring-1 ring-amber-400 bg-[#fff8ea] hover:bg-[#fff3d7] text-[#5a4a3f]",
-                    weekend: "bg-[#faf7f3]",
-                  }}
-                  components={{ DayContent }}
-                />
-
-                <Legend />
-                <p className="mt-3 text-center text-xs text-[#7a6a58]">
-                  Showing the next 6 months of availability.
-                </p>
-              </>
-            )}
-
-            {/* Paused badge + overlay */}
-            {pausedNow && (
-              <>
-                <div className="pointer-events-none absolute inset-0 rounded-2xl" />
-                <div className="absolute right-4 top-4 rounded-full bg-[#8b6f47]/90 px-3 py-1.5 text-xs text-white shadow">
-                  Bookings paused
+            <div className="relative z-10 p-6 sm:p-8">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 rounded-full bg-[#efeae2] p-2">
+                    <CalendarDays className="h-5 w-5 text-[#8b6f47]" />
+                  </div>
+                  <div>
+                    <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif text-[#5a4a3f] leading-tight">
+                      {experience?.name || "Experience"}
+                    </h1>
+                    {experience?.location ? (
+                      <p className="mt-1 flex items-center gap-2 text-sm text-[#6b5e53]">
+                        <MapPin size={14} className="text-[#8b6f47]" />
+                        {experience.location}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-              </>
-            )}
-          </section>
+                {fromPrice !== null ? (
+                  <div className="mt-2 sm:mt-0 rounded-xl border border-[#e0dcd4] bg-white px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
+                    From{" "}
+                    <span className="font-semibold">
+                      {formatEuro(fromPrice)}
+                    </span>{" "}
+                    / person
+                  </div>
+                ) : null}
+              </div>
 
-          {/* Right: Times + Group card */}
-          <section className="space-y-6" ref={slotsContainerRef}>
-            {/* Times */}
-            <div
-              className={`rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm ${
-                pausedNow ? "opacity-60" : ""
-              }`}
-            >
-              <h3 className="mb-3 text-lg font-semibold text-[#5a4a3f] flex items-center gap-2">
-                <Clock className="w-5 h-5 text-[#8b6f47]" />
-                {selectedDate
-                  ? `Available times on ${format(selectedDate, "PPP")}`
-                  : "Select a date"}
-              </h3>
+              {/* Stepper */}
+              <div className="mt-6">
+                <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm">
+                  <Step
+                    label="Choose date"
+                    active={step >= 1}
+                    done={step > 1}
+                  />
+                  <Step
+                    label="Choose time"
+                    active={step >= 2}
+                    done={step > 2}
+                  />
+                  <Step label="Group size" active={step >= 3} />
+                </div>
+                <div className="mt-3 h-1.5 w-full rounded-full bg-[#ece6dc]">
+                  <div
+                    className="h-1.5 rounded-full bg-[#8b6f47] transition-all"
+                    style={{ width: `${(step / 3) * 100}%` }}
+                    aria-hidden
+                  />
+                </div>
+              </div>
 
-              {!selectedDate ? (
-                <p className="text-sm text-[#7a6a5a]">
-                  Choose a date to see times.
-                </p>
-              ) : slotsOnSelectedDay.length === 0 ? (
-                <p className="text-sm text-[#7a6a5a]">
-                  No times available for this day.
-                </p>
-              ) : (
+              {/* Info / Pause banner */}
+              {settingsLoading ? (
                 <div
-                  ref={timesListRef}
-                  role="radiogroup"
-                  aria-label="Available start times"
-                  className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+                  className="mt-4 flex items-center gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm"
+                  aria-busy
                 >
-                  {slotsOnSelectedDay.map((slot) => {
-                    const available =
-                      typeof slot.available === "number"
-                        ? slot.available
-                        : Math.max(
-                            0,
-                            (slot.totalSlots ?? 0) -
-                              (slot.booked ?? slot.bookedSlots ?? 0)
-                          );
-                    const isSelected = selectedSlotId === slot.id;
-                    const isDisabled = pausedNow || available <= 0;
-                    const time = format(parseISO(slot.date), "p");
-
-                    return (
-                      <button
-                        key={slot.id}
-                        type="button"
-                        onClick={() =>
-                          !isDisabled && setSelectedSlotId(slot.id)
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            !isDisabled && setSelectedSlotId(slot.id);
-                          }
-                        }}
-                        disabled={isDisabled}
-                        role="radio"
-                        aria-checked={isSelected}
-                        className={`flex items-center justify-between rounded-xl border p-4 text-left transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e] ${
-                          isDisabled
-                            ? "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
-                            : isSelected
-                            ? "bg-[#f5efe4] border-[#8b6f47]"
-                            : "bg-white border-[#e8e5df] hover:shadow-md"
-                        }`}
-                        aria-label={`Start time ${time}${
-                          available > 0
-                            ? `, ${available} spots left`
-                            : ", fully booked"
-                        }`}
-                      >
-                        <div>
-                          <div className="text-sm font-semibold">{time}</div>
-                          <div
-                            className={`text-xs font-medium ${
-                              available <= 0
-                                ? "text-gray-500"
-                                : "text-green-700"
-                            }`}
-                          >
-                            {available <= 0
-                              ? "Fully booked"
-                              : `${available} available`}
-                          </div>
-                        </div>
-                        <input
-                          type="radio"
-                          name="slot"
-                          className="accent-[#8b6f47]"
-                          checked={isSelected}
-                          readOnly
-                          tabIndex={-1}
-                        />
-                      </button>
-                    );
-                  })}
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[#8b6f47]" />
+                  Loading booking status…
+                </div>
+              ) : pausedNow ? (
+                <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#f1d7d7] bg-[#fff6f6] px-3 py-2 text-xs text-[#7a4a4a] shadow-sm">
+                  <PauseCircle size={14} className="mt-0.5 text-[#b14545]" />
+                  <div>
+                    <p className="font-medium">
+                      Bookings are temporarily paused.
+                    </p>
+                    {globalSettings.bookingsPausedUntil ? (
+                      <p>
+                        Resuming after{" "}
+                        <span className="font-semibold">
+                          {format(
+                            new Date(globalSettings.bookingsPausedUntil),
+                            "PPpp"
+                          )}
+                        </span>
+                        .
+                      </p>
+                    ) : null}
+                    {globalSettings.bookingsPausedMessage ? (
+                      <p className="mt-1">
+                        {globalSettings.bookingsPausedMessage}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
+                  <Info size={14} className="mt-0.5 text-[#8b6f47]" />
+                  <p>
+                    Pick a date and time, then set your group split. You’ll fill
+                    attendee details on the next page.
+                  </p>
+                  <span className="ml-auto text-[11px] text-[#8b6f47]">
+                    Times shown in {tz}
+                  </span>
                 </div>
               )}
             </div>
+          </div>
+        </div>
 
-            {/* Group & Summary (sticky on desktop) */}
-            <div className="lg:sticky lg:top-24">
-              <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-[#5a4a3f]">
-                  Your group
-                </h3>
+        {/* Content */}
+        <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-8 sm:pt-10">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+            {/* Left: Calendar */}
+            {/* Left: Calendar */}
+            <section
+              className={`relative rounded-3xl border border-[#e8e5df] bg-white/95 p-6 sm:p-7 shadow-[0_14px_34px_rgba(90,74,63,0.10)] ${
+                pausedNow ? "opacity-75" : ""
+              }`}
+            >
+              {/* Header row: selected date + quick actions */}
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-[#b09f8a]">
+                    Step 1
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-serif text-lg text-[#5a4a3f]">
+                      Choose your date
+                    </h2>
+                    <span className="hidden sm:inline-block rounded-full bg-[#f4ede3] px-2 py-0.5 text-[10px] text-[#7a6a58]">
+                      Live availability
+                    </span>
+                  </div>
 
-                {/* Capacity meter */}
-                {selectedSlot && (
-                  <CapacityBar
-                    total={selectedSlot.totalSlots}
-                    booked={
-                      selectedSlot.booked ??
-                      selectedSlot.bookedSlots ??
-                      Math.max(
-                        0,
-                        (selectedSlot.totalSlots ?? 0) -
-                          (selectedSlot.available ?? 0)
-                      )
-                    }
-                  />
-                )}
-
-                {/* Counters */}
-                <div className={`mt-4 ${pausedNow ? "opacity-60" : ""}`}>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-[#7a6a58]">
-                      Adults 15+, Kids 3–14.
-                    </p>
-                    {(adults !== 1 || kids !== 0) && (
-                      <button
-                        type="button"
-                        className="text-[11px] underline text-[#8b6f47] hover:text-[#6f583c]"
-                        onClick={() => {
-                          setAdults(1);
-                          setKids(0);
-                        }}
-                      >
-                        Reset
-                      </button>
+                  <div className="mt-1">
+                    {selectedDate ? (
+                      <SelectedDatePill
+                        date={selectedDate}
+                        onClear={() => setSelectedDate(null)}
+                      />
+                    ) : (
+                      <span className="text-xs text-[#7a6a58]">
+                        Pick a day to reveal available times.
+                      </span>
                     )}
                   </div>
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <Counter
-                      label="Adults"
-                      value={adults}
-                      onChange={(v) => setAdults(clampGroup(v, 1, "adults"))}
-                      min={1}
-                      disabled={!selectedSlot || pausedNow || bookingCap === 0}
-                    />
+                </div>
 
-                    <Counter
-                      label="Kids"
-                      value={kids}
-                      onChange={(v) => setKids(clampGroup(v, 0, "kids"))}
-                      disabled={!selectedSlot || pausedNow || bookingCap === 0}
-                    />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(new Date())}
+                    className="rounded-full border border-[#e0dcd4] px-3 py-1.5 text-xs text-[#5a4a3f] bg-white hover:bg-[#faf7f1] focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = earliestDayWithAvailability(availableSlots);
+                      if (d && !pausedNow) setSelectedDate(d);
+                    }}
+                    className="rounded-full bg-[#8b6f47] px-3 py-1.5 text-xs text-white hover:bg-[#7a5f3a] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
+                    disabled={!hasAnySlots}
+                  >
+                    First available
+                  </button>
+                </div>
+              </div>
 
-                    {/* Total people quick-view */}
-                    <div className="bg-white border border-[#e2ddd2] rounded-xl p-3 shadow-sm flex flex-col justify-center">
-                      <div className="text-sm text-[#5a4a3f] mb-1">Total</div>
-                      <div className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                        {totalPeople}
+              {loadingSlots ? (
+                <SkeletonCalendar />
+              ) : !hasAnySlots ? (
+                <div className="py-10 text-center text-[#5a4a3f]">
+                  <p className="font-medium text-sm sm:text-base">
+                    No upcoming availability yet.
+                  </p>
+                  <p className="text-xs sm:text-sm text-[#7a6a5a] mt-1">
+                    Please check back soon or reach out for custom dates.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <DayPicker
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={(d) => !pausedNow && setSelectedDate(d || null)}
+                    showOutsideDays
+                    fixedWeeks
+                    captionLayout="dropdown-buttons"
+                    fromMonth={new Date()}
+                    toMonth={
+                      new Date(new Date().setMonth(new Date().getMonth() + 6))
+                    }
+                    fromYear={new Date().getFullYear()}
+                    toYear={new Date().getFullYear() + 1}
+                    locale={enGB}
+                    modifiers={{
+                      plenty: availabilityBuckets.plenty,
+                      some: availabilityBuckets.some,
+                      few: availabilityBuckets.few,
+                      weekend: { dayOfWeek: [0, 6] },
+                    }}
+                    disabled={[
+                      { before: new Date() },
+                      (date) => !availableDates.some((d) => isSameDay(d, date)),
+                    ]}
+                    className="w-full max-w-md mx-auto"
+                    classNames={{
+                      root: "rdp-root w-full",
+                      caption:
+                        "rdp-caption mb-4 flex items-center justify-between rounded-xl bg-[#f7f3ed] px-3 py-2 border border-[#ece6dc]",
+                      caption_label:
+                        "text-sm sm:text-base font-serif text-[#5a4a3f] tracking-tight",
+                      nav: "rdp-nav flex items-center gap-2",
+                      nav_button:
+                        "rdp-nav_button h-8 w-8 grid place-items-center rounded-full border border-[#e0dcd4] bg-white hover:bg-[#faf7f1] text-[#5a4a3f] text-sm",
+                      table:
+                        "rdp-table w-full border-separate border-spacing-y-1 border-spacing-x-1",
+                      head_row: "rdp-head_row",
+                      head_cell:
+                        "rdp-head_cell text-[11px] font-semibold text-[#7a6a58] pb-2 uppercase tracking-[0.16em]",
+                      row: "rdp-row",
+                      cell: "rdp-cell text-center align-middle h-10 w-10 [&_.rdp-day_selected]:!bg-[#8b6f47] [&_.rdp-day_selected]:!text-white",
+                      day: "rdp-day !rounded-full focus:outline-none focus:ring-2 focus:ring-[#cbb89e] transition-all duration-150 text-[13px]",
+                      day_selected:
+                        "rdp-day_selected !bg-[#8b6f47] !text-white !rounded-full hover:!bg-[#7a5f3a] shadow-sm scale-[1.02]",
+                      day_today:
+                        "rdp-day_today border border-[#8b6f47] !rounded-full text-[#5a4a3f] bg-[#f7f1e6]",
+                      day_outside: "rdp-day_outside text-[#cbbfae]",
+                      day_disabled:
+                        "rdp-day_disabled text-[#c7c0b6] opacity-60 line-through",
+                    }}
+                    modifiersClassNames={{
+                      plenty:
+                        "bg-[#e8f3ec] hover:bg-[#e2efe7] text-[#30433a] border border-[#c7dece]",
+                      some: "bg-[#f4efe5] hover:bg-[#efe8dd] text-[#4a4136] border border-[#e1d6c5]",
+                      few: "ring-1 ring-amber-400 bg-[#fff8ea] hover:bg-[#fff3d7] text-[#5a4a3f] border border-amber-200",
+                      weekend: "bg-[#fbf6f0]",
+                    }}
+                    components={{ DayContent }}
+                  />
+
+                  <Legend />
+
+                  <p className="mt-3 text-center text-[11px] text-[#7a6a58]">
+                    Showing availability for the next 6 months.
+                  </p>
+                </>
+              )}
+
+              {/* Paused overlay */}
+              {pausedNow && (
+                <>
+                  <div className="pointer-events-none absolute inset-0 rounded-3xl" />
+                  <div className="absolute right-4 top-4 rounded-full bg-[#8b6f47]/90 px-3 py-1.5 text-xs text-white shadow">
+                    Bookings paused
+                  </div>
+                </>
+              )}
+            </section>
+
+            {/* Right: Times + Group */}
+            <section className="space-y-6" ref={slotsContainerRef}>
+              {/* Times */}
+              <div
+                className={`rounded-3xl border border-[#e8e5df] bg-white/95 p-6 shadow-[0_12px_30px_rgba(90,74,63,0.08)] ${
+                  pausedNow ? "opacity-60" : ""
+                }`}
+              >
+                <h3 className="mb-3 text-lg font-serif text-[#5a4a3f] flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-[#8b6f47]" />
+                  {selectedDate
+                    ? `Available times on ${format(selectedDate, "PPP")}`
+                    : "Select a date"}
+                </h3>
+
+                {!selectedDate ? (
+                  <p className="text-sm text-[#7a6a5a]">
+                    Choose a date to see times.
+                  </p>
+                ) : slotsOnSelectedDay.length === 0 ? (
+                  <p className="text-sm text-[#7a6a5a]">
+                    No times available for this day.
+                  </p>
+                ) : (
+                  <div
+                    ref={timesListRef}
+                    role="radiogroup"
+                    aria-label="Available start times"
+                    className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+                  >
+                    {slotsOnSelectedDay.map((slot) => {
+                      const available =
+                        typeof slot.available === "number"
+                          ? slot.available
+                          : Math.max(
+                              0,
+                              (slot.totalSlots ?? 0) -
+                                (slot.booked ?? slot.bookedSlots ?? 0)
+                            );
+                      const isSelected = selectedSlotId === slot.id;
+                      const isDisabled = pausedNow || available <= 0;
+                      const time = format(parseISO(slot.date), "p");
+
+                      return (
+                        <button
+                          key={slot.id}
+                          type="button"
+                          onClick={() =>
+                            !isDisabled && setSelectedSlotId(slot.id)
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              !isDisabled && setSelectedSlotId(slot.id);
+                            }
+                          }}
+                          disabled={isDisabled}
+                          role="radio"
+                          aria-checked={isSelected}
+                          className={`flex items-center justify-between rounded-xl border p-4 text-left transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e] ${
+                            isDisabled
+                              ? "bg-[#f1ede7] border-[#ded6c9] text-[#b3aa9c] cursor-not-allowed"
+                              : isSelected
+                              ? "bg-[#f5efe4] border-[#8b6f47]"
+                              : "bg-white border-[#e8e5df] hover:shadow-md"
+                          }`}
+                          aria-label={`Start time ${time}${
+                            available > 0
+                              ? `, ${available} spots left`
+                              : ", fully booked"
+                          }`}
+                        >
+                          <div>
+                            <div className="text-sm font-semibold text-[#5a4a3f]">
+                              {time}
+                            </div>
+                            <div
+                              className={`text-xs font-medium ${
+                                available <= 0
+                                  ? "text-[#a89f92]"
+                                  : "text-[#2f6b3f]"
+                              }`}
+                            >
+                              {available <= 0
+                                ? "Fully booked"
+                                : `${available} available`}
+                            </div>
+                          </div>
+                          <input
+                            type="radio"
+                            name="slot"
+                            className="accent-[#8b6f47]"
+                            checked={isSelected}
+                            readOnly
+                            tabIndex={-1}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Group & Summary */}
+              <div className="lg:sticky lg:top-28">
+                <div className="rounded-3xl border border-[#e8e5df] bg-[#fcf9f4]/95 p-6 shadow-[0_12px_32px_rgba(90,74,63,0.12)]">
+                  <h3 className="text-lg font-serif text-[#5a4a3f]">
+                    Your group
+                  </h3>
+
+                  {selectedSlot && (
+                    <CapacityBar
+                      total={selectedSlot.totalSlots}
+                      booked={
+                        selectedSlot.booked ??
+                        selectedSlot.bookedSlots ??
+                        Math.max(
+                          0,
+                          (selectedSlot.totalSlots ?? 0) -
+                            (selectedSlot.available ?? 0)
+                        )
+                      }
+                    />
+                  )}
+
+                  <div className={`mt-4 ${pausedNow ? "opacity-60" : ""}`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-[#7a6a58]">
+                        Adults 15+, Kids 3–14.
+                      </p>
+                      {(adults !== 1 || kids !== 0) && (
+                        <button
+                          type="button"
+                          className="text-[11px] underline text-[#8b6f47] hover:text-[#6f583c]"
+                          onClick={() => {
+                            setAdults(1);
+                            setKids(0);
+                          }}
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <Counter
+                        label="Adults"
+                        value={adults}
+                        onChange={(v) => setAdults(clampGroup(v, 1, "adults"))}
+                        min={1}
+                        disabled={
+                          !selectedSlot || pausedNow || bookingCap === 0
+                        }
+                      />
+
+                      <Counter
+                        label="Kids"
+                        value={kids}
+                        onChange={(v) => setKids(clampGroup(v, 0, "kids"))}
+                        disabled={
+                          !selectedSlot || pausedNow || bookingCap === 0
+                        }
+                      />
+
+                      <div className="bg-white border border-[#e2ddd2] rounded-xl p-3 shadow-sm flex flex-col justify-center">
+                        <div className="text-sm text-[#5a4a3f] mb-1">Total</div>
+                        <div className="text-2xl font-bold text-[#8b6f47] tracking-wide">
+                          {totalPeople}
+                        </div>
                       </div>
+                    </div>
+
+                    {selectedSlot && (
+                      <p className="mt-2 text-xs text-[#5a4a3f]">
+                        {totalPeople} selected —{" "}
+                        {Math.max(0, bookingCap - totalPeople)} of {bookingCap}{" "}
+                        allowed for this booking (max {MAX_PER_BOOKING}; limited
+                        by remaining availability).
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Price summary */}
+                  <div
+                    id={priceLiveId}
+                    role="status"
+                    aria-live="polite"
+                    className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner"
+                  >
+                    <div className="space-y-1 text-sm text-[#5a4a3f]">
+                      {adults > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span>
+                            Adults × {adults} @ {formatEuro(prices.adult)}
+                          </span>
+                          <span className="font-semibold">
+                            {formatEuro(lineAdult)}
+                          </span>
+                        </div>
+                      )}
+
+                      {kids > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span>
+                            Kids × {kids} @ {formatEuro(prices.kid)}
+                          </span>
+                          <span className="font-semibold">
+                            {formatEuro(lineKid)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-3 border-t border-[#e5e0d8] pt-3 flex items-center justify-between">
+                      <span className="text-sm text-[#5a4a3f]">Total</span>
+                      <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
+                        {formatEuro(totalPrice)}
+                      </span>
                     </div>
                   </div>
 
-                  {selectedSlot && (
-                    <p className="mt-2 text-xs text-[#5a4a3f]">
-                      {totalPeople} selected —{" "}
-                      {Math.max(0, bookingCap - totalPeople)} of {bookingCap}{" "}
-                      allowed for this booking (max {MAX_PER_BOOKING}; limited
-                      by remaining availability).
-                    </p>
-                  )}
-                </div>
-
-                {/* Price summary (tiered) */}
-                <div
-                  id={priceLiveId}
-                  role="status"
-                  aria-live="polite"
-                  className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner"
-                >
-                  <div className="space-y-1 text-sm text-[#5a4a3f]">
-                    {adults > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span>
-                          Adults × {adults} @ {formatEuro(prices.adult)}
-                        </span>
-                        <span className="font-semibold">
-                          {formatEuro(lineAdult)}
-                        </span>
-                      </div>
+                  {/* Continue (desktop) */}
+                  <button
+                    onClick={handleContinue}
+                    disabled={!canContinue || isSubmitting}
+                    className={`mt-6 w-full py-3 rounded-full font-semibold text-sm sm:text-base transition-all flex items-center justify-center gap-2 shadow-md sm:flex ${
+                      !canContinue
+                        ? "bg-[#c3b8a9] cursor-not-allowed text-white"
+                        : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
+                    }`}
+                  >
+                    {pausedNow ? (
+                      "Bookings are paused"
+                    ) : isSubmitting ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Starting your booking...
+                      </>
+                    ) : !selectedSlotId ? (
+                      "Select a time"
+                    ) : totalPeople <= 0 ? (
+                      "Add people"
+                    ) : (
+                      "Continue to details"
                     )}
-
-                    {kids > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span>
-                          Kids × {kids} @ {formatEuro(prices.kid)}
-                        </span>
-                        <span className="font-semibold">
-                          {formatEuro(lineKid)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="mt-3 border-t border-[#e5e0d8] pt-3 flex items-center justify-between">
-                    <span className="text-sm text-[#5a4a3f]">Total</span>
-                    <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                      {formatEuro(totalPrice)}
-                    </span>
-                  </div>
+                  </button>
                 </div>
-
-                {/* Continue */}
-                <button
-                  onClick={handleContinue}
-                  disabled={!canContinue || isSubmitting}
-                  className={`mt-6 w-full py-3 rounded-lg font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md hidden sm:flex ${
-                    !canContinue
-                      ? "bg-gray-400 cursor-not-allowed text-white"
-                      : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
-                  }`}
-                >
-                  {pausedNow ? (
-                    "Bookings are paused"
-                  ) : isSubmitting ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Starting your booking...
-                    </>
-                  ) : !selectedSlotId ? (
-                    "Select a time"
-                  ) : totalPeople <= 0 ? (
-                    "Add people"
-                  ) : (
-                    "Continue to Details"
-                  )}
-                </button>
               </div>
-            </div>
-          </section>
-        </div>
-      </main>
+            </section>
+          </div>
+        </main>
+      </div>
 
       {/* Mobile sticky action bar */}
       <div className="sm:hidden fixed bottom-0 left-0 right-0 border-t border-[#e5e0d8] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 px-4 py-3">
@@ -842,9 +902,9 @@ export default function CheckAvailabilityPage() {
           <button
             onClick={handleContinue}
             disabled={!canContinue || isSubmitting}
-            className={`flex-1 justify-center py-3 rounded-lg font-semibold text-base transition-all flex items-center gap-2 shadow-md ${
+            className={`flex-1 justify-center py-3 rounded-full font-semibold text-base transition-all flex items-center gap-2 shadow-md ${
               !canContinue
-                ? "bg-gray-400 cursor-not-allowed text-white"
+                ? "bg-[#c3b8a9] cursor-not-allowed text-white"
                 : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
             }`}
             aria-label="Continue to details"
@@ -866,7 +926,7 @@ export default function CheckAvailabilityPage() {
           </button>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -904,10 +964,10 @@ function CapacityBar({ total = 0, booked = 0 }) {
     total > 0 ? Math.min(100, Math.round((booked / total) * 100)) : 0;
   const tone =
     usedPct >= 80
-      ? "bg-red-500"
+      ? "bg-rose-500"
       : usedPct >= 50
-      ? "bg-yellow-500"
-      : "bg-green-600";
+      ? "bg-amber-500"
+      : "bg-emerald-600";
 
   return (
     <div className="mt-3">
@@ -1027,28 +1087,40 @@ function SelectedDatePill({ date, onClear }) {
 
 function Legend() {
   return (
-    <div className="mt-3 flex flex-wrap items-center justify-center gap-4 text-[11px] text-[#7a6a58]">
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full bg-[#e8f3ec] ring-1 ring-[#bcd8c8]" />
-        Plenty
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full bg-[#f4efe5] ring-1 ring-[#e1d6c5]" />
-        Some
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full bg-[#fff8ea] ring-1 ring-amber-400" />
-        Few left
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-block h-3 w-3 rounded-full border border-[#8b6f47]" />
-        Today
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-block h-2 w-4 rounded bg-[#faf7f3]" />
-        Weekend
-      </span>
+    <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-[11px] text-[#7a6a58]">
+      <LegendChip
+        swatchClass="bg-[#e8f3ec] ring-1 ring-[#bcd8c8]"
+        label="Plenty"
+      />
+      <LegendChip
+        swatchClass="bg-[#f4efe5] ring-1 ring-[#e1d6c5]"
+        label="Some"
+      />
+      <LegendChip
+        swatchClass="bg-[#fff8ea] ring-1 ring-amber-400"
+        label="Few left"
+      />
+      <LegendChip circle swatchClass="border border-[#8b6f47]" label="Today" />
+      <LegendChip swatchClass="bg-[#fbf6f0]" label="Weekend" wide />
     </div>
+  );
+}
+
+function LegendChip({ swatchClass, label, circle = false, wide = false }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f7f3ed] px-2.5 py-1 border border-[#ebe4d8]">
+      <span
+        className={[
+          "inline-block",
+          circle ? "h-2.5 w-2.5 rounded-full" : "h-2 w-3 rounded",
+          swatchClass,
+          wide ? "w-5" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      />
+      <span>{label}</span>
+    </span>
   );
 }
 
@@ -1060,12 +1132,18 @@ function DayDot({ date, countsByYMD }) {
   ].join("-");
   const remaining = countsByYMD.get(ymd) || 0;
   if (!remaining) return null;
+
   const few = remaining <= 3;
+
   return (
     <span
-      className={`pointer-events-none absolute bottom-1 left-1/2 -translate-x-1/2 h-1.5 w-1.5 rounded-full ${
-        few ? "bg-amber-600" : "bg-[#8b6f47]"
-      }`}
+      className={[
+        "pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 h-1.5 w-1.5 rounded-full",
+        "shadow-[0_0_0_1px_rgba(255,255,255,0.9)]",
+        few ? "bg-amber-600" : "bg-[#4f7d5c]",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-hidden="true"
     />
   );
