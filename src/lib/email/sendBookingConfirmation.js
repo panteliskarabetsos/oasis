@@ -1,19 +1,29 @@
 // src/lib/email/sendBookingConfirmation.js
 import "server-only";
 import { format } from "date-fns";
-import { getTransporter } from "./mailer";
 import Stripe from "stripe";
-
 import path from "node:path";
+
+import { getTransporter } from "./mailer";
 import buildTicketPdfBuffer from "@/lib/pdf/buildTicket";
-/**
- * Env
- */
+
+/* -------------------------------------------------------------------------- */
+/*                                   ENV                                      */
+/* -------------------------------------------------------------------------- */
+
 const EMAIL_FROM = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 const REPLY_TO = process.env.EMAIL_REPLY_TO || EMAIL_FROM;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+
+/* -------------------------------------------------------------------------- */
+/*                         MAIN: sendBookingConfirmation                      */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Send a booking confirmation email with optional calendar invite.
+ * Send a booking confirmation email with optional:
+ * - Calendar invite (ICS)
+ * - Stripe invoice PDF (+ hosted receipt URL)
+ * - Custom “ticket” PDF (experience + QR + order summary)
  *
  * @param {Object} opts
  * @param {string|string[]} [opts.to]
@@ -31,14 +41,19 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
  * @param {string}   [opts.tz="Europe/Athens"]
  * @param {Object}   [opts.brand]
  * @param {string}   [opts.preheader]
- * @param {string}   [opts.logoUrl]
+ * @param {string}   [opts.logoUrl]  // email logo URL (not the PDF logo path)
+ * @param {boolean}  [opts.attachTicketPdf=true]
+ * @param {string}   [opts.appOrigin]
+ * @param {string}   [opts.checkinUrl]
+ * @param {string}   [opts.qrValue]
+ * @param {string}   [opts.status]   // booking status for the ticket PDF header
  */
 export default async function sendBookingConfirmation(opts = {}) {
   const {
     to,
     draft,
     session,
-    stripeSessionId: _stripeSessionId, // optional overrides
+    stripeSessionId: _stripeSessionId,
     stripePaymentIntentId: _stripePaymentIntentId,
     experience = null,
     slot = null,
@@ -62,10 +77,12 @@ export default async function sendBookingConfirmation(opts = {}) {
     logoUrl,
   } = opts;
 
-  if (!draft || !session)
-    return { skipped: true, error: "missing-draft-or-session" };
+  /* -------------------------- basic guards --------------------------- */
 
-  /** -------------------- recipients -------------------- */
+  if (!draft || !session) {
+    return { skipped: true, error: "missing-draft-or-session" };
+  }
+
   const recipients = normalizeRecipients(
     to ||
       draft?.primary_contact?.email ||
@@ -78,37 +95,39 @@ export default async function sendBookingConfirmation(opts = {}) {
   }
   const bccList = normalizeRecipients(bcc);
 
-  /** -------------------- counts & attendees -------------------- */
+  /* -------------------- counts, attendees, schedule ------------------ */
+
   const { adults, kids } = normalizeCounts(draft?.counts);
   const attendees = deriveAttendeesFromDraft(draft, adults, kids);
 
-  /** -------------------- when -------------------- */
   const whenIso = slot?.date || slot?.startAt || slot?.start || null;
-  const d = whenIso ? new Date(whenIso) : null;
-  const dateLabel = d ? format(d, "PPP") : "";
-  const timeLabel = d ? format(d, "p") : "";
+  const startDate = whenIso ? new Date(whenIso) : null;
+  const dateLabel = startDate ? format(startDate, "PPP") : "";
+  const timeLabel = startDate ? format(startDate, "p") : "";
 
-  /** -------------------- amounts & currency -------------------- */
+  /* -------------------------- money / promo -------------------------- */
+
   const currency = String(
     session?.currency || draft?.currency || "eur"
   ).toUpperCase();
+
   const amount =
     typeof session?.amount_total === "number"
       ? session.amount_total / 100
       : Number(draft?.totalAmount ?? 0);
 
-  const fmt = makeCurrencyFormatter(locale, currency);
-  const amountLabel = fmt(Number(amount || 0));
+  const fmtCurrency = makeCurrencyFormatter(locale, currency);
+  const amountLabel = fmtCurrency(Number(amount || 0));
 
-  /** -------------------- promo / discount -------------------- */
   const promo = extractPromoFromDraft(draft);
   const hasDiscount = promo?.discountAmount > 0;
-  const discountLabel = hasDiscount ? fmt(promo.discountAmount) : null;
+  const discountLabel = hasDiscount ? fmtCurrency(promo.discountAmount) : null;
   const subtotalLabel = hasDiscount
-    ? fmt(Math.max(0, Number(amount || 0) + promo.discountAmount))
+    ? fmtCurrency(Math.max(0, Number(amount || 0) + promo.discountAmount))
     : null;
 
-  /** -------------------- subject / ref / preheader -------------------- */
+  /* ---------------------- subject / reference ------------------------ */
+
   const reference =
     bookingCode ||
     (bookingId ? `BK-${String(bookingId).padStart(6, "0")}` : null) ||
@@ -124,41 +143,13 @@ export default async function sendBookingConfirmation(opts = {}) {
       timeLabel ? `, ${timeLabel}` : ""
     } — confirmed`;
 
-  /** -------------------- render -------------------- */
-  const html = renderConfirmationHtml({
-    brand,
-    logoUrl,
-    preheaderText,
-    experienceName: experience?.name,
-    location: experience?.location,
-    dateLabel,
-    timeLabel,
-    attendees,
-    amountLabel,
-    currency,
-    bookingRef: reference,
-    promoCode: promo?.code || null,
-    discountLabel,
-    subtotalLabel,
-  });
+  /* ------------------------ attachments array ------------------------ */
 
-  const text = renderTextFallback({
-    experienceName: experience?.name,
-    location: experience?.location,
-    dateLabel,
-    timeLabel,
-    attendees,
-    amountLabel,
-    currency,
-    bookingRef: reference,
-    promoCode: promo?.code || null,
-    discountLabel,
-    subtotalLabel,
-  });
-
-  /** -------------------- optional ICS attachment -------------------- */
   const attachments = [];
-  if (addCalendarInvite && d) {
+
+  /* ------------------------ ICS calendar invite ---------------------- */
+
+  if (addCalendarInvite && startDate) {
     const ics = buildICS({
       uid: reference || `booking-${draft?.id || ""}-${Date.now()}`,
       title: experience?.name || "Reservation",
@@ -166,10 +157,11 @@ export default async function sendBookingConfirmation(opts = {}) {
         experience?.name ? ` — ${experience.name}` : ""
       }`,
       location: experience?.location || "",
-      start: d,
+      start: startDate,
       durationMinutes,
       tz, // informational only; ICS uses UTC
     });
+
     attachments.push({
       filename: "booking.ics",
       content: ics,
@@ -177,16 +169,18 @@ export default async function sendBookingConfirmation(opts = {}) {
     });
   }
 
-  /** -------------------- Stripe invoice PDF + receipt URL -------------------- */
+  /* ------------------- Stripe invoice + receipt URL ------------------ */
+
   let receiptUrl = null;
   let hasInvoicePdf = false;
-  // Collect Stripe identifiers from any source available
-  const ssId =
+
+  const stripeSessionId =
     (session && session.id) ||
     _stripeSessionId ||
     draft?.stripeSessionId ||
     null;
-  const piId =
+
+  const stripePaymentIntentId =
     (session &&
       (typeof session.payment_intent === "string"
         ? session.payment_intent
@@ -201,10 +195,12 @@ export default async function sendBookingConfirmation(opts = {}) {
       invoiceFilename,
       receiptUrl: rUrl,
     } = await getStripeArtifacts({
-      stripeSessionId: ssId,
-      stripePaymentIntentId: piId,
+      stripeSessionId,
+      stripePaymentIntentId,
     });
+
     receiptUrl = rUrl || null;
+
     if (invoicePdfBuffer) {
       attachments.push({
         filename:
@@ -213,14 +209,15 @@ export default async function sendBookingConfirmation(opts = {}) {
             6,
             "0"
           )}.pdf`,
-        content: invoicePdfBuffer, // Buffer
+        content: invoicePdfBuffer,
         contentType: "application/pdf",
       });
       hasInvoicePdf = true;
     }
+
     console.log("[email] artifacts:", {
-      stripeSessionId: ssId,
-      stripePaymentIntentId: piId,
+      stripeSessionId,
+      stripePaymentIntentId,
       hasInvoicePdf,
       hasReceipt: Boolean(receiptUrl),
     });
@@ -228,7 +225,8 @@ export default async function sendBookingConfirmation(opts = {}) {
     console.warn("[email] stripe artifacts error:", e?.message || e);
   }
 
-  /** -------------------- Custom Ticket PDF (experience + payment + QR) -------------------- */
+  /* ------------------------ Ticket PDF attachment -------------------- */
+
   if (opts.attachTicketPdf !== false) {
     const appOrigin =
       opts.appOrigin || process.env.APP_ORIGIN || "https://youroasis.gr";
@@ -252,9 +250,19 @@ export default async function sendBookingConfirmation(opts = {}) {
         bookingRef: reference || String(bookingId ?? draft?.id ?? ""),
         receiptUrl,
         qrValue: opts.qrValue || defaultQrUrl,
-        fontDir: path.join(process.cwd(), "public", "fonts"), // <- explicit
+
+        // fonts + logo on disk (PDFKit wants file paths or buffers)
+        fontDir: path.join(process.cwd(), "public", "fonts"),
         logoUrl: path.join(process.cwd(), "public", "brand", "logo.png"),
-        brandName: "Oasis", // fallback text if the image can’t load
+        brandName: brand?.name || "Oasis",
+
+        // pretty footer
+        status: opts.status || "CONFIRMED",
+        supportEmail: brand?.supportEmail || "info@youroasis.gr",
+        supportPhone: brand?.supportPhone || "+30 210 0000000",
+        footerNote:
+          "Present this ticket at check-in. For changes or questions, contact us.",
+        watermarkText: brand?.watermarkText || brand?.name || "Oasis",
       });
 
       attachments.push({
@@ -269,8 +277,9 @@ export default async function sendBookingConfirmation(opts = {}) {
     }
   }
 
-  // Re-render HTML and text with receipt link / invoice note info
-  const htmlFinal = renderConfirmationHtml({
+  /* --------------------- HTML + text email bodies -------------------- */
+
+  const html = renderConfirmationHtml({
     brand,
     logoUrl,
     preheaderText,
@@ -287,9 +296,13 @@ export default async function sendBookingConfirmation(opts = {}) {
     subtotalLabel,
     receiptUrl,
     hasInvoicePdf,
+
+    // optionally used for CTAs (not required right now, but supported)
+    calendarUrl: null,
+    manageUrl: null,
   });
 
-  const textFinal = renderTextFallback({
+  const text = renderTextFallback({
     experienceName: experience?.name,
     location: experience?.location,
     dateLabel,
@@ -304,7 +317,9 @@ export default async function sendBookingConfirmation(opts = {}) {
     receiptUrl,
     hasInvoicePdf,
   });
-  /** -------------------- send -------------------- */
+
+  /* ------------------------------ send ------------------------------- */
+
   try {
     const transporter = getTransporter();
     const info = await transporter.sendMail({
@@ -318,10 +333,11 @@ export default async function sendBookingConfirmation(opts = {}) {
         "X-Booking-ID": String(bookingId ?? ""),
         "X-Experience-ID": String(draft?.experienceId ?? ""),
       },
-      html: htmlFinal,
-      text: textFinal,
+      html,
+      text,
       attachments,
     });
+
     return { sent: true, id: info?.messageId };
   } catch (e) {
     console.error("[email] Gmail send error:", e?.message || e);
@@ -329,7 +345,9 @@ export default async function sendBookingConfirmation(opts = {}) {
   }
 }
 
-/** =========================== renderers =========================== */
+/* -------------------------------------------------------------------------- */
+/*                              STRIPE HELPERS                                */
+/* -------------------------------------------------------------------------- */
 
 async function fetchPdfBuffer(url) {
   const res = await fetch(url);
@@ -346,6 +364,7 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
     console.warn("[email] STRIPE_SECRET_KEY missing; skipping Stripe lookups");
     return {};
   }
+
   const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 
   // Re-fetch the session to expand invoice + latest charge
@@ -362,6 +381,7 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
 
   // Hosted receipt URL from PI/Charge
   let receiptUrl = null;
+
   async function receiptFromPI(idOrObj) {
     const pi =
       typeof idOrObj === "string"
@@ -399,6 +419,7 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
   // Invoice PDF (if invoice_creation enabled at Checkout)
   let invoicePdfBuffer = null;
   let invoiceFilename = null;
+
   if (sess?.invoice) {
     try {
       const inv =
@@ -417,6 +438,10 @@ async function getStripeArtifacts({ stripeSessionId, stripePaymentIntentId }) {
   return { invoicePdfBuffer, invoiceFilename, receiptUrl };
 }
 
+/* -------------------------------------------------------------------------- */
+/*                           HTML / TEXT RENDERERS                            */
+/* -------------------------------------------------------------------------- */
+
 export function renderConfirmationHtml({
   brand,
   logoUrl,
@@ -434,9 +459,10 @@ export function renderConfirmationHtml({
   subtotalLabel,
   receiptUrl,
   hasInvoicePdf,
-  // NEW (optional):
-  calendarUrl, // e.g. a Google Calendar template link
-  manageUrl, // e.g. “Manage booking” link in your app
+
+  // optional CTAs:
+  calendarUrl,
+  manageUrl,
 }) {
   const {
     text = "#2b2a28",
@@ -698,46 +724,6 @@ export function renderConfirmationHtml({
   </div>`;
 }
 
-/* small helpers used above */
-function row(label, value, border = "#efeae1") {
-  return `<tr>
-    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(
-    label
-  )}</strong></td>
-    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${escapeHtml(
-    value || ""
-  )}</td>
-  </tr>`;
-}
-function rowHtml(label, html, border = "#efeae1") {
-  return `<tr>
-    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(
-    label
-  )}</strong></td>
-    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${
-    html || ""
-  }</td>
-  </tr>`;
-}
-function cta(href, label, bg = "#8b6f47", border = "transparent", fgPanel) {
-  const styles = `display:inline-block;margin:6px 8px 0 0;padding:11px 16px;border-radius:10px;border:1px solid ${border};background:${bg};color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;line-height:20px;`;
-  const onPanel = fgPanel ? `background:${fgPanel};color:#2b2a28;` : "";
-  return `<a href="${href}" target="_blank" style="${
-    fgPanel
-      ? styles.replace(
-          `background:${bg};color:#ffffff;`,
-          onPanel + `border:1px solid ${border};`
-        )
-      : styles
-  }">${escapeHtml(label)} →</a>`;
-}
-function escapeHtml(s = "") {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
 function renderTextFallback({
   experienceName,
   location,
@@ -777,33 +763,57 @@ function renderTextFallback({
   return lines.filter(Boolean).join("\n");
 }
 
-/** =========================== helpers =========================== */
+/* -------------------------------------------------------------------------- */
+/*                               HTML helpers                                 */
+/* -------------------------------------------------------------------------- */
 
-// function row(label, value, border = "#efeae1") {
-//   return `<tr><td style="padding:10px;border-bottom:1px solid ${border}"><strong>${escapeHtml(
-//     label
-//   )}</strong></td><td style="padding:10px;border-bottom:1px solid ${border}">${escapeHtml(
-//     value || ""
-//   )}</td></tr>`;
-// }
+function row(label, value, border = "#efeae1") {
+  return `<tr>
+    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(
+    label
+  )}</strong></td>
+    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${escapeHtml(
+    value || ""
+  )}</td>
+  </tr>`;
+}
 
-// function rowHtml(label, html, border = "#efeae1") {
-//   return `<tr>
-//     <td style="padding:10px;border-bottom:1px solid ${border};"><strong>${escapeHtml(
-//     label
-//   )}</strong></td>
-//     <td style="padding:10px;border-bottom:1px solid ${border};">${
-//     html || ""
-//   }</td>
-//   </tr>`;
-// }
+function rowHtml(label, html, border = "#efeae1") {
+  return `<tr>
+    <td style="padding:10px;border-bottom:1px solid ${border};width:140px;color:#6b665d;"><strong>${escapeHtml(
+    label
+  )}</strong></td>
+    <td style="padding:10px;border-bottom:1px solid ${border};color:#2b2a28;">${
+    html || ""
+  }</td>
+  </tr>`;
+}
 
-// function escapeHtml(s = "") {
-//   return String(s)
-//     .replace(/&/g, "&amp;")
-//     .replace(/</g, "&lt;")
-//     .replace(/>/g, "&gt;");
-// }
+function cta(href, label, bg = "#8b6f47", border = "transparent", fgPanel) {
+  const base = `display:inline-block;margin:6px 8px 0 0;padding:11px 16px;border-radius:10px;border:1px solid ${border};background:${bg};color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;line-height:20px;`;
+  const onPanel = fgPanel ? `background:${fgPanel};color:#2b2a28;` : "";
+  const styles = fgPanel
+    ? base.replace(
+        /background:[^;]+;color:[^;]+;/,
+        onPanel + `border:1px solid ${border};`
+      )
+    : base;
+
+  return `<a href="${href}" target="_blank" style="${styles}">${escapeHtml(
+    label
+  )} →</a>`;
+}
+
+function escapeHtml(s = "") {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/* -------------------------------------------------------------------------- */
+/*                             booking helpers                                */
+/* -------------------------------------------------------------------------- */
 
 function normalizeRecipients(to) {
   const arr = Array.isArray(to) ? to : [to];
@@ -849,7 +859,7 @@ function deriveAttendeesFromDraft(draft, adults, kids) {
 
   const out = [];
   const buyer = draft?.primary_contact || {};
-  const buyerName = pickName(buyer, 0, /*isPrimary*/ true);
+  const buyerName = pickName(buyer, 0, true);
 
   if (adults > 0 && buyerName) out.push({ name: buyerName });
 
@@ -895,23 +905,23 @@ function pickName(obj = {}, idx = 0, isPrimary = false) {
   return `Guest ${idx + 1}`;
 }
 
-/** promo extracted from draft */
 function extractPromoFromDraft(draft) {
   try {
     const code = draft?.appliedPromoCode || draft?.promoJson?.code || null;
     const discountAmount = Number(draft?.discountAmount || 0);
     const out = { code, discountAmount };
+
     if (draft?.promoJson?.discountType)
       out.discountType = draft.promoJson.discountType;
     if (draft?.promoJson?.discountValue != null)
       out.discountValue = draft.promoJson.discountValue;
+
     return out;
   } catch {
     return { code: null, discountAmount: 0 };
   }
 }
 
-/** currency formatter factory */
 function makeCurrencyFormatter(locale, currency) {
   try {
     const nf = new Intl.NumberFormat(locale || "en-GB", {
@@ -927,7 +937,10 @@ function makeCurrencyFormatter(locale, currency) {
   }
 }
 
-/** Build a minimal ICS invite in UTC */
+/* -------------------------------------------------------------------------- */
+/*                                  ICS                                      */
+/* -------------------------------------------------------------------------- */
+
 function buildICS({
   uid,
   title,
@@ -982,4 +995,5 @@ function escapeICS(s = "") {
     .replace(/;/g, "\\;");
 }
 
+/* exported for tests / reuse */
 export { deriveAttendeesFromDraft };
