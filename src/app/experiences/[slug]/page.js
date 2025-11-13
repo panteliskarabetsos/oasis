@@ -139,7 +139,7 @@ export default async function ExperienceDetailPage({ params }) {
   });
 
   return (
-    <main className="bg-[#f4f1ec] text-[#2f2f2f]">
+    <main className="bg-gradient-to-b from-[#f4f1ec] via-[#faf9f7] to-[#f4f1ec] text-[#2f2f2f] min-h-screen">
       {/* JSON-LD for rich results */}
       <Script
         id="experience-jsonld"
@@ -147,10 +147,10 @@ export default async function ExperienceDetailPage({ params }) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      {/* Decorative ambient background */}
+      {/* Ambient background blob */}
       <div aria-hidden className="fixed inset-0 -z-10">
         <div
-          className="pointer-events-none absolute -top-32 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full blur-3xl opacity-40"
+          className="pointer-events-none absolute -top-32 left-1/2 h-[34rem] w-[34rem] -translate-x-1/2 rounded-full blur-3xl opacity-40"
           style={{
             background:
               "radial-gradient(closest-side, #e8dfcf, transparent 70%)",
@@ -158,325 +158,379 @@ export default async function ExperienceDetailPage({ params }) {
         />
       </div>
 
-      {/* Back button overlay + Hero section */}
-      <div className="absolute inset-x-0 top-16 sm:top-24 z-10">
-        <div className="mx-auto w-full max-w-6xl px-6">
-          <LinkWithLoader href="/experiences" aria-label="Back to Experiences">
-            <button className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/60 backdrop-blur px-4 py-2 text-sm text-[#5a4a3f] hover:bg-white/80 transition">
-              <ArrowLeft size={18} aria-hidden="true" />
-              Back to Experiences
-            </button>
-          </LinkWithLoader>
-        </div>
-      </div>
+      {/* HERO */}
+      <section className="relative">
+        {/* Background image */}
+        <div className="relative h-[320px] sm:h-[420px] lg:h-[460px] overflow-hidden">
+          {parsedImages?.[0] ? (
+            <>
+              <Image
+                src={parsedImages[0]}
+                alt={`${name} banner`}
+                fill
+                priority
+                className="object-cover scale-105"
+                sizes="100vw"
+              />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/25 to-transparent" />
+            </>
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-b from-[#d8cbb5] to-[#f4f1ec]" />
+          )}
 
-      <div className="relative -mx-6 -mt-16 sm:-mt-24 h-[320px] sm:h-[420px] overflow-hidden">
-        {parsedImages?.[0] ? (
-          <>
-            <Image
-              src={parsedImages[0]}
-              alt={`${name} banner`}
-              fill
-              priority
-              className="object-cover blur-md scale-110"
-              sizes="100vw"
-            />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/10 to-[#f4f1ec]" />
-          </>
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-b from-[#d8cbb5] to-[#f4f1ec]" />
-        )}
+          {/* Back button + content */}
+          <div className="absolute inset-0 flex flex-col justify-between pt-20 sm:pt-24">
+            <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 flex justify-between items-start">
+              <LinkWithLoader
+                href="/experiences"
+                aria-label="Back to Experiences"
+              >
+                <button className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/70 backdrop-blur px-4 py-2 text-xs sm:text-sm text-[#5a4a3f] hover:bg-white transition">
+                  <ArrowLeft size={16} aria-hidden="true" />
+                  Back to experiences
+                </button>
+              </LinkWithLoader>
+            </div>
 
-        {/* Header content overlay */}
-        <div className="absolute inset-0 flex items-end justify-center">
-          <div className="mx-auto w-full max-w-6xl px-6 pb-6">
-            <div className="backdrop-blur-sm bg-white/50 border border-white/50 rounded-2xl shadow-lg p-5 sm:p-7">
-              <h1 className="text-3xl sm:text-5xl font-serif text-[#5a4a3f]">
-                {name}
-              </h1>
-              {(duration || fromPrice !== null || location) && (
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[#4a4a4a]">
-                  {duration && <span className="italic">{duration}</span>}
-                  {fromPrice !== null && (
-                    <span className="font-medium text-[#5a4a3f]">
-                      From {eur(fromPrice)} / person
-                    </span>
-                  )}
-                  {location && (
-                    <span className="text-[#8b6f47]">Location: {location}</span>
-                  )}
-                </div>
-              )}
-              <div className="mt-4">
-                <LinkWithLoader href={`/check-availability/${slug}`}>
-                  <button className="bg-[#8b6f47] text-white px-6 py-3 rounded-full font-medium hover:bg-[#a78b62] transition-all">
-                    Check Availability
-                  </button>
-                </LinkWithLoader>
+            {/* Title card */}
+            <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 pb-6 sm:pb-10">
+              <div className="max-w-3xl rounded-3xl bg-white/90 backdrop-blur border border-white/80 shadow-[0_18px_55px_rgba(0,0,0,0.22)] px-5 py-5 sm:px-7 sm:py-7">
+                <h1 className="text-2xl sm:text-4xl lg:text-5xl font-serif text-[#5a4a3f] leading-tight">
+                  {name}
+                </h1>
+
+                {(duration || fromPrice !== null || location) && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 sm:gap-3 text-xs sm:text-sm">
+                    {duration && (
+                      <span className="inline-flex items-center rounded-full bg-[#f4ede2] px-3 py-1 text-[#5a4a3f]">
+                        {duration}
+                      </span>
+                    )}
+                    {location && (
+                      <span className="inline-flex items-center rounded-full bg-white px-3 py-1 text-[#8b6f47] border border-[#e2d7c7]">
+                        {location}
+                      </span>
+                    )}
+                    {fromPrice !== null && (
+                      <span className="inline-flex items-center rounded-full bg-[#8b6f47] px-3 py-1 text-white font-medium">
+                        From {eur(fromPrice)} / person
+                      </span>
+                    )}
+                  </div>
+                )}
+                <p className="mt-3 text-xs tracking-[0.22em] uppercase text-[#8b7a6b]">
+                  Small groups • Slow-paced • Nature-first
+                </p>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Content */}
-      <div className="mx-auto max-w-7xl px-4 sm:px-6">
-        {/* Description */}
-        {description && (
-          <section className="py-12 sm:py-16">
-            <div className="mx-auto max-w-4xl text-center">
-              <p className="text-lg sm:text-xl leading-relaxed text-[#4a4a4a] whitespace-pre-line">
-                {description}
+      {/* MAIN CONTENT LAYOUT */}
+      <section className="mx-auto max-w-6xl px-4 sm:px-6 py-10 sm:py-14 lg:py-16">
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)] lg:items-start">
+          {/* LEFT COLUMN – Story & details */}
+          <div className="space-y-10">
+            {/* Description */}
+            {description && (
+              <section>
+                <h2 className="text-sm tracking-[0.3em] uppercase text-[#8b6f47] mb-3">
+                  Overview
+                </h2>
+                <p className="text-[16px] sm:text-[17px] leading-relaxed text-[#4a4a4a] whitespace-pre-line">
+                  {description}
+                </p>
+              </section>
+            )}
+
+            {/* What’s included / to bring / why you'll love */}
+            {(whatsIncluded || whatToBring || whyYoullLove) && (
+              <section className="space-y-6">
+                {whatsIncluded && (
+                  <div className="rounded-3xl border border-[#e0dcd4] bg-white/90 p-6 sm:p-7 shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
+                    <h3 className="text-xl sm:text-2xl font-serif text-[#5a4a3f] mb-4">
+                      What’s included
+                    </h3>
+                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6">
+                      {splitItems(whatsIncluded).map((item, i) => (
+                        <li
+                          key={i}
+                          className="inline-flex items-start gap-2 text-[15px] text-[#4a4a4a]"
+                        >
+                          <CheckCircle2
+                            className="mt-0.5 shrink-0 text-[#8b6f47]"
+                            size={18}
+                            aria-hidden
+                          />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {whatToBring && (
+                  <div className="rounded-3xl border border-[#e0dcd4] bg-[#fffdf9] p-6 sm:p-7 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
+                    <h3 className="text-xl sm:text-2xl font-serif text-[#5a4a3f] mb-3 inline-flex items-center gap-2">
+                      <AlertCircle size={20} aria-hidden />
+                      What to bring
+                    </h3>
+                    <p className="text-[15px] leading-relaxed text-[#4a4a4a] whitespace-pre-line">
+                      {whatToBring}
+                    </p>
+                  </div>
+                )}
+
+                {whyYoullLove && (
+                  <div className="rounded-3xl border border-[#e0dcd4] bg-white/90 p-6 sm:p-8 shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
+                    <h3 className="text-xl sm:text-2xl font-serif text-[#5a4a3f] mb-3 text-center">
+                      Why you’ll love it
+                    </h3>
+                    <blockquote className="mx-auto max-w-3xl text-center text-lg sm:text-xl leading-relaxed text-[#5a4a3f]">
+                      “{whyYoullLove}”
+                    </blockquote>
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+
+          {/* RIGHT COLUMN – Booking / pricing card */}
+          <aside className="lg:sticky lg:top-28">
+            <div className="rounded-3xl border border-[#e0dcd4] bg-white/95 shadow-[0_18px_45px_rgba(90,74,63,0.18)] p-6 sm:p-7 space-y-5">
+              <h2 className="text-xl font-serif text-[#5a4a3f]">
+                Plan your visit
+              </h2>
+
+              <div className="space-y-2 text-sm text-[#4a4a4a]">
+                {location && (
+                  <p>
+                    <span className="font-semibold text-[#5a4a3f]">
+                      Location:
+                    </span>{" "}
+                    {location}
+                  </p>
+                )}
+                {duration && (
+                  <p>
+                    <span className="font-semibold text-[#5a4a3f]">
+                      Duration:
+                    </span>{" "}
+                    {duration}
+                  </p>
+                )}
+              </div>
+
+              <div className="border-t border-[#e6dfd4] pt-4">
+                <p className="text-xs tracking-[0.24em] uppercase text-[#8b7a6b] mb-2">
+                  Pricing
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-center text-sm">
+                  <div className="rounded-2xl border border-[#e0dcd4] bg-[#fbf7f1] p-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-[#7a6a5f] mb-1">
+                      Adult
+                    </div>
+                    <div className="text-lg font-semibold text-[#5a4a3f]">
+                      {typeof prices.adult === "number"
+                        ? eur(prices.adult)
+                        : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-[#e0dcd4] bg-[#fbf7f1] p-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-[#7a6a5f] mb-1">
+                      Kid (3–12)
+                    </div>
+                    <div className="text-lg font-semibold text-[#5a4a3f]">
+                      {typeof prices.kid === "number"
+                        ? eur(prices.kid)
+                        : typeof prices.adult === "number"
+                        ? eur(prices.adult)
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+                <p className="mt-2 text-[11px] text-[#7a6a5f] text-center">
+                  Final total is calculated at checkout based on your group.
+                </p>
+              </div>
+
+              <LinkWithLoader href={`/check-availability/${slug}`}>
+                <button className="mt-2 w-full bg-[#8b6f47] text-white px-6 py-3 rounded-full text-sm font-medium hover:bg-[#a78b62] transition-all">
+                  Check availability
+                </button>
+              </LinkWithLoader>
+
+              <p className="text-[11px] text-center text-[#7a6a5f]">
+                No payment is taken at this step. You&apos;ll receive a
+                confirmation email once your booking is approved.
               </p>
             </div>
-          </section>
-        )}
+          </aside>
+        </div>
+      </section>
 
-        {/* Highlights & What’s Included */}
-        {(whatsIncluded || whatToBring || whyYoullLove) && (
-          <section className="pb-12 sm:pb-16">
-            <div className="grid grid-cols-1 gap-6 sm:gap-8 md:grid-cols-3">
-              {whatsIncluded && (
-                <div className="col-span-1 md:col-span-2 rounded-3xl border-2 border-[#e0dcd4] bg-white/80 p-6 sm:p-8 shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
-                  <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-6">
-                    What’s Included
-                  </h3>
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6">
-                    {splitItems(whatsIncluded).map((item, i) => (
-                      <li
-                        key={i}
-                        className="inline-flex items-start gap-2 text-[17px] text-[#4a4a4a]"
-                      >
-                        <CheckCircle2
-                          className="mt-0.5 shrink-0"
-                          size={20}
-                          aria-hidden
-                        />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
+      {/* GALLERY */}
+      {parsedImages.length > 1 && (
+        <section className="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
+          <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-6 text-center">
+            Gallery
+          </h3>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+            {parsedImages.slice(1).map((img, idx) => {
+              const j = idx + 1; // slides start at 1 to skip hero image
+              return (
+                <a
+                  key={img + j}
+                  href={`#lb-${j}`}
+                  className="group relative aspect-[4/3] overflow-hidden rounded-2xl border border-[#e0dcd4] bg-[#f4ede2] shadow-[0_10px_30px_rgba(0,0,0,0.08)]"
+                  aria-label={`Open slide ${j + 1}`}
+                >
+                  <Image
+                    src={img}
+                    alt={`${name} photo ${j + 1}`}
+                    fill
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                    className="object-cover transition-transform duration-300 group-hover:scale-105"
+                    loading="lazy"
+                  />
+                </a>
+              );
+            })}
+          </div>
+
+          {/* Lightbox overlays (CSS-only) */}
+          {(() => {
+            const n = parsedImages.length - 1; // slides excluding hero
+            return parsedImages.slice(1).map((img, idx) => {
+              const j = idx + 1;
+              const prev = j - 1 >= 1 ? j - 1 : n;
+              const next = j + 1 <= n ? j + 1 : 1;
+              return (
+                <div
+                  key={`overlay-${j}`}
+                  id={`lb-${j}`}
+                  className="lightbox fixed inset-0 z-[60] hidden"
+                >
+                  <a
+                    href="#_"
+                    className="absolute inset-0 bg-black/80"
+                    aria-label="Close"
+                  />
+
+                  <div className="absolute inset-0 flex items-center justify-center p-4">
+                    <div className="relative w-[min(92vw,1200px)] h-[80vh]">
+                      <Image
+                        src={img}
+                        alt={`${name} photo ${j + 1}`}
+                        fill
+                        sizes="(max-width: 1400px) 92vw, 1200px"
+                        className="object-contain"
+                      />
+                    </div>
+                  </div>
+
+                  <a
+                    href={`#lb-${prev}`}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 shadow hover:bg-white"
+                    aria-label="Previous slide"
+                  >
+                    <ChevronLeft size={24} />
+                  </a>
+                  <a
+                    href={`#lb-${next}`}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 shadow hover:bg-white"
+                    aria-label="Next slide"
+                  >
+                    <ChevronRight size={24} />
+                  </a>
+                  <a
+                    href="#_"
+                    className="absolute right-5 top-5 rounded-full bg-white/90 p-2 shadow hover:bg-white"
+                    aria-label="Close slideshow"
+                  >
+                    <X size={20} />
+                  </a>
                 </div>
-              )}
+              );
+            });
+          })()}
 
-              {whatToBring && (
-                <div className="rounded-3xl border-2 border-[#e0dcd4] bg-white/80 p-6 sm:p-8 shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
-                  <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-4 inline-flex items-center gap-2">
-                    <AlertCircle size={22} aria-hidden /> What to Bring
-                  </h3>
-                  <p className="text-[#4a4a4a] whitespace-pre-line">
-                    {whatToBring}
+          <style>{`
+            .lightbox:target { display: block; }
+          `}</style>
+        </section>
+      )}
+
+      {/* MAP */}
+      {mapPin && (
+        <section className="mx-auto max-w-6xl px-4 sm:px-6 pb-18 lg:pb-20">
+          <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-6 text-center">
+            Where you&apos;ll be
+          </h3>
+          <div className="overflow-hidden rounded-2xl border border-[#e0dcd4] shadow-[0_16px_40px_rgba(0,0,0,0.14)]">
+            <div className="w-full aspect-[16/9]">
+              <iframe
+                title={`Map location for ${name}`}
+                src={`https://www.google.com/maps?q=${encodeURIComponent(
+                  mapPin
+                )}&z=14&output=embed`}
+                width="100%"
+                height="100%"
+                style={{ border: 0 }}
+                allowFullScreen
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+          </div>
+          <p className="mt-2 text-center text-sm text-[#4a4a4a]">
+            Having trouble viewing the map?{" "}
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                mapPin
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline text-[#8b6f47] hover:text-[#5a4a3f]"
+            >
+              Open in Google Maps
+            </a>
+          </p>
+        </section>
+      )}
+
+      {/* REVIEWS */}
+      {parsedReviews.length > 0 && (
+        <section className="mx-auto max-w-6xl px-4 sm:px-6 pb-24">
+          <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-6 text-center">
+            Guest reviews
+          </h3>
+          <div className="grid gap-6 sm:grid-cols-2">
+            {parsedReviews.map((review, i) => (
+              <article
+                key={(review?.name || "guest") + i}
+                className="rounded-2xl border border-[#e0dcd4] bg-white/95 p-6 shadow-[0_12px_32px_rgba(0,0,0,0.08)]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e8dfcf] font-semibold text-[#5a4a3f]">
+                    {initials(review?.name || "Guest")}
+                  </div>
+                  <p className="font-semibold text-lg text-[#5a4a3f]">
+                    {review?.name || "Guest"}
                   </p>
                 </div>
-              )}
-            </div>
-
-            {whyYoullLove && (
-              <div className="mt-8 rounded-3xl border-2 border-[#e0dcd4] bg-[#fffdf9] p-6 sm:p-10 shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
-                <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-4 text-center">
-                  Why You’ll Love It
-                </h3>
-                <blockquote className="mx-auto max-w-3xl text-center text-xl sm:text-2xl leading-relaxed text-[#5a4a3f]">
-                  “{whyYoullLove}”
-                </blockquote>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Pricing table (Adult + Kid) */}
-        <section className="pb-12">
-          <div className="mx-auto max-w-3xl rounded-3xl border-2 border-[#e0dcd4] bg-white p-6 shadow-[0_10px_30px_rgba(0,0,0,0.06)]">
-            <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-4 text-center">
-              Pricing
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 text-center gap-4">
-              <div className="rounded-xl border border-[#e0dcd4] p-4">
-                <div className="text-sm text-[#7a6a58] mb-1">Adult</div>
-                <div className="text-xl font-semibold text-[#5a4a3f]">
-                  {typeof prices.adult === "number" ? eur(prices.adult) : "—"}
-                </div>
-              </div>
-              <div className="rounded-xl border border-[#e0dcd4] p-4">
-                <div className="text-sm text-[#7a6a58] mb-1">Kid (3–12)</div>
-                <div className="text-xl font-semibold text-[#5a4a3f]">
-                  {typeof prices.kid === "number"
-                    ? eur(prices.kid)
-                    : typeof prices.adult === "number"
-                    ? eur(prices.adult)
-                    : "—"}
-                </div>
-              </div>
-            </div>
-            <p className="mt-3 text-center text-xs text-[#7a6a58]">
-              Final total is calculated at checkout based on your group.
-            </p>
+                {review?.comment && (
+                  <p className="mt-3 italic text-[#4a4a4a]">
+                    “{review.comment}”
+                  </p>
+                )}
+              </article>
+            ))}
           </div>
         </section>
-
-        {/* Image Gallery */}
-        {parsedImages.length > 1 && (
-          <section className="pb-16">
-            <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-6 text-center">
-              Gallery
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
-              {parsedImages.slice(1).map((img, idx) => {
-                const j = idx + 1; // slides start at 1 to skip hero image
-                return (
-                  <a
-                    key={img + j}
-                    href={`#lb-${j}`}
-                    className="group relative aspect-[4/3] overflow-hidden rounded-2xl border-2 border-[#e0dcd4] shadow-lg"
-                    aria-label={`Open slide ${j + 1}`}
-                  >
-                    <Image
-                      src={img}
-                      alt={`${name} photo ${j + 1}`}
-                      fill
-                      sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                      className="object-cover transition-transform duration-300 group-hover:scale-105"
-                      loading="lazy"
-                    />
-                  </a>
-                );
-              })}
-            </div>
-
-            {(() => {
-              const n = parsedImages.length - 1; // number of slides excluding hero
-              return parsedImages.slice(1).map((img, idx) => {
-                const j = idx + 1;
-                const prev = j - 1 >= 1 ? j - 1 : n;
-                const next = j + 1 <= n ? j + 1 : 1;
-                return (
-                  <div
-                    key={`overlay-${j}`}
-                    id={`lb-${j}`}
-                    className="lightbox fixed inset-0 z-[60] hidden"
-                  >
-                    <a
-                      href="#_"
-                      className="absolute inset-0 bg-black/80"
-                      aria-label="Close"
-                    />
-
-                    <div className="absolute inset-0 flex items-center justify-center p-4">
-                      <div className="relative w-[min(92vw,1200px)] h-[80vh]">
-                        <Image
-                          src={img}
-                          alt={`${name} photo ${j + 1}`}
-                          fill
-                          sizes="(max-width: 1400px) 92vw, 1200px"
-                          className="object-contain"
-                        />
-                      </div>
-                    </div>
-
-                    <a
-                      href={`#lb-${prev}`}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/80 p-2 shadow hover:bg-white"
-                      aria-label="Previous slide"
-                    >
-                      <ChevronLeft size={24} />
-                    </a>
-                    <a
-                      href={`#lb-${next}`}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/80 p-2 shadow hover:bg-white"
-                      aria-label="Next slide"
-                    >
-                      <ChevronRight size={24} />
-                    </a>
-                    <a
-                      href="#_"
-                      className="absolute right-4 top-4 rounded-full bg-white/80 p-2 shadow hover:bg-white"
-                      aria-label="Close slideshow"
-                    >
-                      <X size={20} />
-                    </a>
-                  </div>
-                );
-              });
-            })()}
-
-            <style>{`
-              .lightbox:target { display: block; }
-              .no-scrollbar::-webkit-scrollbar { display: none; }
-              .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-            `}</style>
-          </section>
-        )}
-
-        {/* Map Section */}
-        {mapPin && (
-          <section className="pb-20">
-            <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-6 text-center">
-              Where You'll Be
-            </h3>
-            <div className="overflow-hidden rounded-2xl border-2 border-[#e0dcd4] shadow-lg">
-              <div className="w-full aspect-[16/9]">
-                <iframe
-                  title={`Map location for ${name}`}
-                  src={`https://www.google.com/maps?q=${encodeURIComponent(
-                    mapPin
-                  )}&z=14&output=embed`}
-                  width="100%"
-                  height="100%"
-                  style={{ border: 0 }}
-                  allowFullScreen
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
-              </div>
-            </div>
-            <p className="mt-2 text-center text-sm text-[#4a4a4a]">
-              Having trouble viewing the map?{" "}
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                  mapPin
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline text-[#8b6f47] hover:text-[#5a4a3f]"
-              >
-                Open in Google Maps
-              </a>
-            </p>
-          </section>
-        )}
-
-        {/* Guest Reviews */}
-        {parsedReviews.length > 0 && (
-          <section className="pb-24">
-            <h3 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f] mb-6 text-center">
-              Guest Reviews
-            </h3>
-            <div className="grid gap-6 sm:grid-cols-2">
-              {parsedReviews.map((review, i) => (
-                <article
-                  key={(review?.name || "guest") + i}
-                  className="rounded-2xl border-2 border-[#e0dcd4] bg-white p-6 shadow-xl"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e8dfcf] font-semibold text-[#5a4a3f]">
-                      {initials(review?.name || "Guest")}
-                    </div>
-                    <p className="font-semibold text-lg text-[#5a4a3f]">
-                      {review?.name || "Guest"}
-                    </p>
-                  </div>
-                  {review?.comment && (
-                    <p className="mt-3 italic text-[#4a4a4a]">
-                      “{review.comment}”
-                    </p>
-                  )}
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
-      </div>
+      )}
     </main>
   );
 }
@@ -544,7 +598,7 @@ function NotAvailable() {
           href="/experiences"
           className="inline-block rounded-full bg-[#8b6f47] px-6 py-3 text-white font-medium hover:bg-[#a78b62] transition-all"
         >
-          Browse Experiences
+          Browse experiences
         </Link>
       </div>
     </main>

@@ -33,14 +33,15 @@ export default async function Experiences() {
     console.error("Error fetching experiences:", error);
     return (
       <div className="min-h-screen flex items-center justify-center text-center px-6 bg-[#f4f1ec] text-[#5a4a3f]">
-        <div>
-          <h1 className="text-3xl font-serif mb-4">Something went wrong</h1>
-          <p className="text-lg mb-6">
-            We couldn’t load the experiences right now. Please try again later.
+        <div className="max-w-md">
+          <h1 className="text-3xl font-serif mb-3">Something went wrong</h1>
+          <p className="text-base mb-6 text-[#6b625a]">
+            We couldn&apos;t load the experiences right now. Please try again a
+            bit later.
           </p>
           <LinkWithLoader href="/">
             <button className="bg-[#8b6f47] text-white px-6 py-3 rounded-full font-medium hover:bg-[#a78b62] transition-all">
-              Go Home
+              Go home
             </button>
           </LinkWithLoader>
         </div>
@@ -48,19 +49,32 @@ export default async function Experiences() {
     );
   }
 
+  const count = publicExperiences?.length || 0;
+
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#f4f1ec] via-[#faf9f7] to-[#f4f1ec] text-[#2f2f2f] pt-28 px-6">
-      <section className="max-w-6xl mx-auto text-center mb-20">
-        <h1 className="text-5xl md:text-6xl font-serif text-[#5a4a3f] mb-6">
+    <main className="min-h-screen bg-gradient-to-b from-[#f4f1ec] via-[#faf9f7] to-[#f4f1ec] text-[#2f2f2f] pt-28 pb-24 px-6">
+      {/* Hero */}
+      <section className="max-w-6xl mx-auto text-center mb-16">
+        <p className="text-xs tracking-[0.3em] uppercase text-[#8b6f47] mb-3">
+          Experiences
+        </p>
+        <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif text-[#5a4a3f] mb-4 leading-tight">
           Our Signature Experiences
         </h1>
         <p className="text-lg md:text-xl text-[#4a4a4a] max-w-3xl mx-auto">
-          Curated bundles of agrotourism & wellness rooted in Cretan tradition.
+          Curated journeys of agrotourism &amp; wellness rooted in Cretan
+          tradition, nature, and local life.
         </p>
+        {count > 0 && (
+          <p className="mt-4 text-xs tracking-[0.25em] uppercase text-[#8b7a6b]">
+            {count} experience{count !== 1 ? "s" : ""} currently available
+          </p>
+        )}
       </section>
 
-      <section className="max-w-6xl mx-auto grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16 pb-32">
-        {publicExperiences?.length > 0 ? (
+      {/* Experiences grid */}
+      <section className="max-w-6xl mx-auto grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 md:gap-12">
+        {count > 0 ? (
           publicExperiences.map((exp) => {
             const hasImg =
               Array.isArray(exp.images) &&
@@ -70,76 +84,119 @@ export default async function Experiences() {
                 exp.images[0].startsWith("/"));
 
             const fromPrice = getFromPrice(exp);
-            const freq =
-              Array.isArray(exp.frequency) && exp.frequency.length
-                ? exp.frequency.join(", ")
-                : "—";
+            const freqArray = Array.isArray(exp.frequency)
+              ? exp.frequency.filter(Boolean)
+              : [];
+            const freqLabel =
+              freqArray.length > 0 ? freqArray.join(" • ") : null;
+
+            const shortDescription =
+              (exp.description || "").length > 150
+                ? `${exp.description.slice(0, 150)}…`
+                : exp.description || "";
 
             return (
-              <div
+              <article
                 key={exp.id}
-                className="bg-white rounded-[2rem] shadow-xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl flex flex-col"
+                className="group relative flex flex-col rounded-[2rem] border border-[#e2d7c7] bg-white/95 shadow-[0_10px_30px_rgba(90,74,63,0.08)] overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_45px_rgba(90,74,63,0.16)]"
               >
-                {hasImg ? (
-                  <Image
-                    src={exp.images[0]}
-                    alt={exp.name}
-                    width={600}
-                    height={400}
-                    className="w-full h-56 object-cover rounded-t-[2rem]"
-                  />
-                ) : (
-                  <div className="w-full h-56 bg-[#f1ede7] flex items-center justify-center text-[#8b6f47] font-medium italic rounded-t-[2rem]">
-                    No image available
-                  </div>
-                )}
+                {/* Image */}
+                <div className="relative h-56 w-full overflow-hidden">
+                  {hasImg ? (
+                    <Image
+                      src={exp.images[0]}
+                      alt={exp.name}
+                      width={600}
+                      height={400}
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-[#f1ede7] flex items-center justify-center text-[#8b6f47] font-medium italic">
+                      No image available
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent" />
 
-                <div className="p-8 flex flex-col flex-grow justify-between">
-                  <div>
-                    <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3">
+                  {exp.location && (
+                    <span className="absolute bottom-4 left-4 rounded-full bg-black/60 text-xs text-white px-3 py-1">
+                      {exp.location}
+                    </span>
+                  )}
+
+                  {exp.duration && (
+                    <span className="absolute top-4 left-4 rounded-full bg-white/90 text-xs text-[#5a4a3f] px-3 py-1 shadow">
+                      {exp.duration}
+                    </span>
+                  )}
+
+                  {fromPrice !== null && (
+                    <span className="absolute top-4 right-4 rounded-full bg-[#f4ede2]/95 text-xs text-[#5a4a3f] px-3 py-1 shadow-sm">
+                      From {eur(fromPrice)} / person
+                    </span>
+                  )}
+                </div>
+
+                {/* Body */}
+                <div className="p-7 flex flex-col flex-1">
+                  <div className="flex-1 flex flex-col gap-3">
+                    <h3 className="text-xl font-serif text-[#5a4a3f]">
                       {exp.name}
                     </h3>
-                    <p className="text-md text-[#4a4a4a] mb-6 leading-relaxed">
-                      {(exp.description || "").slice(0, 120)}
-                      {exp.description?.length > 120 ? "..." : ""}
-                    </p>
-                    <p className="text-sm text-[#8b6f47] font-medium mb-1 italic">
-                      Duration: {exp.duration || "—"} {" - " + freq}
-                    </p>
-                    <p className="text-lg font-semibold text-[#5a4a3f] mb-6">
-                      {fromPrice !== null
-                        ? `From ${eur(fromPrice)} / person`
-                        : "Pricing available"}
-                    </p>
+
+                    {shortDescription && (
+                      <p className="text-sm text-[#4a4a4a] leading-relaxed">
+                        {shortDescription}
+                      </p>
+                    )}
+
+                    <div className="mt-1 flex flex-col gap-1 text-xs text-[#7a6a5f]">
+                      {freqLabel && (
+                        <p className="text-[11px] uppercase tracking-[0.18em]">
+                          {freqLabel}
+                        </p>
+                      )}
+                      {exp.location && (
+                        <p className="text-[11px] uppercase tracking-[0.18em]">
+                          Small groups • Slow-paced
+                        </p>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="mt-auto flex flex-col gap-3">
+                  {/* Actions */}
+                  <div className="mt-6 flex flex-col gap-3">
                     <LinkWithLoader
-                      className="text-center"
+                      className="w-full"
                       href={`/check-availability/${exp.slug}`}
                     >
-                      <button className="bg-[#8b6f47] text-white px-6 py-3 rounded-full font-medium hover:bg-[#a78b62] transition-all">
-                        Check Availability
+                      <button className="w-full bg-[#8b6f47] text-white px-6 py-3 rounded-full text-sm font-medium hover:bg-[#a78b62] transition-all">
+                        Check availability
                       </button>
                     </LinkWithLoader>
 
                     <LinkWithLoader
-                      className="text-center"
+                      className="w-full text-center"
                       href={`/experiences/${exp.slug}`}
                     >
-                      <button className="text-sm text-[#5a4a3f] underline hover:text-[#8b6f47] transition-all">
+                      <button className="w-full text-sm text-[#5a4a3f] underline underline-offset-4 decoration-[#d1c3b1] hover:text-[#8b6f47] transition-colors">
                         View more details →
                       </button>
                     </LinkWithLoader>
                   </div>
                 </div>
-              </div>
+              </article>
             );
           })
         ) : (
-          <p className="text-center text-[#8b6f47] font-medium">
-            No experiences available.
-          </p>
+          <div className="col-span-full text-center text-[#5a4a3f]">
+            <p className="text-base">
+              No experiences are available at the moment.
+            </p>
+            <p className="text-sm mt-2 text-[#7a6a5f]">
+              We&apos;re curating new journeys — check back soon or contact us
+              for bespoke options.
+            </p>
+          </div>
         )}
       </section>
     </main>

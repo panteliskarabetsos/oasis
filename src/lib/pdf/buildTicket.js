@@ -1,3 +1,4 @@
+// src/lib/pdf/buildTicket.js
 import "server-only";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
