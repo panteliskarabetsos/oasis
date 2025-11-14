@@ -2,11 +2,21 @@
 import Image from "next/image";
 import LinkWithLoader from "@/app/components/LinkWithLoader";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import ExperiencesFilterBar from "./ExperiencesFilterBar";
 
 export const dynamic = "force-dynamic";
 
-export default async function Experiences() {
+export default async function Experiences({ searchParams }) {
   const supa = createSupabaseAdmin();
+
+  const rawFrom = searchParams?.from || null;
+  const rawTo = searchParams?.to || null;
+  const rawParty = searchParams?.party || null;
+
+  const partySize =
+    rawParty && !Number.isNaN(Number(rawParty)) && Number(rawParty) > 0
+      ? Number(rawParty)
+      : null;
 
   const { data: publicExperiences, error } = await supa
     .from("Experience")
@@ -49,12 +59,74 @@ export default async function Experiences() {
     );
   }
 
-  const count = publicExperiences?.length || 0;
+  let filteredExperiences = publicExperiences || [];
+
+  const hasValidDateRange = rawFrom && rawTo;
+
+  if (filteredExperiences.length > 0 && hasValidDateRange && partySize) {
+    const experienceIds = filteredExperiences.map((e) => e.id);
+
+    // Interpret incoming date inputs as whole days (local) and convert to ISO.
+    const fromDate = new Date(`${rawFrom}T00:00:00.000Z`);
+    const toDate = new Date(`${rawTo}T23:59:59.999Z`);
+
+    const fromIso = fromDate.toISOString();
+    const toIso = toDate.toISOString();
+
+    const { data: slots, error: slotsError } = await supa
+      .from("ScheduleSlot")
+      .select(
+        `
+        id,
+        experienceId,
+        date,
+        totalSlots,
+        isCancelled,
+        bookings:booking (
+          id,
+          status,
+          "numberOfPeople"
+        )
+      `
+      )
+      .in("experienceId", experienceIds)
+      .gte("date", fromIso)
+      .lte("date", toIso)
+      .eq("isCancelled", false);
+
+    if (slotsError) {
+      console.error("Error fetching schedule slots:", slotsError);
+    } else if (slots) {
+      const availableExperienceIds = new Set();
+
+      for (const slot of slots) {
+        const bookings = Array.isArray(slot.bookings) ? slot.bookings : [];
+        const activeBookings = bookings.filter((b) => b.status !== "cancelled");
+
+        const usedSeats = activeBookings.reduce(
+          (sum, b) => sum + (b.numberOfPeople ?? 0),
+          0
+        );
+
+        const remaining = (slot.totalSlots || 0) - usedSeats;
+
+        if (remaining >= partySize) {
+          availableExperienceIds.add(slot.experienceId);
+        }
+      }
+
+      filteredExperiences = filteredExperiences.filter((exp) =>
+        availableExperienceIds.has(exp.id)
+      );
+    }
+  }
+
+  const count = filteredExperiences?.length || 0;
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#f4f1ec] via-[#faf9f7] to-[#f4f1ec] text-[#2f2f2f] pt-28 pb-24 px-6">
+    <main className="min-h-screen bg-gradient-to-b from-[#f4f1ec] via-[#faf9f7] to-[#f4f1ec] text-[#2f2f2f] pt-16 md:pt-20 pb-20 px-6">
       {/* Hero */}
-      <section className="max-w-6xl mx-auto text-center mb-16">
+      <section className="max-w-6xl mx-auto text-center mb-8 md:mb-10">
         <p className="text-xs tracking-[0.3em] uppercase text-[#8b6f47] mb-3">
           Experiences
         </p>
@@ -72,10 +144,19 @@ export default async function Experiences() {
         )}
       </section>
 
+      {/* Filter bar */}
+      <section className="max-w-6xl mx-auto mb-10">
+        <ExperiencesFilterBar
+          initialFrom={rawFrom}
+          initialTo={rawTo}
+          initialParty={partySize}
+        />
+      </section>
+
       {/* Experiences grid */}
       <section className="max-w-6xl mx-auto grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 md:gap-12">
         {count > 0 ? (
-          publicExperiences.map((exp) => {
+          filteredExperiences.map((exp) => {
             const hasImg =
               Array.isArray(exp.images) &&
               exp.images.length > 0 &&
@@ -190,11 +271,12 @@ export default async function Experiences() {
         ) : (
           <div className="col-span-full text-center text-[#5a4a3f]">
             <p className="text-base">
-              No experiences are available at the moment.
+              No experiences are available for your selected dates and group
+              size.
             </p>
             <p className="text-sm mt-2 text-[#7a6a5f]">
-              We&apos;re curating new journeys — check back soon or contact us
-              for bespoke options.
+              Try adjusting your date range or party size, or contact us for
+              bespoke options.
             </p>
           </div>
         )}
