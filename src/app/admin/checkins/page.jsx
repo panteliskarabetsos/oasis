@@ -149,10 +149,13 @@ function Toasts({ toasts, remove }) {
             className={clsx(
               "rounded-xl px-3 py-2 text-sm shadow border backdrop-blur bg-white/90 flex items-center gap-2 cursor-pointer",
               t.tone === "ok" && "border-green-200 text-green-800",
-              t.tone === "err" && "border-red-200 text-red-700",
-              (!t.tone || t.tone === "default") &&
-                `border-[${colors.border}] text-[${colors.text}]`
+              t.tone === "err" && "border-red-200 text-red-700"
             )}
+            style={
+              !t.tone || t.tone === "default"
+                ? { borderColor: colors.border, color: colors.text }
+                : undefined
+            }
             onClick={() => remove(t.id)}
           >
             {t.tone === "ok" ? (
@@ -296,13 +299,17 @@ function ScanModal({ open, onClose, onDetected }) {
   }
 
   async function loadDevices() {
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    const vids = devs.filter((d) => d.kind === "videoinput");
-    setDevices(vids);
-    const back =
-      vids.find((d) => (d.label || "").toLowerCase().includes("back")) ||
-      vids[1];
-    setDeviceId((d) => d ?? back?.deviceId ?? vids[0]?.deviceId ?? null);
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const vids = devs.filter((d) => d.kind === "videoinput");
+      setDevices(vids);
+      const back =
+        vids.find((d) => (d.label || "").toLowerCase().includes("back")) ||
+        vids[1];
+      setDeviceId((d) => d ?? back?.deviceId ?? vids[0]?.deviceId ?? null);
+    } catch {
+      // silently ignore, error will show from scanner init
+    }
   }
 
   async function startNative() {
@@ -540,6 +547,7 @@ function ScanModal({ open, onClose, onDetected }) {
       alive = false;
       stopAll();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
@@ -554,9 +562,7 @@ function ScanModal({ open, onClose, onDetected }) {
     <AnimatePresence>
       {open ? (
         <motion.div
-          className={clsx(
-            "fixed inset-0 z-40 items-end sm:items-center justify-center flex"
-          )}
+          className="fixed inset-0 z-40 items-end sm:items-center justify-center flex"
           role="dialog"
           aria-modal="true"
           initial={{ opacity: 0 }}
@@ -590,14 +596,18 @@ function ScanModal({ open, onClose, onDetected }) {
               </div>
               <button
                 onClick={close}
-                className="text-sm rounded-full px-3 py-1 border border-[var(--border,#e6dfd6)] hover:bg-white"
+                className="text-sm rounded-full px-3 py-1 border hover:bg-white"
+                style={{ borderColor: colors.border }}
               >
                 Close <span className="ml-1 text-xs text-slate-500">⎋ Esc</span>
               </button>
             </div>
 
             <div className="p-4">
-              <div className="relative rounded-2xl overflow-hidden border border-[#e6dfd6] bg-black aspect-[16/10]">
+              <div
+                className="relative rounded-2xl overflow-hidden border bg-black aspect-[16/10]"
+                style={{ borderColor: colors.border }}
+              >
                 <video
                   ref={videoRef}
                   className="w-full h-full object-cover"
@@ -736,9 +746,13 @@ function ManualFallback({ onDetected }) {
         value={val}
         onChange={(e) => setVal(e.target.value)}
         placeholder="Or paste / type booking code or URL…"
-        className="flex-1 rounded-full border border-[#d8cfc3] bg-white/80 px-4 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+        className="flex-1 rounded-full border bg-white/80 px-4 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+        style={{ borderColor: colors.border }}
       />
-      <button className="rounded-full px-3 py-2 text-xs border border-[#d8cfc3] bg-[#fdfaf5] hover:bg-[#f1ede7]">
+      <button
+        className="rounded-full px-3 py-2 text-xs border bg-[#fdfaf5] hover:bg-[#f1ede7]"
+        style={{ borderColor: colors.border }}
+      >
         Apply
       </button>
     </form>
@@ -746,17 +760,10 @@ function ManualFallback({ onDetected }) {
 }
 
 /* ------------------------------------------------------------
-   Scan result pop-up (NEW)
+   Scan result pop-up
 -------------------------------------------------------------*/
 function ScanResultPopover({ result, onClose, onUndo, onScroll }) {
   if (!result) return null;
-  const tone =
-    result.mode === "ok"
-      ? "ok"
-      : result.mode === "already"
-      ? "already"
-      : "invalid";
-
   const icon =
     result.mode === "ok" ? (
       <CheckCircle2 className="w-5 h-5 text-green-700" />
@@ -869,12 +876,14 @@ export default function CheckinsPage() {
   const [error, setError] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
 
-  // NEW: scan result + row flash highlight
+  // scan result + row flash highlight
   const [scanResult, setScanResult] = useState(null);
   const [flashId, setFlashId] = useState(null);
 
   const searchRef = useRef(null);
   const { toasts, pushToast, remove } = useToasts();
+
+  const jumpToToday = () => setDate(formatDayTZ(new Date()));
 
   // URL sync
   useEffect(() => {
@@ -887,16 +896,46 @@ export default function CheckinsPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "/") {
+      const target = e.target;
+      const tag = target?.tagName;
+      const isInput =
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        target?.isContentEditable === true;
+
+      const key = e.key;
+
+      // global shortcuts should not fire while typing
+      if (isInput) {
+        if (key === "Escape" && scanOpen) {
+          e.stopPropagation();
+          setScanOpen(false);
+        }
+        return;
+      }
+
+      if (key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
       }
 
-      if (e.key === "Escape") setScanOpen(false);
+      if (key.toLowerCase() === "s") {
+        e.preventDefault();
+        setScanOpen(true);
+      }
+
+      if (key.toLowerCase() === "t") {
+        e.preventDefault();
+        jumpToToday();
+      }
+
+      if (key === "Escape") {
+        setScanOpen(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [scanOpen]);
 
   // Data loading
   useEffect(() => {
@@ -984,11 +1023,12 @@ export default function CheckinsPage() {
 
   function extractBookingId(s) {
     if (!s) return null;
-    const mUrl = String(s).match(/\/(?:booking|bookings)\/(\d+)/i);
+    const str = String(s);
+    const mUrl = str.match(/\/(?:booking|bookings)\/(\d+)/i);
     if (mUrl) return Number(mUrl[1]);
-    const mTag = String(s).match(/booking[:=\s]+(\d{1,10})/i);
+    const mTag = str.match(/booking[:=\s]+(\d{1,10})/i);
     if (mTag) return Number(mTag[1]);
-    const mNum = String(s).match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/);
+    const mNum = str.match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/);
     return mNum ? Number(mNum[1]) : null;
   }
 
@@ -1011,7 +1051,7 @@ export default function CheckinsPage() {
     return { count, checked, noshow, capacity: cap, reserved: resv };
   }, [roster]);
 
-  // --- NEW: helpers for scan result ---
+  // helpers for scan result
   function findBookingInRoster(id) {
     const slots = roster?.slots || [];
     for (const slot of slots) {
@@ -1134,10 +1174,13 @@ export default function CheckinsPage() {
   }
 
   return (
-    <div className={clsx("min-h-screen", colors.soft, `text-[${colors.text}]`)}>
+    <div
+      className={clsx("min-h-screen", colors.soft)}
+      style={{ color: colors.text }}
+    >
       <Toasts toasts={toasts} remove={remove} />
 
-      {/* NEW: Scan result popover */}
+      {/* Scan result popover */}
       <ScanResultPopover
         result={scanResult}
         onClose={() => setScanResult(null)}
@@ -1158,16 +1201,16 @@ export default function CheckinsPage() {
         <div
           className={clsx(
             "mb-4 -mx-2 sm:-mx-4 px-2 sm:px-4 py-3 rounded-2xl border",
-            `border-[${colors.border}]`,
             "bg-gradient-to-r from-[#f4f1ec] via-[#fff8ef] to-[#f4f1ec]"
           )}
+          style={{ borderColor: colors.border }}
         >
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl md:text-3xl font-serif tracking-tight">
                 Check-ins
               </h1>
-              <p className={clsx("text-sm", `text-[${colors.sub}]`)}>
+              <p className="text-sm" style={{ color: colors.sub }}>
                 Scan or mark arrivals for today’s slots.
               </p>
             </div>
@@ -1185,7 +1228,7 @@ export default function CheckinsPage() {
                 />
                 <button
                   type="button"
-                  onClick={() => setDate(formatDayTZ(new Date()))}
+                  onClick={jumpToToday}
                   className="text-[11px] px-2 py-0.5 rounded-full border hover:bg-white"
                   style={{ borderColor: colors.border }}
                   title="Jump to today (T)"
@@ -1208,7 +1251,7 @@ export default function CheckinsPage() {
                   className="w-64 rounded-full border bg-white/80 backdrop-blur px-9 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2"
                   style={{
                     borderColor: colors.border,
-                    boxShadow: `0 0 0 2px transparent`,
+                    boxShadow: "0 0 0 2px transparent",
                     outlineColor: colors.accent,
                   }}
                 />
@@ -1227,8 +1270,11 @@ export default function CheckinsPage() {
               <button
                 type="button"
                 onClick={() => setScanOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border bg-[var(--btn-bg,#8b6f47)] text-white hover:brightness-110 transition text-xs shadow-sm"
-                style={{ borderColor: colors.border }}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-white hover:brightness-110 transition text-xs shadow-sm"
+                style={{
+                  borderColor: colors.border,
+                  backgroundColor: colors.accent,
+                }}
                 title="Open camera scanner (S)"
               >
                 <QrCode size={14} /> Scan
@@ -1272,7 +1318,10 @@ export default function CheckinsPage() {
 
         {/* Error */}
         {error ? (
-          <div className="mb-4 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm">
+          <div
+            className="mb-4 flex items-center gap-2 rounded-xl border bg-red-50 text-red-700 px-3 py-2 text-sm"
+            style={{ borderColor: "#fecaca" }}
+          >
             <AlertTriangle size={16} /> {error}
           </div>
         ) : null}
@@ -1293,11 +1342,8 @@ export default function CheckinsPage() {
         {/* Empty state */}
         {!loading && filteredSlots.length === 0 ? (
           <div
-            className={clsx(
-              "text-center py-12 rounded-2xl border",
-              `border-[${colors.border}]`,
-              "bg-white/60"
-            )}
+            className="text-center py-12 rounded-2xl border bg-white/60"
+            style={{ borderColor: colors.border }}
           >
             <QrCode className="mx-auto mb-2 opacity-60" />
             <p className="text-sm" style={{ color: colors.sub }}>
@@ -1307,14 +1353,17 @@ export default function CheckinsPage() {
               <button
                 type="button"
                 onClick={() => setScanOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-xs bg-[#8b6f47] text-white hover:brightness-110"
-                style={{ borderColor: colors.border }}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-xs text-white hover:brightness-110"
+                style={{
+                  borderColor: colors.border,
+                  backgroundColor: colors.accent,
+                }}
               >
                 <QrCode size={14} /> Scan code
               </button>
               <button
                 type="button"
-                onClick={() => setDate(formatDayTZ(new Date()))}
+                onClick={jumpToToday}
                 className="rounded-full px-3 py-1.5 text-xs border bg-white/80 hover:bg-white"
                 style={{ borderColor: colors.border }}
               >
@@ -1562,10 +1611,10 @@ export default function CheckinsPage() {
 
 function SummaryCard({ label, value, tone, icon }) {
   const rings = {
-    green: "focus:ring-green-600/30",
-    red: "focus:ring-red-600/30",
-    blue: "focus:ring-sky-600/30",
-    default: "focus:ring-[#8b6f47]/30",
+    green: "focus-within:ring-green-600/30",
+    red: "focus-within:ring-red-600/30",
+    blue: "focus-within:ring-sky-600/30",
+    default: "focus-within:ring-[#8b6f47]/30",
   };
   const accents = {
     green: "text-green-700",
@@ -1576,7 +1625,7 @@ function SummaryCard({ label, value, tone, icon }) {
   return (
     <div
       className={clsx(
-        "rounded-2xl p-4 shadow-sm",
+        "rounded-2xl p-4 shadow-sm focus-within:ring-2 outline-none",
         colors.card,
         rings[tone] || rings.default
       )}
