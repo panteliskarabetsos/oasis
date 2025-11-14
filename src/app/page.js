@@ -53,6 +53,43 @@ export default function Home() {
       )}
     </div>
   );
+  const formatFrequency = (frequencyArray = []) => {
+    if (!Array.isArray(frequencyArray) || frequencyArray.length === 0)
+      return "";
+
+    const normalize = (s) => s.toString().trim().toLowerCase();
+
+    const weekdayNames = new Set([
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "mon",
+      "tue",
+      "tues",
+      "wed",
+      "thu",
+      "thur",
+      "fri",
+    ]);
+
+    const weekendNames = new Set(["saturday", "sunday", "sat", "sun"]);
+
+    const normalized = frequencyArray.map(normalize);
+
+    const allWeekdays =
+      normalized.length > 0 && normalized.every((d) => weekdayNames.has(d));
+
+    const allWeekends =
+      normalized.length > 0 && normalized.every((d) => weekendNames.has(d));
+
+    if (allWeekdays) return "Weekdays";
+    if (allWeekends) return "Weekends";
+
+    // fallback: show original labels joined
+    return frequencyArray.join(" • ");
+  };
 
   const ExperienceCard = ({ exp }) => {
     const cover =
@@ -114,7 +151,7 @@ export default function Home() {
               </span>
               {Array.isArray(exp.frequency) && exp.frequency.length > 0 && (
                 <span className="rounded-full bg-[#f7f2ea] border border-[#eadfce] px-3 py-1 text-[11px] text-[#5a4a3f]">
-                  {exp.frequency.join(" • ")}
+                  {formatFrequency(exp.frequency)}
                 </span>
               )}
             </div>
@@ -215,7 +252,7 @@ export default function Home() {
             </LinkWithLoader>
             <LinkWithLoader href="/about">
               <motion.button
-                className="border border-white/65 bg-white/10 text-white px-6 py-3 rounded-full text-sm sm:text-base hover:bg.white/20 hover:bg-white/20 transition-all"
+                className="border border-white/65 bg-white/10 text-white px-6 py-3 rounded-full text-sm sm:text-base hover:bg-white/20 transition-all"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.7, duration: 0.8 }}
@@ -288,117 +325,198 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ================== Essence Section ================== */}
+      {/* ================== ABOUT / SLOW STAYS ================== */}
       <section className="py-24 px-6 bg-[#faf9f7]">
         <motion.div
-          className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center"
+          className="max-w-7xl mx-auto grid md:grid-cols-[1.15fr,0.85fr] gap-16 items-center"
           initial={{ opacity: 0, y: 50 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.8 }}
         >
           {/* Text */}
-          <div className="space-y-8">
+          <div className="space-y-7">
             <SectionHeading
-              title="The Essence of Slow Living"
-              subtitle="In the heart of Crete, time flows differently. Wander through olive groves, gather mountain herbs, and rediscover the art of simply being."
+              eyebrow="Slow Stays in Crete"
+              title="More than a holiday, a gentle return to yourself."
+              subtitle="We weave together land, food, ritual and rest into grounded, small-group experiences on the island of Crete."
             />
-            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[#4a4a4a]">
-              {[
-                "Guided herb walks",
-                "Olive oil rituals",
-                "Forest bathing",
-                "Local cooking & tastings",
-              ].map((item) => (
-                <li key={item} className="flex items-center gap-2">
-                  <span className="inline-grid place-items-center w-6 h-6 rounded-full bg-[#e9e3d9] text-[#8b6f47] text-xs">
-                    ✓
-                  </span>
-                  {item}
-                </li>
-              ))}
-            </ul>
-            <p className="text-sm text-[#6b625a] leading-relaxed">
-              We keep our groups intimate and our pace unhurried, so you can
-              truly absorb the stories, scents, and textures of the land.
+
+            <p className="text-sm md:text-base text-[#6b625a] leading-relaxed">
+              Mornings begin with soft light over the hills, the smell of
+              mountain herbs and fresh bread. Days are spent between olive
+              groves, the kitchen, the sea and stillness. Evenings close with
+              simple shared meals and stories.
             </p>
-            <Link href="/experiences">
-              <button className="mt-2 inline-flex items-center gap-2 bg-[#8b6f47] text-white px-6 py-3 rounded-full text-base font-medium hover:bg-[#7a5f3a] transition shadow-md">
-                Explore Experiences
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-[#eadfce] bg-white/80 p-4">
+                <h4 className="text-sm font-semibold tracking-[0.18em] uppercase text-[#8b6f47]">
+                  WHO WE HOST
+                </h4>
+                <ul className="mt-3 space-y-1.5 text-sm text-[#4a4a4a]">
+                  <li>• Solo travellers seeking reset</li>
+                  <li>• Couples & close friends</li>
+                  <li>• Small private groups & retreats</li>
+                  <li>• Conscious travellers curious about Crete</li>
+                </ul>
+              </div>
+
+              <div className="rounded-2xl border border-[#eadfce] bg-white/80 p-4">
+                <h4 className="text-sm font-semibold tracking-[0.18em] uppercase text-[#8b6f47]">
+                  WHAT YOU CAN EXPECT
+                </h4>
+                <ul className="mt-3 space-y-1.5 text-sm text-[#4a4a4a]">
+                  <li>• Unhurried itineraries</li>
+                  <li>• Farm-to-table moments</li>
+                  <li>• Herbal & body-care rituals</li>
+                  <li>• Deep connection to place & people</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              {[
+                "Slow travel",
+                "Seasonal food",
+                "Hands-on learning",
+                "Intimate groups",
+              ].map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full border border-[#eadfce] bg-[#f7f2ea] px-3 py-1 text-[11px] tracking-wide uppercase text-[#5a4a3f]"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+
+            <Link href="/about">
+              <button className="mt-4 inline-flex items-center gap-2 bg-[#8b6f47] text-white px-6 py-3 rounded-full text-sm md:text-base font-medium hover:bg-[#7a5f3a] transition shadow-md">
+                Learn more about our philosophy
               </button>
             </Link>
           </div>
 
-          {/* Image */}
+          {/* Collage Image */}
           <motion.div
-            className="relative rounded-3xl overflow-hidden shadow-2xl border border-[#eadfce]"
+            className="relative h-full"
             initial={{ scale: 0.96, opacity: 0 }}
             whileInView={{ scale: 1, opacity: 1 }}
             viewport={{ once: true }}
             transition={{ duration: 0.8 }}
           >
-            <Image
-              src="/gorge.jpg"
-              alt="Slow Living Crete"
-              width={900}
-              height={600}
-              className="w-full h-auto object-cover"
-              priority={false}
-            />
-            <div className="absolute bottom-4 right-4 rounded-2xl bg-white/90 backdrop-blur px-4 py-2 text-sm text-[#5a4a3f] border border-[#eadfce] shadow">
-              Small groups • Eco-friendly
+            <div className="relative h-full max-h-[520px]">
+              <div className="absolute -top-4 -left-4 h-32 w-32 rounded-full bg-[#e6dccf] opacity-40 blur-2xl" />
+              <div className="absolute bottom-0 -right-2 h-24 w-24 rounded-full bg-[#d7c7af] opacity-40 blur-2xl" />
+
+              <div className="grid grid-rows-2 gap-4 h-full">
+                <div className="relative rounded-3xl overflow-hidden shadow-2xl border border-[#eadfce] min-h-[220px]">
+                  <Image
+                    src="/gorge.jpg"
+                    alt="Walking in Cretan nature"
+                    fill
+                    className="object-cover"
+                    priority={false}
+                  />
+                </div>
+                <div className="grid grid-cols-[1.1fr,0.9fr] gap-4">
+                  <div className="relative rounded-3xl overflow-hidden shadow-xl border border-[#eadfce] min-h-[160px]">
+                    <Image
+                      src="/background.jpeg"
+                      alt="Cretan landscape and olive trees"
+                      fill
+                      className="object-cover"
+                    />
+                  </div>
+                  <div className="rounded-3xl border border-dashed border-[#d6c6b2] bg-[#f7f2ea]/80 p-4 flex flex-col justify-between">
+                    <p className="text-xs uppercase tracking-[0.22em] text-[#8b6f47]">
+                      INTENTIONALLY SMALL
+                    </p>
+                    <p className="mt-3 text-sm text-[#4a4a4a]">
+                      We welcome only a handful of guests at a time so the land,
+                      the food and the conversations can breathe.
+                    </p>
+                    <p className="mt-3 text-[11px] text-[#8b7a6b] uppercase tracking-[0.18em]">
+                      CRETE • AGROTOURISM • WELLNESS
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </motion.div>
         </motion.div>
       </section>
 
-      {/* ================== Sustainability Cards ================== */}
-      <section className="bg-[#faf9f7] py-24 px-6">
+      {/* ================== HOW YOUR JOURNEY UNFOLDS ================== */}
+      <section className="bg-[#f4f1ec] py-24 px-6">
         <div className="max-w-6xl mx-auto">
           <SectionHeading
-            eyebrow="Our Approach"
-            title="Rooted in Sustainability"
-            subtitle="Every journey we offer respects the land, supports local communities, and celebrates tradition."
+            eyebrow="How it works"
+            title="How your journey with us unfolds"
+            subtitle="From first hello to your last cup of mountain tea, we keep things clear, gentle and deeply human."
             center
           />
 
-          <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="mt-14 grid grid-cols-1 md:grid-cols-4 gap-8">
             {[
               {
-                title: "Local Partnerships",
-                text: "We collaborate with farmers, artisans, and healers to keep traditions alive.",
-                icon: "🌾",
+                step: "01",
+                title: "Choose what calls you",
+                text: "Explore our agrotourism & wellness experiences and pick the one that matches your rhythm, season and needs.",
               },
               {
-                title: "Eco-conscious",
-                text: "Low-impact, nature-first experiences designed with care.",
-                icon: "🌱",
+                step: "02",
+                title: "We tailor the details",
+                text: "We’ll confirm dates, small group size, and any personal needs or intentions you want to honour during your stay.",
               },
               {
-                title: "Heritage & Culture",
-                text: "We honor Crete’s cultural legacy in every experience.",
-                icon: "🏺",
+                step: "03",
+                title: "Arrive & soften",
+                text: "From the moment you arrive, we slow the pace. Expect grounding rituals, local tastes and plenty of unscheduled time.",
               },
-            ].map((item, i) => (
+              {
+                step: "04",
+                title: "Return with roots",
+                text: "You leave with practices, flavours and stories you can carry home – not just memories on a screen.",
+              },
+            ].map((item, index) => (
               <motion.div
-                key={i}
+                key={item.step}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ delay: i * 0.1, duration: 0.6 }}
-                className="relative rounded-3xl bg.white bg-white border border-[#e8e2d8] p-8 shadow-sm hover:shadow-lg transition-all"
+                transition={{ delay: index * 0.1, duration: 0.6 }}
+                className="relative rounded-3xl bg-white/90 border border-[#e8e2d8] p-6 shadow-sm"
               >
-                <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[#efeae2] text-2xl">
-                  {item.icon}
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs tracking-[0.25em] uppercase text-[#8b6f47]/80">
+                    Step {index + 1}
+                  </span>
+                  <span className="text-lg font-serif text-[#d0b894]">
+                    {item.step}
+                  </span>
                 </div>
-                <h4 className="text-xl font-serif text-[#5a4a3f]">
+                <h4 className="text-lg font-serif text-[#5a4a3f]">
                   {item.title}
                 </h4>
-                <p className="mt-2 text-[#4a4a4a] leading-relaxed">
+                <p className="mt-2 text-sm text-[#4a4a4a] leading-relaxed">
                   {item.text}
                 </p>
               </motion.div>
             ))}
+          </div>
+
+          <div className="mt-10 flex flex-col items-center gap-3 text-center">
+            <LinkWithLoader href="/check-availability">
+              <button className="rounded-full bg-[#8b6f47] text-white px-7 py-3 text-sm md:text-base font-medium hover:bg-[#7a5f3a] transition shadow-md">
+                Check upcoming dates & availability
+              </button>
+            </LinkWithLoader>
+            <p className="text-xs text-[#8b7a6b] uppercase tracking-[0.22em]">
+              Transparent pricing • No large groups • Real humans behind every
+              email
+            </p>
           </div>
         </div>
       </section>
@@ -416,7 +534,8 @@ export default function Home() {
             “We don’t offer tours. We offer rooted experiences that breathe.”
           </h4>
           <p className="text-md md:text-lg text-[#4a4a4a]">
-            Guests leave not only relaxed — but transformed.
+            Guests leave not only relaxed — but with a renewed sense of pace,
+            place and presence.
           </p>
         </motion.div>
       </section>

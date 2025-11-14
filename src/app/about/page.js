@@ -100,15 +100,15 @@ export default function About() {
       <div aria-hidden className="pointer-events-none absolute inset-0">
         <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-[#e3d3bc]/70 blur-3xl" />
         <div className="absolute bottom-[-6rem] right-[-6rem] h-[26rem] w-[26rem] rounded-full bg-[#d2c3aa]/60 blur-3xl" />
-        <div className="absolute inset-0 opacity-[0.07] [background:radial-gradient(circle_at_center,rgba(90,74,63,0.5)_1px,transparent_1px)] [background-size:26px_26px]" />
+        <div className="absolute inset-0 opacity-[0.06] [background:radial-gradient(circle_at_center,rgba(90,74,63,0.5)_1px,transparent_1px)] [background-size:26px_26px]" />
       </div>
 
-      {/* Hero */}
-      <section className="relative z-10 px-6 pb-12 pt-24 md:px-10 md:pt-28 lg:pt-32">
+      {/* HERO */}
+      <section className="relative z-10 px-6 pb-16 pt-24 md:px-10 md:pt-28 lg:pt-32">
         <div className="mx-auto grid max-w-6xl grid-cols-1 items-start gap-12 lg:grid-cols-[1.05fr_0.95fr]">
           {/* Text column */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 22 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.5 }}
             transition={{ duration: 0.7 }}
@@ -118,7 +118,7 @@ export default function About() {
               Chania • Crete
             </div>
 
-            <h1 className="mt-5 font-serif text-4xl leading-[1.08] text-[#4d3d33] md:text-5xl lg:text-6xl">
+            <h1 className="mt-5 font-serif text-4xl leading-[1.1] text-[#4d3d33] md:text-5xl lg:text-6xl">
               Slow travel, rooted in{" "}
               <span className="text-[#8b6f47]">Cretan land</span>
             </h1>
@@ -158,9 +158,9 @@ export default function About() {
             </div>
           </motion.div>
 
-          {/* Image mosaic */}
+          {/* Hero image / story card */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 22 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.5 }}
             transition={{ duration: 0.7, delay: 0.05 }}
@@ -168,81 +168,115 @@ export default function About() {
           >
             <div className="relative mx-auto w-full max-w-xl">
               <div
-                className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-[#8b6f47]/30 via-transparent to-[#e8d2b2]/40 blur-2xl"
+                className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-[#8b6f47]/32 via-transparent to-[#e8d2b2]/40 blur-2xl"
                 aria-hidden
               />
-              <div className="relative grid grid-cols-2 gap-4 rounded-3xl border border-[#e2d7c7] bg-white/80 p-4 backdrop-blur">
-                <MosaicImage src="/village-3.jpg" alt="Cretan village" />
-                <MosaicImage src="/olive-rituals.jpg" alt="Olive rituals" />
-                <MosaicImage src="/pottery.png" alt="Pottery workshop" />
-                <MosaicImage src="/village-1.jpg" alt="Mountain paths" />
+              <div className="relative overflow-hidden rounded-3xl border border-[#e2d7c7] bg-white/80 shadow-sm backdrop-blur">
+                <div className="relative h-72 w-full md:h-80">
+                  <Image
+                    src="/gorge.jpg"
+                    alt="Cretan nature and paths"
+                    fill
+                    className="object-cover"
+                    priority={false}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/10 to-transparent" />
+                  <p className="absolute bottom-4 left-4 max-w-xs rounded-2xl bg-black/45 px-4 py-3 text-sm text-white">
+                    “Guests come for rest and leave with a new rhythm — one that
+                    feels closer to the land and to themselves.”
+                  </p>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-5 py-4 text-xs text-[#6b625a]">
+                  <span className="uppercase tracking-[0.22em] text-[#8b6f47]">
+                    CRETE • AGROTOURISM • WELLNESS
+                  </span>
+                  <span className="rounded-full border border-[#eadfce] bg-[#f7f2ea] px-3 py-1">
+                    Intimate, slow-paced stays
+                  </span>
+                </div>
               </div>
             </div>
           </motion.div>
         </div>
       </section>
 
-      {/* Ethos */}
-      <section className="relative z-10 border-y border-[#e2d7c7] bg-[#efe8de] px-6 py-20 md:px-10">
+      {/* WHY OASIS EXISTS – TIMELINE */}
+      <section className="relative z-10 border-y border-[#e2d7c7] bg-[#efe8de]/70 px-6 py-20 md:px-10">
         <motion.div
-          className="mx-auto grid max-w-6xl grid-cols-1 items-start gap-12 lg:grid-cols-2"
+          className="mx-auto max-w-6xl"
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.6 }}
         >
-          <div>
-            <p className="text-xs tracking-[0.28em] uppercase text-[#8b6f47]">
-              Our ethos
-            </p>
-            <h2 className="mt-3 font-serif text-3xl text-[#4d3d33] md:text-4xl">
-              Gentle travel, deep connection
-            </h2>
-            <p className="mt-4 text-[16px] leading-relaxed text-[#4a4a4a]">
-              An oasis is a quiet place in the middle of movement — a pause, a
-              breath, a home away from home. Through olive harvests, herb walks,
-              slow food, and creative workshops, we invite you to feel part of
-              Cretan life rather than just visiting it.
-            </p>
-            <ul className="mt-6 grid gap-3 text-sm text-[#5a4a3f] sm:grid-cols-2">
-              {features.map((f) => (
-                <li
-                  key={f.title}
-                  className="flex items-center gap-2 rounded-lg bg-white/80 px-3 py-2 ring-1 ring-[#dac9b5]"
-                >
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f2e6d6] text-[#8b6f47]">
-                    {f.icon}
-                  </span>
-                  <span className="font-medium">{f.title}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <div className="grid gap-10 lg:grid-cols-[0.9fr,1.1fr] lg:items-center">
+            <div>
+              <p className="text-xs tracking-[0.28em] uppercase text-[#8b6f47]">
+                Our story
+              </p>
+              <h2 className="mt-3 font-serif text-3xl text-[#4d3d33] md:text-4xl">
+                Born from the rhythms of local life
+              </h2>
+              <p className="mt-4 text-[15px] leading-relaxed text-[#4a4a4a]">
+                Oasis began with a simple idea: travel can be gentler, slower,
+                and more rooted in the everyday life of the people who live
+                here. Instead of rushing from sight to sight, we wanted guests
+                to feel the early-morning stillness in the olive groves, the
+                long conversations over food, and the quiet glow of the sea at
+                dusk.
+              </p>
+              <p className="mt-3 text-[15px] leading-relaxed text-[#4a4a4a]">
+                Today, we collaborate with growers, cooks, artisans and guides
+                to host small groups in a way that feels like being welcomed
+                into a circle — not just checking into a stay.
+              </p>
+            </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            {features.map((f, i) => (
-              <motion.div
-                key={f.title}
-                initial={{ opacity: 0, y: 10 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.06 }}
-                className="rounded-2xl border border-[#e2d7c7] bg-white/80 p-6 shadow-sm"
-              >
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#8b6f47]/10 text-[#8b6f47]">
-                  {f.icon}
-                </div>
-                <div className="mt-2 text-lg font-semibold text-[#4d3d33]">
-                  {f.title}
-                </div>
-                <div className="mt-1 text-sm text-[#6b5a49]">{f.text}</div>
-              </motion.div>
-            ))}
+            <div className="relative mt-4 lg:mt-0">
+              <div className="absolute left-4 top-2 bottom-4 w-px bg-gradient-to-b from-[#c8b59e] via-[#e2d7c7] to-transparent" />
+              <div className="space-y-5">
+                {[
+                  {
+                    label: "The seed",
+                    title: "A question about pace",
+                    text: "What would travel feel like if we designed it around slowness, care and true connection — rather than schedules and checklists?",
+                  },
+                  {
+                    label: "The roots",
+                    title: "Listening to the land",
+                    text: "We spent seasons listening: to farmers, villagers, cooks and healers, shaping experiences around their stories and seasonal rhythms.",
+                  },
+                  {
+                    label: "Today",
+                    title: "Hosting with intention",
+                    text: "Each gathering is small, curated and grounded in place. We favour quality over quantity and depth over spectacle.",
+                  },
+                ].map((step, i) => (
+                  <div
+                    key={step.label}
+                    className="relative rounded-2xl border border-[#e2d7c7] bg-white/85 p-4 pl-11 shadow-sm"
+                  >
+                    <div className="absolute left-3 top-4 flex h-6 w-6 items-center justify-center rounded-full border border-[#c8b59e] bg-[#f7f2ea] text-[11px] font-medium text-[#8b6f47]">
+                      {i + 1}
+                    </div>
+                    <p className="text-[11px] uppercase tracking-[0.26em] text-[#8b6f47]/85">
+                      {step.label}
+                    </p>
+                    <h3 className="mt-1 text-sm font-semibold text-[#4d3d33]">
+                      {step.title}
+                    </h3>
+                    <p className="mt-1 text-sm leading-relaxed text-[#4a4a4a]">
+                      {step.text}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </motion.div>
       </section>
 
-      {/* Story */}
+      {/* ETHOS IN PRACTICE */}
       <section className="relative z-10 px-6 py-20 md:px-10">
         <motion.div
           className="mx-auto max-w-6xl"
@@ -251,44 +285,126 @@ export default function About() {
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.6 }}
         >
-          <div className="grid gap-10 lg:grid-cols-2 lg:gap-14">
-            <div className="relative rounded-3xl border border-[#e2d7c7] bg-white/80 p-4">
-              <Image
-                src="/olive-1.jpg"
-                alt="Cretan landscape"
-                width={1200}
-                height={800}
-                sizes="(max-width: 1024px) 100vw, 600px"
-                className="h-auto w-full rounded-2xl object-cover shadow-sm"
-                priority
-              />
-            </div>
-            <div className="space-y-4">
+          <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+            <div>
               <p className="text-xs tracking-[0.28em] uppercase text-[#8b6f47]">
-                Our story
+                Our ethos
               </p>
-              <h3 className="font-serif text-3xl text-[#4d3d33] md:text-4xl">
-                Born from the rhythms of local life
-              </h3>
-              <p className="text-[15px] leading-relaxed text-[#4a4a4a]">
-                Oasis began with a simple idea: travel can be gentler, slower,
-                and more connected to the people who call this place home.
-                Rather than ticking off sights, we wanted guests to feel the
-                everyday magic of Cretan life — the early-morning olive groves,
-                the long conversations over food, the sea at dusk.
-              </p>
-              <p className="text-[15px] leading-relaxed text-[#4a4a4a]">
-                We collaborate with growers, cooks, artisans, and guides to
-                create experiences that respect their work and stories. Each
-                gathering is intimate, unhurried, and thoughtfully curated so
-                you can arrive as a guest and leave as a friend.
+              <h2 className="mt-3 font-serif text-3xl text-[#4d3d33] md:text-4xl">
+                Gentle travel, real connection
+              </h2>
+              <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-[#4a4a4a]">
+                We design each stay as a conversation between land, people and
+                guests. These four principles keep us anchored — in every
+                workshop, meal and walk we host.
               </p>
             </div>
+            <p className="max-w-md text-sm text-[#6b625a]">
+              Think of Oasis as a bridge: between visitors and locals, between
+              fast-paced lives and slower, more grounded ways of being.
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {features.map((f, i) => (
+              <motion.div
+                key={f.title}
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.45, delay: i * 0.06 }}
+                className="relative overflow-hidden rounded-3xl border border-[#e2d7c7] bg-white/90 p-5 shadow-sm"
+              >
+                <div
+                  className="pointer-events-none absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100"
+                  aria-hidden
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-[#e8d2b2]/45 to-transparent" />
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#f2e6d6] text-[#8b6f47]">
+                  {f.icon}
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-[#4d3d33]">
+                  {f.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#6b5a49]">
+                  {f.text}
+                </p>
+              </motion.div>
+            ))}
           </div>
         </motion.div>
       </section>
 
-      {/* Team */}
+      {/* A DAY WITH OASIS */}
+      <section className="relative z-10 border-y border-[#e2d7c7] bg-[#faf9f7] px-6 py-20 md:px-10">
+        <motion.div
+          className="mx-auto max-w-6xl"
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.4 }}
+          transition={{ duration: 0.6 }}
+        >
+          <div className="text-center">
+            <p className="text-xs tracking-[0.28em] uppercase text-[#8b6f47]">
+              A day with us
+            </p>
+            <h2 className="mt-3 font-serif text-3xl text-[#4d3d33] md:text-4xl">
+              What your stay might feel like
+            </h2>
+            <p className="mt-3 mx-auto max-w-2xl text-[15px] leading-relaxed text-[#4a4a4a]">
+              No two days look exactly the same, but they all share the same
+              ingredients: time, seasonality, and space to simply be.
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-6 md:grid-cols-3">
+            {[
+              {
+                title: "Morning",
+                tag: "Arrive slowly",
+                text: "Wake up to soft light, birds, and the smell of mountain herbs. Gentle grounding, slow breakfast, introductions to the day’s rhythm.",
+              },
+              {
+                title: "Daytime",
+                tag: "Hands in the land",
+                text: "Herb walks, olive rituals, cooking, tastings, or swims — always in small groups, moving at the pace of conversation and curiosity.",
+              },
+              {
+                title: "Evening",
+                tag: "Gather & integrate",
+                text: "Shared meals, reflection, simple rituals. Space to rest, write, or just sit under the sky before another unhurried day.",
+              },
+            ].map((b, i) => (
+              <motion.div
+                key={b.title}
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.45, delay: i * 0.07 }}
+                className="relative flex flex-col rounded-3xl border border-[#e2d7c7] bg-white/90 p-6 shadow-sm"
+              >
+                <span className="text-[11px] uppercase tracking-[0.26em] text-[#8b6f47]">
+                  {b.tag}
+                </span>
+                <h3 className="mt-2 text-lg font-serif text-[#4d3d33]">
+                  {b.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#4a4a4a]">
+                  {b.text}
+                </p>
+                {i === 1 && (
+                  <p className="mt-3 text-xs uppercase tracking-[0.24em] text-[#8b7a6b]">
+                    Small groups • Slow pace • Nature-first
+                  </p>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+      </section>
+
+      {/* TEAM */}
       <section className="relative z-10 px-6 py-20 md:px-10">
         <motion.div
           className="mx-auto max-w-6xl"
@@ -308,14 +424,14 @@ export default function About() {
             {team.map((t, i) => (
               <motion.div
                 key={t.name}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 18 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, amount: 0.4 }}
-                transition={{ duration: 0.6, delay: i * 0.08 }}
-                className="group relative overflow-hidden rounded-3xl border border-[#e2d7c7] bg-white/85 p-6 text-center shadow-sm transition-transform hover:-translate-y-0.5"
+                transition={{ duration: 0.5, delay: i * 0.08 }}
+                className="group relative overflow-hidden rounded-3xl border border-[#e2d7c7] bg-white/90 p-6 text-center shadow-sm transition-transform hover:-translate-y-0.5"
               >
                 <div
-                  className="absolute inset-0 -z-10 opacity-0 transition-opacity group-hover:opacity-100"
+                  className="pointer-events-none absolute inset-0 -z-10 opacity-0 transition-opacity group-hover:opacity-100"
                   aria-hidden
                 >
                   <div className="absolute inset-0 bg-gradient-to-br from-[#e8d2b2]/50 to-transparent" />
@@ -404,24 +520,9 @@ export default function About() {
 
 /* --------------------------- Subcomponents --------------------------- */
 
-function MosaicImage({ src, alt }) {
-  return (
-    <div className="relative aspect-[4/3] overflow-hidden rounded-2xl">
-      <Image
-        src={src}
-        alt={alt}
-        fill
-        sizes="(max-width: 768px) 100vw, 50vw"
-        className="object-cover transition-transform duration-500 hover:scale-[1.04]"
-        priority={false}
-      />
-    </div>
-  );
-}
-
 function NewsletterForm({ compact = false }) {
   const [email, setEmail] = React.useState("");
-  const [status, setStatus] = React.useState(null);
+  const [status, setStatus] = React.useState(null); // "invalid" | "loading" | "success" | "error"
 
   const submit = async (e) => {
     e.preventDefault();
@@ -441,7 +542,7 @@ function NewsletterForm({ compact = false }) {
       });
       if (res.ok) setStatus("success");
       else setStatus("error");
-    } catch (e) {
+    } catch (err) {
       setStatus("error");
     }
   };

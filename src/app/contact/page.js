@@ -48,16 +48,16 @@ export default function Contact() {
   };
 
   return (
-    <main className="relative min-h-[100svh] overflow-hidden bg-[#f4f1ec] text-[#2f2f2f] transition-colors duration-500 dark:bg-[#0e0e0e] dark:text-[#e9e4da]">
+    <main className="relative min-h-[100svh] overflow-hidden bg-[#f4f1ec] text-[#2f2f2f]">
       {/* Ambient background */}
       <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-[#a3845b]/20 blur-3xl" />
-        <div className="absolute bottom-[-6rem] right-[-6rem] h-96 w-96 rounded-full bg-emerald-400/10 blur-3xl dark:bg-emerald-500/10" />
-        <div className="absolute inset-0 opacity-[0.08] [background:radial-gradient(circle_at_center,rgba(0,0,0,0.3)_1px,transparent_1px)] [background-size:20px_20px] dark:opacity-[0.12]" />
+        <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-[#e3d3bc]/70 blur-3xl" />
+        <div className="absolute bottom-[-6rem] right-[-6rem] h-[26rem] w-[26rem] rounded-full bg-[#d2c3aa]/60 blur-3xl" />
+        <div className="absolute inset-0 opacity-[0.06] [background:radial-gradient(circle_at_center,rgba(90,74,63,0.5)_1px,transparent_1px)] [background-size:26px_26px]" />
       </div>
 
       <section className="relative z-10 py-24 md:py-28">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-10 px-6 md:px-10 lg:grid-cols-2 lg:gap-14">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-12 px-6 md:px-10 lg:grid-cols-[0.9fr,1.1fr]">
           {/* Left: Intro + contacts */}
           <motion.div
             initial={{ opacity: 0, y: 16 }}
@@ -66,19 +66,22 @@ export default function Contact() {
             transition={{ duration: 0.6 }}
             className="flex flex-col justify-center"
           >
-            <div className="inline-flex items-center gap-2 self-start rounded-full border border-[#c7b8a6]/50 bg-white/60 px-3 py-1 text-xs text-[#6a5a49] backdrop-blur dark:border-white/10 dark:bg-white/5 dark:text-[#d8cdbf]">
-              <span className="inline-block h-2 w-2 rounded-full bg-[#a3845b]" />
+            <div className="inline-flex items-center gap-2 self-start rounded-full border border-[#d3c2aa] bg-white/70 px-3 py-1 text-xs text-[#6a5a49] backdrop-blur">
+              <span className="inline-block h-2 w-2 rounded-full bg-[#8b6f47]" />
               We usually reply within 24 hours
             </div>
-            <h1 className="mt-5 font-serif text-4xl leading-tight md:text-5xl lg:text-6xl">
-              Get in <span className="text-[#a3845b]">Touch</span>
+
+            <h1 className="mt-5 font-serif text-4xl leading-tight text-[#4d3d33] md:text-5xl lg:text-6xl">
+              Let&apos;s start{" "}
+              <span className="text-[#8b6f47]">your Cretan journey</span>
             </h1>
-            <p className="mt-4 max-w-xl text-base text-[#4a4a4a] dark:text-[#cfc9be] md:text-lg">
-              Curious about our experiences or ready to start your journey with
-              Oasis? Drop us a line and we’ll get back to you.
+            <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-[#4a4a4a] md:text-[17px]">
+              Curious about an experience, planning a retreat, or just feeling a
+              pull towards Crete? Share a few words and we&apos;ll help you find
+              the right next step.
             </p>
 
-            <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <ContactCard
                 icon={<Mail className="h-5 w-5" aria-hidden />}
                 label="Email"
@@ -97,9 +100,13 @@ export default function Contact() {
               <ContactCard
                 icon={<Clock className="h-5 w-5" aria-hidden />}
                 label="Hours"
-                value="Mon–Fri, 09:00–17:00"
+                value="Mon–Fri, 09:00–17:00 (EET)"
               />
             </div>
+
+            <p className="mt-6 text-xs uppercase tracking-[0.22em] text-[#8b7a6b]">
+              Small team • Thoughtful replies • No spam
+            </p>
           </motion.div>
 
           {/* Right: Form */}
@@ -111,14 +118,27 @@ export default function Contact() {
             className="relative"
           >
             <div
-              className="absolute -inset-0.5 rounded-[1.75rem] bg-gradient-to-br from-[#a3845b]/40 via-transparent to-emerald-400/30 blur-2xl"
+              className="absolute -inset-1 rounded-[1.75rem] bg-gradient-to-br from-[#8b6f47]/35 via-transparent to-[#e8d2b2]/45 blur-2xl"
               aria-hidden
             />
             <form
               onSubmit={handleSubmit}
-              className="relative rounded-[1.5rem] border border-black/5 bg-white/70 p-6 shadow-xl backdrop-blur-md supports-[backdrop-filter]:backdrop-blur md:p-8 dark:border-white/10 dark:bg-neutral-900/60"
+              className="relative rounded-[1.5rem] border border-[#e0d6c6] bg-white/80 p-6 shadow-xl backdrop-blur-md supports-[backdrop-filter]:backdrop-blur md:p-8"
               aria-describedby="form-status"
             >
+              <div className="mb-6">
+                <p className="text-xs uppercase tracking-[0.26em] text-[#8b6f47]">
+                  Contact
+                </p>
+                <h2 className="mt-2 font-serif text-2xl text-[#4d3d33]">
+                  Tell us what you&apos;re dreaming of
+                </h2>
+                <p className="mt-2 text-sm text-[#6b625a]">
+                  Share as much or as little as you like — we&apos;ll gently
+                  guide you from there.
+                </p>
+              </div>
+
               <div className="grid grid-cols-1 gap-5 md:gap-6">
                 <Field
                   id="name"
@@ -145,19 +165,19 @@ export default function Contact() {
                   label="Message"
                   value={formData.message}
                   onChange={handleChange}
-                  placeholder="Tell us a bit about what you’re looking for…"
+                  placeholder="Tell us a bit about your plans, preferred dates, or the kind of experience you’re seeking…"
                   rows={6}
                   required
                 />
 
-                <div className="flex items-center justify-between gap-4">
-                  <p className="text-xs text-[#6a6a6a] dark:text-[#a8a39a]">
-                    This form is protected by simple spam checks.
+                <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-[#7a6a5f]">
+                    We&apos;ll only use your details to reply to this enquiry.
                   </p>
                   <button
                     type="submit"
                     disabled={status === "loading"}
-                    className="group inline-flex items-center gap-2 rounded-full bg-[#a3845b] px-6 py-3 font-medium text-white shadow-lg shadow-[#a3845b]/20 transition-transform hover:translate-y-[-1px] hover:bg-[#b79266] active:translate-y-[0px] disabled:opacity-70"
+                    className="group inline-flex items-center justify-center gap-2 rounded-full bg-[#8b6f47] px-6 py-3 text-sm font-medium text-white shadow-lg shadow-[#8b6f47]/20 transition-transform hover:-translate-y-0.5 hover:bg-[#a78b62] active:translate-y-0 disabled:opacity-70"
                   >
                     {status === "loading" ? (
                       <>
@@ -167,7 +187,7 @@ export default function Contact() {
                     ) : (
                       <>
                         <Send className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                        Send Message
+                        Send message
                       </>
                     )}
                   </button>
@@ -183,10 +203,10 @@ export default function Contact() {
                     <motion.div
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-900/20 dark:text-emerald-200"
+                      className="mt-2 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
                     >
                       <CheckCircle2 className="h-4 w-4" />
-                      Your message has been sent. We’ll get back to you soon!
+                      Your message has been sent. We’ll get back to you soon.
                     </motion.div>
                   )}
 
@@ -194,7 +214,7 @@ export default function Contact() {
                     <motion.div
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/20 dark:bg-red-900/20 dark:text-red-200"
+                      className="mt-2 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-50 px-3 py-2 text-sm text-red-700"
                     >
                       <AlertCircle className="h-4 w-4" />
                       Something went wrong. Please try again.
@@ -208,14 +228,15 @@ export default function Contact() {
 
         {/* Footer note */}
         <motion.p
-          className="mx-auto mt-16 max-w-3xl px-6 text-center text-sm text-[#4a4a4a] dark:text-[#aaa]"
+          className="mx-auto mt-16 max-w-3xl px-6 text-center text-sm text-[#4a4a4a]"
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
           viewport={{ once: true, amount: 0.5 }}
           transition={{ duration: 0.6, delay: 0.1 }}
         >
-          We’ll get back to you as soon as possible. Thank you for reaching out
-          ✨
+          If you don&apos;t hear from us within a couple of days, feel free to
+          check your spam folder or reach out again — sometimes even island
+          emails wander off.
         </motion.p>
       </section>
     </main>
@@ -226,20 +247,20 @@ export default function Contact() {
 
 function ContactCard({ icon, label, value }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-black/5 bg-white/70 p-4 shadow-sm backdrop-blur transition dark:border-white/10 dark:bg-white/5">
+    <div className="group relative overflow-hidden rounded-2xl border border-[#e0d6c6] bg-white/80 p-4 shadow-sm backdrop-blur transition">
       <div
-        className="absolute inset-0 -z-10 bg-gradient-to-br from-[#a3845b]/20 to-transparent opacity-0 transition-opacity group-hover:opacity-100"
+        className="absolute inset-0 -z-10 bg-gradient-to-br from-[#e8d2b2]/40 to-transparent opacity-0 transition-opacity group-hover:opacity-100"
         aria-hidden
       />
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#a3845b]/10 text-[#a3845b] ring-1 ring-[#a3845b]/20">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#f2e6d6] text-[#8b6f47] ring-1 ring-[#e0d6c6]">
           {icon}
         </div>
         <div>
-          <div className="text-xs uppercase tracking-wide text-[#7a6a58] dark:text-[#c9baa7]">
+          <div className="text-xs uppercase tracking-[0.16em] text-[#7a6a58]">
             {label}
           </div>
-          <div className="text-base font-medium">{value}</div>
+          <div className="text-sm font-medium text-[#4d3d33]">{value}</div>
         </div>
       </div>
     </div>
@@ -257,7 +278,7 @@ function Field({
 }) {
   return (
     <label htmlFor={id} className="block">
-      <div className="mb-2 text-sm font-medium text-[#3c3c3c] dark:text-[#ddd]">
+      <div className="mb-2 text-sm font-medium text-[#3c3c3c]">
         {label}
         {required && <span className="ml-1 text-[#b44d4d]">*</span>}
       </div>
@@ -269,10 +290,10 @@ function Field({
           onChange={onChange}
           placeholder={placeholder}
           required={required}
-          className="peer w-full rounded-xl border border-[#d3cec7] bg-[#fafafa] px-4 py-3 text-[15px] outline-none transition placeholder:text-[#9a9388] focus:border-[#a3845b] focus:ring-4 focus:ring-[#a3845b]/20 dark:border-[#3b3b3b] dark:bg-[#1f1f1f] dark:placeholder:text-[#7f7a72]"
+          className="peer w-full rounded-xl border border-[#d3c2aa] bg-[#f8f4ee] px-4 py-3 text-[15px] outline-none transition placeholder:text-[#9a9388] focus:border-[#8b6f47] focus:ring-4 focus:ring-[#8b6f47]/16"
         />
         <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center opacity-60">
-          <span className="h-2 w-2 rounded-full bg-[#a3845b]" />
+          <span className="h-2 w-2 rounded-full bg-[#d3c2aa]" />
         </div>
       </div>
     </label>
@@ -290,7 +311,7 @@ function FieldTextArea({
 }) {
   return (
     <label htmlFor={id} className="block">
-      <div className="mb-2 text-sm font-medium text-[#3c3c3c] dark:text-[#ddd]">
+      <div className="mb-2 text-sm font-medium text-[#3c3c3c]">
         {label}
         {required && <span className="ml-1 text-[#b44d4d]">*</span>}
       </div>
@@ -301,7 +322,7 @@ function FieldTextArea({
         placeholder={placeholder}
         rows={rows}
         required={required}
-        className="w-full rounded-xl border border-[#d3cec7] bg-[#fafafa] px-4 py-3 text-[15px] outline-none transition placeholder:text-[#9a9388] focus:border-[#a3845b] focus:ring-4 focus:ring-[#a3845b]/20 dark:border-[#3b3b3b] dark:bg-[#1f1f1f] dark:placeholder:text-[#7f7a72]"
+        className="w-full rounded-xl border border-[#d3c2aa] bg-[#f8f4ee] px-4 py-3 text-[15px] outline-none transition placeholder:text-[#9a9388] focus:border-[#8b6f47] focus:ring-4 focus:ring-[#8b6f47]/16"
       />
     </label>
   );
