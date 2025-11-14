@@ -498,32 +498,32 @@ export default function AdminDashboardPage() {
 
   return (
     <div
-      className="relative min-h-screen bg-[#f4f1ec] text-[#5a4a3f] overflow-hidden"
+      className="relative min-h-screen bg-[radial-gradient(circle_at_top,_#fdfaf5,_#f4f1ec)] text-[#4a3c32] overflow-hidden"
       aria-busy={isNavigating}
       aria-live="polite"
     >
       {/* Ambient blobs */}
-      <div className="pointer-events-none absolute -top-40 -left-24 h-[28rem] w-[28rem] rounded-full bg-[#e9e4dc] blur-3xl opacity-70" />
-      <div className="pointer-events-none absolute -bottom-40 -right-24 h-[32rem] w-[32rem] rounded-full bg-[#fff4e1] blur-3xl opacity-80" />
+      <div className="pointer-events-none absolute -top-40 -left-24 h-[24rem] w-[24rem] rounded-full bg-[#e9e4dc] blur-3xl opacity-70" />
+      <div className="pointer-events-none absolute -bottom-40 -right-24 h-[26rem] w-[26rem] rounded-full bg-[#fff4e1] blur-3xl opacity-80" />
 
-      <div className="relative mx-auto px-6 pt-2 lg:pt-2 pb-10 max-w-6xl xl:max-w-7xl 2xl:max-w-[88rem]">
+      <div className="relative mx-auto px-4 sm:px-6 pt-2 lg:pt-3 pb-10 max-w-6xl xl:max-w-7xl 2xl:max-w-[88rem]">
         {/* Sticky Header */}
-        <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-6 mb-4 bg-gradient-to-b from-[#f4f1ec]/90 to-[#f4f1ec]/40 backdrop-blur border-b border-[#e8e2d9] px-6 py-2">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-serif tracking-tight leading-tight text-[#5a4a3f]">
-                Admin Dashboard
+        <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-4 sm:-mx-6 mb-3 bg-gradient-to-b from-[#f4f1ec]/95 to-[#f4f1ec]/55 backdrop-blur border-b border-[#e3ddd2] px-4 sm:px-6 py-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-serif tracking-tight leading-tight text-[#3f3127]">
+                Admin dashboard
               </h1>
-              <p className="mt-1 text-sm text-[#7a6a5f]">
-                Manage experiences, bookings, clients & growth programs.
+              <p className="mt-0.5 text-xs sm:text-sm text-[#7a6a5f] line-clamp-2">
+                Manage experiences, bookings, customers & growth.
               </p>
             </div>
 
-            {/* Right controls */}
-            <div className="flex items-center gap-2">
+            {/* Right controls – hide on very small screens to keep header compact */}
+            <div className="hidden sm:flex flex-wrap items-center justify-end gap-2 ml-2">
               <button
                 onClick={() => router.push("/admin/help")}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-[#fdfaf5] text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-[#fdfaf5] text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs shadow-[0_0_0_1px_rgba(255,255,255,0.7)]"
                 title="Help & Support"
                 aria-label="Help and support"
               >
@@ -531,7 +531,7 @@ export default function AdminDashboardPage() {
               </button>
               <button
                 onClick={() => go("/admin/settings")}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-white/70 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-white/80 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
                 title="Settings"
                 aria-label="Settings"
               >
@@ -539,7 +539,7 @@ export default function AdminDashboardPage() {
               </button>
               <button
                 onClick={() => go("/admin/reports")}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-white/70 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-xs"
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-[#f7f3ec] text-[#5a4a3f] hover:bg-[#efe6db] transition text-xs"
                 title="Reports & Analytics"
                 aria-label="Reports and analytics"
               >
@@ -555,9 +555,9 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Top toolbar: quick search + primary CTAs */}
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative w-full sm:max-w-xs">
+        {/* Command bar: search + primary CTAs */}
+        <div className="mb-5 flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-sm">
             <Search
               className="absolute left-3 top-2.5 h-4 w-4 text-[#7a6a5f]"
               aria-hidden
@@ -566,30 +566,39 @@ export default function AdminDashboardPage() {
               id="dashboard-search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Quick search… (press / )"
-              className="w-full rounded-full border border-[#d8cfc3] bg-white/80 backdrop-blur px-9 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+              placeholder="Search or jump to a module…"
+              className="w-full rounded-2xl border border-[#d8cfc3] bg-white/85 backdrop-blur px-9 py-2.5 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40 shadow-sm"
               aria-label="Quick search actions"
               autoComplete="off"
             />
+            <div className="pointer-events-none absolute inset-y-0 right-3 hidden sm:flex items-center">
+              <span className="inline-flex items-center gap-1 rounded-full bg-[#f4efe6] border border-[#e3ddd2] px-2 py-0.5 text-[10px] text-[#7a6a5f]">
+                <span className="rounded bg-white/80 px-1.5 py-0.5 text-[9px] font-mono border border-[#ded6cb]">
+                  /
+                </span>
+                <span>to search</span>
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* CTAs: full width on mobile, inline on larger screens */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
             <button
               onClick={() => go("/admin/experiences/new")}
-              className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-[#d8cfc3] bg-[#8b6f47] text-white hover:brightness-110 transition text-sm shadow-sm"
+              className="inline-flex justify-center items-center gap-1.5 rounded-full px-4 py-2 border border-[#b79a71] bg-[#8b6f47] text-white hover:brightness-110 transition text-sm shadow-md w-full sm:w-auto"
             >
-              <Plus size={16} aria-hidden /> New Experience
+              <Plus size={16} aria-hidden /> New experience
             </button>
             <button
               onClick={() => go("/admin/bookings/new")}
-              className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-[#d8cfc3] bg-white/70 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-sm"
+              className="inline-flex justify-center items-center gap-1.5 rounded-full px-4 py-2 border border-[#d8cfc3] bg-white/85 text-[#5a4a3f] hover:bg-[#f1ede7] transition text-sm shadow-sm w-full sm:w-auto"
             >
-              <CalendarDays size={16} aria-hidden /> New Booking
+              <CalendarDays size={16} aria-hidden /> New booking
             </button>
           </div>
         </div>
 
-        {/* PRIMARY KPI row */}
+        {/* KPI row — hidden on mobile as requested */}
         <section
           className="mb-6 hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4"
           role="region"
@@ -607,7 +616,6 @@ export default function AdminDashboardPage() {
             trend={metricsSeries.occupancyPct}
             tooltipFormatter={(v) => [formatPercent(v), "Occupancy"]}
           />
-
           <StatCard
             label="Revenue this month"
             value={formatCurrency(metrics?.revenue ?? 0)}
@@ -624,46 +632,58 @@ export default function AdminDashboardPage() {
           />
         </section>
 
-        {/* Quick Actions toolbar (compact chips) */}
+        {/* Quick Actions toolbar – horizontal scroll on mobile */}
         <section
-          className="mb-6 flex flex-wrap items-center gap-2"
+          className="mb-6 -mx-4 sm:mx-0 overflow-x-auto pb-1"
           aria-label="Quick actions"
         >
-          <ToolbarButton
-            label="Experiences"
-            icon={<Compass size={16} aria-hidden />}
-            onClick={() => go("/admin/experiences")}
-          />
-          <ToolbarButton
-            label="Bookings"
-            icon={<CalendarDays size={16} aria-hidden />}
-            onClick={() => go("/admin/bookings")}
-          />
-          <ToolbarButton
-            label="Clients"
-            icon={<Users size={16} aria-hidden />}
-            onClick={() => go("/admin/users")}
-          />
-          <ToolbarButton
-            label="Schedule"
-            icon={<Clock size={16} aria-hidden />}
-            onClick={() => go("/admin/schedule")}
-          />
-          <ToolbarButton
-            label="Check-ins"
-            icon={<QrCode size={16} aria-hidden />}
-            onClick={() => go("/admin/checkins")}
-          />
-          <ToolbarButton
-            label="Gift Cards"
-            icon={<Gift size={16} aria-hidden />}
-            onClick={() => go("/admin/giftcards")}
-          />
+          <div className="flex items-center gap-2 min-w-max px-4 sm:px-0">
+            <ToolbarButton
+              label="Experiences"
+              icon={<Compass size={16} aria-hidden />}
+              onClick={() => go("/admin/experiences")}
+            />
+            <ToolbarButton
+              label="Bookings"
+              icon={<CalendarDays size={16} aria-hidden />}
+              onClick={() => go("/admin/bookings")}
+            />
+            <ToolbarButton
+              label="Clients"
+              icon={<Users size={16} aria-hidden />}
+              onClick={() => go("/admin/users")}
+            />
+            <ToolbarButton
+              label="Schedule"
+              icon={<Clock size={16} aria-hidden />}
+              onClick={() => go("/admin/schedule")}
+            />
+            <ToolbarButton
+              label="Check-ins"
+              icon={<QrCode size={16} aria-hidden />}
+              onClick={() => go("/admin/checkins")}
+            />
+            <ToolbarButton
+              label="Gift cards"
+              icon={<Gift size={16} aria-hidden />}
+              onClick={() => go("/admin/giftcards")}
+            />
+          </div>
         </section>
 
         {/* Action tiles grid */}
-        <section className="mb-10">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <section className="mb-8">
+          <header className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.22em] text-[#937d6a]">
+                Workspace
+              </p>
+              <span className="inline-flex items-center rounded-full bg-[#efe7db] px-2 py-0.5 text-[10px] text-[#6b5a4e]">
+                {filtered.length} modules
+              </span>
+            </div>
+          </header>
+          <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <AnimatePresence>
               {filtered.map((a, idx) => (
                 <motion.div
@@ -689,20 +709,22 @@ export default function AdminDashboardPage() {
             </AnimatePresence>
           </div>
           {filtered.length === 0 ? (
-            <p className="mt-6 text-sm text-[#7a6a5f]">
+            <p className="mt-4 text-sm text-[#7a6a5f]">
               No actions match your search.
             </p>
           ) : null}
         </section>
 
-        {/* Two-column: Activity + Tips */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 rounded-2xl bg-white/80 backdrop-blur border border-[#e0dcd4] shadow-xl p-5">
+        {/* Two-column: Activity + Tips (stacked on mobile) */}
+        <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4">
+          <div className="rounded-2xl bg-white/90 backdrop-blur border border-[#e0dcd4] shadow-[0_18px_45px_rgba(81,55,28,0.08)] p-4 sm:p-5">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-semibold">Recent activity</h2>
+              <h2 className="text-xs font-semibold tracking-[0.18em] uppercase text-[#937d6a]">
+                Recent activity
+              </h2>
               <button
                 onClick={() => go("/admin/reports")}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 border border-[#d8cfc3] bg-white/70 text-xs hover:bg-[#f1ede7]"
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-full px-3 py-1 border border-[#d8cfc3] bg-white/80 text-xs text-[#5a4a3f] hover:bg-[#f1ede7]"
               >
                 View reports <ArrowUpRight size={14} aria-hidden />
               </button>
@@ -714,17 +736,19 @@ export default function AdminDashboardPage() {
               ).map((item) => (
                 <li
                   key={item.id}
-                  className="py-2.5 flex items-center justify-between"
+                  className="py-2.5 flex items-center justify-between gap-3"
                 >
-                  <div className="min-w-0">
-                    <p className="text-sm truncate">{item.label}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm truncate text-[#4a3c32]">
+                      {item.label}
+                    </p>
                     {item.meta ? (
                       <p className="text-xs text-[#7a6a5f] truncate">
                         {item.meta}
                       </p>
                     ) : null}
                   </div>
-                  <time className="text-xs text-[#7a6a5f]">
+                  <time className="whitespace-nowrap text-xs text-[#a09084]">
                     {formatShortTime(item.at)}
                   </time>
                 </li>
@@ -732,9 +756,11 @@ export default function AdminDashboardPage() {
             </ul>
           </div>
 
-          <aside className="rounded-2xl bg-white/80 backdrop-blur border border-[#e0dcd4] shadow-xl p-5">
-            <h2 className="text-base font-semibold mb-2">Quick Tips</h2>
-            <ul className="space-y-2 text-sm">
+          <aside className="rounded-2xl bg-gradient-to-b from-white/95 to-[#f8f1e7]/90 backdrop-blur border border-[#e0dcd4] shadow-[0_18px_45px_rgba(81,55,28,0.07)] p-4 sm:p-5">
+            <h2 className="text-xs font-semibold tracking-[0.18em] uppercase text-[#937d6a] mb-2.5">
+              Quick tips
+            </h2>
+            <ul className="space-y-2 text-sm text-[#4a3c32]">
               <Tip>Enable the Waitlist to auto-fill cancellations.</Tip>
               <Tip>Add Add-ons (extras) to lift ARPU immediately.</Tip>
               <Tip>Send abandoned draft reminders to recover bookings.</Tip>
@@ -746,7 +772,7 @@ export default function AdminDashboardPage() {
         </section>
 
         {/* Footer breathing space */}
-        <div className="h-10" />
+        <div className="h-8" />
       </div>
     </div>
   );
@@ -789,24 +815,28 @@ function ActionTile({
       aria-disabled={disabled}
       aria-describedby={disabled && disabledHint ? `${title}-hint` : undefined}
       className={
-        "group text-left rounded-2xl bg-gradient-to-b from-white/90 to-[#fdfaf7] border border-[#e6dfd6] p-5 shadow-sm transition-all focus:outline-none " +
+        "group text-left rounded-2xl bg-gradient-to-b from-white/95 to-[#fdfaf7] border border-[#e6dfd6] p-4 sm:p-5 shadow-sm transition-all focus:outline-none " +
         (disabled
           ? "opacity-60 cursor-not-allowed"
-          : "hover:shadow-md hover:-translate-y-0.5 focus:ring-2 focus:ring-offset-2 focus:ring-[#8b6f47]/40")
+          : "hover:-translate-y-0.5 hover:shadow-md hover:border-[#d2c3ad] focus:ring-2 focus:ring-offset-2 focus:ring-[#8b6f47]/40")
       }
     >
       <div className="flex items-start gap-3">
         <div
           className={
-            "shrink-0 h-10 w-10 rounded-xl border border-[#e0dcd4] bg-white/70 backdrop-blur flex items-center justify-center transition " +
-            (disabled ? "" : "group-hover:bg-[#8b6f47] group-hover:text-white")
+            "shrink-0 h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-[#e0dcd4] bg-white/80 backdrop-blur flex items-center justify-center text-[#6b5a4e] transition " +
+            (disabled
+              ? ""
+              : "group-hover:bg-[#8b6f47] group-hover:text-white group-focus-visible:bg-[#8b6f47] group-focus-visible:text-white")
           }
         >
           {icon}
         </div>
         <div className="min-w-0">
-          <h3 className="text-[15px] font-semibold text-[#5a4a3f]">{title}</h3>
-          <p className="mt-1 text-xs text-[#7a6a5f]">{desc}</p>
+          <h3 className="text-[14px] sm:text-[15px] font-semibold text-[#3f3127]">
+            {title}
+          </h3>
+          <p className="mt-1 text-xs text-[#7a6a5f] leading-snug">{desc}</p>
           {disabled && disabledHint ? (
             <p
               id={`${title}-hint`}
@@ -816,7 +846,11 @@ function ActionTile({
             </p>
           ) : null}
         </div>
-        <ChevronRight className="ml-auto opacity-60" size={16} aria-hidden />
+        <ChevronRight
+          className="ml-auto opacity-50 group-hover:opacity-80 group-hover:translate-x-0.5 transition-transform"
+          size={16}
+          aria-hidden
+        />
       </div>
     </button>
   );
@@ -847,10 +881,10 @@ function ToolbarButton({ label, icon, onClick, disabled = false, title }) {
       disabled={disabled}
       aria-disabled={disabled}
       className={
-        "inline-flex items-center gap-1.5 rounded-full border border-[#d8cfc3] bg-white/70 px-3 py-1.5 text-xs text-[#5a4a3f] transition focus:outline-none " +
+        "inline-flex items-center gap-1.5 rounded-full border border-[#d8cfc3] bg-white/85 px-3.5 py-1.5 text-xs text-[#5a4a3f] transition focus:outline-none " +
         (disabled
           ? "opacity-50 cursor-not-allowed pointer-events-none"
-          : "hover:bg-[#f1ede7] focus:ring-2 focus:ring-[#8b6f47]/40")
+          : "hover:bg-[#f1ede7] hover:border-[#ccbfae] focus:ring-2 focus:ring-[#8b6f47]/35")
       }
     >
       {icon}
@@ -858,7 +892,6 @@ function ToolbarButton({ label, icon, onClick, disabled = false, title }) {
     </button>
   );
 
-  // Disabled <button> may not show tooltips; wrap to keep a title/hint.
   return disabled && title ? (
     <span className="inline-block" title={title}>
       {btn}
@@ -871,23 +904,28 @@ function ToolbarButton({ label, icon, onClick, disabled = false, title }) {
 function StatCard({ label, value, tone, trend, tooltipFormatter }) {
   const ring =
     tone === "amber"
-      ? "focus:ring-amber-500/30"
+      ? "focus-within:ring-amber-500/30"
       : tone === "green"
-      ? "focus:ring-green-600/30"
+      ? "focus-within:ring-emerald-600/30"
       : tone === "blue"
-      ? "focus:ring-sky-600/30"
-      : "focus:ring-[#8b6f47]/30";
+      ? "focus-within:ring-sky-600/30"
+      : "focus-within:ring-[#8b6f47]/30";
+
   return (
     <div
       className={
-        "rounded-2xl border border-[#e6dfd6] bg-white/80 backdrop-blur p-4 shadow-sm focus-within:outline-none focus-within:ring-2 " +
+        "rounded-2xl border border-[#e6dfd6] bg-white/90 backdrop-blur p-4 shadow-sm transition-shadow " +
         ring
       }
     >
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-xs text-[#7a6a5f]">{label}</p>
-          <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[#9a8673]">
+            {label}
+          </p>
+          <p className="mt-2 text-2xl font-semibold tracking-tight text-[#3f3127]">
+            {value}
+          </p>
         </div>
       </div>
       <div className="mt-3 h-16">
