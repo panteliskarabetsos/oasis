@@ -9,9 +9,12 @@ export const dynamic = "force-dynamic";
 export default async function Experiences({ searchParams }) {
   const supa = createSupabaseAdmin();
 
-  const rawFrom = searchParams?.from || null;
-  const rawTo = searchParams?.to || null;
-  const rawParty = searchParams?.party || null;
+  // 🔧 IMPORTANT: unwrap the async searchParams first
+  const sp = await searchParams;
+
+  const rawFrom = sp?.from || null;
+  const rawTo = sp?.to || null;
+  const rawParty = sp?.party || null;
 
   const partySize =
     rawParty && !Number.isNaN(Number(rawParty)) && Number(rawParty) > 0
