@@ -180,6 +180,7 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
         list.push(...rs);
       });
     }
+
     return list.map((r) => ({
       id: r.id,
       amount: Number(r.amount || 0),
@@ -193,6 +194,16 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
       created: Number(r.created || 0),
       status: r.status || "",
       reason: r.reason || r?.metadata?.reason || "",
+      performedByEmail:
+        r.performed_by_email ||
+        r.performedByEmail ||
+        r?.metadata?.performed_by_email ||
+        null,
+      performedByName:
+        r.performed_by_name ||
+        r.performedByName ||
+        r?.metadata?.performed_by_name ||
+        null,
     }));
   }, [stripe, currency]);
 
@@ -604,7 +615,7 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
     const dec = minorToMajor(amountDefaultCents || 0, stripeCurrency).toFixed(
       2
     );
-    setRefundAmount(dec);
+    setRefundAmount(dec); // default: full remaining net
     setRefundErr("");
     setRefundOk("");
     setShowRefund(true);
@@ -612,18 +623,23 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
 
   async function submitRefund() {
     if (!piId) return;
+
     const amtCents = toMinor(refundAmount, stripeCurrency);
+
+    // basic validation
     if (!amtCents || amtCents <= 0) {
       setRefundErr("Enter a positive amount.");
       return;
     }
     if (amtCents > stripeNetPaidCents) {
-      setRefundErr("Amount exceeds net paid.");
+      setRefundErr("Amount exceeds remaining Stripe net.");
       return;
     }
+
     setRefundSaving(true);
     setRefundErr("");
     setRefundOk("");
+
     try {
       const r = await fetch(`/api/admin/payments/refund`, {
         method: "POST",
@@ -632,13 +648,21 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error || "Refund failed");
+
       setRefundOk("Refund created");
       await refreshStripe();
     } catch (e) {
       setRefundErr(e?.message || "Refund failed");
     } finally {
       setRefundSaving(false);
-      setTimeout(() => setShowRefund(false), 900);
+      // leave the modal open a bit so the success / error message is visible,
+      // then close it if there was no error
+      setTimeout(() => {
+        setRefundOk((okMsg) => {
+          if (okMsg) setShowRefund(false);
+          return okMsg;
+        });
+      }, 1000);
     }
   }
 
@@ -789,21 +813,25 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
                     key={r.id}
                     className="flex items-center justify-between gap-3 py-1.5 text-xs"
                   >
-                    <div className="min-w-0">
-                      <div className="truncate text-[#7a6a58]">
-                        <code className="rounded bg-[#fcfbf8] px-1 py-0.5">
-                          {r.id}
-                        </code>
-                        <span className="mx-1">•</span>
-                        <span className="capitalize">
-                          {r.status || "unknown"}
+                    <div className="truncate text-[#7a6a58]">
+                      <code className="rounded bg-[#fcfbf8] px-1 py-0.5">
+                        {r.id}
+                      </code>
+                      <span className="mx-1">•</span>
+                      <span className="capitalize">
+                        {r.status || "unknown"}
+                      </span>
+                      {r.reason ? (
+                        <span className="opacity-70"> — {r.reason}</span>
+                      ) : null}
+                      {r.performedByEmail && (
+                        <span className="ml-1 text-[11px] opacity-70">
+                          by {r.performedByName || r.performedByEmail}
                         </span>
-                        {r.reason ? (
-                          <span className="opacity-70"> — {r.reason}</span>
-                        ) : null}
-                      </div>
-                      <div className="opacity-70">{fmtTs(r.created)}</div>
+                      )}
                     </div>
+                    <div className="opacity-70">{fmtTs(r.created)}</div>
+
                     <div className="font-semibold text-rose-700">
                       -{money(minorToMajor(r.amount, r.currency), r.currency)}
                     </div>
@@ -1143,48 +1171,126 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
       )}
 
       {/* Refund modal */}
+      {/* Refund modal */}
       {showRefund && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Refund payment"
-          onClick={() => !refundSaving && setShowRefund(false)}
+          onClick={() => {
+            if (!refundSaving) setShowRefund(false);
+          }}
         >
           <div
             className="w-full max-w-md rounded-2xl border border-black/10 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-[#111]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-2 text-sm font-semibold">Issue refund</div>
-            <div className="text-xs text-[#7a6a58]">
-              Net paid on Stripe:{" "}
-              <strong>
-                {money(
-                  minorToMajor(stripeNetPaidCents, stripeCurrency),
-                  stripeCurrency
-                )}
-              </strong>
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-sm font-semibold">Issue refund</div>
+              <div className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                Stripe • {stripeCurrency}
+              </div>
             </div>
-            <label className="mt-3 block text-sm">
+
+            {/* Stripe amounts summary */}
+            <div className="space-y-1 text-xs text-[#7a6a58]">
+              <div>
+                Net paid on Stripe:{" "}
+                <strong>
+                  {money(
+                    minorToMajor(
+                      stripeNetPaidCents + stripeRefundedCents,
+                      stripeCurrency
+                    ),
+                    stripeCurrency
+                  )}
+                </strong>
+              </div>
+              {stripeRefundedCents > 0 && (
+                <div>
+                  Already refunded:{" "}
+                  <strong>
+                    {money(
+                      minorToMajor(stripeRefundedCents, stripeCurrency),
+                      stripeCurrency
+                    )}
+                  </strong>
+                </div>
+              )}
+              <div>
+                Remaining refundable:{" "}
+                <strong>
+                  {money(
+                    minorToMajor(stripeNetPaidCents, stripeCurrency),
+                    stripeCurrency
+                  )}
+                </strong>
+              </div>
+            </div>
+
+            {/* Amount input */}
+            <label className="mt-4 block text-sm">
               <span className="text-[#3f342c]">Amount to refund</span>
               <NumberInput
                 value={refundAmount}
-                onChange={setRefundAmount}
+                onChange={(v) => {
+                  setRefundErr("");
+                  setRefundOk("");
+                  setRefundAmount(v);
+                }}
                 placeholder="0.00"
                 min={0}
                 step={0.01}
                 prefix={currencySymbol(stripeCurrency)}
               />
+              <div className="mt-1 flex items-center justify-between text-[11px] text-[#7a6a58]">
+                <button
+                  type="button"
+                  className="rounded-full border border-black/10 px-2 py-0.5 text-[11px] hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+                  onClick={() =>
+                    setRefundAmount(
+                      minorToMajor(stripeNetPaidCents, stripeCurrency).toFixed(
+                        2
+                      )
+                    )
+                  }
+                  disabled={refundSaving}
+                >
+                  Full remaining amount
+                </button>
+                {refundAmount && Number(refundAmount) > 0 && (
+                  <span>
+                    Remaining after this refund:{" "}
+                    <strong>
+                      {money(
+                        minorToMajor(
+                          Math.max(
+                            0,
+                            stripeNetPaidCents -
+                              toMinor(refundAmount, stripeCurrency)
+                          ),
+                          stripeCurrency
+                        ),
+                        stripeCurrency
+                      )}
+                    </strong>
+                  </span>
+                )}
+              </div>
             </label>
+
+            {/* Info / error line */}
             <div className="mt-3 flex items-center justify-between">
-              <div className="text-xs">
+              <div className="text-[11px]">
                 {refundErr ? (
                   <span className="text-rose-600">{refundErr}</span>
                 ) : refundOk ? (
                   <span className="text-emerald-700">{refundOk}</span>
                 ) : (
-                  <span className="text-[#7a6a58]">
-                    Refunds are processed by Stripe.
+                  <span className="flex items-center gap-1 text-[#7a6a58]">
+                    <Info className="h-3 w-3" />
+                    Refunds are processed by Stripe and cannot be undone.
                   </span>
                 )}
               </div>
@@ -1201,7 +1307,7 @@ export default function BookingPricingEditor({ bookingId, onSaved }) {
                   type="button"
                   className="inline-flex items-center gap-2 rounded-lg bg-[#a3845b] px-3 py-1.5 text-sm text-white hover:bg-[#b79266] disabled:opacity-60"
                   onClick={submitRefund}
-                  disabled={refundSaving}
+                  disabled={refundSaving || !refundAmount}
                 >
                   {refundSaving ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

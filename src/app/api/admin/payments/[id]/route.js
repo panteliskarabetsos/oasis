@@ -24,6 +24,7 @@ const sum = (xs, f) =>
  * - item.charges.data: simplified charges snapshot (with per-charge refunds)
  * - item.aggregates: amounts in smallest currency unit ("cents")
  * - item.links: dashboard URLs
+ * - item.refunds[*].performed_by_*: admin who did the refund (from payment_refund)
  */
 export async function GET(_req, context) {
   try {
@@ -122,14 +123,17 @@ export async function GET(_req, context) {
       pm?.card ||
       null;
 
-    // Try to find related booking id (best-effort; non-fatal)
+    // --- Supabase lookups (booking_id + refund audit info) ---
     let booking_id = null;
+    let refundAuditRows = [];
+
     try {
       const mod = await import("@/lib/supabase/admin").catch(() => null);
       const createSupabaseAdmin = mod?.createSupabaseAdmin;
       if (createSupabaseAdmin) {
         const admin = createSupabaseAdmin();
 
+        // Try to find related booking id (best-effort; non-fatal)
         const { data: b } = await admin
           .from("Booking")
           .select("id, stripePaymentIntentId")
@@ -148,9 +152,27 @@ export async function GET(_req, context) {
             .maybeSingle();
           if (d?.convertedBookingId) booking_id = d.convertedBookingId;
         }
+
+        // Load refund audit rows from payment_refund
+        const { data: auditData, error: auditError } = await admin
+          .from("payment_refund")
+          .select(
+            "stripe_refund_id, performed_by_email, performed_by_name, performed_by_auth_user_id, performed_by_user_id, created_at"
+          )
+          .eq("stripe_payment_intent_id", pi.id);
+
+        if (auditError) {
+          console.error(
+            "[payment:detail] failed to load payment_refund audit rows",
+            auditError
+          );
+        } else if (auditData) {
+          refundAuditRows = auditData;
+        }
       }
-    } catch {
+    } catch (e) {
       // non-fatal
+      console.error("[payment:detail] Supabase lookup error", e);
     }
 
     if (!booking_id) {
@@ -160,16 +182,38 @@ export async function GET(_req, context) {
       }
     }
 
+    // Build index of audit rows by Stripe refund id
+    const auditIndex = Object.fromEntries(
+      (refundAuditRows || []).map((r) => [r.stripe_refund_id, r])
+    );
+
     // Map refunds into a clean, flat structure for the UI
-    const allRefunds = allRefundsRaw.map((r) => ({
-      id: r.id,
-      amount: Number(r.amount ?? 0),
-      status: r.status,
-      created: r.created,
-      currency: r.currency,
-      reason: r.reason || r?.metadata?.reason || null,
-      charge: r.charge || null,
-    }));
+    const allRefunds = allRefundsRaw.map((r) => {
+      const audit = auditIndex[r.id] || {};
+      const meta = r.metadata || {};
+
+      return {
+        id: r.id,
+        amount: Number(r.amount ?? 0),
+        status: r.status,
+        created: r.created,
+        currency: r.currency,
+        reason: r.reason || meta.reason || null,
+        charge: r.charge || null,
+
+        // NEW: admin info (DB first, then Stripe metadata as fallback)
+        performed_by_email:
+          audit.performed_by_email || meta.performed_by_email || null,
+        performed_by_name:
+          audit.performed_by_name || meta.performed_by_name || null,
+        performed_by_auth_user_id:
+          audit.performed_by_auth_user_id ||
+          meta.performed_by_auth_user_id ||
+          null,
+        performed_by_user_id:
+          audit.performed_by_user_id || meta.performed_by_user_id || null,
+      };
+    });
 
     // Simplified charges snapshot with per-charge refunds
     const chargesSimple = charges.map((c) => {
@@ -189,6 +233,10 @@ export async function GET(_req, context) {
           created: r.created,
           currency: r.currency,
           reason: r.reason,
+          performed_by_email: r.performed_by_email,
+          performed_by_name: r.performed_by_name,
+          performed_by_auth_user_id: r.performed_by_auth_user_id,
+          performed_by_user_id: r.performed_by_user_id,
         })),
         receipt_url: c?.receipt_url || null,
       };

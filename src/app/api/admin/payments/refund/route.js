@@ -28,7 +28,7 @@ async function requireAdmin() {
 
   const { data: profile } = await admin
     .from("User")
-    .select("id, role")
+    .select("id, role, name, surname")
     .eq("auth_user_id", user.id)
     .single();
 
@@ -41,7 +41,14 @@ async function requireAdmin() {
   if (!["admin", "superadmin"].includes(role))
     return { error: true, response: bad("Forbidden", 403) };
 
-  return { error: false, admin };
+  // Return more context for auditing
+  return {
+    error: false,
+    admin,
+    authUser: user,
+    profile,
+    role,
+  };
 }
 
 function assertStripe() {
@@ -57,6 +64,8 @@ function assertStripe() {
 export async function POST(req) {
   const auth = await requireAdmin();
   if (auth.error) return auth.response;
+
+  const { admin, authUser, profile, role } = auth; // role just for response/debug, not stored in DB
 
   let body;
   try {
@@ -156,6 +165,18 @@ export async function POST(req) {
       );
     }
 
+    // Admin metadata for Stripe + DB (only keys that exist in DB or Stripe metadata)
+    const adminMetadata = {
+      performed_by_auth_user_id: authUser.id,
+      performed_by_user_id: profile?.id ?? null,
+      performed_by_email: authUser.email ?? "",
+    };
+
+    const mergedMetadata = {
+      ...(metadata || {}),
+      ...adminMetadata,
+    };
+
     // Create refund – prefer `payment_intent` param when available
     const createParams = {
       ...(piIdForRefund
@@ -163,10 +184,67 @@ export async function POST(req) {
         : { charge: chargeIdForRefund }),
       amount: amount_cents,
       ...(reason ? { reason } : {}),
-      ...(metadata ? { metadata } : {}),
+      ...(mergedMetadata ? { metadata: mergedMetadata } : {}),
     };
 
     const refund = await stripe.refunds.create(createParams);
+
+    // --- Audit log in DB: payment_refund ---
+    try {
+      let bookingId = null;
+      let invoiceId = null;
+
+      // Link by payment_intent when possible
+      const lookupPiId = piIdForRefund || null;
+
+      if (lookupPiId) {
+        const { data: bookingRow } = await admin
+          .from("booking")
+          .select("id")
+          .eq("stripePaymentIntentId", lookupPiId)
+          .maybeSingle();
+
+        bookingId = bookingRow?.id ?? null;
+
+        const { data: invoiceRow } = await admin
+          .from("invoice")
+          .select("id")
+          .eq("stripe_payment_intent_id", lookupPiId)
+          .maybeSingle();
+
+        invoiceId = invoiceRow?.id ?? null;
+      }
+
+      const performedByName =
+        profile?.name || profile?.surname
+          ? [profile?.name, profile?.surname].filter(Boolean).join(" ")
+          : authUser.user_metadata?.full_name ||
+            authUser.user_metadata?.name ||
+            null;
+
+      const { error: auditError } = await admin.from("payment_refund").insert({
+        booking_id: bookingId,
+        invoice_id: invoiceId,
+        // payment_id can be filled later if/when you wire it
+        stripe_payment_intent_id: lookupPiId || payment_intent || null,
+        stripe_refund_id: refund.id,
+        amount_cents: refund.amount,
+        currency: currency || (refund.currency || "").toUpperCase(),
+        reason: refund.reason || reason || null,
+        notes: null,
+        performed_by_auth_user_id: authUser.id,
+        performed_by_user_id: profile?.id ?? null,
+        performed_by_email: authUser.email ?? null,
+        performed_by_name: performedByName,
+      });
+
+      if (auditError) {
+        console.error("Failed to record payment_refund audit row", auditError);
+      }
+    } catch (auditEx) {
+      // Don't break the API if audit logging fails – refund already exists in Stripe
+      console.error("payment_refund audit logging failed", auditEx);
+    }
 
     return ok({
       refund,
@@ -179,6 +257,12 @@ export async function POST(req) {
         refundable_after_cents: refundable_cents - amount_cents,
         refunded_total_cents: refunded_so_far_cents + amount_cents,
         amount_received_cents,
+        admin: {
+          performed_by_auth_user_id: authUser.id,
+          performed_by_user_id: profile?.id ?? null,
+          performed_by_email: authUser.email ?? "",
+          role, // only in response, not stored in DB
+        },
       },
     });
   } catch (e) {

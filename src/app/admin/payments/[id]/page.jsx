@@ -696,30 +696,51 @@ export default function PaymentDetailPage() {
                         <th className="px-5 py-2 text-left font-medium">
                           Created
                         </th>
+                        {/* NEW: Admin */}
+                        <th className="px-5 py-2 text-left font-medium">
+                          Admin
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {p.refunds.map((r) => (
-                        <tr key={r.id} className="border-t border-[#f0ece6]">
-                          <td className="px-5 py-2">
-                            <code className="rounded bg-[#fcf9f4] px-1 py-0.5">
-                              {r.id}
-                            </code>
-                          </td>
-                          <td className="px-5 py-2">
-                            {toCurrency(r.amount, currency)}
-                          </td>
-                          <td className="px-5 py-2">
-                            <span className="text-[#7a6a58]">{r.status}</span>
-                          </td>
-                          <td className="px-5 py-2">
-                            <div>{dt(r.created)}</div>
-                            <div className="text-xs text-[#a09386]">
-                              {rel(r.created)}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                      {p.refunds.map((r) => {
+                        const adminName =
+                          r.performed_by_name || r.performed_by_email || null;
+
+                        return (
+                          <tr key={r.id} className="border-t border-[#f0ece6]">
+                            <td className="px-5 py-2">
+                              <code className="rounded bg-[#fcf9f4] px-1 py-0.5">
+                                {r.id}
+                              </code>
+                            </td>
+                            <td className="px-5 py-2">
+                              {toCurrency(r.amount, currency)}
+                            </td>
+                            <td className="px-5 py-2">
+                              <span className="text-[#7a6a58]">{r.status}</span>
+                            </td>
+                            <td className="px-5 py-2">
+                              <div>{dt(r.created)}</div>
+                              <div className="text-xs text-[#a09386]">
+                                {rel(r.created)}
+                              </div>
+                            </td>
+                            {/* NEW: Admin cell */}
+                            <td className="px-5 py-2">
+                              {adminName ? (
+                                <span className="text-xs text-[#3f342c]">
+                                  {adminName}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-[#b0a496]">
+                                  —
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -753,17 +774,29 @@ export default function PaymentDetailPage() {
                   </li>
                 ) : null}
                 {Array.isArray(p?.refunds) &&
-                  p.refunds.map((r) => (
-                    <li key={r.id} className="ml-4 mb-3">
-                      <div className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full bg-sky-400" />
-                      <div className="text-sm text-[#3f342c]">
-                        Refunded {toCurrency(r.amount, currency)}
-                      </div>
-                      <div className="text-xs text-[#7a6a58]">
-                        {dt(r.created)} • {rel(r.created)}
-                      </div>
-                    </li>
-                  ))}
+                  p.refunds.map((r) => {
+                    const adminName =
+                      r.performed_by_name || r.performed_by_email || null;
+
+                    return (
+                      <li key={r.id} className="ml-4 mb-3">
+                        <div className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full bg-sky-400" />
+                        <div className="text-sm text-[#3f342c]">
+                          Refunded {toCurrency(r.amount, currency)}
+                          {adminName && (
+                            <span className="text-xs text-[#7a6a58]">
+                              {" "}
+                              · by {adminName}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-[#7a6a58]">
+                          {dt(r.created)} • {rel(r.created)}
+                        </div>
+                      </li>
+                    );
+                  })}
+
                 {!p?.created && (!p?.refunds || p.refunds.length === 0) ? (
                   <li className="ml-4 mb-3">
                     <div className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full bg-[#ddd5c9]" />

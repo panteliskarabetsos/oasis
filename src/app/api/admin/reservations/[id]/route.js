@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import Stripe from "stripe";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -152,10 +153,11 @@ export async function GET(req, ctx) {
           currency,
         },
 
-        // Stripe
+        // Stripe – we'll enrich this below
         payments: {
           stripeSessionId: b?.stripeSessionId ?? null,
           stripePaymentIntentId: b?.stripePaymentIntentId ?? null,
+          paymentMethod: null, // placeholder, filled from Stripe
         },
 
         // Schedule / experience
@@ -189,6 +191,55 @@ export async function GET(req, ctx) {
         totalPaidAmount: totalPaidAmount,
         customExperienceName: b?.customExperienceName ?? null,
       };
+
+      // --- NEW: fetch payment method / card details from Stripe (if PI exists) ---
+      // --- NEW: fetch card details via Charges API ---
+      if (b?.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
+        try {
+          const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+            apiVersion: "2023-10-16",
+          });
+
+          const chargeList = await stripe.charges.list({
+            payment_intent: b.stripePaymentIntentId,
+            limit: 1,
+          });
+
+          console.log(
+            "[reservations/:id GET] charges.list result",
+            JSON.stringify(
+              {
+                payment_intent: b.stripePaymentIntentId,
+                count: chargeList?.data?.length || 0,
+                firstChargeId: chargeList?.data?.[0]?.id || null,
+              },
+              null,
+              2
+            )
+          );
+
+          const charge = chargeList?.data?.[0] || null;
+          if (charge) {
+            item.payments.paymentMethod =
+              extractPaymentMethodSummaryFromCharge(charge);
+          } else {
+            console.log(
+              "[reservations/:id GET] no charges for PI",
+              b.stripePaymentIntentId
+            );
+          }
+        } catch (err) {
+          console.error(
+            "[reservations/:id GET] Stripe charges fetch error:",
+            err
+          );
+        }
+      } else {
+        console.log("[reservations/:id GET] skipping Stripe enrichment", {
+          hasPI: !!b?.stripePaymentIntentId,
+          hasStripeKey: !!process.env.STRIPE_SECRET_KEY,
+        });
+      }
 
       return ok({ item });
     }
@@ -678,5 +729,108 @@ function buildPromoPayload(extracted) {
     appliedPromoCode: code || null,
     discountAmount: Number.isFinite(discountAmount) ? discountAmount : null,
     promoJson: pj || null,
+  };
+}
+function extractPaymentMethodSummaryFromPI(pi) {
+  const empty = { type: null, label: null, card: null };
+  if (!pi || typeof pi !== "object") return empty;
+
+  const charges = Array.isArray(pi?.charges?.data) ? pi.charges.data : [];
+  const charge = charges[0] || null;
+
+  // Stripe usually exposes details on the charge
+  const pmd =
+    charge?.payment_method_details ||
+    (charge?.payment_method && charge.payment_method.card
+      ? { type: "card", card: charge.payment_method.card }
+      : null) ||
+    pi?.payment_method_details ||
+    null;
+
+  if (!pmd) return empty;
+
+  let type = pmd.type;
+  if (!type) {
+    if (pmd.card) type = "card";
+    else {
+      const keys = Object.keys(pmd).filter((k) => k !== "type");
+      type = keys[0] || null;
+    }
+  }
+
+  let card = null;
+  if (type === "card") {
+    const cardObj =
+      pmd.card ||
+      charge?.payment_method_details?.card ||
+      charge?.payment_method?.card ||
+      null;
+
+    if (cardObj) {
+      card = {
+        brand: cardObj.brand || null,
+        last4: cardObj.last4 || null,
+        expMonth: cardObj.exp_month || null,
+        expYear: cardObj.exp_year || null,
+        country: cardObj.country || null,
+        funding: cardObj.funding || null,
+      };
+    }
+  }
+
+  const labelParts = [];
+  if (type === "card") {
+    if (card?.brand) labelParts.push(card.brand.toUpperCase());
+    if (card?.last4) labelParts.push(`•••• ${card.last4}`);
+  } else if (type) {
+    labelParts.push(type);
+  }
+
+  return {
+    type,
+    label: labelParts.join(" · ") || null,
+    card,
+  };
+}
+function extractPaymentMethodSummaryFromCharge(charge) {
+  const empty = { type: null, label: null, card: null };
+  if (!charge || typeof charge !== "object") return empty;
+
+  const pmd = charge.payment_method_details || {};
+  let type = pmd.type || null;
+
+  // Handle card
+  let card = null;
+  if (pmd.card && typeof pmd.card === "object") {
+    type = type || "card";
+    const cardObj = pmd.card;
+    card = {
+      brand: cardObj.brand || null,
+      last4: cardObj.last4 || null,
+      expMonth: cardObj.exp_month || null,
+      expYear: cardObj.exp_year || null,
+      country: cardObj.country || null,
+      funding: cardObj.funding || null,
+    };
+  }
+
+  // For non-card methods you’ll still get a label (e.g. "ideal", "klarna")
+  if (!type) {
+    const keys = Object.keys(pmd).filter((k) => k !== "type");
+    type = keys[0] || null;
+  }
+
+  const labelParts = [];
+  if (type === "card" && card) {
+    if (card.brand) labelParts.push(card.brand.toUpperCase());
+    if (card.last4) labelParts.push(`•••• ${card.last4}`);
+  } else if (type) {
+    labelParts.push(type);
+  }
+
+  return {
+    type,
+    label: labelParts.join(" · ") || null,
+    card,
   };
 }
