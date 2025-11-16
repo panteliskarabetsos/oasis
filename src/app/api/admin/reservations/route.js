@@ -65,11 +65,22 @@ export async function GET(req) {
       1,
       Math.min(200, Number(searchParams.get("pageSize")) || 20)
     );
-    const q = (searchParams.get("q") || "").trim().toLowerCase();
+    const rawQ = (searchParams.get("q") || "").trim();
+    const q = rawQ.toLowerCase();
     const status = (searchParams.get("status") || "").trim();
     const experienceId = Number(searchParams.get("experienceId")) || null;
     const from = (searchParams.get("from") || "").trim();
     const to = (searchParams.get("to") || "").trim();
+    // Special: code param from "#123" search in UI (numeric booking/draft id)
+    const rawCode = (searchParams.get("code") || "").trim();
+    const codeId = rawCode && /^\d+$/.test(rawCode) ? Number(rawCode) : null;
+
+    // Special #ID search: e.g. "#256" or "# 256"
+    let idSearch = null;
+    const hashMatch = rawQ.match(/^#\s*(\d+)\s*$/);
+    if (hashMatch) {
+      idSearch = Number(hashMatch[1]);
+    }
 
     const fromTs = from ? `${from}T00:00:00` : null;
     const toTs = to ? `${to}T23:59:59.999` : null;
@@ -172,7 +183,16 @@ export async function GET(req) {
 
     // merge + search
     let merged = [...bookings, ...drafts];
-    if (q) {
+
+    // 1️⃣ If we have a numeric codeId (from "code" query), filter by id
+    if (codeId !== null) {
+      merged = merged.filter((r) => {
+        const n = Number(r.id);
+        return Number.isFinite(n) && n === codeId;
+      });
+    }
+    // 2️⃣ Otherwise fall back to normal text search "q"
+    else if (q) {
       const like = (s) => (s || "").toString().toLowerCase().includes(q);
       merged = merged.filter(
         (r) =>

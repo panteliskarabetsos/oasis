@@ -1,3 +1,4 @@
+// src/app/api/bookings/drafts/[id]/checkout/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,7 @@ import { getStripe } from "@/lib/stripe/server";
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
-const REFRESH_MINUTES_ON_CHECKOUT = 30;
+const REFRESH_MINUTES_ON_CHECKOUT = 10;
 const COUNT_STATUSES = new Set([
   "paid",
   "confirmed",
@@ -202,26 +203,32 @@ export async function POST(req, ctx) {
   }
 
   // 4) If draft expired, auto-extend the hold window
-  const isExpired = !!draft.expiresAt && new Date(draft.expiresAt) < now;
-  if (isExpired) {
-    const newExpiresAt = new Date(
+  // 4) Enforce expiry / set hold window
+  const expDate = draft.expiresAt ? new Date(draft.expiresAt) : null;
+  const hasExpiry = !!expDate;
+  const isExpired = hasExpiry && expDate <= now;
+
+  // If we already had an expiry and it's in the past, do NOT revive the draft.
+  if (isExpired && draft.status !== "paid") {
+    return bad("Draft expired. Please start again.", 410); // or 400 if you prefer
+  }
+
+  // If there's no expiry yet or we're transitioning from draft -> checkout,
+  // start a hold window from now. Otherwise keep the existing one.
+  let newExpiresAt = draft.expiresAt;
+  if (!hasExpiry || draft.status === "draft") {
+    newExpiresAt = new Date(
       Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000
     ).toISOString();
-    const upd = await admin
+
+    await admin
       .from("BookingDraft")
-      .update({ expiresAt: newExpiresAt, updatedAt: new Date().toISOString() })
+      .update({
+        status: "checkout",
+        expiresAt: newExpiresAt,
+        updatedAt: new Date().toISOString(),
+      })
       .eq("id", draftId);
-    if (upd.error) {
-      if (String(upd.error.code) === "42703") {
-        const upd2 = await admin
-          .from("BookingDraft")
-          .update({ expiresAt: newExpiresAt })
-          .eq("id", draftId);
-        if (upd2.error) return bad("Draft expired. Please start again.", 400);
-      } else {
-        return bad("Draft expired. Please start again.", 400);
-      }
-    }
   }
 
   // 5) Pricing
@@ -329,17 +336,17 @@ export async function POST(req, ctx) {
   }
 
   // Common: extend hold window + mark "checkout" state
-  const newExpiresAt = new Date(
-    Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000
-  ).toISOString();
-  await admin
-    .from("BookingDraft")
-    .update({
-      status: "checkout",
-      expiresAt: newExpiresAt,
-      updatedAt: new Date().toISOString(),
-    })
-    .eq("id", draftId);
+  // const newExpiresAt = new Date(
+  //   Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000
+  // ).toISOString();
+  // await admin
+  //   .from("BookingDraft")
+  //   .update({
+  //     status: "checkout",
+  //     expiresAt: newExpiresAt,
+  //     updatedAt: new Date().toISOString(),
+  //   })
+  //   .eq("id", draftId);
 
   // === Branch by mode ===
   if (mode === "elements") {
@@ -556,7 +563,6 @@ export async function POST(req, ctx) {
     .update({
       status: "checkout",
       stripeSessionId: session.id,
-      expiresAt: newExpiresAt,
       updatedAt: new Date().toISOString(),
       totalAmount: finalTotalCents / 100,
       appliedPromoCode: promo?.code ?? null,

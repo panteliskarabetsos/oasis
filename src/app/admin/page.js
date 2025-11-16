@@ -50,20 +50,22 @@ import {
 export const dynamic = "force-dynamic"; // ensure this runs on every request (no static caching)
 
 async function runCleanup() {
-  const headers = {};
-  if (process.env.CRON_SECRET) {
-    headers.Authorization = `Bearer ${process.env.CRON_SECRET}`;
+  const res = await fetch("/api/cleanupDrafts", {
+    method: "POST",
+    cache: "no-store",
+    credentials: "include",
+    next: { revalidate: 0 },
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    const msg = (data && data.error) || "Failed to cleanup drafts";
+    throw new Error(msg);
   }
 
-  // Global sweep. If you want per-slot, add ?scheduleSlotId=123
-  await fetch("/api/cleanupDrafts", {
-    method: "POST",
-    headers,
-    cache: "no-store",
-    next: { revalidate: 0 },
-  }).catch((e) => {
-    console.error("[admin] cleanupDrafts failed:", e);
-  });
+  // data is expected to be { deleted, at }
+  return data;
 }
 
 // Admin Dashboard – refreshed UI/UX + business features (improved)

@@ -1,3 +1,4 @@
+// src/app/check-availability/[id]/page.js
 "use client";
 
 import { enGB } from "date-fns/locale";
@@ -290,7 +291,12 @@ export default function CheckAvailabilityPage() {
         throw new Error(err?.error || "Could not start booking.");
       }
       const data = await res.json();
-      router.push(`/booking/${data.id}/attendees`);
+
+      // pass expiresAt to the next step
+      const params = new URLSearchParams();
+      if (data.expiresAt) params.set("expiresAt", data.expiresAt);
+      const qs = params.toString();
+      router.push(`/booking/${data.id}/attendees${qs ? `?${qs}` : ""}`);
     } catch (e) {
       console.error(e);
       toast.error(e.message || "Something went wrong.");

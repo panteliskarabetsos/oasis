@@ -1,7 +1,8 @@
+// src/app/booking/[id]/attendees/page.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { format, parseISO } from "date-fns";
 import {
@@ -27,7 +28,16 @@ export default function AttendeesPage() {
   const router = useRouter();
   const { id } = useParams();
   const draftId = Number(id);
+  const searchParams = useSearchParams();
+  const initialExpiresAtFromQuery = searchParams.get("expiresAt") || null;
 
+  // Draft expiry
+  const [expiresAt, setExpiresAt] = useState(initialExpiresAtFromQuery);
+  const {
+    formatted: timeLeft,
+    expired,
+    progress: holdProgress,
+  } = useDraftCountdown(expiresAt);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -83,6 +93,14 @@ export default function AttendeesPage() {
     if (autoPcFromFirstAdult) setPcName(firstAdultFullName);
   }, [firstAdultFullName, autoPcFromFirstAdult]);
 
+  useEffect(() => {
+    if (expired) {
+      toast.error(
+        "Your reservation hold has expired. Please go back and select a new time."
+      );
+    }
+  }, [expired]);
+
   // Fetch draft
   useEffect(() => {
     if (!Number.isFinite(draftId) || draftId <= 0) {
@@ -107,6 +125,10 @@ export default function AttendeesPage() {
 
         // NEW: support either { draft, experience, slot } or legacy flat shape
         const d = data?.draft || data;
+        // Keep frontend timer in sync with server expiry
+        if (d?.expiresAt) {
+          setExpiresAt(d.expiresAt);
+        }
 
         // If already paid/converted, bounce to confirmation
         const st = String(d?.status || "").toLowerCase();
@@ -255,7 +277,11 @@ export default function AttendeesPage() {
         throw new Error(msg);
       }
 
-      router.push(`/booking/${draftId}/payment`);
+      const params = new URLSearchParams();
+      if (expiresAt) params.set("expiresAt", expiresAt);
+
+      const qs = params.toString();
+      router.push(`/booking/${draftId}/payment${qs ? `?${qs}` : ""}`);
     } catch (e) {
       console.error(e);
       toast.error(e.message || "Something went wrong.");
@@ -290,6 +316,40 @@ export default function AttendeesPage() {
 
       {/* Header */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 mt-6">
+        {expiresAt && (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                {expired ? (
+                  <span>
+                    Your hold for this time slot has back and choose a new time.
+                  </span>
+                ) : (
+                  <span>
+                    We&apos;re holding your seats for{" "}
+                    <span className="font-mono font-semibold">{timeLeft}</span>.
+                    Please complete your booking before the timer runs out.
+                  </span>
+                )}
+              </div>
+
+              {!expired && (
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-amber-800/80">
+                    Time left
+                  </span>
+                  <div className="h-1.5 w-28 overflow-hidden rounded-full bg-amber-100">
+                    <div
+                      className="h-full bg-amber-500 transition-[width] duration-1000 ease-linear"
+                      style={{ width: `${holdProgress * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <div className="relative overflow-hidden rounded-3xl border border-[#e5e0d8] bg-[#fcf9f4]/95 shadow-[0_16px_40px_rgba(90,74,63,0.10)]">
           <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-[#e9e3d9] opacity-70 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-[#e1d6c5] opacity-60 blur-3xl" />
@@ -672,7 +732,7 @@ export default function AttendeesPage() {
 
                   <button
                     type="button"
-                    disabled={saving || expectedTotal === 0}
+                    disabled={saving || expectedTotal === 0 || expired}
                     onClick={handleSaveAndContinue}
                     className={`mt-6 w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#c4b89f] ${
                       saving || expectedTotal === 0
@@ -687,7 +747,8 @@ export default function AttendeesPage() {
                       </>
                     ) : (
                       <>
-                        <CreditCard className="w-5 h-5" /> Continue to payment
+                        <CreditCard className="w-5 h-5" />{" "}
+                        {expired ? "Hold expired" : "Continue to payment"}
                       </>
                     )}
                   </button>
@@ -730,7 +791,8 @@ export default function AttendeesPage() {
                 </>
               ) : (
                 <>
-                  <CreditCard className="w-5 h-5" /> Pay
+                  <CreditCard className="w-5 h-5" />{" "}
+                  {expired ? "Hold expired" : "Pay"}
                 </>
               )}
             </button>
@@ -924,4 +986,60 @@ function LoadingBlock() {
       </div>
     </div>
   );
+}
+
+// Simple countdown hook for draft expiry
+function useDraftCountdown(expiresAtIso) {
+  const [remainingMs, setRemainingMs] = useState(() => {
+    if (!expiresAtIso) return 0;
+    const ts = Date.parse(expiresAtIso);
+    if (!Number.isFinite(ts)) return 0;
+    return Math.max(0, ts - Date.now());
+  });
+
+  const [initialMs, setInitialMs] = useState(() => {
+    if (!expiresAtIso) return 0;
+    const ts = Date.parse(expiresAtIso);
+    if (!Number.isFinite(ts)) return 0;
+    return Math.max(0, ts - Date.now());
+  });
+
+  useEffect(() => {
+    if (!expiresAtIso) {
+      setRemainingMs(0);
+      setInitialMs(0);
+      return;
+    }
+
+    const ts = Date.parse(expiresAtIso);
+    if (!Number.isFinite(ts)) {
+      setRemainingMs(0);
+      setInitialMs(0);
+      return;
+    }
+
+    const update = () => {
+      const diff = Math.max(0, ts - Date.now());
+      setRemainingMs(diff);
+    };
+
+    setInitialMs(Math.max(0, ts - Date.now()));
+    update();
+
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [expiresAtIso]);
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  const formatted = `${String(minutes).padStart(2, "0")}:${String(
+    seconds
+  ).padStart(2, "0")}`;
+  const expired = remainingMs <= 0;
+  const progress =
+    initialMs > 0 ? Math.max(0, Math.min(1, remainingMs / initialMs)) : 0;
+
+  return { remainingMs, formatted, expired, progress };
 }

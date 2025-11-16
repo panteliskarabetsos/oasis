@@ -42,6 +42,15 @@ export default function PaymentPage() {
   const draftId = Number(id);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Draft expiry
+  const [expiresAt, setExpiresAt] = useState(
+    qs?.get("expiresAt") || null //seed from URL
+  );
+  const {
+    formatted: timeLeft,
+    expired,
+    progress: holdProgress,
+  } = useDraftCountdown(expiresAt);
 
   const [experience, setExperience] = useState(null);
   const [slot, setSlot] = useState(null);
@@ -89,6 +98,9 @@ export default function PaymentPage() {
           data = await res.json();
         } catch {}
         const d = data?.draft || data; // normalize
+        if (d?.expiresAt) {
+          setExpiresAt(d.expiresAt);
+        }
 
         // If this draft is already paid/converted, jump to confirmation.
         const st = String(d?.status || "").toLowerCase();
@@ -102,7 +114,9 @@ export default function PaymentPage() {
 
         setExperience(data?.experience || d?.experience || null);
         setSlot(data?.slot || d?.slot || null);
-
+        if (d?.expiresAt) {
+          setExpiresAt(d.expiresAt);
+        }
         const c = d?.counts || {};
         setCounts({
           adults: Number(c.adults || 0),
@@ -136,6 +150,14 @@ export default function PaymentPage() {
     if (isDetailsOpen) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isDetailsOpen]);
+
+  useEffect(() => {
+    if (expired) {
+      setError(
+        "Your reservation hold has expired. Please go back and choose a new time."
+      );
+    }
+  }, [expired]);
 
   function normalizePromo(p, fallbackCode) {
     return {
@@ -369,6 +391,42 @@ export default function PaymentPage() {
 
           <Stepper currentStep={3} />
         </div>
+        {expiresAt && (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                {expired ? (
+                  <span>
+                    Your hold for this time slot has{" "}
+                    <span className="font-semibold">expired</span>. Please go
+                    back and choose a new time.
+                  </span>
+                ) : (
+                  <span>
+                    We&apos;re holding your seats for{" "}
+                    <span className="font-mono font-semibold">{timeLeft}</span>.
+                    Please complete your payment before the timer runs out.
+                  </span>
+                )}
+              </div>
+
+              {!expired && (
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-amber-800/80">
+                    Time left
+                  </span>
+                  <div className="h-1.5 w-28 overflow-hidden rounded-full bg-amber-100">
+                    <div
+                      className="h-full bg-amber-500 transition-[width] duration-1000 ease-linear"
+                      style={{ width: `${holdProgress * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {cancelled && (
           <Banner tone="danger" icon={<AlertCircle size={14} />}>
@@ -547,6 +605,7 @@ export default function PaymentPage() {
                           currency: (piInfo.currency || "eur").toUpperCase(),
                         }).format((piInfo.amountCents || 0) / 100)}
                         onError={(msg) => setError(msg)}
+                        expired={expired}
                       />
                     </div>
                   </Elements>
@@ -973,8 +1032,63 @@ function DetailsDialog({ onClose, experience, when, attendeesRows }) {
     </div>
   );
 }
+// Simple countdown hook for draft expiry
+function useDraftCountdown(expiresAtIso) {
+  const [remainingMs, setRemainingMs] = useState(() => {
+    if (!expiresAtIso) return 0;
+    const ts = Date.parse(expiresAtIso);
+    if (!Number.isFinite(ts)) return 0;
+    return Math.max(0, ts - Date.now());
+  });
 
-function CheckoutForm({ draftId, amountLabel, onError }) {
+  const [initialMs, setInitialMs] = useState(() => {
+    if (!expiresAtIso) return 0;
+    const ts = Date.parse(expiresAtIso);
+    if (!Number.isFinite(ts)) return 0;
+    return Math.max(0, ts - Date.now());
+  });
+
+  useEffect(() => {
+    if (!expiresAtIso) {
+      setRemainingMs(0);
+      setInitialMs(0);
+      return;
+    }
+
+    const ts = Date.parse(expiresAtIso);
+    if (!Number.isFinite(ts)) {
+      setRemainingMs(0);
+      setInitialMs(0);
+      return;
+    }
+
+    const update = () => {
+      const diff = Math.max(0, ts - Date.now());
+      setRemainingMs(diff);
+    };
+
+    setInitialMs(Math.max(0, ts - Date.now()));
+    update();
+
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [expiresAtIso]);
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  const formatted = `${String(minutes).padStart(2, "0")}:${String(
+    seconds
+  ).padStart(2, "0")}`;
+  const expired = remainingMs <= 0;
+  const progress =
+    initialMs > 0 ? Math.max(0, Math.min(1, remainingMs / initialMs)) : 0;
+
+  return { remainingMs, formatted, expired, progress };
+}
+
+function CheckoutForm({ draftId, amountLabel, onError, expired }) {
   const stripe = useStripe();
   const elements = useElements();
   const [email, setEmail] = useState("");
@@ -1021,9 +1135,9 @@ function CheckoutForm({ draftId, amountLabel, onError }) {
       <PaymentElement />
       <button
         type="submit"
-        disabled={processing || !stripe || !elements}
+        disabled={processing || !stripe || !elements || expired}
         className={`w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md ${
-          processing
+          processing || expired
             ? "bg-gray-300 text-white cursor-not-allowed"
             : "bg-gradient-to-b from-[#8b6f47] to-[#7a5f3a] text-white hover:from-[#7f643f] hover:to-[#6a5233]"
         }`}
@@ -1032,6 +1146,8 @@ function CheckoutForm({ draftId, amountLabel, onError }) {
           <>
             <Loader2 className="w-5 h-5 animate-spin" /> Processing…
           </>
+        ) : expired ? (
+          <>Hold expired</>
         ) : (
           <>Pay {amountLabel}</>
         )}
