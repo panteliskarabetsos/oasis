@@ -219,8 +219,7 @@ export default function ReservationsPage() {
         const match = raw.match(/^#\s*(.+)$/); // everything after "#"
         if (match && match[1]) {
           const bookingToken = match[1].trim();
-          // 👉 pick whichever your API expects: "id", "code", etc.
-          // Example: search only by booking code:
+       
           qs.set("code", bookingToken);
         } else {
           // normal free-text search

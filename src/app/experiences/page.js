@@ -122,6 +122,7 @@ export default async function Experiences({ searchParams }) {
   }
 
   const count = filteredExperiences?.length || 0;
+  const filtersApplied = hasValidDateRange && !!partySize;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#f4f1ec] via-[#faf9f7] to-[#f4f1ec] text-[#2f2f2f] pt-16 md:pt-20 pb-20 px-6">
@@ -146,11 +147,13 @@ export default async function Experiences({ searchParams }) {
 
       {/* Filter bar */}
       <section className="max-w-6xl mx-auto mb-10">
-        <ExperiencesFilterBar
-          initialFrom={rawFrom}
-          initialTo={rawTo}
-          initialParty={partySize}
-        />
+        <div className="rounded-3xl border border-[#e2d7c7] bg-white/80 shadow-sm backdrop-blur-sm px-4 py-4 md:px-6 md:py-5">
+          <ExperiencesFilterBar
+            initialFrom={rawFrom}
+            initialTo={rawTo}
+            initialParty={partySize}
+          />
+        </div>
       </section>
 
       {/* Experiences grid */}
@@ -168,8 +171,7 @@ export default async function Experiences({ searchParams }) {
             const freqArray = Array.isArray(exp.frequency)
               ? exp.frequency.filter(Boolean)
               : [];
-            const freqLabel =
-              freqArray.length > 0 ? freqArray.join(" • ") : null;
+            const freqLabel = getFrequencyLabel(freqArray);
 
             const shortDescription =
               (exp.description || "").length > 150
@@ -269,15 +271,54 @@ export default async function Experiences({ searchParams }) {
             );
           })
         ) : (
-          <div className="col-span-full text-center text-[#5a4a3f]">
-            <p className="text-base">
-              No experiences are available for your selected dates and group
-              size.
-            </p>
-            <p className="text-sm mt-2 text-[#7a6a5f]">
-              Try adjusting your date range or party size, or contact us for
-              bespoke options.
-            </p>
+          <div className="col-span-full">
+            <div className="max-w-xl mx-auto text-center rounded-[2rem] border border-dashed border-[#d3c4b4] bg-white/80 px-8 py-10 shadow-sm">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-[#8b6f47] mb-3">
+                {filtersApplied ? "No matching dates" : "Currently unavailable"}
+              </p>
+              <h2 className="text-2xl font-serif text-[#5a4a3f] mb-3">
+                {filtersApplied
+                  ? "We’re fully booked for these dates."
+                  : "Our public experiences are being updated."}
+              </h2>
+              <p className="text-sm mt-1 text-[#7a6a5f] mb-6">
+                {filtersApplied ? (
+                  <>
+                    We don&apos;t have any public availability for your selected
+                    dates and group size. Try adjusting your date range or party
+                    size, or{" "}
+                    <span className="font-medium">
+                      contact us for a private booking.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    We&apos;re currently updating our calendar. In the meantime,
+                    you can{" "}
+                    <span className="font-medium">
+                      contact us for a private booking
+                    </span>{" "}
+                    tailored to your group.
+                  </>
+                )}
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                {filtersApplied && (
+                  <LinkWithLoader href="/experiences">
+                    <button className="px-5 py-2.5 rounded-full border border-[#c9b9a5] text-sm text-[#5a4a3f] hover:bg-[#f4ede4] transition-colors">
+                      Clear filters
+                    </button>
+                  </LinkWithLoader>
+                )}
+
+                <LinkWithLoader href="/contact">
+                  <button className="px-5 py-2.5 rounded-full bg-[#8b6f47] text-sm text-white font-medium hover:bg-[#a78b62] transition-colors">
+                    Contact us for a private booking
+                  </button>
+                </LinkWithLoader>
+              </div>
+            </div>
           </div>
         )}
       </section>
@@ -303,4 +344,57 @@ function getFromPrice(exp) {
 function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : NaN;
+}
+const ALL_DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+
+const WEEKDAYS = ALL_DAYS.slice(0, 5); // Mon–Fri
+const WEEKENDS = ALL_DAYS.slice(5); // Sat–Sun
+
+function normalizeToken(label) {
+  return String(label)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, ""); // "Every day" -> "everyday", "week_days" -> "weekdays"
+}
+
+function getFrequencyLabel(freqArray) {
+  if (!Array.isArray(freqArray) || freqArray.length === 0) return null;
+
+  const normalizedTokens = freqArray.map(normalizeToken);
+
+  // Direct codes like "every_day", "weekends", "weekdays"
+  if (normalizedTokens.includes("everyday")) return "Every day";
+  if (normalizedTokens.includes("weekdays")) return "Weekdays";
+  if (
+    normalizedTokens.includes("weekend") ||
+    normalizedTokens.includes("weekends")
+  ) {
+    return "Weekends";
+  }
+
+  // Handle arrays of day names (e.g. ["Monday", "Tuesday", ...])
+  const normalizedDays = freqArray.map((d) => String(d).trim().toLowerCase());
+
+  const hasAllDays = ALL_DAYS.every((day) => normalizedDays.includes(day));
+  const hasWeekdaysOnly =
+    WEEKDAYS.every((day) => normalizedDays.includes(day)) &&
+    WEEKENDS.every((day) => !normalizedDays.includes(day));
+  const hasWeekendsOnly =
+    WEEKENDS.every((day) => normalizedDays.includes(day)) &&
+    WEEKDAYS.every((day) => !normalizedDays.includes(day));
+
+  if (hasAllDays) return "Every day";
+  if (hasWeekdaysOnly) return "Weekdays";
+  if (hasWeekendsOnly) return "Weekends";
+
+  // Fallback: list whatever is there
+  return freqArray.join(" • ");
 }
