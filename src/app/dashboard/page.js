@@ -281,7 +281,7 @@ export default function Dashboard() {
                 <SnapshotRow
                   label="Status"
                   value={
-                    hasActiveReservations ? "Upcoming stay" : "No bookings"
+                    hasActiveReservations ? "Upcoming bookings" : "No bookings"
                   }
                 />
                 <SnapshotRow
