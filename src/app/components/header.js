@@ -100,6 +100,7 @@ function PublicHeader() {
   const pathname = usePathname();
   const routeLoader = useRouteLoader();
   const { user, supabase } = useAuth();
+  const isLoading = routeLoader?.isLoading || false;
 
   const [isOpen, setIsOpen] = useState(false);
   const [menuSection, setMenuSection] = useState(
@@ -283,6 +284,9 @@ function PublicHeader() {
     },
     [routeLoader]
   );
+  const loadingClasses = isLoading
+    ? "opacity-0 -translate-y-2 pointer-events-none"
+    : "opacity-100 translate-y-0";
 
   async function handleSignOut() {
     await supabase?.auth.signOut();
@@ -294,11 +298,12 @@ function PublicHeader() {
   return (
     <header
       id="site-header"
-      className={`fixed top-0 left-0 right-0 z-50 print:hidden transition-shadow ${
-        hasShadow ? "shadow-lg" : "shadow-none"
-      } ${ui.bg}/85 backdrop-blur-md border-b ${
-        ui.border
-      } pt-[env(safe-area-inset-top)]`}
+      className={`fixed top-0 left-0 right-0 z-50 print:hidden
+               transition-transform duration-300 ease-out
+                  ${hasShadow ? "shadow-lg" : "shadow-none"}
+                  ${ui.bg}/85 backdrop-blur-md border-b ${ui.border}
+                  pt-[env(safe-area-inset-top)]
+                  ${loadingClasses}`}
       role="banner"
     >
       {/* Thin progress bar on route changes */}

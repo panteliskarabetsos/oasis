@@ -41,6 +41,13 @@ const STATUS_OPTIONS = [
   { value: "partially_refunded", label: "Partially refunded (derived)" },
 ];
 
+const QUICK_RANGE_OPTIONS = [
+  { key: "any", label: "Any time" },
+  { key: "today", label: "Today" },
+  { key: "7d", label: "Last 7 days" },
+  { key: "30d", label: "Last 30 days" },
+];
+
 function formatMoney(amountCents = 0, currency = "EUR") {
   try {
     const amt = (Number(amountCents) || 0) / 100;
@@ -175,8 +182,12 @@ export default function PaymentsPage() {
   // Copy feedback (for PI or email)
   const [copiedValue, setCopiedValue] = useState("");
 
+  // Small knob to allow a manual refresh if needed later
+  const [refreshKey, setRefreshKey] = useState(0);
+
   // Auth gate
   const [auth, setAuth] = useState({ loading: true, ok: true });
+
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -191,6 +202,18 @@ export default function PaymentsPage() {
       ignore = true;
     };
   }, []);
+
+  // Reusable copy handler (keeps logic in one place)
+  const handleCopy = async (value) => {
+    if (!value) return;
+    const ok = await copyToClipboard(value);
+    if (!ok) return;
+
+    setCopiedValue(value);
+    setTimeout(() => {
+      setCopiedValue((current) => (current === value ? "" : current));
+    }, 1500);
+  };
 
   // Build query string for URL (shareable filters)
   const paramsString = useMemo(() => {
@@ -290,6 +313,7 @@ export default function PaymentsPage() {
     (async () => {
       setLoading(true);
       setError("");
+
       try {
         const qs = new URLSearchParams();
         if (q) qs.set("q", q);
@@ -327,7 +351,7 @@ export default function PaymentsPage() {
       ignore = true;
       ctrl.abort();
     };
-  }, [q, status, dateFrom, dateTo, pageIndex, cursorStack]);
+  }, [q, status, dateFrom, dateTo, pageIndex, cursorStack, refreshKey]);
 
   const goReset = () => {
     setQ("");
@@ -472,6 +496,7 @@ export default function PaymentsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={exportCSV}
             disabled={!rows.length || loading}
             className={classNames(
@@ -484,6 +509,7 @@ export default function PaymentsPage() {
             <Download className="h-4 w-4" /> Export CSV
           </button>
           <button
+            type="button"
             onClick={goReset}
             disabled={!isFiltered}
             className={classNames(
@@ -568,6 +594,7 @@ export default function PaymentsPage() {
             }}
             placeholder="Search name, email, booking, PI…"
             className="h-10 w-full bg-transparent text-sm outline-none placeholder:text-[#a09386]"
+            aria-label="Search payments"
           />
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3">
@@ -581,6 +608,7 @@ export default function PaymentsPage() {
               setCursorStack([null]);
             }}
             className="h-10 w-full bg-transparent text-sm outline-none"
+            aria-label="Date from"
           />
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3">
@@ -594,6 +622,7 @@ export default function PaymentsPage() {
               setCursorStack([null]);
             }}
             className="h-10 w-full bg-transparent text-sm outline-none"
+            aria-label="Date to"
           />
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3">
@@ -606,6 +635,7 @@ export default function PaymentsPage() {
               setCursorStack([null]);
             }}
             className="h-10 w-full bg-transparent text-sm outline-none"
+            aria-label="Filter by status"
           >
             {STATUS_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -618,12 +648,7 @@ export default function PaymentsPage() {
         {/* Quick range chips */}
         <div className="col-span-1 sm:col-span-2 md:col-span-3 lg:col-span-5 flex flex-wrap items-center gap-2 text-xs text-[#7a6a58]">
           <span className="font-medium text-[#5a4a3f]">Quick range:</span>
-          {[
-            { key: "any", label: "Any time" },
-            { key: "today", label: "Today" },
-            { key: "7d", label: "Last 7 days" },
-            { key: "30d", label: "Last 30 days" },
-          ].map((opt) => {
+          {QUICK_RANGE_OPTIONS.map((opt) => {
             let isActive = false;
             if (opt.key === "any") {
               isActive = !dateFrom && !dateTo;
@@ -671,8 +696,18 @@ export default function PaymentsPage() {
             <Loader2 className="h-5 w-5 animate-spin" /> Loading payments…
           </div>
         ) : error ? (
-          <div className="flex items-center gap-2 px-4 py-10 text-rose-600">
-            <AlertCircle className="h-5 w-5" /> {error}
+          <div className="flex flex-col gap-3 px-4 py-10 text-rose-600">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5" /> {error}
+            </div>
+            <button
+              type="button"
+              onClick={() => setRefreshKey((k) => k + 1)}
+              className="inline-flex w-max items-center gap-2 rounded-xl border border-[#f4c7cd] bg-rose-50 px-3 py-1.5 text-xs text-rose-700 hover:bg-rose-100"
+            >
+              <RefreshCcw className="h-3.5 w-3.5" />
+              Retry loading
+            </button>
           </div>
         ) : rows.length === 0 ? (
           <div className="px-4 py-10 text-[#7a6a58]">No payments found.</div>
@@ -707,23 +742,13 @@ export default function PaymentsPage() {
                             {p.stripe_payment_intent_id}
                           </code>
                           <button
-                            onClick={async () => {
-                              const ok = await copyToClipboard(
-                                p.stripe_payment_intent_id || ""
-                              );
-                              if (ok) {
-                                setCopiedValue(p.stripe_payment_intent_id);
-                                setTimeout(() => {
-                                  setCopiedValue((current) =>
-                                    current === p.stripe_payment_intent_id
-                                      ? ""
-                                      : current
-                                  );
-                                }, 1500);
-                              }
-                            }}
+                            type="button"
+                            onClick={() =>
+                              handleCopy(p.stripe_payment_intent_id || "")
+                            }
                             className="ml-1 inline-flex items-center rounded p-0.5 hover:bg-[#f1ebe3]"
                             title="Copy Payment Intent ID"
+                            aria-label="Copy Payment Intent ID"
                           >
                             <CopyIcon className="h-3.5 w-3.5" />
                           </button>
@@ -749,23 +774,11 @@ export default function PaymentsPage() {
                               {p.customer_email}
                             </a>
                             <button
-                              onClick={async () => {
-                                const ok = await copyToClipboard(
-                                  p.customer_email || ""
-                                );
-                                if (ok) {
-                                  setCopiedValue(p.customer_email);
-                                  setTimeout(() => {
-                                    setCopiedValue((current) =>
-                                      current === p.customer_email
-                                        ? ""
-                                        : current
-                                    );
-                                  }, 1500);
-                                }
-                              }}
+                              type="button"
+                              onClick={() => handleCopy(p.customer_email || "")}
                               className="inline-flex items-center rounded p-0.5 hover:bg-[#f1ebe3]"
                               title="Copy email"
+                              aria-label="Copy email"
                             >
                               <CopyIcon className="h-3.5 w-3.5" />
                             </button>
@@ -844,6 +857,7 @@ export default function PaymentsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               disabled={pageIndex <= 0}
               onClick={goPrev}
               className={classNames(
@@ -852,10 +866,12 @@ export default function PaymentsPage() {
                   ? "cursor-not-allowed border-[#eeeae3] text-[#c1b8ae]"
                   : "border-[#e8e5df] text-[#5a4a3f] hover:bg-[#faf8f5]"
               )}
+              aria-label="Previous page"
             >
               Prev
             </button>
             <button
+              type="button"
               disabled={!hasMore}
               onClick={goNext}
               className={classNames(
@@ -864,6 +880,7 @@ export default function PaymentsPage() {
                   ? "cursor-not-allowed border-[#eeeae3] text-[#c1b8ae]"
                   : "border-[#e8e5df] text-[#5a4a3f] hover:bg-[#faf8f5]"
               )}
+              aria-label="Next page"
             >
               Next
             </button>
