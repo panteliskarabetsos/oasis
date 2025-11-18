@@ -18,8 +18,8 @@ export default function Dashboard() {
   const router = useRouter();
   const { user, loading, supabase } = useAuth();
 
-  const [dbProfile, setDbProfile] = useState(null); // NEW
-  const [profileLoading, setProfileLoading] = useState(true); // NEW
+  const [dbProfile, setDbProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -63,8 +63,8 @@ export default function Dashboard() {
       phone: md.phone ?? "",
       dateOfBirth: md.dateOfBirth ?? md.dob ?? null,
       createdAt: md.createdAt ?? user?.created_at ?? null,
-      role, // kept for internal checks if you ever need it
-      badge, // NEW: preferred display field
+      role,
+      badge,
       appUserId: md.appUserId ?? null,
     };
   }, [user]);
@@ -89,7 +89,6 @@ export default function Dashboard() {
   }, [user]);
 
   const finalProfile = useMemo(() => {
-    // dbProfile may include: { id, email, name, surname, phone, role, badge, dateOfBirth, createdAt }
     const merged = {
       email: dbProfile?.email ?? supaProfile.email,
       first: dbProfile?.name?.trim?.() || supaProfile.first,
@@ -97,8 +96,8 @@ export default function Dashboard() {
       phone: dbProfile?.phone ?? supaProfile.phone,
       dateOfBirth: dbProfile?.dateOfBirth ?? supaProfile.dateOfBirth,
       createdAt: dbProfile?.createdAt ?? supaProfile.createdAt,
-      role: dbProfile?.role ?? supaProfile.role, // still available if you need it
-      badge: dbProfile?.badge ?? supaProfile.badge ?? "Explorer", // NEW: main display field
+      role: dbProfile?.role ?? supaProfile.role,
+      badge: dbProfile?.badge ?? supaProfile.badge ?? "Explorer",
       appUserId: dbProfile?.id ?? supaProfile.appUserId,
     };
     return merged;
@@ -106,28 +105,37 @@ export default function Dashboard() {
 
   const greetingName =
     [finalProfile.first].filter(Boolean).join(" ").trim() || "Explorer";
-  const timeGreeting = useMemo(() => getTimeGreeting(), []); // compute once on mount
+  const timeGreeting = useMemo(() => getTimeGreeting(), []);
 
-  // ---- Active reservations (email-based)
+  // ---- Active reservations (via /api/my-bookings)
   useEffect(() => {
-    const check = async () => {
-      if (!user?.email) return;
+    const loadBookings = async () => {
       try {
-        const res = await fetch(
-          `/api/user/active-reservations?email=${encodeURIComponent(
-            user.email
-          )}`,
-          { cache: "no-store" }
-        );
-        if (!res.ok) throw new Error("Failed to fetch reservations");
-        const data = await res.json();
-        setHasActiveReservations((data?.activeReservations ?? 0) > 0);
+        const res = await fetch("/api/my-bookings", { cache: "no-store" });
+        if (!res.ok) throw new Error("Failed to fetch bookings");
+        const bookings = await res.json();
+
+        const now = new Date();
+        const active = Array.isArray(bookings)
+          ? bookings.some((b) => {
+              if (!b) return false;
+              const status = (b.status || "").toLowerCase();
+              if (!["confirmed", "pending", "paid"].includes(status))
+                return false;
+              if (!b.startTime) return false;
+              const start = new Date(b.startTime);
+              return start >= now;
+            })
+          : false;
+
+        setHasActiveReservations(active);
       } catch (e) {
-        console.error("Error checking active reservations:", e);
+        console.error("Error checking active reservations via my-bookings:", e);
         setHasActiveReservations(false);
       }
     };
-    check();
+
+    if (user) loadBookings();
   }, [user]);
 
   if (loading || profileLoading) return <Skeleton />;
@@ -159,7 +167,7 @@ export default function Dashboard() {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: finalProfile.appUserId, // use DB id if available
+          userId: finalProfile.appUserId,
           email: finalProfile.email,
         }),
       });
@@ -189,125 +197,249 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#f4f1ec]">
-      {/* Soft hero header */}
+      {/* Header */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-[#e9e4dc] via-[#f4f1ec] to-[#f4f1ec]" />
-        <div className="mx-auto max-w-3xl px-6 pt-16 pb-10">
-          <button
-            onClick={() => handleRedirect("/")}
-            className="mb-6 inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#d8cfc3] px-4 py-2 rounded-full hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm"
-          >
-            <ArrowLeft size={18} />
-            Home
-          </button>
+        <div className="absolute inset-0 -z-10">
+          <div className="h-full w-full bg-gradient-to-b from-[#e7e0d5] via-[#f4f1ec] to-[#f4f1ec]" />
+          <div className="pointer-events-none absolute -top-24 right-[-10%] h-64 w-64 rounded-full bg-[#f5e7cf] opacity-60 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-32 left-[-5%] h-72 w-72 rounded-full bg-[#e0d2c0] opacity-50 blur-3xl" />
+        </div>
 
-          <div className="flex items-start gap-5">
-            <Avatar name={greetingName} />
-            <div className="min-w-0">
-              <h1
-                className="text-balance text-3xl sm:text-4xl md:text-5xl font-serif tracking-tight leading-tight"
-                style={{ textWrap: "balance" }}
-              >
-                <span className="opacity-70">{timeGreeting},</span>{" "}
-                <span className="bg-gradient-to-r from-[#8b6f47] to-[#a78b62] bg-clip-text text-transparent break-words">
-                  {greetingName}
-                </span>
-              </h1>
+        <div className="mx-auto max-w-5xl px-6 pt-8 pb-10 sm:pt-12">
+          {/* Top bar */}
+          <div className="mb-6 flex items-center justify-between gap-3">
+            <button
+              onClick={() => handleRedirect("/")}
+              className="inline-flex items-center gap-2 rounded-full border border-[#d8cfc3] bg-[#fdfaf5]/70 px-4 py-2 text-xs font-medium text-[#8b6f47] shadow-sm transition-all hover:bg-[#f4f0e9] hover:text-[#5a4a3f]"
+            >
+              <ArrowLeft size={18} />
+              Back to home
+            </button>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Chip icon={<ShieldCheck size={14} />} label={memberStatus} />
-                {finalProfile.role === "admin" && <Chip label="Admin" />}
-                {hasActiveReservations && (
-                  <Chip label="Active reservations" tone="accent" />
-                )}
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut();
+                router.replace("/");
+              }}
+              className="inline-flex items-center gap-2 rounded-full border border-[#e4ddd3] bg-white/70 px-3 py-2 text-xs font-medium text-[#5a4a3f] shadow-sm transition hover:bg-[#f1ede7]"
+            >
+              <LogOut size={16} />
+              Sign out
+            </button>
+          </div>
+
+          {/* Main header content */}
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+            <div className="flex flex-1 items-start gap-4">
+              <Avatar name={greetingName} />
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#a08c74]">
+                  Your oasis space
+                </p>
+                <h1
+                  className="mt-1 text-balance text-3xl font-serif tracking-tight text-[#4d3e33] sm:text-4xl md:text-5xl"
+                  style={{ textWrap: "balance" }}
+                >
+                  <span className="opacity-70">{timeGreeting},</span>{" "}
+                  <span className="bg-gradient-to-r from-[#8b6f47] to-[#b49766] bg-clip-text text-transparent">
+                    {greetingName}
+                  </span>
+                </h1>
+
+                <p className="mt-3 max-w-xl text-sm text-[#7a6a5f]">
+                  Here you can review your details, keep an eye on your
+                  bookings, and gently manage your account at your own pace.
+                </p>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <Chip
+                    icon={<ShieldCheck size={14} />}
+                    label={`${memberStatus} • ${finalProfile.badge}`}
+                  />
+                  {finalProfile.role === "admin" && (
+                    <Chip label="Admin access" />
+                  )}
+                  {hasActiveReservations && (
+                    <Chip label="Active reservations" tone="accent" />
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="ml-auto shrink-0">
-              <button
-                onClick={async () => {
-                  await supabase.auth.signOut();
-                  router.replace("/");
-                }}
-                className="inline-flex items-center gap-2 text-sm text-[#5a4a3f] px-3 py-2 rounded-full border border-[#e4ddd3] bg-[#fdfaf5] hover:bg-[#f1ede7] transition"
-              >
-                <LogOut size={16} />
-                Sign out
-              </button>
+            {/* Snapshot card */}
+            <div className="w-full max-w-xs rounded-2xl border border-[#e1dad1] bg-white/85 px-4 py-4 shadow-sm backdrop-blur-sm sm:w-64">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#b29a79]">
+                  Snapshot
+                </p>
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#f3e6d2] text-[#7a5c38]">
+                  <CalendarCheck className="h-3.5 w-3.5" />
+                </div>
+              </div>
+              <div className="space-y-1.5 text-sm text-[#5a4a3f]">
+                <SnapshotRow label="Membership" value={memberStatus} />
+                <SnapshotRow
+                  label="Status"
+                  value={
+                    hasActiveReservations ? "Upcoming stay" : "No bookings"
+                  }
+                />
+                <SnapshotRow
+                  label="Member since"
+                  value={
+                    finalProfile.createdAt
+                      ? new Date(finalProfile.createdAt).toLocaleDateString()
+                      : "—"
+                  }
+                />
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Card body */}
-      <section className="mx-auto max-w-3xl px-6 pb-16">
-        {/* Info Card */}
-        <div className="bg-white/80 backdrop-blur-lg border border-[#e0dcd4] rounded-3xl shadow-xl p-6 mb-8">
-          <h2 className="text-xl font-serif text-[#5a4a3f] mb-4">
-            Your details
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[#5a4a3f]">
-            <Row
-              label="Name"
-              value={
-                [finalProfile.first, finalProfile.last]
-                  .filter(Boolean)
-                  .join(" ") || "Not provided"
-              }
-            />
-            <Row label="Email" value={finalProfile.email || "Not provided"} />
-            <Row label="Phone" value={finalProfile.phone || "Not provided"} />
-            <Row
-              label="Date of Birth"
-              value={
-                finalProfile.dateOfBirth
-                  ? new Date(finalProfile.dateOfBirth).toLocaleDateString()
-                  : "Not provided"
-              }
-            />
-            <Row
-              label="Member Since"
-              value={
-                finalProfile.createdAt
-                  ? new Date(finalProfile.createdAt).toLocaleDateString()
-                  : "Not provided"
-              }
-            />
-            <Row label="Badge" value={finalProfile.badge || "Explorer"} />
+      {/* Body */}
+      <section className="mx-auto max-w-5xl px-6 pb-16">
+        <div className="grid gap-8 lg:grid-cols-3 lg:items-start">
+          {/* Left: details + actions */}
+          <div className="space-y-6 lg:col-span-2">
+            {/* Info Card */}
+            <div className="rounded-3xl border border-[#e0dcd4] bg:white/90 bg-white/90 p-6 shadow-[0_18px_45px_rgba(93,71,43,0.06)] backdrop-blur">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-serif text-[#5a4a3f]">
+                    Your details
+                  </h2>
+                  <p className="mt-1 text-xs text-[#8b7b6f]">
+                    We keep your information safe and only use it to manage your
+                    experiences.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => handleRedirect("/account/settings")}
+                  className="hidden rounded-full border border-[#e4ddd3] bg-[#fdfaf7] px-3 py-1.5 text-xs font-medium text-[#5a4a3f] shadow-sm transition hover:bg-[#f3ede6] sm:inline-flex"
+                >
+                  Manage details
+                </button>
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Row
+                  label="Name"
+                  value={
+                    [finalProfile.first, finalProfile.last]
+                      .filter(Boolean)
+                      .join(" ") || "Not provided"
+                  }
+                />
+                <Row
+                  label="Email"
+                  value={finalProfile.email || "Not provided"}
+                  mono
+                />
+                <Row
+                  label="Phone"
+                  value={finalProfile.phone || "Not provided"}
+                  mono
+                />
+                <Row
+                  label="Date of birth"
+                  value={
+                    finalProfile.dateOfBirth
+                      ? new Date(finalProfile.dateOfBirth).toLocaleDateString()
+                      : "Not provided"
+                  }
+                  mono
+                />
+                <Row
+                  label="Member since"
+                  value={
+                    finalProfile.createdAt
+                      ? new Date(finalProfile.createdAt).toLocaleDateString()
+                      : "Not provided"
+                  }
+                  mono
+                />
+                <Row label="Badge" value={finalProfile.badge || "Explorer"} />
+              </div>
+
+              <p className="mt-4 text-xs text-[#9a8a7e]">
+                Need to update something? You can always adjust your details in{" "}
+                <button
+                  type="button"
+                  onClick={() => handleRedirect("/account/settings")}
+                  className="font-medium text-[#8b6f47] underline-offset-2 hover:underline"
+                >
+                  Account settings
+                </button>
+                .
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <ActionCard
+                icon={<CalendarCheck size={26} />}
+                label="My bookings"
+                description="View your upcoming and past reservations."
+                onClick={() => handleRedirect("/bookings")}
+              />
+              <ActionCard
+                icon={<Settings size={26} />}
+                label="Account settings"
+                description="Update personal info and preferences."
+                onClick={() => handleRedirect("/account/settings")}
+              />
+            </div>
           </div>
-        </div>
 
-        {/* Actions */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <ActionCard
-            icon={<CalendarCheck size={28} />}
-            label="My Bookings"
-            onClick={() => handleRedirect("/bookings")}
-          />
-          <ActionCard
-            icon={<Settings size={28} />}
-            label="Account Settings"
-            onClick={() => handleRedirect("/account/settings")}
-          />
-        </div>
+          {/* Right: account + danger zone */}
+          <aside className="space-y-6">
+            <div className="rounded-3xl border border-[#e1dad1] bg-[#fdfaf7] p-5 text-sm text-[#5a4a3f] shadow-sm">
+              <h3 className="text-sm font-semibold text-[#4f4035]">
+                Account & privacy
+              </h3>
+              <p className="mt-2 text-xs leading-relaxed text-[#857669]">
+                You&apos;re always in control of your data. You can update your
+                details or close your account at any time.
+              </p>
+              <ul className="mt-3 space-y-1.5 text-xs text-[#7a6a5f]">
+                <li>• Your details are only used for bookings and support.</li>
+                <li>• You can request data export through our contact page.</li>
+              </ul>
+            </div>
 
-        {/* Danger zone */}
-        <div className="mt-10 flex justify-center">
-          <button
-            onClick={() => setIsModalOpen(true)}
-            disabled={isDeleting || hasActiveReservations}
-            className={`flex items-center gap-2 rounded-full px-5 py-3 border transition-all shadow-sm text-sm
-              ${
-                hasActiveReservations
-                  ? "bg-red-100 border-red-200 text-red-400 opacity-60 cursor-not-allowed"
-                  : "bg-white border-red-300 text-red-600 hover:bg-red-600 hover:text-white"
-              }`}
-          >
-            <Trash2 size={18} />
-            {hasActiveReservations
-              ? "Cancel reservations first"
-              : "Delete Account"}
-          </button>
+            <div className="rounded-3xl border border-red-100 bg-red-50/65 p-5 text-sm shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-red-500">
+                Danger zone
+              </p>
+              <p className="mt-1 text-xs text-[#7b5b54]">
+                Deleting your account is permanent and removes your profile.
+              </p>
+
+              <button
+                onClick={() => setIsModalOpen(true)}
+                disabled={isDeleting || hasActiveReservations}
+                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-xs font-medium shadow-sm transition-all
+                  ${
+                    hasActiveReservations
+                      ? "cursor-not-allowed border border-red-200 bg-red-100 text-red-400 opacity-70"
+                      : "border border-red-300 bg-white text-red-600 hover:bg-red-600 hover:text-white"
+                  }`}
+              >
+                <Trash2 size={16} />
+                {hasActiveReservations
+                  ? "You have upcoming bookings"
+                  : "Delete account"}
+              </button>
+
+              <p className="mt-2 text-[11px] leading-snug text-[#9a6b64]">
+                If you have upcoming bookings, please cancel them first so we
+                can safely close your account or contact support for assistance.
+              </p>
+            </div>
+          </aside>
         </div>
       </section>
 
@@ -332,8 +464,9 @@ function Avatar({ name }) {
     .slice(0, 2)
     .map((n) => n[0]?.toUpperCase())
     .join("");
+
   return (
-    <div className="h-12 w-12 rounded-full bg-[#e8dfcf] text-[#5a4a3f] ring-2 ring-[#f0e9dc] flex items-center justify-center font-semibold shadow-sm">
+    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#e8dfcf] text-sm font-semibold text-[#5a4a3f] ring-2 ring-[#f0e9dc] shadow-sm sm:h-14 sm:w-14">
       {initials || "?"}
     </div>
   );
@@ -346,7 +479,7 @@ function Chip({ label, icon, tone = "neutral" }) {
       : "bg-[#f6f4f0] text-[#5a4a3f] border-[#e8e2d9]";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${toneClass}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] ${toneClass}`}
     >
       {icon}
       {label}
@@ -354,43 +487,75 @@ function Chip({ label, icon, tone = "neutral" }) {
   );
 }
 
-function Row({ label, value }) {
+function SnapshotRow({ label, value }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-[#fffdf9] border border-[#eee8df] px-4 py-3">
-      <span className="text-xs font-semibold uppercase tracking-wide text-[#7a6a5f]">
+    <p className="flex justify-between text-sm">
+      <span className="text-xs text-[#8f7f70]">{label}</span>
+      <span className="font-medium text-[#4f4035]">{value}</span>
+    </p>
+  );
+}
+
+function Row({ label, value, mono = false }) {
+  return (
+    <div className="rounded-2xl border border-[#eee8df] bg-[#fffdf9] px-4 py-3.5">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#a08c74]">
         {label}
       </span>
-      <span className="text-sm text-right">{value}</span>
+      <span
+        className={`mt-1 block text-sm text-[#4d3e33] break-words ${
+          mono ? "font-mono text-[13px]" : ""
+        }`}
+        title={typeof value === "string" ? value : undefined}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-function ActionCard({ icon, label, onClick }) {
+function ActionCard({ icon, label, description, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="group flex items-center gap-4 rounded-2xl bg-[#fdfaf7] border border-[#d8cfc3] p-6 shadow-lg transition-all hover:shadow-2xl hover:bg-[#8b6f47] hover:text-white"
+      className="group relative flex items-start gap-4 rounded-2xl border border-[#d8cfc3] bg-[#fdfaf7] p-5 text-left shadow-[0_16px_40px_rgba(93,71,43,0.07)] transition-all hover:-translate-y-0.5 hover:border-[#b2976c] hover:bg-[#8b6f47] hover:shadow-[0_20px_55px_rgba(72,54,31,0.35)]"
     >
-      <div className="shrink-0">{icon}</div>
-      <div className="text-left">
-        <p className="text-base font-medium">{label}</p>
-        <p className="text-xs opacity-80">Tap to manage</p>
+      <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#efe3cf] text-[#5a4a3f] transition group-hover:bg-white/10 group-hover:text-white">
+        {icon}
       </div>
-      <div className="ml-auto h-2 w-2 rounded-full bg-[#8b6f47] opacity-0 group-hover:opacity-100" />
+      <div className="pr-8">
+        <p className="text-sm font-semibold text-[#4d3e33] group-hover:text-white">
+          {label}
+        </p>
+        {description && (
+          <p className="mt-1 text-xs text-[#8b7b6f] group-hover:text-[#f9efe0]">
+            {description}
+          </p>
+        )}
+        <p className="mt-2 text-[11px] font-medium text-[#a08c74] group-hover:text-[#fbead1]">
+          Open
+        </p>
+      </div>
+      <div className="pointer-events-none absolute right-4 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-[#c9b089] opacity-0 transition group-hover:opacity-100" />
     </button>
   );
 }
 
 function Skeleton() {
   return (
-    <div className="min-h-screen bg-[#f4f1ec] flex items-center justify-center p-8">
-      <div className="w-full max-w-3xl space-y-6 animate-pulse">
-        <div className="h-6 w-24 bg-[#e8e2d9] rounded" />
-        <div className="h-10 w-3/4 bg-[#e8e2d9] rounded" />
-        <div className="h-40 w-full bg-[#e8e2d9] rounded-2xl" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="h-24 bg-[#e8e2d9] rounded-2xl" />
-          <div className="h-24 bg-[#e8e2d9] rounded-2xl" />
+    <div className="flex min-h-screen items-center justify-center bg-[#f4f1ec] p-8">
+      <div className="w-full max-w-5xl space-y-6 animate-pulse">
+        <div className="h-4 w-28 rounded-full bg-[#e8e2d9]" />
+        <div className="h-10 w-2/3 rounded-full bg-[#e8e2d9]" />
+        <div className="h-24 w-1/2 rounded-3xl bg-[#e8e2d9]" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="h-32 rounded-3xl bg-[#e8e2d9]" />
+          <div className="h-32 rounded-3xl bg-[#e8e2d9]" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="h-28 rounded-3xl bg-[#e8e2d9]" />
+          <div className="h-28 rounded-3xl bg-[#e8e2d9]" />
+          <div className="h-28 rounded-3xl bg-[#e8e2d9]" />
         </div>
       </div>
     </div>
@@ -410,6 +575,8 @@ function titleCase(str = "") {
   if (!str) return "";
   return str
     .toLowerCase()
-    .replace(/(^.|[\s-].)/g, (m) => m.toUpperCase())
+    .replace(/(^.|[\s-].)/g, function (m) {
+      return m.toUpperCase();
+    })
     .trim();
 }
