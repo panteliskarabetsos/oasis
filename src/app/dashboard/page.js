@@ -162,27 +162,39 @@ export default function Dashboard() {
   async function handleDeleteAccount() {
     setMessage("");
     setIsDeleting(true);
+
     try {
       const res = await fetch("/api/auth/delete-account", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: finalProfile.appUserId,
+          userId: finalProfile.appUserId, // use DB id if available
           email: finalProfile.email,
         }),
       });
-      const data = await res.json();
+
+      const data = await res.json().catch(() => ({}));
+      console.log("[delete-account] response", res.status, data);
+
       if (res.ok) {
         setMessage("Account deleted successfully");
         setIsError(false);
-        await supabase.auth.signOut();
+
+        // Try to sign out, but don't block redirect if it fails
+        try {
+          await supabase.auth.signOut();
+        } catch (signOutErr) {
+          console.error("[delete-account] signOut error (ignored)", signOutErr);
+        }
+
+        // Always go to goodbye page on successful deletion
         router.replace("/goodbye");
-      } else {
-        setMessage(
-          data?.error || "Failed to delete account. Please try again."
-        );
-        setIsError(true);
+        return;
       }
+
+      // Error from API
+      setMessage(data?.error || "Failed to delete account. Please try again.");
+      setIsError(true);
     } catch (err) {
       console.error("Error deleting account:", err);
       setMessage("Something went wrong. Please try again later.");
