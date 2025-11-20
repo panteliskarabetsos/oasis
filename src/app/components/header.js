@@ -107,12 +107,12 @@ function LanguageSwitcher({
   };
 
   const baseButtonClasses =
-    "inline-flex items-center rounded-full border text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6]";
+    "inline-flex items-center gap-2 rounded-full border text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#d7cbb6]";
 
   const desktopClasses =
-    "h-9 w-9 items-center justify-center border-[#e0dcd4] bg-white/80 hover:bg-[#f3eee7]";
+    "h-9 px-2 pr-2 border-[#e0dcd4] bg-white/80 hover:bg-[#f3eee7] hover:border-[#d2c5b3] shadow-sm";
   const mobileClasses =
-    "w-full justify-between px-3 py-1.5 border-[#e0dcd4] bg-white/90 hover:bg-[#f3eee7]";
+    "w-full justify-between px-3 py-1.5 border-[#e0dcd4] bg-white/90 hover:bg-[#f3eee7] shadow-sm";
 
   return (
     <div
@@ -120,7 +120,7 @@ function LanguageSwitcher({
       className={isMobile ? "relative w-full" : "relative ml-2"}
       aria-label="Select language"
     >
-      {/* Trigger button – only globe (desktop), globe + chevron (mobile) */}
+      {/* Trigger */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -131,27 +131,51 @@ function LanguageSwitcher({
           isMobile ? mobileClasses : desktopClasses
         } ${ui.text}`}
       >
-        <span className="inline-flex items-center justify-center">
+        {/* Icon + code badge */}
+        <span className="relative inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f6efe4] border border-[#e2d6c4] shadow-[0_1px_4px_rgba(15,14,13,0.18)]">
           <Globe2 size={14} className="opacity-80" />
+          <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#8b6f47] text-[7px] font-semibold uppercase tracking-[0.08em] text-white shadow-sm">
+            {currentMeta.short}
+          </span>
         </span>
+
+        {/* Label */}
+        <div className="hidden sm:flex flex-col items-start leading-tight">
+          <span className="text-[9px] uppercase tracking-[0.18em] text-[#b2a394]">
+            Language
+          </span>
+          <span className="text-[11px]">{currentMeta.label}</span>
+        </div>
         {isMobile && (
-          <ChevronDown
-            size={14}
-            className={`ml-2 transition-transform ${
-              open ? "rotate-180" : "rotate-0"
-            }`}
-          />
+          <span className="sm:hidden text-xs truncate">
+            {currentMeta.label}
+          </span>
         )}
+
+        <ChevronDown
+          size={14}
+          className={`ml-1 shrink-0 transition-transform ${
+            open ? "rotate-180" : "rotate-0"
+          }`}
+        />
       </button>
 
       {/* Dropdown */}
       {open && (
         <div
           role="menu"
-          className={`absolute z-50 mt-2 min-w-[160px] overflow-hidden rounded-xl border ${
+          className={`absolute z-50 mt-2 w-[220px] overflow-hidden rounded-2xl border ${
             ui.border
-          } ${ui.bgElevated} shadow-lg ${isMobile ? "left-0" : "right-0"}`}
+          } ${ui.bgElevated} shadow-[0_18px_45px_rgba(15,14,13,0.18)] ${
+            isMobile ? "left-0" : "right-0"
+          }`}
         >
+          <div className="border-b border-[#eee4d6] bg-gradient-to-b from-[#f9f2e8] to-[#f5eee3] px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8b6f47]">
+              Language
+            </p>
+          </div>
+
           <div className="py-1">
             {availableLocales.map((loc) => {
               const active = loc === locale;
@@ -169,19 +193,33 @@ function LanguageSwitcher({
                     setOpen(false);
                     onSelect(loc);
                   }}
-                  className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs transition-colors ${
+                  className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-xs transition-colors ${
                     active
-                      ? "bg-[#f4ede2] text-[#5a4a3f] font-medium"
-                      : `${ui.textSoft} hover:bg-[#f7f2ea]`
+                      ? "bg-[#f3ecdf] text-[#5a4a3f] font-medium"
+                      : `${ui.textSoft} hover:bg-[#f7f1e8]`
                   }`}
                   aria-pressed={active}
                 >
-                  <span>{meta.label}</span>
-                  {active ? (
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#8b6f47]" />
-                  ) : (
-                    <span className="h-1.5 w-1.5 rounded-full border border-[#d8cbb8]" />
-                  )}
+                  <div className="flex flex-col">
+                    <span className="text-[13px]">{meta.label}</span>
+                    <span className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-[#b2a394]">
+                      {meta.short}
+                    </span>
+                  </div>
+
+                  {/* Radio indicator */}
+                  <span
+                    className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                      active
+                        ? "border-[#8b6f47] bg-[#f1e7d7]"
+                        : "border-[#d8cbb8] bg-transparent"
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {active && (
+                      <span className="h-2 w-2 rounded-full bg-[#8b6f47]" />
+                    )}
+                  </span>
                 </button>
               );
             })}
@@ -499,6 +537,12 @@ function PublicHeader() {
             style={{ fontFamily: "Noto Serif, ui-serif, Georgia, serif" }}
           >
             Oasis
+          </span>
+          <span
+            className="inline-flex items-center rounded-full border border-[#e0dcd4] bg-white/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-[#8b6f47]"
+            aria-label="Beta – unreleased testing version"
+          >
+            Beta
           </span>
         </button>
 
