@@ -282,12 +282,11 @@ function RouteLoaderOverlay({ tip }) {
 export function useRouteLoader() {
   return useContext(RouteLoaderContext);
 }
-
 export function RouteLoader({ children }) {
   const [isLoading, setIsLoading] = useState(false);
   const [nextPath, setNextPath] = useState(null);
   const [tipIndex, setTipIndex] = useState(0);
-  const router = useRouter();
+  const router = useRouter(); // ✅ now safe everywhere
 
   useEffect(() => {
     if (!nextPath) return;
@@ -296,7 +295,7 @@ export function RouteLoader({ children }) {
     setTipIndex((prev) => (prev + 1) % LOADER_TIPS.length);
 
     const timeout = setTimeout(() => {
-      router.push(nextPath);
+      router.push(nextPath); // 🔥 nextPath is already locale-aware
       setIsLoading(false);
       setNextPath(null);
     }, 1000);

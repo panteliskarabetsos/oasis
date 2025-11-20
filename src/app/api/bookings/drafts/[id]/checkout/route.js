@@ -112,7 +112,8 @@ export async function POST(req, ctx) {
   } catch {}
   const promoCode = (body?.promoCode || "").trim();
   const mode = String(body?.mode || "checkout").toLowerCase(); // "checkout" | "elements"
-
+  const rawLocale = (body?.locale || "").toString().trim();
+  const locale = rawLocale || "en";
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
 
@@ -321,7 +322,7 @@ export async function POST(req, ctx) {
       .eq("id", draftId);
 
     const origin = computeOrigin(req);
-    const redirectUrl = `${origin}/booking/${draftId}/confirmation`;
+    const redirectUrl = `${origin}/${locale}/booking/${draftId}/confirmation`;
     // send both keys for compatibility; client uses redirectUrl
     return NextResponse.json({
       mode: "free",
@@ -364,7 +365,7 @@ export async function POST(req, ctx) {
           return NextResponse.json(
             {
               error: "Already confirmed",
-              redirectUrl: `${origin}/booking/${draftId}/confirmation`,
+              redirectUrl: `${origin}/${locale}/booking/${draftId}/confirmation`,
             },
             { status: 409 }
           );
@@ -449,8 +450,8 @@ export async function POST(req, ctx) {
   const line_items = discountedStripeItems(base, currency, discountCents);
 
   const origin = computeOrigin(req);
-  const successUrl = `${origin}/booking/${draftId}/confirmation?session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `${origin}/booking/${draftId}/payment?cancelled=1`;
+  const successUrl = `${origin}/${locale}/booking/${draftId}/confirmation?session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `${origin}/${locale}/booking/${draftId}/payment?cancelled=1`;
 
   try {
     new URL(successUrl);

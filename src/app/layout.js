@@ -1,12 +1,9 @@
+// src/app/layout.js
 import "./globals.css";
-import Header from "./components/header";
-import Footer from "./components/footer";
 import { RouteLoader } from "./components/RouteLoader";
 import SessionWrapper from "./components/SessionWrapper";
-import PromoBannerGate from "./components/PromoBannerGate";
-import FooterGate from "./components/FooterGate";
-import { BotIdClient } from "botid/client";
 import { Toaster } from "react-hot-toast";
+
 export const metadata = {
   title: "Oasis – Agrotourism & Wellness",
   description: "Rooted, soulful, slow travel in Crete.",
@@ -27,13 +24,10 @@ export default function RootLayout({ children }) {
       <body className="flex min-h-screen flex-col bg-[#f4f1ec] text-[#2f2f2f] antialiased">
         <SessionWrapper>
           <RouteLoader>
-            <Header />
-            <PromoBannerGate />
+            {/* Global toaster is fine here, no locale needed */}
             <Toaster position="top-right" />
-            <main className="flex-1">{children}</main>
-            <FooterGate>
-              <Footer />
-            </FooterGate>
+            {/* All routes (including [locale]) render here */}
+            {children}
           </RouteLoader>
         </SessionWrapper>
       </body>

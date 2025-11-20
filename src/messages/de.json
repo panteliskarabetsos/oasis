@@ -1,0 +1,1003 @@
+{
+  "Header": {
+    "nav": {
+      "experiences": "Erlebnisse",
+      "about": "Über uns",
+      "contact": "Kontakt"
+    },
+    "cta": {
+      "bookJourney": "Eine Reise buchen"
+    },
+    "auth": {
+      "login": "Anmelden",
+      "register": "Registrieren"
+    },
+    "account": {
+      "myBookings": "Meine Buchungen",
+      "dashboard": "Dashboard",
+      "adminDashboard": "Admin-Dashboard",
+      "signOut": "Abmelden"
+    },
+    "labels": {
+      "navigate": "Navigation",
+      "browse": "Stöbern",
+      "account": "Konto",
+      "language": "Sprache"
+    }
+  },
+
+  "Home": {
+    "hero": {
+      "eyebrow": "KRETA • AGRARTOURISMUS • WELLNESS",
+      "title": {
+        "line1": "Agrotourismus & Wellness",
+        "line2": "Verwurzelt auf Kreta"
+      },
+      "subtitle": "Kuratiere Rituale und naturnahe Reisen, um das Tempo zu drosseln, weicher zu werden und dich wieder mit dem zu verbinden, was wirklich zählt.",
+      "cta": {
+        "primary": "Erlebnisse entdecken",
+        "secondary": "Unsere Geschichte"
+      },
+      "scrollHint": "Scroll zum Beginnen"
+    },
+
+    "featured": {
+      "eyebrow": "Empfohlen",
+      "title": "Unsere Signature-Erlebnisse",
+      "subtitle": "Handverlesene Reisen, die dem Rhythmus des kretischen Landes und Lebens folgen.",
+      "description": "Von Kräuterwanderungen bis zu Olivenöl-Ritualen – jedes Erlebnis ist mit Achtsamkeit und tiefem Respekt für die lokale Gemeinschaft gestaltet.",
+      "browseAll": "Alle Erlebnisse ansehen →",
+      "tagline": "Kleine Gruppen • Ruhiges Tempo • Natur im Mittelpunkt"
+    },
+
+    "experience": {
+      "frequency": {
+        "everyDay": "Jeden Tag",
+        "weekdays": "Wochentags",
+        "weekends": "Wochenenden"
+      },
+      "noImage": "Kein Bild",
+      "badge": "Kleine Gruppen • Slow Travel",
+      "checkAvailability": "Verfügbarkeit prüfen",
+      "details": "Details",
+      "none": "Derzeit sind keine Erlebnisse verfügbar."
+    },
+
+    "about": {
+      "eyebrow": "Slow Stays auf Kreta",
+      "title": "Mehr als Urlaub – eine sanfte Rückkehr zu dir selbst.",
+      "subtitle": "Wir verweben Land, Essen, Ritual und Ruhe zu bodenständigen Erlebnissen in Kleingruppen auf der Insel Kreta.",
+      "body": "Die Morgen beginnen mit sanftem Licht über den Hügeln, dem Duft von Bergkräutern und frischem Brot. Die Tage verbringst du zwischen Olivenhainen, Küche, Meer und Stille. Die Abende enden mit einfachen gemeinsamen Mahlzeiten und Geschichten.",
+      "whoWeHost": {
+        "title": "FÜR WEN WIR DA SIND",
+        "item1": " Alleinreisende, die einen Reset suchen",
+        "item2": " Paare & enge Freund*innen",
+        "item3": " Kleine private Gruppen & Retreats",
+        "item4": " Bewusste Reisende mit Neugier auf Kreta"
+      },
+      "whatExpect": {
+        "title": "WAS DICH ERWARTET",
+        "item1": " Ungehetzte Tagesabläufe",
+        "item2": " Farm-to-Table-Momente",
+        "item3": " Kräuter- & Körperpflege-Rituale",
+        "item4": " Tiefe Verbindung zu Ort & Menschen"
+      },
+      "tagSlowTravel": "Slow Travel",
+      "tagSeasonalFood": "Saisonale Küche",
+      "tagHandsOn": "Praktisches Lernen",
+      "tagIntimateGroups": "Intime Gruppen",
+      "cta": "Mehr über unsere Philosophie",
+      "smallTitle": "BEWUSST KLEIN",
+      "smallBody": "Wir begrüßen immer nur wenige Gäste gleichzeitig, damit Land, Essen und Gespräche Raum zum Atmen haben."
+    },
+
+    "how": {
+      "eyebrow": "So funktioniert es",
+      "title": "So entfaltet sich deine Reise mit uns",
+      "subtitle": "Vom ersten Hallo bis zur letzten Tasse Bergtee – wir halten alles klar, sanft und zutiefst menschlich.",
+      "stepLabel": "Schritt {step}",
+      "steps": {
+        "1": {
+          "title": "Wähle, was dich ruft",
+          "text": "Entdecke unsere Agrotourismus- & Wellness-Erlebnisse und wähle das, das zu deinem Rhythmus, deiner Jahreszeit und deinen Bedürfnissen passt."
+        },
+        "2": {
+          "title": "Wir verfeinern die Details",
+          "text": "Wir bestätigen Termine, kleine Gruppengrößen und alle persönlichen Bedürfnisse oder Intentionen, die du während deines Aufenthalts ehren möchtest."
+        },
+        "3": {
+          "title": "Ankommen & weicher werden",
+          "text": "Ab deiner Ankunft nehmen wir das Tempo heraus. Dich erwarten erdende Rituale, lokale Geschmäcker und viel unverplante Zeit."
+        },
+        "4": {
+          "title": "Verwurzelt zurückkehren",
+          "text": "Du nimmst Praktiken, Aromen und Geschichten mit nach Hause – nicht nur Erinnerungen auf einem Bildschirm."
+        }
+      },
+      "cta": "Kommende Termine & Verfügbarkeit prüfen",
+      "tagline": "Transparente Preise • Keine großen Gruppen • Echte Menschen hinter jeder E-Mail"
+    },
+
+    "motto": {
+      "title": "„Wir bieten keine Touren an. Wir bieten verwurzelte Erlebnisse, die atmen.“",
+      "text": "Gäste reisen nicht nur entspannt ab – sondern mit einem erneuerten Gefühl für Tempo, Ort und Präsenz."
+    },
+
+    "cta": {
+      "title": "Bereit, dich wieder mit dir und dem Land zu verbinden?",
+      "text": "Wähle das Erlebnis, das dich am meisten ruft, und wir kümmern uns um den Rest – vom ersten Willkommen bis zur letzten Tasse Bergtee.",
+      "button": "Eine Reise buchen"
+    },
+
+    "testimonials": {
+      "title": "Was unsere Gäste sagen",
+      "subtitle": "Ein Einblick in die Reisen derjenigen, die den Weg vor dir gegangen sind.",
+      "items": {
+        "1": {
+          "name": "Sophia",
+          "text": "Ein unvergessliches Erlebnis, das mir erlaubte, wirklich mit dem Land und der lokalen Gemeinschaft in Verbindung zu treten."
+        },
+        "2": {
+          "name": "Oliver",
+          "text": "Ein friedlicher Rückzugsort, umgeben von Natur. Die Wellness-Sessions waren wirklich transformierend."
+        },
+        "3": {
+          "name": "Emily",
+          "text": "Alles fühlte sich so authentisch und in der Tradition verwurzelt an. Eine wirklich bereichernde Reise."
+        }
+      }
+    }
+  },
+
+  "About": {
+    "hero": {
+      "badge": "Chania • Kreta",
+      "title": {
+        "line1": "Slow Travel, verwurzelt in",
+        "highlight": "kretischem Land"
+      },
+      "subtitle": "Oasis ist eine Sammlung von naturnahen Erlebnissen in Kleingruppen, in denen lokales Leben, Handwerk und Wohlbefinden zusammenkommen. Entwickelt mit kretischen Gastgeber*innen und getragen von einem sanften Tempo.",
+      "cta": {
+        "primary": "Erlebnisse entdecken",
+        "secondary": "Kontakt aufnehmen"
+      },
+      "quickFacts": {
+        "base": "Chania, Kreta",
+        "focus": "Slow Travel & Wellness",
+        "approach": "Kleine Gruppen"
+      },
+      "card": {
+        "quote": "„Gäste kommen für Ruhe und gehen mit einem neuen Rhythmus – einem, der dem Land und ihnen selbst näher ist.“",
+        "tagline": "KRETA • AGRARTOURISMUS • WELLNESS",
+        "pill": "Intime, entschleunigte Aufenthalte"
+      }
+    },
+
+    "story": {
+      "eyebrow": "Unsere Geschichte",
+      "title": "Gewachsen aus den Rhythmen des lokalen Lebens",
+      "body1": "Oasis begann mit einer einfachen Idee: Reisen können sanfter, langsamer und stärker im Alltag der Menschen verwurzelt sein, die hier leben. Statt von Sehenswürdigkeit zu Sehenswürdigkeit zu eilen, wollten wir, dass Gäste die frühe Morgenstille in den Olivenhainen, die langen Gespräche beim Essen und das leise Glühen des Meeres in der Dämmerung spüren.",
+      "body2": "Heute arbeiten wir mit Produzent*innen, Köch*innen, Handwerker*innen und Guides zusammen, um kleine Gruppen so zu beherbergen, dass es sich wie ein Willkommen im Kreis anfühlt – nicht wie ein Check-in.",
+      "timeline": {
+        "1": {
+          "label": "Der Samen",
+          "title": "Eine Frage nach dem Tempo",
+          "text": "Wie würde sich Reisen anfühlen, wenn wir es um Langsamkeit, Fürsorge und echte Verbindung herum gestalten – statt um Zeitpläne und Checklisten?"
+        },
+        "2": {
+          "label": "Die Wurzeln",
+          "title": "Dem Land zuhören",
+          "text": "Wir haben Jahreszeiten damit verbracht zuzuhören: Bäuerinnen und Bauern, Dorfbewohner*innen, Köch*innen und Heiler*innen – und Erlebnisse um ihre Geschichten und saisonalen Rhythmen herum gestaltet."
+        },
+        "3": {
+          "label": "Heute",
+          "title": "Mit Intention beherbergen",
+          "text": "Jedes Zusammenkommen ist klein, kuratiert und an den Ort gebunden. Wir bevorzugen Qualität vor Quantität und Tiefe vor Spektakel."
+        }
+      }
+    },
+
+    "ethos": {
+      "eyebrow": "Unser Ethos",
+      "title": "Sanftes Reisen, echte Verbindung",
+      "body": "Wir gestalten jeden Aufenthalt als Gespräch zwischen Land, Menschen und Gästen. Diese vier Prinzipien halten uns in jedem Workshop, jeder Mahlzeit und jedem Spaziergang geerdet.",
+      "sideText": "Denk an Oasis als Brücke: zwischen Besucher*innen und Einheimischen, zwischen schnellen Leben und langsameren, bodenständigeren Formen des Seins.",
+      "features": {
+        "sustainability": {
+          "title": "Nachhaltigkeit",
+          "text": "Aktivitäten mit geringer Umweltbelastung, lokale Bezugsquellen und verantwortungsvolle Abläufe, um die Insel zu schützen, die wir lieben."
+        },
+        "authenticity": {
+          "title": "Authentizität",
+          "text": "Jedes Erlebnis wird gemeinsam mit kretischen Gastgeber*innen, Handwerker*innen und Produzent*innen geschaffen – nichts von der Stange."
+        },
+        "community": {
+          "title": "Gemeinschaft",
+          "text": "Wir verbinden Gäste und Einheimische durch gemeinsame Mahlzeiten, Workshops und langsame Abenteuer."
+        },
+        "wellbeing": {
+          "title": "Wohlbefinden",
+          "text": "Achtsame Praktiken und naturverbundenes Design helfen dir, wieder bei dir selbst anzukommen."
+        }
+      }
+    },
+
+    "day": {
+      "eyebrow": "Ein Tag mit uns",
+      "title": "Wie sich dein Aufenthalt anfühlen könnte",
+      "subtitle": "Kein Tag sieht genau gleich aus – aber alle teilen dieselben Zutaten: Zeit, Saisonalität und Raum, einfach zu sein.",
+      "blocks": {
+        "morning": {
+          "title": "Morgen",
+          "tag": "Langsam ankommen",
+          "text": "Wach auf mit sanftem Licht, Vogelstimmen und dem Duft von Bergkräutern. Sanftes Grounding, langsames Frühstück, Einführung in den Rhythmus des Tages."
+        },
+        "daytime": {
+          "title": "Tag",
+          "tag": "Hände in der Erde",
+          "text": "Kräuterwanderungen, Olivenrituale, Kochen, Verkostungen oder Schwimmen – immer in kleinen Gruppen, im Tempo von Gesprächen und Neugier."
+        },
+        "evening": {
+          "title": "Abend",
+          "tag": "Sammeln & integrieren",
+          "text": "Gemeinsame Mahlzeiten, Reflexion, einfache Rituale. Raum zum Ausruhen, Schreiben oder einfach unter dem Himmel sitzen, bevor ein weiterer ungehetzter Tag beginnt.",
+          "tagline": "Kleine Gruppen • Ruhiges Tempo • Natur im Mittelpunkt"
+        }
+      }
+    },
+
+    "team": {
+      "title": "Lern das Team kennen",
+      "subtitle": "Ein kleines, praxisnahes Team, das eng mit einem weiteren Kreis kretischer Gastgeber*innen, Bäuerinnen und Bauern sowie Handwerker*innen arbeitet.",
+      "members": {
+        "1": {
+          "name": "Stavroula",
+          "role": "Gründerin & Gastgeberin",
+          "bio": "Gründete Oasis, um die Ruhe und Weisheit Kretas durch intime, verwurzelte Aufenthalte zu teilen."
+        },
+        "2": {
+          "name": "Christos",
+          "role": "Wellness-Facilitator",
+          "bio": "Leitet Achtsamkeits- und ganzheitliche Praktiken, inspiriert von den Rhythmen der Natur."
+        },
+        "3": {
+          "name": "Maria",
+          "role": "Community-Kuratorin",
+          "bio": "Fördert Zugehörigkeit und bedeutungsvolle Verbindung zwischen Gästen und Einheimischen."
+        }
+      }
+    },
+
+    "faq": {
+      "title": "Praktische Fragen",
+      "subtitle": "Einige häufige Fragen, die Gäste vor der Buchung stellen.",
+      "items": {
+        "1": {
+          "q": "Für wen sind eure Erlebnisse gedacht?",
+          "a": "Für Reisende, die Tiefe statt Tempo bevorzugen – allein Reisende, Paare und kleine Gruppen, die sich mit Natur, Essen und lokaler Kultur verbinden möchten."
+        },
+        "2": {
+          "q": "Wie groß sind die Gruppen?",
+          "a": "Die meisten Erlebnisse finden in sehr kleinen Gruppen statt, damit alles intim bleibt und respektvoll gegenüber Gastgeber*innen und Land."
+        },
+        "3": {
+          "q": "Könnt ihr ein Erlebnis individuell anpassen?",
+          "a": "Ja. Für private Aufenthalte oder besondere Anlässe können wir ein maßgeschneidertes Programm rund um deine Bedürfnisse gestalten."
+        }
+      }
+    },
+
+    "newsletter": {
+      "title": "Geschichten aus Kreta in deinem Posteingang",
+      "text": "Gelegentliche Notizen über saisonale Rituale, neue Erlebnisse und das Leben auf der Insel. Kein Lärm, kein täglicher Spam – nur dann, wenn es wirklich etwas zu teilen gibt.",
+      "form": {
+        "placeholder": "Deine E-Mail",
+        "ariaLabel": "E-Mail-Adresse",
+        "button": {
+          "idle": "Abonnieren",
+          "loading": "Abonniere…",
+          "success": "Bitte E-Mail prüfen"
+        },
+        "messages": {
+          "invalid": "Bitte gib eine gültige E-Mail-Adresse ein.",
+          "error": "Etwas ist schiefgelaufen – bitte versuch es erneut.",
+          "success": "Wir haben dir einen Bestätigungslink gesendet."
+        }
+      },
+      "sticky": {
+        "text": "Saisonale Notizen aus Kreta – abonniere, wenn du in Verbindung bleiben möchtest.",
+        "hide": "Ausblenden"
+      }
+    }
+  },
+
+  "Contact": {
+    "hero": {
+      "badge": "Wir antworten in der Regel innerhalb von 24 Stunden",
+      "title": {
+        "line1": "Lass uns",
+        "highlight": "deine kretische Reise beginnen"
+      },
+      "subtitle": "Neugierig auf ein Erlebnis, bei der Planung eines Retreats oder fühlst du dich einfach zu Kreta hingezogen? Teile ein paar Worte und wir helfen dir, den nächsten Schritt zu finden."
+    },
+    "details": {
+      "email": {
+        "label": "E-Mail",
+        "value": "info@youroasis.gr"
+      },
+      "phone": {
+        "label": "Telefon",
+        "value": "+30 210 000 0000"
+      },
+      "location": {
+        "label": "Ort",
+        "value": "Chania, Kreta"
+      },
+      "hours": {
+        "label": "Öffnungszeiten",
+        "value": "Mo–Fr, 09:00–17:00 (EET)"
+      },
+      "tagline": "Kleines Team • Durchdachte Antworten • Kein Spam"
+    },
+    "form": {
+      "eyebrow": "Kontakt",
+      "title": "Erzähl uns, wovon du träumst",
+      "subtitle": "Teile so viel oder so wenig, wie du möchtest – wir führen dich von dort aus behutsam weiter.",
+      "fields": {
+        "name": {
+          "label": "Name",
+          "placeholder": "Dein vollständiger Name"
+        },
+        "email": {
+          "label": "E-Mail",
+          "placeholder": "du@beispiel.de"
+        },
+        "message": {
+          "label": "Nachricht",
+          "placeholder": "Erzähl uns ein wenig über deine Pläne, Wunschdaten oder die Art von Erlebnis, die du suchst…"
+        }
+      },
+      "privacy": "Wir verwenden deine Daten nur, um auf diese Anfrage zu antworten.",
+      "submit": {
+        "idle": "Nachricht senden",
+        "loading": "Senden…"
+      },
+      "status": {
+        "success": "Deine Nachricht wurde gesendet. Wir melden uns bald bei dir.",
+        "error": "Etwas ist schiefgelaufen. Bitte versuch es erneut."
+      }
+    },
+    "footer": {
+      "note": "Wenn du innerhalb einiger Tage nichts von uns hörst, schau bitte im Spam-Ordner nach oder melde dich erneut – manchmal verirren sich selbst Insel-E-Mails."
+    }
+  },
+
+  "Experiences": {
+    "error": {
+      "title": "Etwas ist schiefgelaufen",
+      "message": "Wir konnten die Erlebnisse gerade nicht laden. Bitte versuch es später noch einmal oder kontaktiere uns direkt.",
+      "cta": "Zur Startseite"
+    },
+    "hero": {
+      "eyebrow": "Erlebnisse",
+      "title": "Unsere Signature-Erlebnisse",
+      "subtitle": "Kuratiere Agrotourismus- & Wellness-Reisen, verwurzelt in kretischer Tradition, Natur und lokalem Leben.",
+      "availableCount": "{count, plural, one {{count} Erlebnis derzeit verfügbar} other {{count} Erlebnisse derzeit verfügbar}}"
+    },
+    "card": {
+      "priceFrom": "Ab {price} / Person"
+    },
+    "empty": {
+      "badge": {
+        "filtered": "Keine passenden Daten",
+        "unfiltered": "Derzeit nicht verfügbar"
+      },
+      "title": {
+        "filtered": "Für diese Daten sind wir ausgebucht.",
+        "unfiltered": "Unsere öffentlichen Erlebnisse werden gerade aktualisiert."
+      },
+      "description": {
+        "filtered": "Für deine gewählten Daten und deine Gruppengröße haben wir derzeit keine öffentliche Verfügbarkeit. Versuche, die Daten oder die Gruppengröße anzupassen oder kontaktiere uns für eine private Buchung.",
+        "unfiltered": "Wir aktualisieren derzeit unseren Kalender mit öffentlichen Erlebnissen. In der Zwischenzeit kannst du uns für eine private, auf deine Gruppe zugeschnittene Buchung kontaktieren."
+      },
+      "actions": {
+        "clearFilters": "Filter zurücksetzen",
+        "contact": "Kontaktiere uns für eine private Buchung"
+      }
+    }
+  },
+
+  "CheckAvailability": {
+    "back": "Zurück",
+    "maxPerBooking": "Max. {max} / Buchung",
+    "experienceFallback": "Erlebnis",
+    "fromLabel": "Ab",
+    "perPerson": "/ Person",
+
+    "stepChooseDate": "Datum wählen",
+    "stepChooseTime": "Zeit wählen",
+    "stepGroupSize": "Gruppengröße",
+    "stepLabel": "Schritt {step}",
+
+    "bookingsLoading": "Buchungsstatus wird geladen…",
+    "bookingsPausedTitle": "Buchungen sind vorübergehend pausiert.",
+    "bookingsPausedResumeAfter": "Wird wieder aufgenommen nach dem {date}.",
+    "bookingsPausedBadge": "Buchungen pausiert",
+
+    "infoText": "Wähle ein Datum und eine Uhrzeit und lege dann deine Gruppenaufteilung fest. Die Daten der Teilnehmer*innen gibst du auf der nächsten Seite ein.",
+    "timesShownIn": "Zeiten in {tz}",
+
+    "step1Title": "Wähle dein Datum",
+    "step1Helper": "Wähle einen Tag, um verfügbare Zeiten zu sehen.",
+    "today": "Heute",
+    "firstAvailable": "Erster verfügbarer Termin",
+
+    "noUpcoming": "Noch keine zukünftige Verfügbarkeit.",
+    "noUpcomingHint": "Bitte schau bald wieder vorbei oder melde dich für individuelle Termine.",
+    "calendarLoading": "Verfügbarkeit wird geladen…",
+    "showingNextMonths": "Verfügbarkeit für die nächsten 6 Monate wird angezeigt.",
+
+    "legendPlenty": "Viel frei",
+    "legendSome": "Etwas frei",
+    "legendFewLeft": "Wenige Plätze",
+    "legendToday": "Heute",
+    "legendWeekend": "Wochenende",
+
+    "availableTimesOn": "Verfügbare Zeiten am {date}",
+    "selectDate": "Datum auswählen",
+    "timesChooseDate": "Wähle ein Datum, um Zeiten zu sehen.",
+    "timesNoSlots": "Für diesen Tag sind keine Zeiten verfügbar.",
+    "slotFullyBooked": "Ausgebucht",
+    "slotAvailablePlural": "{count} verfügbar",
+    "availableStartTimes": "Verfügbare Startzeiten",
+
+    "yourGroup": "Deine Gruppe",
+    "capacityLabel": "Kapazität",
+    "capacityAvailable": "{available} / {total} verfügbar",
+    "ageHint": "Erwachsene 15+, Kinder 3–14.",
+    "reset": "Zurücksetzen",
+    "adults": "Erwachsene",
+    "kids": "Kinder",
+    "total": "Gesamt",
+
+    "groupSummary": "{selected} ausgewählt — {remaining} von {cap} für diese Buchung erlaubt (max. {max}; begrenzt durch die verbleibende Verfügbarkeit).",
+    "summaryAdultsLine": "Erwachsene × {count} @ {price}",
+    "summaryKidsLine": "Kinder × {count} @ {price}",
+
+    "submitPaused": "Buchungen pausiert",
+    "submitSubmitting": "Deine Buchung wird gestartet...",
+    "submitSelectTime": "Zeit wählen",
+    "submitAddPeople": "Personen hinzufügen",
+    "submitContinue": "Weiter zu den Details",
+
+    "mobilePaused": "Pausiert",
+    "mobileSubmitting": "Weiter…",
+    "mobileContinue": "Weiter",
+
+    "toastLoadFailed": "Erlebnis oder Verfügbarkeit konnten nicht geladen werden.",
+    "toastSelectTimeAndGroup": "Bitte Zeit und gültige Gruppengröße wählen.",
+    "toastGenericError": "Etwas ist schiefgelaufen.",
+
+    "selectedDateClear": "Ausgewähltes Datum löschen"
+  },
+
+  "BookingAttendees": {
+    "back": "Zurück",
+    "topStep2Label": "Schritt 2 · Teilnehmende",
+
+    "toastHoldExpired": "Deine Reservierung ist abgelaufen. Bitte gehe zurück und wähle eine neue Zeit.",
+    "invalidBookingId": "Ungültige Buchungs-ID.",
+    "failedToLoadDraft": "Buchungsentwurf konnte nicht geladen werden.",
+    "couldNotSave": "Teilnehmende konnten nicht gespeichert werden.",
+    "genericError": "Etwas ist schiefgelaufen.",
+
+    "stepperDetails": "Details",
+    "stepperAttendees": "Teilnehmende",
+    "stepperPayment": "Zahlung",
+    "stepperStepXofY": "Schritt {current} von {total}",
+
+    "holdBannerExpired": "Deine Reservierung für dieses Zeitfenster ist abgelaufen. Bitte gehe zurück und wähle eine neue Zeit.",
+    "holdBannerActive": "Wir halten deine Plätze für {timeLeft} frei. Bitte schließe deine Buchung ab, bevor der Timer abläuft.",
+    "holdTimeLeftLabel": "Verbleibende Zeit",
+
+    "guestDetailsTag": "Teilnehmendendaten",
+    "bookingTitleFallback": "Deine Buchung",
+    "groupLabel": "Gruppe:",
+    "editGroup": "Gruppe bearbeiten",
+
+    "guestInfoTitle": "Informationen zu den Gästen",
+    "guestInfoSubtitle": "Wir nutzen diese Daten nur, um alle sicher zu halten und dich zu dieser Buchung zu kontaktieren.",
+    "guestsCompleted": "Abgeschlossene Teilnehmende:",
+
+    "guestCardTitle": "Gast {index}",
+    "primaryContactBadge": "Hauptkontakt",
+    "guestCardTapToFill": "Zum Ausfüllen der Daten tippen",
+    "fieldFirstName": "Vorname",
+    "fieldLastName": "Nachname",
+    "fieldAgeRequired": "Alter (erforderlich)",
+    "fieldAllergies": "Allergien / Hinweise (optional)",
+    "fieldAllergiesPlaceholder": "z. B. Nüsse, Gluten, vegan",
+
+    "noAttendeesText": "Kein*e Teilnehmende erwartet – gehe zurück und wähle zuerst deine Gruppe.",
+
+    "summaryTitle": "Buchungsübersicht",
+    "summaryTotalLabel": "Gesamt",
+    "completionLabel": "Vollständigkeit der Teilnehmendendaten",
+
+    "primaryContactTitle": "Hauptkontakt",
+    "primaryContactDescription": "Wir senden die Bestätigung an diese E-Mail und nutzen die Telefonnummer für Updates am Tag des Erlebnisses.",
+    "primaryContactToggleLabel": "Erste erwachsene Person als Kontaktname verwenden",
+    "primaryContactToggleAria": "Automatische Verwendung der ersten erwachsenen Person als Kontaktname umschalten",
+    "fieldFullName": "Vollständiger Name",
+    "fieldEmail": "E-Mail",
+    "fieldPhoneOptional": "Telefon (optional)",
+    "fieldPhonePlaceholder": "+30 ...",
+
+    "ctaSaving": "Wird gespeichert…",
+    "ctaHoldExpired": "Reservierung abgelaufen",
+    "ctaContinueToPayment": "Weiter zur Zahlung",
+    "termsText": "Mit dem Fortfahren stimmst du unseren Buchungsbedingungen zu.",
+    "mobileSaving": "Wird gespeichert…",
+    "mobilePay": "Bezahlen",
+
+    "priceLineAdults": "Erwachsene × {count} @ {price}",
+    "priceLineKids": "Kinder × {count} @ {price}",
+
+    "categoryAdultLabel": "Erwachsener (16+)",
+    "categoryKidLabel": "Kind (3–15)",
+    "categoryAdultHint": "Erwachsene müssen 16 oder älter sein.",
+    "categoryKidHint": "Kinder müssen zwischen 3 und 15 Jahre alt sein.",
+
+    "validationMismatchAttendeeCount": "Erwartet {expected} Teilnehmende, gefunden {found}.",
+    "validationAttendeeNameRequired": "Teilnehmende*r {index}: Name ist erforderlich.",
+    "validationAttendeeAgeRequired": "Teilnehmende*r {index}: Alter ist erforderlich.",
+    "validationAttendeeAgeInvalid": "Teilnehmende*r {index}: Alter scheint ungültig.",
+    "validationAdultAgeRange": "Teilnehmende*r {index}: Erwachsene müssen 16+ sein.",
+    "validationKidAgeRange": "Teilnehmende*r {index}: Kinder müssen zwischen 3 und 15 sein.",
+    "validationUnknownCategory": "Teilnehmende*r {index}: Unbekannte Kategorie.",
+    "validationAtLeastOneAdult18": "Mindestens eine Person muss 18+ sein.",
+    "validationPrimaryNameRequired": "Hauptkontakt: Name ist erforderlich.",
+    "validationPrimaryEmailRequired": "Hauptkontakt: Gültige E-Mail ist erforderlich."
+  },
+
+  "BookingPayment": {
+    "invalidBookingId": "Ungültige Buchungs-ID.",
+    "failedToLoadBooking": "Buchung konnte nicht geladen werden.",
+    "holdExpiredError": "Deine Reservierung ist abgelaufen. Bitte gehe zurück und wähle eine neue Zeit.",
+    "viewDetails": "Details anzeigen",
+    "promoEnterCode": "Gib einen Code ein.",
+    "promoInvalidDefault": "Ungültiger Code.",
+    "promoExpired": "Dieser Code ist abgelaufen.",
+
+    "initPaymentFailed": "Die Zahlung konnte nicht initialisiert werden.",
+    "initPaymentCouldNot": "Zahlung konnte nicht initialisiert werden.",
+
+    "back": "Zurück",
+    "secureCheckout": "Sicherer Checkout",
+    "title": "Sichere Zahlung",
+
+    "stepperTickets": "Tickets",
+    "stepperDetails": "Details",
+    "stepperPayment": "Zahlung",
+    "stepperProgressAria": "Checkout-Fortschritt",
+
+    "holdBannerExpired": "Deine Reservierung für dieses Zeitfenster ist abgelaufen. Bitte gehe zurück und wähle eine neue Zeit.",
+    "holdBannerActive": "Wir halten deine Plätze für {timeLeft} frei. Bitte schließe deine Zahlung ab, bevor der Timer abläuft.",
+    "holdTimeLeftLabel": "Verbleibende Zeit",
+
+    "paymentCancelled": "Zahlung abgebrochen. Du kannst es unten erneut versuchen.",
+
+    "summaryTitle": "Buchungsübersicht",
+
+    "priceLineAdults": "Erwachsene × {count}",
+    "priceLineKids": "Kinder × {count}",
+
+    "noTicketsSelected": "Keine Tickets ausgewählt.",
+    "subtotalLabel": "Zwischensumme",
+    "promoRowLabel": "Gutschein",
+    "totalAfterDiscountLabel": "Gesamt nach Rabatt",
+    "totalLabel": "Gesamt",
+    "taxesIncluded": "Alle Steuern sind enthalten. Nach erfolgreicher Zahlung erhältst du eine Bestätigungs-E-Mail.",
+
+    "trustBadgeStripe": "PCI-DSS-konform via Stripe",
+    "trustBadgeSsl": "256-Bit-SSL-Verschlüsselung",
+    "trustBadgeReschedule": "Kostenlose Umbuchung*",
+    "trustBadgeFootnote": "*Bei ausgewählten Erlebnissen.",
+
+    "payWithCardTitle": "Mit Karte bezahlen",
+    "stripeExplainer": "Sichere Zahlung vor Ort über Stripe. Wir speichern deine Kartendaten nie.",
+    "initializingPayment": "Zahlung wird initialisiert…",
+
+    "promoQuestion": "Hast du einen Rabattcode oder Gutschein?",
+    "promoBadgeApplied": "Verwendet: {code}",
+    "promoHide": "Ausblenden",
+    "promoApplyShort": "Anwenden",
+    "promoPlaceholder": "CODE EINGEBEN",
+    "promoTitle": "Nur Großbuchstaben, Zahlen und Bindestriche verwenden",
+    "promoAriaLabel": "Rabattcode",
+    "promoChecking": "Wird geprüft…",
+    "promoApply": "Anwenden",
+    "promoApplied": "Angewendet",
+    "promoPercentOff": "{value}% Rabatt",
+    "promoFixedOff": "{amount} Rabatt",
+    "promoRemove": "Entfernen",
+
+    "stripeHandledInfo": "Zahlungen werden von Stripe abgewickelt. Wir speichern deine Kartendaten nie.",
+    "acceptedCards": "Akzeptiert: Visa · Mastercard · Amex",
+    "needHelp": "Brauchst du Hilfe?",
+    "closingWindowInfo": "Wenn du dieses Fenster während des Checkouts schließt, kannst du zu dieser Seite zurückkehren und es erneut versuchen. Deine Reservierung wird für kurze Zeit gehalten.",
+
+    "close": "Schließen",
+    "detailsDialogTitle": "Buchungsdetails",
+    "detailsThIndex": "#",
+    "detailsThName": "Name",
+    "detailsThType": "Typ",
+    "detailsThNotes": "Hinweise · Allergien",
+    "detailsNoAttendees": "Keine Teilnehmendendaten verfügbar.",
+
+    "genericAttendeeName": "Teilnehmende*r {index}",
+    "attendeeTypeAdult": "Erwachsen",
+    "attendeeTypeTeen": "Teenager",
+    "attendeeTypeKid": "Kind",
+
+    "checkYourDetails": "Bitte überprüfe deine Angaben.",
+    "submitError": "Fehler beim Senden",
+    "paymentFailed": "Zahlung fehlgeschlagen. Bitte versuch es erneut.",
+    "processing": "Wird verarbeitet…",
+    "holdExpired": "Reservierung abgelaufen",
+    "payAmount": "{amount} bezahlen"
+  },
+
+  "BookingConfirmation": {
+    "chipLabel": "Buchungsbestätigung",
+
+    "heroTitleConfirmed": "Alles ist bereit!",
+    "heroTitlePaid": "Zahlung eingegangen – fast geschafft",
+    "heroTitleProcessing": "Danke! Wir finalisieren deine Buchung…",
+    "heroTitleGeneric": "Buchungsstatus",
+
+    "heroSubtitleConfirmed": "Deine Buchung ist bestätigt. Wir haben dir eine Bestätigungs-E-Mail mit allen Details gesendet.",
+    "heroSubtitlePaid": "Deine Zahlung war erfolgreich. Wir schließen deine Buchung ab und bestätigen sie dir in Kürze per E-Mail.",
+    "heroSubtitleProcessing": "Wir warten noch auf die Bestätigung durch den Zahlungsanbieter. Diese Seite aktualisiert sich automatisch.",
+    "heroSubtitleGeneric": "Wir konnten deine Zahlung noch nicht verifizieren. Wenn du belastet wurdest, melden wir uns per E-Mail, sobald alles bestätigt ist.",
+
+    "statusConfirmed": "Bestätigt",
+    "statusFinalizing": "Wird finalisiert",
+    "statusProcessing": "Wird verarbeitet",
+    "statusUnknown": "Unbekannt",
+
+    "referenceLabel": "Referenz",
+
+    "infoBannerDefault": "Falls dies länger als eine Minute dauert, prüfe bitte deine E-Mails auf die Bestätigung. Wenn du nichts findest, melde dich bei uns – wir helfen dir weiter.",
+    "refreshButtonLabel": "Aktualisieren",
+
+    "loadingMain": "Deine Buchungsdetails werden geladen…",
+    "loadingSub": "Das dauert normalerweise nur einen Moment.",
+    "bookingNotFound": "Buchung nicht gefunden.",
+
+    "sectionYourBookingTitle": "Deine Buchung",
+    "sectionYourBookingSubtitle": "Bewahre diese Details für den Check-in gut auf.",
+
+    "openMap": "Karte öffnen",
+
+    "bookingSummaryLabel": "Buchungsübersicht",
+    "discountAppliedBadge": "Rabatt angewendet",
+    "discountGeneric": "Rabatt",
+    "lineAdult": "Erwachsene × {count}",
+    "lineTeen": "Teens × {count}",
+    "lineKid": "Kinder × {count}",
+
+    "subtotalLabel": "Zwischensumme",
+    "discountLabel": "Rabatt",
+    "totalLabel": "Gesamt",
+
+    "addToCalendar": "Zum Kalender hinzufügen",
+    "generatingPdf": "PDF wird erstellt…",
+    "printInvoice": "Rechnung drucken",
+    "exploreMore": "Weitere Erlebnisse entdecken",
+    "backToHome": "Zur Startseite",
+
+    "attendeesTitle": "Teilnehmende",
+    "attendeeCategoryAdult": "Erwachsene*r (18+)",
+    "attendeeCategoryTeen": "Teen",
+    "attendeeCategoryKid": "Kind (3–12)",
+
+    "statusOverviewTitle": "Statusübersicht",
+    "statusOverviewConfirmed": "Alles bereit! Deine Buchung ist bestätigt, und eine Bestätigungs-E-Mail wurde an die angegebene Adresse gesendet.",
+    "statusOverviewPaid": "Deine Zahlung ist abgeschlossen. Wir finalisieren deine Buchung und bestätigen sie dir in Kürze per E-Mail.",
+    "statusOverviewProcessing": "Deine Zahlung wird noch bestätigt. Das dauert normalerweise nur wenige Augenblicke.",
+    "statusOverviewFallback": "Wir konnten deine Zahlung noch nicht vollständig verifizieren. Wenn du belastet wurdest, erhältst du eine E-Mail, sobald alles bestätigt ist.",
+
+    "statusCardBookingCode": "Buchungscode",
+    "statusCardReference": "Referenz",
+    "statusCardHint": "Gib diesen Code an, falls wir nach deinen Buchungsdetails fragen.",
+
+    "startTimeLabel": "Startzeit",
+    "startTimeHint": "Bitte sei ein wenig früher da, um in Ruhe anzukommen.",
+
+    "paymentSessionDetails": "Details zur Zahlungssitzung",
+
+    "helpTitle": "Brauchst du Hilfe?",
+    "helpBody": "Falls etwas nicht richtig aussieht oder du unsicher bist, ob deine Buchung durchgegangen ist, schreib uns eine Nachricht und wir prüfen das für dich.",
+    "helpContactSupport": "Support kontaktieren",
+    "helpEmailSubject": "Frage zu meiner Buchung",
+
+    "finalizationFailedFallback": "Buchung konnte nicht finalisiert werden.",
+    "loadFailed": "Buchung konnte nicht geladen werden.",
+
+    "icsDefaultSummary": "Gebuchtes Erlebnis",
+    "icsDescriptionWithCode": "Buchung {code} {status}",
+    "icsDescriptionFallback": "Buchung #{id} {status}"
+  },
+
+  "AuthLogin": {
+    "title": "Willkommen zurück",
+    "subtitle": "Melde dich an, um deine Reise fortzusetzen.",
+
+    "checkingSession": "Sitzung wird geprüft…",
+
+    "emailLabel": "E-Mail",
+    "emailPlaceholder": "du@beispiel.de",
+
+    "passwordLabel": "Passwort",
+    "passwordPlaceholder": "••••••••",
+    "passwordShow": "Passwort anzeigen",
+    "passwordHide": "Passwort ausblenden",
+
+    "submit": "Anmelden",
+    "submitting": "Anmeldung läuft…",
+
+    "forgotPasswordQuestion": "Passwort vergessen?",
+    "noAccountQuestion": "Noch kein Konto?",
+    "registerCta": "Registrieren",
+
+    "captchaArmedHint": "Zu deiner Sicherheit haben wir reCAPTCHA nach mehreren Fehlversuchen aktiviert.",
+    "captchaRequired": "Bitte schließe das reCAPTCHA ab.",
+    "captchaVerifyFailed": "reCAPTCHA-Verifizierung fehlgeschlagen. Bitte versuch es erneut.",
+    "captchaVerifyError": "reCAPTCHA konnte nicht verifiziert werden. Bitte versuch es erneut.",
+
+    "errorInvalidCredentials": "Ungültige E-Mail oder ungültiges Passwort.",
+    "genericError": "Etwas ist schiefgelaufen. Bitte versuch es erneut."
+  },
+
+  "Dashboard": {
+    "fallbackName": "Explorer",
+
+    "memberStatus": {
+      "member": "Mitglied",
+      "newcomer": "Neu dabei",
+      "loyal": "Treues Mitglied"
+    },
+
+    "badge": {
+      "admin": "Admin",
+      "explorer": "Explorer",
+      "default": "Mitglied"
+    },
+
+    "timeMorning": "Guten Morgen",
+    "timeAfternoon": "Guten Nachmittag",
+    "timeEvening": "Guten Abend",
+
+    "backToHome": "Zur Startseite",
+    "signOut": "Abmelden",
+
+    "heroEyebrow": "Dein Oasis-Bereich",
+    "heroBody": "Hier kannst du deine Daten einsehen, deine Buchungen im Blick behalten und dein Konto in deinem eigenen Tempo sanft verwalten.",
+
+    "badgeAdminAccess": "Admin-Zugang",
+    "chipActiveReservations": "Aktive Reservierungen",
+
+    "snapshotTitle": "Überblick",
+    "snapshotMembershipLabel": "Mitgliedschaft",
+    "snapshotStatusLabel": "Status",
+    "snapshotStatusUpcoming": "Bevorstehende Buchungen",
+    "snapshotStatusNone": "Keine Buchungen",
+    "snapshotMemberSinceLabel": "Mitglied seit",
+
+    "detailsTitle": "Deine Daten",
+    "detailsSubtext": "Wir schützen deine Informationen und nutzen sie nur, um deine Erlebnisse zu verwalten.",
+    "detailsManageCta": "Daten verwalten",
+
+    "detailsNameLabel": "Name",
+    "detailsEmailLabel": "E-Mail",
+    "detailsPhoneLabel": "Telefon",
+    "detailsDobLabel": "Geburtsdatum",
+    "detailsMemberSinceLabel": "Mitglied seit",
+    "detailsBadgeLabel": "Badge",
+    "detailsNotProvided": "Nicht angegeben",
+
+    "detailsUpdateHint": "Möchtest du etwas ändern? Du kannst deine Daten jederzeit in den",
+    "detailsUpdateLink": "Kontoeinstellungen",
+    "actionBookingsLabel": "Meine Buchungen",
+    "actionBookingsDescription": "Sieh dir deine bevorstehenden und vergangenen Reservierungen an.",
+    "actionSettingsLabel": "Kontoeinstellungen",
+    "actionSettingsDescription": "Persönliche Daten und Präferenzen aktualisieren.",
+    "actionOpenCta": "Öffnen",
+
+    "accountPrivacyTitle": "Konto & Datenschutz",
+    "accountPrivacyBody": "Du behältst jederzeit die Kontrolle über deine Daten. Du kannst deine Angaben anpassen oder dein Konto jederzeit schließen.",
+    "accountPrivacyBullet1": "Deine Daten werden nur für Buchungen und Support verwendet.",
+    "accountPrivacyBullet2": "Du kannst einen Datenexport über unsere Kontaktseite anfordern.",
+
+    "deleteSectionTitle": "Konto löschen",
+    "deleteSectionBody": "Wenn du dein Konto löschst, ist dieser Schritt endgültig und dein Profil wird entfernt.",
+    "deleteButtonUpcoming": "Du hast bevorstehende Buchungen",
+    "deleteButtonDefault": "Konto löschen",
+    "deleteSectionFooter": "Wenn du bevorstehende Buchungen hast, storniere diese bitte zuerst, damit wir dein Konto sicher schließen können – oder kontaktiere den Support für Hilfe.",
+
+    "deleteSuccess": "Konto erfolgreich gelöscht",
+    "deleteFailed": "Konto konnte nicht gelöscht werden. Bitte versuch es erneut.",
+    "deleteGenericError": "Etwas ist schiefgelaufen. Bitte versuch es später erneut."
+  },
+
+  "Register": {
+    "loading": "Wird geladen…",
+    "backHome": "Zur Startseite",
+
+    "heroTitle": "Beitreten",
+    "heroSubtitle": "Erstelle ein Konto, um Erlebnisse zu buchen, deine Reservierungen zu verwalten und deine Präferenzen zu speichern.",
+
+    "benefits": {
+      "fastCheckout": {
+        "title": "Schneller Checkout",
+        "body": "Deine Daten werden sicher gespeichert, damit du schnell buchen kannst."
+      },
+      "personalized": {
+        "title": "Personalisierte Erfahrung",
+        "body": "Wir passen Empfehlungen an deine Vorlieben an."
+      },
+      "privacy": {
+        "title": "Datenschutz zuerst",
+        "body": "Wir teilen deine Daten niemals ohne deine Zustimmung."
+      }
+    },
+
+    "termsNotice": "Mit der Erstellung eines Kontos stimmst du unseren Nutzungsbedingungen zu und nimmst unsere Datenschutzerklärung zur Kenntnis.",
+
+    "formTitle": "Konto erstellen",
+    "successMessage": "Konto erfolgreich erstellt. Du wirst angemeldet…",
+
+    "errors": {
+      "recaptchaRequired": "Bitte schließe die reCAPTCHA-Abfrage ab.",
+      "legalAge": "Du musst mindestens 18 Jahre alt sein, um dich zu registrieren.",
+      "registerFailed": "Registrierung fehlgeschlagen. Bitte versuch es erneut.",
+      "generic": "Etwas ist schiefgelaufen. Bitte versuch es erneut."
+    },
+
+    "fields": {
+      "firstName": {
+        "label": "Vorname*",
+        "placeholder": "Gib deinen Vornamen ein"
+      },
+      "surname": {
+        "label": "Nachname*",
+        "placeholder": "Gib deinen Nachnamen ein"
+      },
+      "email": {
+        "label": "E-Mail*",
+        "placeholder": "du@beispiel.de"
+      },
+      "password": {
+        "label": "Passwort*",
+        "placeholder": "Mindestens 8 Zeichen",
+        "hideAria": "Passwort ausblenden",
+        "showAria": "Passwort anzeigen",
+        "help": "Nutze mindestens 8 Zeichen und kombiniere Buchstaben, Zahlen und Symbole."
+      },
+      "phone": {
+        "label": "Telefon",
+        "placeholder": "(optional)"
+      },
+      "dateOfBirth": {
+        "label": "Geburtsdatum*"
+      }
+    },
+
+    "submit": {
+      "creating": "Konto wird erstellt…",
+      "label": "Registrieren"
+    },
+
+    "alreadyHaveAccount": "Du hast bereits ein Konto?",
+    "signInCta": "Anmelden"
+  },
+
+  "MyBookings": {
+    "title": "Meine Buchungen",
+    "subtitle": "Verwalte deine bevorstehenden Erlebnisse und sieh dir deine bisherigen Besuche an.",
+
+    "statUpcoming": "Bevorstehend",
+    "statPast": "Vergangen",
+
+    "checkingSession": "Deine Sitzung wird geprüft...",
+    "errorFetch": "Wir konnten deine Buchungen nicht laden. Bitte versuch es erneut.",
+
+    "searchPlaceholder": "Nach Erlebnis oder Ort suchen...",
+
+    "sectionUpcomingTitle": "Bevorstehende Reservierungen",
+    "sectionPastTitle": "Vergangene Reservierungen",
+    "noUpcoming": "Keine bevorstehenden Reservierungen.",
+    "noPast": "Noch keine vergangenen Reservierungen.",
+
+    "tabUpcoming": "Bevorstehend ({count})",
+    "tabPast": "Vergangen ({count})",
+
+    "errorTitle": "Etwas ist schiefgelaufen",
+    "retryButton": "Erneut versuchen",
+
+    "emptyTitle": "Noch keine Buchungen",
+    "emptySubtitle": "Entdecke einzigartige Erlebnisse und starte deine Reise.",
+    "emptyCta": "Erlebnisse entdecken",
+
+    "statusUpcoming": "Bevorstehend",
+    "statusCompleted": "Abgeschlossen",
+    "experienceFallback": "Erlebnis",
+
+    "timeAt": "um {time}",
+    "peopleCount": "{count, plural, one {# Person} other {# Personen}}",
+    "durationMinutes": "{count, plural, one {# Min.} other {# Min.}}",
+
+    "bookingId": "ID: {id}",
+    "viewDetails": "Details ansehen"
+  },
+
+  "BookingDetails": {
+    "loading": "Buchung wird geladen...",
+    "loadError": "Wir konnten diese Buchung nicht laden. Sie wurde möglicherweise entfernt oder der Link ist falsch.",
+    "backToBookings": "Zurück zu \"Meine Buchungen\"",
+    "refLabel": "Ref: {ref}",
+
+    "experienceFallback": "Erlebnis",
+    "bookingId": "Buchungs-ID: {id}",
+
+    "atTime": "um {time}",
+    "durationMinutes": "{count, plural, one {{count} Min.} other {{count} Min.}}",
+    "peopleCount": "{count, plural, one {{count} Person} other {{count} Personen}}",
+    "adultsLabel": "Erwachsene",
+    "kidsLabel": "Kinder",
+
+    "totalPaid": "Gesamt bezahlt",
+
+    "ticketPreparing": "Ticket wird vorbereitet…",
+    "ticketDownloadCta": "Ticket herunterladen (PDF)",
+    "addToGoogleCalendar": "Zu Google Kalender hinzufügen",
+    "directionsCta": "Anfahrt",
+    "share": "Teilen",
+    "shareTitleFallback": "Reservierung",
+    "shareTextWithDate": "{title} — {datetime}",
+
+    "copied": "Kopiert!",
+
+    "errorTitle": "Nicht verfügbar",
+
+    "statusUpcoming": "Bevorstehend",
+    "statusOngoing": "Laufend",
+    "statusCompleted": "Abgeschlossen",
+
+    "checkInUnavailableTitle": "Check-in nicht verfügbar",
+    "checkInUnavailableBody": "Der QR-Code wird hier für bevorstehende oder laufende Buchungen angezeigt.",
+    "ticketTitle": "Dein Ticket",
+    "checkInTitle": "Check-in-QR",
+
+    "checkInChipOpenNow": "Jetzt geöffnet",
+    "checkInChipOpensAtTime": "Öffnet um {time}",
+    "checkInChipOpensAtStart": "Öffnet zur Startzeit",
+
+    "qrError": "QR konnte nicht erstellt werden. Code: {code}",
+    "qrAlt": "Check-in-QR-Code",
+    "qrPreparing": "QR wird vorbereitet…",
+
+    "copyCode": "Kopieren",
+    "viewLarger": "Anzeigen",
+    "printTicketButton": "Drucken",
+
+    "checkInFooterUntil": "Zeige diesen QR beim Check-in. Er ist gültig bis {time}.",
+    "checkInFooterFallback": "Zeige diesen QR beim Check-in. Er ist bis zum Ende deines Zeitfensters gültig.",
+
+    "toolbarIcs": ".ics",
+    "toolbarGcal": "GCal",
+    "toolbarGo": "Los",
+    "toolbarShare": "Teilen"
+  }
+}

@@ -1,0 +1,1000 @@
+{
+  "Header": {
+    "nav": {
+      "experiences": "Experiences",
+      "about": "About",
+      "contact": "Contact"
+    },
+    "cta": {
+      "bookJourney": "Book a Journey"
+    },
+    "auth": {
+      "login": "Log In",
+      "register": "Register"
+    },
+    "account": {
+      "myBookings": "My Bookings",
+      "dashboard": "Dashboard",
+      "adminDashboard": "Admin Dashboard",
+      "signOut": "Sign Out"
+    },
+    "labels": {
+      "navigate": "Navigate",
+      "browse": "Browse",
+      "account": "Account",
+      "language": "Language"
+    }
+  },
+
+  "Home": {
+    "hero": {
+      "eyebrow": "CRETE • AGROTOURISM • WELLNESS",
+      "title": {
+        "line1": "Agrotourism & Wellness",
+        "line2": "Rooted in Crete"
+      },
+      "subtitle": "Curated rituals and nature-immersive journeys to slow down, soften, and reconnect with what truly matters.",
+      "cta": {
+        "primary": "Discover Experiences",
+        "secondary": "Our Story"
+      },
+      "scrollHint": "Scroll to begin"
+    },
+
+    "featured": {
+      "eyebrow": "Featured",
+      "title": "Our Signature Experiences",
+      "subtitle": "Handpicked journeys that honor the rhythm of Cretan land and life.",
+      "description": "From herb walks to olive oil rituals, each experience is crafted with intention and deep respect for the local community.",
+      "browseAll": "Browse all experiences →",
+      "tagline": "Limited groups • Slow paced • Nature-first"
+    },
+
+    "experience": {
+      "frequency": {
+        "everyDay": "Every day",
+        "weekdays": "Weekdays",
+        "weekends": "Weekends"
+      },
+      "noImage": "No image",
+      "badge": "Small groups • Slow travel",
+      "checkAvailability": "Check Availability",
+      "details": "Details",
+      "none": "No experiences available right now."
+    },
+
+    "about": {
+      "eyebrow": "Slow Stays in Crete",
+      "title": "More than a holiday, a gentle return to yourself.",
+      "subtitle": "We weave together land, food, ritual and rest into grounded, small-group experiences on the island of Crete.",
+      "body": "Mornings begin with soft light over the hills, the smell of mountain herbs and fresh bread. Days are spent between olive groves, the kitchen, the sea and stillness. Evenings close with simple shared meals and stories.",
+      "whoWeHost": {
+        "title": "WHO WE HOST",
+        "item1": " Solo travellers seeking reset",
+        "item2": " Couples & close friends",
+        "item3": " Small private groups & retreats",
+        "item4": " Conscious travellers curious about Crete"
+      },
+      "whatExpect": {
+        "title": "WHAT YOU CAN EXPECT",
+        "item1": " Unhurried itineraries",
+        "item2": " Farm-to-table moments",
+        "item3": " Herbal & body-care rituals",
+        "item4": " Deep connection to place & people"
+      },
+      "tagSlowTravel": "Slow travel",
+      "tagSeasonalFood": "Seasonal food",
+      "tagHandsOn": "Hands-on learning",
+      "tagIntimateGroups": "Intimate groups",
+      "cta": "Learn more about our philosophy",
+      "smallTitle": "INTENTIONALLY SMALL",
+      "smallBody": "We welcome only a handful of guests at a time so the land, the food and the conversations can breathe."
+    },
+
+    "how": {
+      "eyebrow": "How it works",
+      "title": "How your journey with us unfolds",
+      "subtitle": "From first hello to your last cup of mountain tea, we keep things clear, gentle and deeply human.",
+      "stepLabel": "Step {step}",
+      "steps": {
+        "1": {
+          "title": "Choose what calls you",
+          "text": "Explore our agrotourism & wellness experiences and pick the one that matches your rhythm, season and needs."
+        },
+        "2": {
+          "title": "We tailor the details",
+          "text": "We’ll confirm dates, small group size, and any personal needs or intentions you want to honour during your stay."
+        },
+        "3": {
+          "title": "Arrive & soften",
+          "text": "From the moment you arrive, we slow the pace. Expect grounding rituals, local tastes and plenty of unscheduled time."
+        },
+        "4": {
+          "title": "Return with roots",
+          "text": "You leave with practices, flavours and stories you can carry home – not just memories on a screen."
+        }
+      },
+      "cta": "Check upcoming dates & availability",
+      "tagline": "Transparent pricing • No large groups • Real humans behind every email"
+    },
+
+    "motto": {
+      "title": "“We don’t offer tours. We offer rooted experiences that breathe.”",
+      "text": "Guests leave not only relaxed — but with a renewed sense of pace, place and presence."
+    },
+
+    "cta": {
+      "title": "Ready to reconnect with yourself and the land?",
+      "text": "Choose the experience that calls you most, and we’ll take care of the rest — from first welcome to final cup of mountain tea.",
+      "button": "Book a Journey"
+    },
+
+    "testimonials": {
+      "title": "What Our Guests Say",
+      "subtitle": "A glimpse into the journeys of those who have walked the paths before you.",
+      "items": {
+        "1": {
+          "name": "Sophia",
+          "text": "An unforgettable experience that allowed me to truly connect with the land and the local community."
+        },
+        "2": {
+          "name": "Oliver",
+          "text": "A peaceful retreat surrounded by nature. The wellness sessions were truly transformative."
+        },
+        "3": {
+          "name": "Emily",
+          "text": "Everything felt so authentic and rooted in tradition. A truly enriching journey."
+        }
+      }
+    }
+  },
+
+  "About": {
+    "hero": {
+      "badge": "Chania • Crete",
+      "title": {
+        "line1": "Slow travel, rooted in",
+        "highlight": "Cretan land"
+      },
+      "subtitle": "Oasis is a collection of nature-immersive, small-group experiences where local life, craft, and wellbeing meet. Designed with Cretan hosts and guided by a gentle pace.",
+      "cta": {
+        "primary": "Explore experiences",
+        "secondary": "Contact us"
+      },
+      "quickFacts": {
+        "base": "Chania, Crete",
+        "focus": "Slow travel & wellness",
+        "approach": "Small groups"
+      },
+      "card": {
+        "quote": "“Guests come for rest and leave with a new rhythm — one that feels closer to the land and to themselves.”",
+        "tagline": "CRETE • AGROTOURISM • WELLNESS",
+        "pill": "Intimate, slow-paced stays"
+      }
+    },
+
+    "story": {
+      "eyebrow": "Our story",
+      "title": "Born from the rhythms of local life",
+      "body1": "Oasis began with a simple idea: travel can be gentler, slower, and more rooted in the everyday life of the people who live here. Instead of rushing from sight to sight, we wanted guests to feel the early-morning stillness in the olive groves, the long conversations over food, and the quiet glow of the sea at dusk.",
+      "body2": "Today, we collaborate with growers, cooks, artisans and guides to host small groups in a way that feels like being welcomed into a circle — not just checking into a stay.",
+      "timeline": {
+        "1": {
+          "label": "The seed",
+          "title": "A question about pace",
+          "text": "What would travel feel like if we designed it around slowness, care and true connection — rather than schedules and checklists?"
+        },
+        "2": {
+          "label": "The roots",
+          "title": "Listening to the land",
+          "text": "We spent seasons listening: to farmers, villagers, cooks and healers, shaping experiences around their stories and seasonal rhythms."
+        },
+        "3": {
+          "label": "Today",
+          "title": "Hosting with intention",
+          "text": "Each gathering is small, curated and grounded in place. We favour quality over quantity and depth over spectacle."
+        }
+      }
+    },
+
+    "ethos": {
+      "eyebrow": "Our ethos",
+      "title": "Gentle travel, real connection",
+      "body": "We design each stay as a conversation between land, people and guests. These four principles keep us anchored — in every workshop, meal and walk we host.",
+      "sideText": "Think of Oasis as a bridge: between visitors and locals, between fast-paced lives and slower, more grounded ways of being.",
+      "features": {
+        "sustainability": {
+          "title": "Sustainability",
+          "text": "Low-impact activities, local sourcing, and responsible operations to protect the island we love."
+        },
+        "authenticity": {
+          "title": "Authenticity",
+          "text": "Every experience is co-created with Cretan hosts, artisans, and growers — nothing generic."
+        },
+        "community": {
+          "title": "Community",
+          "text": "We connect guests and locals through shared meals, workshops, and slow adventures."
+        },
+        "wellbeing": {
+          "title": "Wellbeing",
+          "text": "Mindful practices and nature-first design to help you reconnect with yourself."
+        }
+      }
+    },
+
+    "day": {
+      "eyebrow": "A day with us",
+      "title": "What your stay might feel like",
+      "subtitle": "No two days look exactly the same, but they all share the same ingredients: time, seasonality, and space to simply be.",
+      "blocks": {
+        "morning": {
+          "title": "Morning",
+          "tag": "Arrive slowly",
+          "text": "Wake up to soft light, birds, and the smell of mountain herbs. Gentle grounding, slow breakfast, introductions to the day’s rhythm."
+        },
+        "daytime": {
+          "title": "Daytime",
+          "tag": "Hands in the land",
+          "text": "Herb walks, olive rituals, cooking, tastings, or swims — always in small groups, moving at the pace of conversation and curiosity."
+        },
+        "evening": {
+          "title": "Evening",
+          "tag": "Gather & integrate",
+          "text": "Shared meals, reflection, simple rituals. Space to rest, write, or just sit under the sky before another unhurried day.",
+          "tagline": "Small groups • Slow pace • Nature-first"
+        }
+      }
+    },
+
+    "team": {
+      "title": "Meet the team",
+      "subtitle": "A small, hands-on team working closely with a wider circle of Cretan hosts, farmers, and artisans.",
+      "members": {
+        "1": {
+          "name": "Stavroula",
+          "role": "Founder & Host",
+          "bio": "Founded Oasis to share the serenity and wisdom of Crete through intimate, rooted stays."
+        },
+        "2": {
+          "name": "Christos",
+          "role": "Wellness Facilitator",
+          "bio": "Guides mindfulness and holistic practices inspired by the rhythms of nature."
+        },
+        "3": {
+          "name": "Maria",
+          "role": "Community Curator",
+          "bio": "Nurtures a sense of belonging and meaningful connection between guests and locals."
+        }
+      }
+    },
+
+    "faq": {
+      "title": "Practical questions",
+      "subtitle": "A few common things guests ask before booking.",
+      "items": {
+        "1": {
+          "q": "Who are your experiences for?",
+          "a": "For travellers who prefer depth over speed — solo guests, couples, and small groups who want to connect with nature, food, and local culture."
+        },
+        "2": {
+          "q": "How big are the groups?",
+          "a": "Most experiences run with very small groups to keep things intimate and respectful to our hosts and the land."
+        },
+        "3": {
+          "q": "Can you customize an experience?",
+          "a": "Yes. For private stays or special occasions, we can co-create a tailored itinerary around your needs."
+        }
+      }
+    },
+
+    "newsletter": {
+      "title": "Stories from Crete, in your inbox",
+      "text": "Occasional notes about seasonal rituals, new experiences, and life on the island. No noise, no daily spam — just when there’s something worth sharing.",
+      "form": {
+        "placeholder": "Your email",
+        "ariaLabel": "Email address",
+        "button": {
+          "idle": "Subscribe",
+          "loading": "Subscribing…",
+          "success": "Check your email"
+        },
+        "messages": {
+          "invalid": "Please enter a valid email address.",
+          "error": "Something went wrong — please try again.",
+          "success": "We’ve sent a confirmation link."
+        }
+      },
+      "sticky": {
+        "text": "Seasonal notes from Crete — subscribe if you’d like to stay in touch.",
+        "hide": "Hide"
+      }
+    }
+  },
+
+  "Contact": {
+    "hero": {
+      "badge": "We usually reply within 24 hours",
+      "title": {
+        "line1": "Let’s start",
+        "highlight": "your Cretan journey"
+      },
+      "subtitle": "Curious about an experience, planning a retreat, or simply feeling a pull towards Crete? Share a few words and we’ll help you find the right next step."
+    },
+    "details": {
+      "email": {
+        "label": "Email",
+        "value": "info@youroasis.gr"
+      },
+      "phone": {
+        "label": "Phone",
+        "value": "+30 210 000 0000"
+      },
+      "location": {
+        "label": "Location",
+        "value": "Chania, Crete"
+      },
+      "hours": {
+        "label": "Hours",
+        "value": "Mon–Fri, 09:00–17:00 (EET)"
+      },
+      "tagline": "Small team • Thoughtful replies • No spam"
+    },
+    "form": {
+      "eyebrow": "Contact",
+      "title": "Tell us what you’re dreaming of",
+      "subtitle": "Share as much or as little as you like — we’ll gently guide you from there.",
+      "fields": {
+        "name": {
+          "label": "Name",
+          "placeholder": "Your full name"
+        },
+        "email": {
+          "label": "Email",
+          "placeholder": "you@example.com"
+        },
+        "message": {
+          "label": "Message",
+          "placeholder": "Tell us a bit about your plans, preferred dates, or the kind of experience you’re seeking…"
+        }
+      },
+      "privacy": "We’ll only use your details to reply to this enquiry.",
+      "submit": {
+        "idle": "Send message",
+        "loading": "Sending…"
+      },
+      "status": {
+        "success": "Your message has been sent. We’ll get back to you soon.",
+        "error": "Something went wrong. Please try again."
+      }
+    },
+    "footer": {
+      "note": "If you don’t hear from us within a couple of days, feel free to check your spam folder or reach out again — sometimes even island emails wander off."
+    }
+  },
+
+  "Experiences": {
+    "error": {
+      "title": "Something went wrong",
+      "message": "We couldn’t load the experiences right now. Please try again in a little while or reach out to us directly.",
+      "cta": "Back to homepage"
+    },
+    "hero": {
+      "eyebrow": "Experiences",
+      "title": "Our Signature Experiences",
+      "subtitle": "Curated journeys of agrotourism & wellness rooted in Cretan tradition, nature, and local life.",
+      "availableCount": "{count, plural, one {{count} experience currently available} other {{count} experiences currently available}}"
+    },
+    "card": {
+      "priceFrom": "From {price} / person"
+    },
+    "empty": {
+      "badge": {
+        "filtered": "No matching dates",
+        "unfiltered": "Currently unavailable"
+      },
+      "title": {
+        "filtered": "We’re fully booked for these dates.",
+        "unfiltered": "Our public experiences are being updated."
+      },
+      "description": {
+        "filtered": "We don’t have any public availability for your selected dates and group size. Try adjusting your dates or party size, or contact us for a private booking.",
+        "unfiltered": "We’re currently updating our calendar of public experiences. In the meantime, you can contact us for a private booking tailored to your group."
+      },
+      "actions": {
+        "clearFilters": "Clear filters",
+        "contact": "Contact us for a private booking"
+      }
+    }
+  },
+
+  "CheckAvailability": {
+    "back": "Back",
+    "maxPerBooking": "Max {max} / booking",
+    "experienceFallback": "Experience",
+    "fromLabel": "From",
+    "perPerson": "/ person",
+
+    "stepChooseDate": "Choose date",
+    "stepChooseTime": "Choose time",
+    "stepGroupSize": "Group size",
+    "stepLabel": "Step {step}",
+
+    "bookingsLoading": "Loading booking status…",
+    "bookingsPausedTitle": "Bookings are temporarily paused.",
+    "bookingsPausedResumeAfter": "Resuming after {date}.",
+    "bookingsPausedBadge": "Bookings paused",
+
+    "infoText": "Pick a date and time, then set your group split. You’ll fill attendee details on the next page.",
+    "timesShownIn": "Times shown in {tz}",
+
+    "step1Title": "Choose your date",
+    "step1Helper": "Pick a day to reveal available times.",
+    "today": "Today",
+    "firstAvailable": "First available",
+
+    "noUpcoming": "No upcoming availability yet.",
+    "noUpcomingHint": "Please check back soon or reach out for custom dates.",
+    "calendarLoading": "Loading availability…",
+    "showingNextMonths": "Showing availability for the next 6 months.",
+
+    "legendPlenty": "Plenty",
+    "legendSome": "Some",
+    "legendFewLeft": "Few left",
+    "legendToday": "Today",
+    "legendWeekend": "Weekend",
+
+    "availableTimesOn": "Available times on {date}",
+    "selectDate": "Select a date",
+    "timesChooseDate": "Choose a date to see times.",
+    "timesNoSlots": "No times available for this day.",
+    "slotFullyBooked": "Fully booked",
+    "slotAvailablePlural": "{count} available",
+    "availableStartTimes": "Available start times",
+
+    "yourGroup": "Your group",
+    "capacityLabel": "Capacity",
+    "capacityAvailable": "{available} / {total} available",
+    "ageHint": "Adults 15+, Kids 3–14.",
+    "reset": "Reset",
+    "adults": "Adults",
+    "kids": "Kids",
+    "total": "Total",
+
+    "groupSummary": "{selected} selected — {remaining} of {cap} allowed for this booking (max {max}; limited by remaining availability).",
+    "summaryAdultsLine": "Adults × {count} @ {price}",
+    "summaryKidsLine": "Kids × {count} @ {price}",
+
+    "submitPaused": "Bookings are paused",
+    "submitSubmitting": "Starting your booking...",
+    "submitSelectTime": "Select a time",
+    "submitAddPeople": "Add people",
+    "submitContinue": "Continue to details",
+
+    "mobilePaused": "Paused",
+    "mobileSubmitting": "Continue…",
+    "mobileContinue": "Continue",
+
+    "toastLoadFailed": "Failed to load experience or availability.",
+    "toastSelectTimeAndGroup": "Select a time and valid group size.",
+    "toastGenericError": "Something went wrong.",
+
+    "selectedDateClear": "Clear selected date"
+  },
+
+  "BookingAttendees": {
+    "back": "Back",
+    "topStep2Label": "Step 2 · Attendees",
+
+    "toastHoldExpired": "Your reservation hold has expired. Please go back and select a new time.",
+    "invalidBookingId": "Invalid booking id.",
+    "failedToLoadDraft": "Failed to load booking draft.",
+    "couldNotSave": "Could not save attendees.",
+    "genericError": "Something went wrong.",
+
+    "stepperDetails": "Details",
+    "stepperAttendees": "Attendees",
+    "stepperPayment": "Payment",
+    "stepperStepXofY": "Step {current} of {total}",
+
+    "holdBannerExpired": "Your hold for this time slot has expired. Please go back and choose a new time.",
+    "holdBannerActive": "We’re holding your seats for {timeLeft}. Please complete your booking before the timer runs out.",
+    "holdTimeLeftLabel": "Time left",
+
+    "guestDetailsTag": "Guest details",
+    "bookingTitleFallback": "Your booking",
+    "groupLabel": "Group:",
+    "editGroup": "Edit group",
+
+    "guestInfoTitle": "Guest information",
+    "guestInfoSubtitle": "We’ll only use this to keep everyone safe and to contact you about this booking.",
+    "guestsCompleted": "Guests completed:",
+
+    "guestCardTitle": "Guest {index}",
+    "primaryContactBadge": "Primary contact",
+    "guestCardTapToFill": "Tap to fill guest details",
+    "fieldFirstName": "First name",
+    "fieldLastName": "Last name",
+    "fieldAgeRequired": "Age (required)",
+    "fieldAllergies": "Allergies / notes (optional)",
+    "fieldAllergiesPlaceholder": "e.g. nuts, gluten, vegan",
+
+    "noAttendeesText": "No attendees expected — go back and select your group first.",
+
+    "summaryTitle": "Booking summary",
+    "summaryTotalLabel": "Total",
+    "completionLabel": "Guest details completion",
+
+    "primaryContactTitle": "Primary contact",
+    "primaryContactDescription": "We’ll send the confirmation to this email and use the phone for day-of updates.",
+    "primaryContactToggleLabel": "Use first adult as contact name",
+    "primaryContactToggleAria": "Toggle automatic use of first adult as contact name",
+    "fieldFullName": "Full name",
+    "fieldEmail": "Email",
+    "fieldPhoneOptional": "Phone (optional)",
+    "fieldPhonePlaceholder": "+30 ...",
+
+    "ctaSaving": "Saving…",
+    "ctaHoldExpired": "Hold expired",
+    "ctaContinueToPayment": "Continue to payment",
+    "termsText": "By continuing you agree to our booking terms.",
+    "mobileSaving": "Saving…",
+    "mobilePay": "Pay",
+
+    "priceLineAdults": "Adults × {count} @ {price}",
+    "priceLineKids": "Kids × {count} @ {price}",
+
+    "categoryAdultLabel": "Adult (16+)",
+    "categoryKidLabel": "Kid (3–15)",
+    "categoryAdultHint": "Adults must be 16 or older.",
+    "categoryKidHint": "Kids must be between 3 and 15 years old.",
+
+    "validationMismatchAttendeeCount": "Expected {expected} attendees, found {found}.",
+    "validationAttendeeNameRequired": "Attendee {index}: name is required.",
+    "validationAttendeeAgeRequired": "Attendee {index}: age is required.",
+    "validationAttendeeAgeInvalid": "Attendee {index}: age looks invalid.",
+    "validationAdultAgeRange": "Attendee {index}: adults must be 16+.",
+    "validationKidAgeRange": "Attendee {index}: kids must be 3–15.",
+    "validationUnknownCategory": "Attendee {index}: unknown category.",
+    "validationAtLeastOneAdult18": "At least one attendee must be 18+.",
+    "validationPrimaryNameRequired": "Primary contact: name is required.",
+    "validationPrimaryEmailRequired": "Primary contact: valid email is required."
+  },
+
+  "BookingPayment": {
+    "invalidBookingId": "Invalid booking ID.",
+    "failedToLoadBooking": "Failed to load booking.",
+    "holdExpiredError": "Your reservation hold has expired. Please go back and choose a new time.",
+    "viewDetails": "View details",
+    "promoEnterCode": "Enter a code.",
+    "promoInvalidDefault": "Invalid code.",
+    "promoExpired": "This code has expired.",
+
+    "initPaymentFailed": "Failed to initialize payment.",
+    "initPaymentCouldNot": "Could not initialize payment.",
+
+    "back": "Back",
+    "secureCheckout": "Secure checkout",
+    "title": "Secure payment",
+
+    "stepperTickets": "Tickets",
+    "stepperDetails": "Details",
+    "stepperPayment": "Payment",
+    "stepperProgressAria": "Checkout progress",
+
+    "holdBannerExpired": "Your hold for this time slot has expired. Please go back and choose a new time.",
+    "holdBannerActive": "We're holding your seats for {timeLeft}. Please complete your payment before the timer runs out.",
+    "holdTimeLeftLabel": "Time left",
+
+    "paymentCancelled": "Payment cancelled. You can try again below.",
+
+    "summaryTitle": "Booking summary",
+
+    "priceLineAdults": "Adults × {count}",
+    "priceLineKids": "Kids × {count}",
+
+    "noTicketsSelected": "No tickets selected.",
+    "subtotalLabel": "Subtotal",
+    "promoRowLabel": "Promo",
+    "totalAfterDiscountLabel": "Total after discount",
+    "totalLabel": "Total",
+    "taxesIncluded": "All taxes included. You’ll receive a confirmation email after successful payment.",
+
+    "trustBadgeStripe": "PCI-DSS compliant via Stripe",
+    "trustBadgeSsl": "256-bit SSL encryption",
+    "trustBadgeReschedule": "Free reschedule policy*",
+    "trustBadgeFootnote": "*On selected experiences.",
+
+    "payWithCardTitle": "Pay with card",
+    "stripeExplainer": "Secure, on-page payment via Stripe. We never store your card details.",
+    "initializingPayment": "Initializing payment…",
+
+    "promoQuestion": "Do you have a promo code or voucher?",
+    "promoBadgeApplied": "Applied: {code}",
+    "promoHide": "Hide",
+    "promoApplyShort": "Apply",
+    "promoPlaceholder": "ENTER CODE",
+    "promoTitle": "Use capital letters, numbers, and hyphens only",
+    "promoAriaLabel": "Promo code",
+    "promoChecking": "Checking…",
+    "promoApply": "Apply",
+    "promoApplied": "Applied",
+    "promoPercentOff": "{value}% off",
+    "promoFixedOff": "{amount} off",
+    "promoRemove": "Remove",
+
+    "stripeHandledInfo": "Payments handled by Stripe. We never store your card details.",
+    "acceptedCards": "Accepted: Visa · Mastercard · Amex",
+    "needHelp": "Need help?",
+    "closingWindowInfo": "If you close this window during checkout, you can return to this page to try again. Your reservation is held for a short time.",
+
+    "close": "Close",
+    "detailsDialogTitle": "Booking details",
+    "detailsThIndex": "#",
+    "detailsThName": "Name",
+    "detailsThType": "Type",
+    "detailsThNotes": "Notes · Allergies",
+    "detailsNoAttendees": "No attendee details available.",
+
+    "genericAttendeeName": "Attendee {index}",
+    "attendeeTypeAdult": "Adult",
+    "attendeeTypeTeen": "Teen",
+    "attendeeTypeKid": "Kid",
+
+    "checkYourDetails": "Please check your details.",
+    "submitError": "Submit error",
+    "paymentFailed": "Payment failed. Try again.",
+    "processing": "Processing…",
+    "holdExpired": "Hold expired",
+    "payAmount": "Pay {amount}"
+  },
+
+  "BookingConfirmation": {
+    "chipLabel": "Booking confirmation",
+
+    "heroTitleConfirmed": "You’re all set!",
+    "heroTitlePaid": "Payment received — almost done",
+    "heroTitleProcessing": "Thanks! Finalizing your booking…",
+    "heroTitleGeneric": "Booking status",
+
+    "heroSubtitleConfirmed": "Your booking is confirmed. We’ve sent a confirmation email with all the details.",
+    "heroSubtitlePaid": "Your payment was successful. We’re finishing up your booking and will confirm shortly.",
+    "heroSubtitleProcessing": "We’re waiting for confirmation from the payment provider. This page updates automatically.",
+    "heroSubtitleGeneric": "We couldn’t verify your payment yet. If you were charged, we’ll email you as soon as it clears.",
+
+    "statusConfirmed": "Confirmed",
+    "statusFinalizing": "Finalizing",
+    "statusProcessing": "Processing",
+    "statusUnknown": "Unknown",
+
+    "referenceLabel": "Reference",
+
+    "infoBannerDefault": "If this takes more than a minute, please check your email for confirmation. If you don’t see it, reach out and we’ll help.",
+    "refreshButtonLabel": "Refresh",
+
+    "loadingMain": "Loading your booking details…",
+    "loadingSub": "This usually only takes a moment.",
+    "bookingNotFound": "Booking not found.",
+
+    "sectionYourBookingTitle": "Your booking",
+    "sectionYourBookingSubtitle": "Keep these details handy for check-in.",
+
+    "openMap": "Open map",
+
+    "bookingSummaryLabel": "Booking summary",
+    "discountAppliedBadge": "Discount applied",
+    "discountGeneric": "Discount",
+    "lineAdult": "Adults × {count}",
+    "lineTeen": "Teens × {count}",
+    "lineKid": "Kids × {count}",
+
+    "subtotalLabel": "Subtotal",
+    "discountLabel": "Discount",
+    "totalLabel": "Total",
+
+    "addToCalendar": "Add to calendar",
+    "generatingPdf": "Generating PDF…",
+    "printInvoice": "Print invoice",
+    "exploreMore": "Explore more experiences",
+    "backToHome": "Back to home",
+
+    "attendeesTitle": "Attendees",
+    "attendeeCategoryAdult": "Adult (18+)",
+    "attendeeCategoryTeen": "Teen",
+    "attendeeCategoryKid": "Kid (3–12)",
+
+    "statusOverviewTitle": "Status overview",
+    "statusOverviewConfirmed": "All set! Your booking is confirmed, and a confirmation email has been sent to the address you provided.",
+    "statusOverviewPaid": "Your payment is complete. We’re finalizing your booking and will confirm by email shortly.",
+    "statusOverviewProcessing": "Your payment is still being confirmed. This usually only takes a few moments.",
+    "statusOverviewFallback": "We couldn’t fully verify your payment yet. If you were charged, you’ll receive an email as soon as it clears.",
+
+    "statusCardBookingCode": "Booking code",
+    "statusCardReference": "Reference",
+    "statusCardHint": "Present this code if we ask for your booking details.",
+
+    "startTimeLabel": "Start time",
+    "startTimeHint": "Please arrive a little early to get settled.",
+
+    "paymentSessionDetails": "Payment session details",
+
+    "helpTitle": "Need help?",
+    "helpBody": "If anything looks off, or you’re unsure whether your booking went through, send us a message and we’ll check it for you.",
+    "helpContactSupport": "Contact support",
+    "helpEmailSubject": "Booking question",
+
+    "finalizationFailedFallback": "Could not finalize booking.",
+    "loadFailed": "Could not load booking.",
+
+    "icsDefaultSummary": "Booked experience",
+    "icsDescriptionWithCode": "Booking {code} {status}",
+    "icsDescriptionFallback": "Booking #{id} {status}"
+  },
+
+  "AuthLogin": {
+    "title": "Welcome back",
+    "subtitle": "Sign in to continue your journey.",
+
+    "checkingSession": "Checking session…",
+
+    "emailLabel": "Email",
+    "emailPlaceholder": "you@example.com",
+
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "••••••••",
+    "passwordShow": "Show password",
+    "passwordHide": "Hide password",
+
+    "submit": "Sign In",
+    "submitting": "Signing in…",
+
+    "forgotPasswordQuestion": "Forgot your password?",
+    "noAccountQuestion": "Don’t have an account?",
+    "registerCta": "Register",
+
+    "captchaArmedHint": "For your security, we’ve enabled reCAPTCHA after multiple failed attempts.",
+    "captchaRequired": "Please complete the reCAPTCHA.",
+    "captchaVerifyFailed": "reCAPTCHA verification failed. Please try again.",
+    "captchaVerifyError": "Could not verify reCAPTCHA. Please try again.",
+
+    "errorInvalidCredentials": "Invalid email or password.",
+    "genericError": "Something went wrong. Please try again."
+  },
+  "Dashboard": {
+    "fallbackName": "Explorer",
+
+    "memberStatus": {
+      "member": "Member",
+      "newcomer": "Newcomer",
+      "loyal": "Loyal Member"
+    },
+
+    "badge": {
+      "admin": "Admin",
+      "explorer": "Explorer",
+      "default": "Member"
+    },
+
+    "timeMorning": "Good morning",
+    "timeAfternoon": "Good afternoon",
+    "timeEvening": "Good evening",
+
+    "backToHome": "Back to home",
+    "signOut": "Sign out",
+
+    "heroEyebrow": "Your oasis space",
+    "heroBody": "Here you can review your details, keep an eye on your bookings, and gently manage your account at your own pace.",
+
+    "badgeAdminAccess": "Admin access",
+    "chipActiveReservations": "Active reservations",
+
+    "snapshotTitle": "Snapshot",
+    "snapshotMembershipLabel": "Membership",
+    "snapshotStatusLabel": "Status",
+    "snapshotStatusUpcoming": "Upcoming bookings",
+    "snapshotStatusNone": "No bookings",
+    "snapshotMemberSinceLabel": "Member since",
+
+    "detailsTitle": "Your details",
+    "detailsSubtext": "We keep your information safe and only use it to manage your experiences.",
+    "detailsManageCta": "Manage details",
+
+    "detailsNameLabel": "Name",
+    "detailsEmailLabel": "Email",
+    "detailsPhoneLabel": "Phone",
+    "detailsDobLabel": "Date of birth",
+    "detailsMemberSinceLabel": "Member since",
+    "detailsBadgeLabel": "Badge",
+    "detailsNotProvided": "Not provided",
+
+    "detailsUpdateHint": "Need to update something? You can always adjust your details in",
+    "detailsUpdateLink": "Account settings",
+
+    "actionBookingsLabel": "My bookings",
+    "actionBookingsDescription": "View your upcoming and past reservations.",
+    "actionSettingsLabel": "Account settings",
+    "actionSettingsDescription": "Update personal info and preferences.",
+    "actionOpenCta": "Open",
+
+    "accountPrivacyTitle": "Account & privacy",
+    "accountPrivacyBody": "You’re always in control of your data. You can update your details or close your account at any time.",
+    "accountPrivacyBullet1": "Your details are only used for bookings and support.",
+    "accountPrivacyBullet2": "You can request data export through our contact page.",
+
+    "deleteSectionTitle": "Account deletion",
+    "deleteSectionBody": "Deleting your account is permanent and removes your profile.",
+    "deleteButtonUpcoming": "You have upcoming bookings",
+    "deleteButtonDefault": "Delete account",
+    "deleteSectionFooter": "If you have upcoming bookings, please cancel them first so we can safely close your account or contact support for assistance.",
+
+    "deleteSuccess": "Account deleted successfully",
+    "deleteFailed": "Failed to delete account. Please try again.",
+    "deleteGenericError": "Something went wrong. Please try again later."
+  },
+  "Register": {
+    "loading": "Loading…",
+    "backHome": "Back home",
+
+    "heroTitle": "Join",
+    "heroSubtitle": "Create an account to book experiences, manage your reservations, and save your preferences.",
+
+    "benefits": {
+      "fastCheckout": {
+        "title": "Fast checkout",
+        "body": "Your details are stored securely for quick bookings."
+      },
+      "personalized": {
+        "title": "Personalized experience",
+        "body": "We tailor recommendations to your preferences."
+      },
+      "privacy": {
+        "title": "Privacy first",
+        "body": "We never share your data without your consent."
+      }
+    },
+
+    "termsNotice": "By creating an account you agree to our Terms and acknowledge our Privacy Policy.",
+
+    "formTitle": "Create an Account",
+    "successMessage": "Account created successfully. Signing you in…",
+
+    "errors": {
+      "recaptchaRequired": "Please complete the reCAPTCHA challenge.",
+      "legalAge": "You must be at least 18 years old to register.",
+      "registerFailed": "Failed to register. Please try again.",
+      "generic": "Something went wrong. Please try again."
+    },
+
+    "fields": {
+      "firstName": {
+        "label": "First Name*",
+        "placeholder": "Enter your first name"
+      },
+      "surname": {
+        "label": "Surname*",
+        "placeholder": "Enter your surname"
+      },
+      "email": {
+        "label": "Email*",
+        "placeholder": "you@example.com"
+      },
+      "password": {
+        "label": "Password*",
+        "placeholder": "Minimum 8 characters",
+        "hideAria": "Hide password",
+        "showAria": "Show password",
+        "help": "Use at least 8 characters, mixing letters, numbers and symbols."
+      },
+      "phone": {
+        "label": "Phone",
+        "placeholder": "(optional)"
+      },
+      "dateOfBirth": {
+        "label": "Date of Birth*"
+      }
+    },
+
+    "submit": {
+      "creating": "Creating Account…",
+      "label": "Register"
+    },
+
+    "alreadyHaveAccount": "Already have an account?",
+    "signInCta": "Sign In"
+  },
+  "MyBookings": {
+    "title": "My Bookings",
+    "subtitle": "Manage your upcoming experiences and review your past visits.",
+
+    "statUpcoming": "Upcoming",
+    "statPast": "Past",
+
+    "checkingSession": "Checking your session...",
+    "errorFetch": "We couldn't load your bookings. Please try again.",
+
+    "searchPlaceholder": "Search by experience or location...",
+
+    "sectionUpcomingTitle": "Upcoming Reservations",
+    "sectionPastTitle": "Past Reservations",
+    "noUpcoming": "No upcoming reservations.",
+    "noPast": "No past reservations yet.",
+
+    "tabUpcoming": "Upcoming ({count})",
+    "tabPast": "Past ({count})",
+
+    "errorTitle": "Something went wrong",
+    "retryButton": "Retry",
+
+    "emptyTitle": "No bookings yet",
+    "emptySubtitle": "Discover unique experiences and start your journey.",
+    "emptyCta": "Explore Experiences",
+
+    "statusUpcoming": "Upcoming",
+    "statusCompleted": "Completed",
+    "experienceFallback": "Experience",
+
+    "timeAt": "at {time}",
+    "peopleCount": "{count, plural, one {# person} other {# people}}",
+    "durationMinutes": "{count, plural, one {# min} other {# min}}",
+
+    "bookingId": "ID: {id}",
+    "viewDetails": "View details"
+  },
+  "BookingDetails": {
+    "loading": "Loading booking...",
+    "loadError": "We couldn't load that booking. It may have been removed or the link is incorrect.",
+    "backToBookings": "Back to My Bookings",
+    "refLabel": "Ref: {ref}",
+
+    "experienceFallback": "Experience",
+    "bookingId": "Booking ID: {id}",
+
+    "atTime": "at {time}",
+    "durationMinutes": "{count, plural, one {{count} min} other {{count} min}}",
+    "peopleCount": "{count, plural, one {{count} person} other {{count} people}}",
+    "adultsLabel": "adults",
+    "kidsLabel": "kids",
+
+    "totalPaid": "Total paid",
+
+    "ticketPreparing": "Preparing ticket…",
+    "ticketDownloadCta": "Download ticket (PDF)",
+    "addToGoogleCalendar": "Add to Google Calendar",
+    "directionsCta": "Directions",
+    "share": "Share",
+    "shareTitleFallback": "Reservation",
+    "shareTextWithDate": "{title} — {datetime}",
+
+    "copied": "Copied!",
+
+    "errorTitle": "Not available",
+
+    "statusUpcoming": "Upcoming",
+    "statusOngoing": "Ongoing",
+    "statusCompleted": "Completed",
+
+    "checkInUnavailableTitle": "Check-in unavailable",
+    "checkInUnavailableBody": "The QR code will appear here for upcoming or ongoing bookings.",
+    "ticketTitle": "Your ticket",
+    "checkInTitle": "Check-in QR",
+
+    "checkInChipOpenNow": "Open now",
+    "checkInChipOpensAtTime": "Opens at {time}",
+    "checkInChipOpensAtStart": "Opens at start time",
+
+    "qrError": "Could not render QR. Code: {code}",
+    "qrAlt": "Check-in QR code",
+    "qrPreparing": "Preparing QR…",
+
+    "copyCode": "Copy",
+    "viewLarger": "View",
+    "printTicketButton": "Print",
+
+    "checkInFooterUntil": "Show this QR at check-in. It’s valid until {time}.",
+    "checkInFooterFallback": "Show this QR at check-in. It’s valid until the end of your slot.",
+
+    "toolbarIcs": ".ics",
+    "toolbarGcal": "GCal",
+    "toolbarGo": "Go",
+    "toolbarShare": "Share"
+  }
+}
