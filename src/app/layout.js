@@ -1,0 +1,42 @@
+import "./globals.css";
+import Header from "./components/header";
+import Footer from "./components/footer";
+import { RouteLoader } from "./components/RouteLoader";
+import SessionWrapper from "./components/SessionWrapper";
+import PromoBannerGate from "./components/PromoBannerGate";
+import FooterGate from "./components/FooterGate";
+import { BotIdClient } from "botid/client";
+import { Toaster } from "react-hot-toast";
+export const metadata = {
+  title: "Oasis – Agrotourism & Wellness",
+  description: "Rooted, soulful, slow travel in Crete.",
+  icons: {
+    icon: "/favicon.ico",
+  },
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en" className="h-full">
+      <head>
+        <script
+          src="https://upload-widget.cloudinary.com/global/all.js"
+          type="text/javascript"
+        ></script>
+      </head>
+      <body className="flex min-h-screen flex-col bg-[#f4f1ec] text-[#2f2f2f] antialiased">
+        <SessionWrapper>
+          <RouteLoader>
+            <Header />
+            <PromoBannerGate />
+            <Toaster position="top-right" />
+            <main className="flex-1">{children}</main>
+            <FooterGate>
+              <Footer />
+            </FooterGate>
+          </RouteLoader>
+        </SessionWrapper>
+      </body>
+    </html>
+  );
+}

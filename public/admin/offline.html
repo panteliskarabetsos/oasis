@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>Oasis Admin — Offline</title>
+    <meta name="color-scheme" content="light dark" />
+    <style>
+      :root {
+        --accent: #a3845b;
+        --bg: #f6f5f3;
+        --card: #ffffff;
+        --text: #1b1b1b;
+        --muted: #6b6b6b;
+        --border: #e8e6e2;
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0e0f10;
+          --card: #121314;
+          --text: #f5f5f5;
+          --muted: #b7b7b7;
+          --border: #222426;
+          --shadow: 0 12px 36px rgba(0, 0, 0, 0.5),
+            0 2px 10px rgba(0, 0, 0, 0.4);
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu,
+          Cantarell, "Helvetica Neue", Arial, sans-serif;
+        background: radial-gradient(
+            1200px 700px at 85% -10%,
+            rgba(163, 132, 91, 0.08),
+            transparent 60%
+          ),
+          radial-gradient(
+            900px 600px at -20% 110%,
+            rgba(163, 132, 91, 0.06),
+            transparent 60%
+          ),
+          var(--bg);
+        color: var(--text);
+      }
+
+      .wrap {
+        min-height: 100%;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .card {
+        width: min(560px, 96vw);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        box-shadow: var(--shadow);
+        padding: 28px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        color: var(--text);
+      }
+      .brand-dot {
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        background: conic-gradient(
+          from 180deg at 50% 50%,
+          #e7d8c2,
+          #c7a77d 40%,
+          #a3845b 70%,
+          #6e5434
+        );
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12) inset;
+      }
+
+      .icon {
+        width: 64px;
+        height: 64px;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(
+          180deg,
+          rgba(163, 132, 91, 0.12),
+          rgba(163, 132, 91, 0.06)
+        );
+        border: 1px solid var(--border);
+        margin-top: 14px;
+        margin-bottom: 10px;
+      }
+      .pulse {
+        animation: pulse 1.7s ease-in-out infinite;
+        transform-origin: center;
+      }
+      @keyframes pulse {
+        0% {
+          opacity: 0.85;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.06);
+        }
+        100% {
+          opacity: 0.85;
+          transform: scale(1);
+        }
+      }
+
+      h1 {
+        margin: 6px 0 6px;
+        font-size: 1.4rem;
+        line-height: 1.2;
+      }
+      p.lead {
+        margin: 0 0 16px;
+        color: var(--muted);
+        font-size: 0.98rem;
+      }
+
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+      }
+
+      .btn {
+        -webkit-tap-highlight-color: transparent;
+        cursor: pointer;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-size: 0.95rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+        transition: transform 0.06s ease, background 0.2s ease,
+          border-color 0.2s ease, opacity 0.2s ease;
+      }
+      .btn:active {
+        transform: translateY(1px);
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: color-mix(in oklab, var(--accent), black 12%);
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--text);
+        border-color: var(--border);
+      }
+
+      .meta {
+        margin-top: 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.02), transparent);
+        color: var(--text);
+        font-weight: 600;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      .dot.offline {
+        background: #d14343;
+      }
+      .dot.online {
+        background: #2bb84a;
+      }
+
+      .small {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .footer {
+        margin-top: 18px;
+        border-top: 1px dashed var(--border);
+        padding-top: 14px;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .footer a {
+        color: inherit;
+        text-underline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <main class="card" role="main" aria-labelledby="ttl">
+        <div class="brand" aria-label="Oasis Admin">
+          <span class="brand-dot" aria-hidden="true"></span>
+          Oasis Admin
+        </div>
+
+        <div class="icon" aria-hidden="true">
+          <!-- WiFi-off / plug icon (inline SVG) -->
+          <svg
+            class="pulse"
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M2 8.82a15 15 0 0 1 20 0" />
+            <path d="M5 12.5a10 10 0 0 1 14 0" />
+            <path d="M8.5 16.2a5 5 0 0 1 7 0" />
+            <path d="M12 20h.01" />
+          </svg>
+        </div>
+
+        <h1 id="ttl">You’re offline</h1>
+        <p class="lead">
+          We couldn’t reach the Oasis Admin right now. Check your connection and
+          try again.
+        </p>
+
+        <div class="row">
+          <button class="btn btn-primary" id="retryBtn" type="button">
+            <!-- refresh icon -->
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10"></path>
+              <path d="M1 14l5.37 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            Try again
+          </button>
+
+          <a class="btn btn-ghost" href="/admin/" id="homeBtn">
+            <!-- home icon -->
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 9l9-7 9 7"></path>
+              <path d="M9 22V12h6v10"></path>
+            </svg>
+            Go to admin home
+          </a>
+        </div>
+
+        <div class="meta" aria-live="polite" aria-atomic="true">
+          <span class="chip" id="netChip">
+            <span class="dot offline" id="netDot"></span>
+            <span id="netText">Offline</span>
+          </span>
+          <span id="lastTry" class="small">No attempts yet</span>
+        </div>
+
+        <div class="footer">
+          <span
+            >Tip: if you just got back online, we’ll try to reload
+            automatically.</span
+          >
+          <span>© <span id="year"></span> Oasis</span>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      // Utilities
+      const $ = (sel) => document.querySelector(sel);
+      const netChip = $("#netChip");
+      const netDot = $("#netDot");
+      const netText = $("#netText");
+      const lastTry = $("#lastTry");
+      $("#year").textContent = new Date().getFullYear();
+
+      function setOnlineUI(online) {
+        netDot.className = "dot " + (online ? "online" : "offline");
+        netText.textContent = online ? "Online" : "Offline";
+      }
+      setOnlineUI(navigator.onLine);
+
+      window.addEventListener("online", () => {
+        setOnlineUI(true);
+        // auto-try shortly after regaining network
+        setTimeout(() => retry(true), 300);
+      });
+      window.addEventListener("offline", () => setOnlineUI(false));
+
+      function ts() {
+        const d = new Date();
+        lastTry.textContent =
+          "Last check: " +
+          d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      }
+
+      function absUrl(url) {
+        try {
+          return new URL(url, location.origin).toString();
+        } catch {
+          return url;
+        }
+      }
+
+      function redirectShim(target) {
+        // Use a JS redirect to avoid returning a redirected response from the SW
+        location.href = absUrl(target);
+      }
+
+      async function retry(auto = false) {
+        ts();
+        const btn = $("#retryBtn");
+        const orig = btn.textContent;
+        btn.disabled = true;
+        btn.style.opacity = ".8";
+        btn.textContent = auto ? "Reconnecting…" : "Checking…";
+
+        try {
+          // Try current path first; follow redirects manually; allow auth pages.
+          const opts = {
+            cache: "no-store",
+            redirect: "manual",
+            credentials: "include",
+          };
+          let res = await fetch(location.pathname, opts);
+
+          // Follow up to a few redirects
+          let hops = 0;
+          while (
+            ["opaqueredirect", "basic", "default"].includes(res.type) &&
+            [301, 302, 303, 307, 308].includes(res.status) &&
+            hops < 5
+          ) {
+            const loc = res.headers.get("Location");
+            if (!loc) break;
+            const target = absUrl(loc);
+            // If cross-origin, just navigate the page
+            if (new URL(target).origin !== location.origin) {
+              redirectShim(target);
+              return;
+            }
+            res = await fetch(target, opts);
+            hops++;
+          }
+
+          // If we got any non-redirect response, just reload to let the app render (even 401/500).
+          if (res) {
+            location.reload();
+            return;
+          }
+        } catch (e) {
+          // swallow — we'll re-enable the button
+        } finally {
+          btn.disabled = false;
+          btn.style.opacity = "1";
+          btn.textContent = orig;
+        }
+      }
+
+      $("#retryBtn").addEventListener("click", () => retry(false));
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1669 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  CalendarClock,
+  XCircle,
+  Mail,
+  Phone,
+  User2,
+  MapPin,
+  Printer,
+  Copy,
+  CreditCard,
+  Users,
+  Loader2,
+  DollarSign,
+} from "lucide-react";
+import { toast } from "react-hot-toast";
+import { AnimatePresence, motion } from "framer-motion";
+import BookingPricingEditor from "../../components/BookingPricingEditor";
+
+/* ---------------------------- helpers ---------------------------- */
+const cx = (...xs) => xs.filter(Boolean).join(" ");
+
+const fmtDateLong = (d) =>
+  d
+    ? new Date(d).toLocaleString("en-GB", {
+        dateStyle: "full",
+        timeStyle: "short",
+      })
+    : "-";
+
+const fmtDateShort = (d) =>
+  d
+    ? new Date(d).toLocaleString("en-GB", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "-";
+
+const fractionDigits = (curr = "EUR") =>
+  new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: curr,
+  }).resolvedOptions().maximumFractionDigits;
+
+const minorToMajor = (minor, curr = "EUR") => {
+  const fd = fractionDigits(curr);
+  return (Number(minor) || 0) / 10 ** fd;
+};
+
+const fmtMoney = (n, currency = "EUR") => {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return "-";
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(
+    Number(n)
+  );
+};
+
+function toDateInput(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function plusDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+// Pull out likely promo fields and compute discount if needed
+function extractPromoFromRaw(raw, unitPrices, counts) {
+  try {
+    const pj =
+      raw.promoJson || raw.promo_json || raw.promo || raw.discount || null;
+
+    const codeList = []
+      .concat(raw.appliedPromoCode || [])
+      .concat(raw.promoCodes || [])
+      .concat(raw.promoCode || [])
+      .concat((pj && pj.code) || []);
+    const flat = codeList.flat
+      ? codeList.flat()
+      : [].concat(...codeList.map((x) => (Array.isArray(x) ? x : [x])));
+    const codes = [
+      ...new Set(
+        flat
+          .filter(Boolean)
+          .map((x) => String(x).trim())
+          .filter(Boolean)
+      ),
+    ];
+    const code = codes.length ? codes.join(" + ") : null;
+
+    let discountAmount = Number(raw.discountAmount);
+    if (!Number.isFinite(discountAmount) || discountAmount <= 0) {
+      const type = String(pj?.discountType || pj?.type || "").toLowerCase();
+      const val = Number(pj?.discountValue ?? pj?.value);
+      if (type && Number.isFinite(val)) {
+        const subtotal =
+          Number(counts?.adults || 0) * (Number(unitPrices?.adult) || 0) +
+          Number(counts?.kids || 0) * (Number(unitPrices?.kid) || 0);
+        if (type.includes("percent") || type === "percentage") {
+          discountAmount = Math.max(
+            0,
+            Math.round(subtotal * (val / 100) * 100) / 100
+          );
+        } else if (type.includes("fixed") || type === "amount") {
+          discountAmount = Math.max(0, val);
+        }
+      }
+    }
+    if (!Number.isFinite(discountAmount) || discountAmount < 0)
+      discountAmount = 0;
+
+    return { code, discountAmount };
+  } catch {
+    return { code: null, discountAmount: 0 };
+  }
+}
+
+// Extract payment method + card details from Stripe payload
+function extractPaymentMethodSummary(raw) {
+  const empty = { type: null, label: null, card: null };
+  if (!raw || typeof raw !== "object") return empty;
+
+  const unwrapPI = (x) => {
+    if (!x || typeof x !== "object") return null;
+    if (x.object === "payment_intent") return x;
+    if (x.payment_intent && typeof x.payment_intent === "object")
+      return x.payment_intent;
+    if (x.paymentIntent && typeof x.paymentIntent === "object")
+      return x.paymentIntent;
+    if (x.item && typeof x.item === "object") return unwrapPI(x.item);
+    if (x.data && x.data.object) return unwrapPI(x.data.object);
+    return x;
+  };
+
+  const pi = unwrapPI(raw);
+
+  const charges = Array.isArray(pi?.charges?.data)
+    ? pi.charges.data
+    : Array.isArray(raw?.charges?.data)
+    ? raw.charges.data
+    : [];
+
+  const charge = charges[0] || null;
+  const pmd =
+    charge?.payment_method_details || pi?.payment_method_details || null;
+
+  if (!pmd) return empty;
+
+  // Stripe usually has: { type: 'card', card: { ... } }
+  let type = pmd.type;
+  if (!type) {
+    if (pmd.card) type = "card";
+    else {
+      // fallback: pick first key that looks like a type
+      const keys = Object.keys(pmd).filter((k) => k !== "type");
+      type = keys[0] || null;
+    }
+  }
+
+  let card = null;
+  if (type === "card") {
+    const cardObj =
+      pmd.card ||
+      charge?.payment_method_details?.card ||
+      pi?.payment_method?.card ||
+      null;
+
+    if (cardObj) {
+      card = {
+        brand: cardObj.brand || null,
+        last4: cardObj.last4 || null,
+        expMonth: cardObj.exp_month || null,
+        expYear: cardObj.exp_year || null,
+        country: cardObj.country || null,
+        funding: cardObj.funding || null,
+      };
+    }
+  }
+
+  const labelParts = [];
+  if (type === "card") {
+    if (card?.brand) labelParts.push(card.brand.toUpperCase());
+    if (card?.last4) labelParts.push(`•••• ${card.last4}`);
+  } else if (type) {
+    labelParts.push(type);
+  }
+
+  return {
+    type,
+    label: labelParts.join(" · ") || null,
+    card,
+  };
+}
+
+// Normalize API payload into a clean booking model
+function normalizeBooking(raw) {
+  if (!raw || typeof raw !== "object") return null;
+
+  const scheduleSlotId = raw.scheduleSlotId ?? raw.slot?.id ?? null;
+  const isPrivate = !scheduleSlotId;
+
+  const startTime = raw.startTime ?? raw.date ?? raw.ScheduleSlot?.date ?? null;
+
+  const experienceId =
+    raw.experienceId ??
+    raw.slot?.experienceId ??
+    raw.Experience?.id ??
+    raw.experience?.id ??
+    null;
+
+  const experienceName =
+    raw.experienceName ??
+    raw.customExperienceName ??
+    raw.Experience?.name ??
+    raw.experience?.name ??
+    null;
+
+  const u = raw.user || raw.User || {};
+  const pc =
+    raw.primary_contact || raw.primaryContact || raw.guestSnapshot || {};
+
+  const guestName =
+    [u?.name, u?.surname].filter(Boolean).join(" ").trim() ||
+    pc?.name ||
+    [pc?.firstName, pc?.lastName].filter(Boolean).join(" ").trim() ||
+    null;
+
+  const guest = {
+    name: guestName,
+    email: u?.email || pc?.email || null,
+    phone: u?.phone || pc?.phone || null,
+  };
+
+  const counts = raw.counts || {
+    adults:
+      (Number.isFinite(raw.adults) ? raw.adults : null) ??
+      (Number.isFinite(raw.adultsCount) ? raw.adultsCount : null) ??
+      0,
+    kids:
+      (Number.isFinite(raw.kids) ? raw.kids : null) ??
+      (Number.isFinite(raw.kidsCount) ? raw.kidsCount : null) ??
+      0,
+  };
+  if (!Number.isFinite(counts.total)) {
+    counts.total = (Number(counts.adults) || 0) + (Number(counts.kids) || 0);
+  }
+
+  const unitPrices = {
+    adult: Number.isFinite(raw.unitPriceAdult) ? raw.unitPriceAdult : null,
+    kid: Number.isFinite(raw.unitPriceKid) ? raw.unitPriceKid : null,
+  };
+
+  const money = {
+    currency: raw.currency || "EUR",
+    totalPaidAmount: Number.isFinite(raw.totalPaidAmount)
+      ? raw.totalPaidAmount
+      : null,
+    totalAmount: Number.isFinite(raw.totalAmount) ? raw.totalAmount : null,
+    discountAmount: Number.isFinite(raw.discountAmount)
+      ? raw.discountAmount
+      : null,
+  };
+
+  const promo = extractPromoFromRaw(raw, unitPrices, counts);
+
+  const payments = {
+    stripeSessionId:
+      raw.payments?.stripeSessionId ?? raw.stripeSessionId ?? null,
+    stripePaymentIntentId:
+      raw.payments?.stripePaymentIntentId ?? raw.stripePaymentIntentId ?? null,
+    paymentMethod: raw.payments?.paymentMethod ?? raw.paymentMethod ?? null,
+  };
+
+  return {
+    id: raw.id,
+    code: raw.code || (raw.id ? `B-${String(raw.id).padStart(6, "0")}` : null),
+
+    status: raw.status || "confirmed",
+    createdAt: raw.createdAt || raw.created_at || null,
+    updatedAt: raw.updatedAt || raw.updated_at || null,
+    notes: raw.notes ?? null,
+    source: raw.source || null,
+
+    isPrivate,
+    scheduleSlotId,
+
+    startTime,
+    duration: raw.duration ?? null,
+
+    experience: {
+      id: experienceId,
+      name: experienceName || (isPrivate ? "Private booking" : null),
+      location: raw.experience?.location ?? null,
+      isCustom: isPrivate || !experienceId,
+    },
+
+    guest,
+    guestSnapshot: pc,
+
+    counts,
+    numberOfPeople: Number.isFinite(raw.numberOfPeople)
+      ? raw.numberOfPeople
+      : counts.total,
+    attendees: Array.isArray(raw.attendees) ? raw.attendees : [],
+
+    unitPrices,
+    money,
+    payments,
+
+    promo,
+
+    currency: raw.currency,
+    unitPriceAdult: raw.unitPriceAdult,
+    unitPriceKid: raw.unitPriceKid,
+    totalPaidAmount: raw.totalPaidAmount,
+    customExperienceName: raw.customExperienceName ?? null,
+  };
+}
+
+// Stripe summary helper (collected/refunded/net)
+const normalizeStripeSummary = (raw, fallbackCurrency) => {
+  const empty = {
+    currency: (fallbackCurrency || "EUR").toUpperCase(),
+    collectedCents: 0,
+    refundedCents: 0,
+    netCents: 0,
+    refunds: [],
+  };
+  if (!raw) return empty;
+
+  const unwrapPI = (x) => {
+    if (!x || typeof x !== "object") return null;
+    if (x.object === "payment_intent") return x;
+    if (x.payment_intent && typeof x.payment_intent === "object")
+      return x.payment_intent;
+    if (x.paymentIntent && typeof x.paymentIntent === "object")
+      return x.paymentIntent;
+    if (x.item && typeof x.item === "object") return unwrapPI(x.item);
+    if (x.data && x.data.object) return unwrapPI(x.data.object);
+    return x;
+  };
+
+  const pi = unwrapPI(raw);
+
+  const baseCurrency = (
+    pi?.currency ||
+    raw?.currency ||
+    raw?.charges?.data?.[0]?.currency ||
+    fallbackCurrency ||
+    "EUR"
+  ).toUpperCase();
+
+  const charges = Array.isArray(pi?.charges?.data)
+    ? pi.charges.data
+    : Array.isArray(raw?.charges?.data)
+    ? raw.charges.data
+    : [];
+
+  let collectedCents = Number(pi?.amount_received) || 0;
+  if (!collectedCents && charges.length) {
+    collectedCents = charges.reduce(
+      (sum, c) => sum + Number(c?.amount_captured ?? c?.amount ?? 0),
+      0
+    );
+  }
+
+  let refundObjs = [];
+  if (Array.isArray(raw?.refunds?.data)) refundObjs = raw.refunds.data;
+  else if (Array.isArray(pi?.refunds?.data)) refundObjs = pi.refunds.data;
+  else if (Array.isArray(raw?.refunds)) refundObjs = raw.refunds;
+
+  if (charges.length) {
+    charges.forEach((c) => {
+      const rs = Array.isArray(c?.refunds?.data)
+        ? c.refunds.data
+        : Array.isArray(c?.refunds)
+        ? c.refunds
+        : [];
+      if (rs.length) {
+        refundObjs.push(...rs);
+      } else if (Number(c?.amount_refunded) > 0) {
+        refundObjs.push({
+          id: `${c.id}-refund`,
+          amount: Number(c.amount_refunded),
+          currency: (c.currency || baseCurrency).toUpperCase(),
+          created: Number(c.created || 0),
+          status: "succeeded",
+          reason: "",
+          _synthetic: true,
+        });
+      }
+    });
+  }
+
+  if (!refundObjs.length && charges.length) {
+    const sumRef = charges.reduce(
+      (s, c) => s + Number(c?.amount_refunded || 0),
+      0
+    );
+    if (sumRef > 0) {
+      refundObjs.push({
+        id: "refund-total",
+        amount: sumRef,
+        currency: baseCurrency,
+        created: Number(pi?.created || charges[0]?.created || 0),
+        status: "succeeded",
+        reason: "Refund (summary)",
+        _synthetic: true,
+      });
+    }
+  }
+
+  const refundedCents = refundObjs.reduce(
+    (s, r) => s + Number(r?.amount || 0),
+    0
+  );
+  const netCents = Math.max(0, collectedCents - refundedCents);
+
+  const refunds = refundObjs
+    .map((r) => ({
+      id: r.id,
+      amount: Number(r.amount || 0),
+      currency: (r.currency || baseCurrency).toUpperCase(),
+      created: Number(r.created || 0),
+      status: r.status || (r._synthetic ? "succeeded" : ""),
+      reason:
+        r.reason ||
+        r?.metadata?.reason ||
+        (r._synthetic ? "Refund (summary)" : ""),
+    }))
+    .sort((a, b) => b.created - a.created);
+
+  return {
+    currency: baseCurrency,
+    collectedCents,
+    refundedCents,
+    netCents,
+    refunds,
+  };
+};
+
+const fmtTs = (sec) =>
+  sec
+    ? new Date(sec * 1000).toLocaleString("en-GB", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "-";
+
+/* ------------------------------ Page ------------------------------ */
+export default function ReservationDetailPage() {
+  const router = useRouter();
+  const params = useParams();
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
+
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const piId = useMemo(
+    () =>
+      item?.payments?.stripePaymentIntentId ||
+      item?.stripePaymentIntentId ||
+      null,
+    [item]
+  );
+
+  // Modal state
+  const [showCancel, setShowCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [showStripeSession, setShowStripeSession] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
+  const [showReschedule, setShowReschedule] = useState(false);
+
+  const [slots, setSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotFrom, setSlotFrom] = useState(() => toDateInput(new Date()));
+  const [slotTo, setSlotTo] = useState(() =>
+    toDateInput(plusDays(new Date(), 60))
+  );
+  const [targetSlotId, setTargetSlotId] = useState("");
+  const [rev, setRev] = useState(0);
+
+  // Stripe state
+  const [stripe, setStripe] = useState(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [stripeErr, setStripeErr] = useState("");
+
+  /* -------------------------- data fetching -------------------------- */
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch(`/api/admin/reservations/${id}`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!res.ok) {
+          throw new Error(
+            (await res.json().catch(() => ({})))?.error || "Failed to load"
+          );
+        }
+        const { item } = await res.json();
+        setItem(normalizeBooking(item));
+      } catch (e) {
+        setError(e.message || "Failed to load");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [id]);
+
+  // Fetch Stripe PI when present, and when pricing editor saves (rev++)
+  useEffect(() => {
+    if (!piId) {
+      setStripe(null);
+      setStripeErr("");
+      return;
+    }
+
+    let aborted = false;
+    (async () => {
+      try {
+        setStripeLoading(true);
+        setStripeErr("");
+        const res = await fetch(`/api/admin/payments/${piId}`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j?.error || "Failed to load payment");
+        if (!aborted) setStripe(j?.item || j);
+      } catch (e) {
+        if (!aborted) {
+          setStripe(null);
+          setStripeErr(e?.message || "Failed to load payment");
+        }
+      } finally {
+        if (!aborted) setStripeLoading(false);
+      }
+    })();
+
+    return () => {
+      aborted = true;
+    };
+  }, [piId, rev]);
+
+  useEffect(() => {
+    if (!showPricing) return;
+
+    const scrollY = window.scrollY;
+    const original = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width,
+      overflow: document.documentElement.style.overflow,
+      paddingRight: document.documentElement.style.paddingRight,
+    };
+
+    const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
+    if (scrollbarW > 0) {
+      document.documentElement.style.paddingRight = `${scrollbarW}px`;
+    }
+
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.position = original.position;
+      document.body.style.top = original.top;
+      document.body.style.width = original.width;
+      document.documentElement.style.overflow = original.overflow;
+      document.documentElement.style.paddingRight = original.paddingRight;
+      window.scrollTo(0, scrollY);
+    };
+  }, [showPricing]);
+
+  /* ------------------------------ actions ------------------------------ */
+  async function cancelBooking() {
+    const res = await fetch(`/api/admin/reservations/${item.id}/cancel`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ reason: cancelReason }),
+    });
+    if (!res.ok) {
+      throw new Error(
+        (await res.json().catch(() => ({})))?.error || "Cancellation failed"
+      );
+    }
+    setItem((curr) => ({ ...curr, status: "cancelled" }));
+    setShowCancel(false);
+    toast.success("Reservation cancelled");
+  }
+
+  async function loadSlots() {
+    if (!item || item?.isPrivate || !item?.experience?.id) {
+      setSlots([]);
+      return;
+    }
+    setSlotsLoading(true);
+    try {
+      const qs = new URLSearchParams({
+        experienceId: String(item.experience.id),
+      });
+      if (slotFrom) qs.set("from", slotFrom);
+      if (slotTo) qs.set("to", slotTo);
+      const res = await fetch(`/api/admin/schedule/slots?${qs.toString()}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        throw new Error(
+          (await res.json().catch(() => ({})))?.error ||
+            "Failed to load availability"
+        );
+      }
+      const payload = await res.json();
+      setSlots(payload?.items || []);
+    } catch (e) {
+      toast.error(e.message || "Failed to load availability");
+    } finally {
+      setSlotsLoading(false);
+    }
+  }
+
+  async function submitReschedule() {
+    if (!targetSlotId) return toast.error("Select a new slot");
+    const res = await fetch(`/api/admin/reservations/${item.id}/reschedule`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ scheduleSlotId: Number(targetSlotId) }),
+    });
+    if (!res.ok) {
+      throw new Error(
+        (await res.json().catch(() => ({})))?.error || "Reschedule failed"
+      );
+    }
+    const payload = await res.json();
+    setItem((curr) => ({
+      ...curr,
+      startTime: payload?.newStartTime || curr.startTime,
+    }));
+    setShowReschedule(false);
+    toast.success("Reservation rescheduled");
+  }
+
+  /* ----------------------- derived UI state ----------------------- */
+  const statusNorm = String(item?.status || "").toLowerCase();
+  const isCancelled = statusNorm === "cancelled";
+  const isPrivate = !!item?.isPrivate;
+
+  const moneyCurrency = item?.money?.currency || "EUR";
+
+  const paidTotal =
+    typeof item?.money?.totalPaidAmount === "number"
+      ? item.money.totalPaidAmount
+      : Number(item?.money?.totalAmount) || 0;
+
+  const unitPriceAdult = Number(item?.unitPrices?.adult ?? 0);
+  const unitPriceKid = Number(item?.unitPrices?.kid ?? 0);
+  const adults = Number(item?.counts?.adults ?? 0);
+  const kids = Number(item?.counts?.kids ?? 0);
+
+  const estimate = +(adults * unitPriceAdult + kids * unitPriceKid).toFixed(2);
+
+  const promoCode = item?.promo?.code || null;
+  const discountValue = Number(item?.promo?.discountAmount || 0);
+  const grandTotal = Math.max(0, +(estimate - discountValue).toFixed(2));
+  const balance = +(
+    grandTotal - (Number.isFinite(paidTotal) ? paidTotal : 0)
+  ).toFixed(2);
+
+  const guestName = (item?.guest?.name || "").trim() || "";
+  const guestInitials = (guestName || "-")
+    .split(" ")
+    .filter(Boolean)
+    .map((x) => x[0])
+    .slice(0, 2)
+    .join("");
+
+  const priceAdult = item?.unitPrices?.adult ?? null;
+  const priceKid = item?.unitPrices?.kid ?? null;
+  const currency = moneyCurrency;
+
+  const stripeSummary = useMemo(
+    () => normalizeStripeSummary(stripe, item?.money?.currency || "EUR"),
+    [stripe, item?.money?.currency]
+  );
+  const {
+    currency: stripeCurrency,
+    collectedCents,
+    refundedCents,
+    netCents,
+    refunds,
+  } = stripeSummary;
+  // const paymentMethod = useMemo(
+  //   () => extractPaymentMethodSummary(stripe),
+  //   [stripe]
+  // );
+
+  const hasPI = Boolean(item?.payments?.stripePaymentIntentId);
+  const heroShowLoading = hasPI && stripeLoading;
+  const heroValue =
+    hasPI && stripe ? minorToMajor(netCents, stripeCurrency) : paidTotal;
+  const heroCurrency = hasPI && stripe ? stripeCurrency : moneyCurrency;
+  const heroLabel = hasPI
+    ? "Net via Stripe (after refunds)"
+    : typeof item?.money?.totalPaidAmount === "number"
+    ? "Total paid"
+    : "Total";
+  const paymentMethod = item?.payments?.paymentMethod || null;
+  const paymentCard = paymentMethod?.card || null;
+
+  const sourceBadge = item?.source ? (
+    <span
+      className={cx(
+        "ml-2 rounded-full border px-2 py-0.5 text-xs",
+        item.source === "admin" &&
+          "bg-purple-50 border-purple-200 text-purple-700",
+        item.source === "web" && "bg-blue-50 border-blue-200 text-blue-700",
+        item.source === "phone" &&
+          "bg-amber-50 border-amber-200 text-amber-800",
+        !["admin", "web", "phone"].includes(item.source) &&
+          "bg-neutral-100 border-neutral-200 text-neutral-600"
+      )}
+    >
+      {item.source}
+    </span>
+  ) : null;
+
+  /* ------------------------------ UI ------------------------------ */
+  return (
+    <div className="pb-16 min-h-screen bg-gradient-to-b from-neutral-50 to-white">
+      {/* sticky header */}
+      <div className="rounded-b-3xl sticky top-0 z-40 border-b bg-white/75 backdrop-blur supports-[backdrop-filter]:bg-white/55 print:hidden">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => router.push("/admin/bookings")}
+              className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back
+            </button>
+            <div className="ml-1 truncate text-sm text-neutral-600">
+              {item?.code ? (
+                <span className="font-mono">{item.code}</span>
+              ) : (
+                <span className="text-neutral-400">#{id}</span>
+              )}
+              {sourceBadge}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <IconButton
+              onClick={() => {
+                const ok =
+                  typeof navigator !== "undefined" &&
+                  navigator.clipboard?.writeText;
+                if (ok) {
+                  navigator.clipboard.writeText(window.location.href);
+                  toast.success("Link copied");
+                } else {
+                  toast.error("Copy not supported by this browser");
+                }
+              }}
+              title="Copy link"
+              ariaLabel="Copy link"
+            >
+              <Copy className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              onClick={() => window.print()}
+              title="Print"
+              ariaLabel="Print"
+            >
+              <Printer className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              onClick={() => setShowReschedule(true)}
+              title="Reschedule"
+              ariaLabel="Reschedule reservation"
+              disabled={isCancelled || isPrivate}
+              className="hover:bg-amber-50"
+            >
+              <CalendarClock className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              onClick={() => setShowCancel(true)}
+              title="Cancel"
+              ariaLabel="Cancel reservation"
+              disabled={isCancelled}
+              className="hover:bg-red-50"
+            >
+              <XCircle className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              onClick={() => setShowPricing(true)}
+              title="Edit pricing"
+              ariaLabel="Edit pricing"
+              disabled={isCancelled}
+              className="hover:bg-emerald-50"
+            >
+              <DollarSign className="h-4 w-4" />
+            </IconButton>
+          </div>
+        </div>
+      </div>
+
+      {/* Pricing modal with framer */}
+      <AnimatePresence>
+        {showPricing && (
+          <motion.div
+            key="pricing-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 overflow-y-auto overscroll-contain"
+            onClick={() => setShowPricing(false)}
+          >
+            <motion.div
+              initial={{ y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 12, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 500, damping: 40 }}
+              className="w-full max-w-2xl rounded-2xl border border-black/10 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-[#111] max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Edit pricing & payment"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold uppercase tracking-wide opacity-70">
+                  Pricing & payment
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowPricing(false)}
+                  className="rounded-lg border border-black/10 px-3 py-1 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+                >
+                  Close
+                </button>
+              </div>
+
+              <BookingPricingEditor
+                bookingId={id}
+                onClose={() => setShowPricing(false)}
+                onSaved={() => setRev((v) => v + 1)}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="mx-auto max-w-5xl px-4">
+        {loading ? (
+          <Skeleton />
+        ) : error ? (
+          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-8 text-red-700">
+            {error}
+          </div>
+        ) : !item ? (
+          <div className="mt-6 rounded-2xl border p-8 text-neutral-600">
+            Reservation not found.
+          </div>
+        ) : (
+          <div className="mt-6 space-y-6">
+            {/* Hero */}
+            <div className="overflow-hidden rounded-3xl border bg-white shadow-sm">
+              <div className="relative">
+                <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-teal-400 via-amber-400 to-pink-400" />
+                <div className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-center">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="grid h-12 w-12 place-items-center rounded-2xl border bg-neutral-50 font-semibold text-neutral-700">
+                      {guestInitials || "?"}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h1 className="truncate text-lg font-semibold text-neutral-900">
+                          {guestName || "No name"}
+                        </h1>
+                        <StatusBadge status={statusNorm} />
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-600">
+                        <Chip icon={<Users className="h-3.5 w-3.5" />}>
+                          {item.counts?.adults ?? 0}
+                          {typeof item.counts?.kids === "number"
+                            ? ` + ${item.counts.kids}`
+                            : ""}
+                          {typeof item.counts?.teens === "number"
+                            ? ` + ${item.counts.teens}`
+                            : ""}
+                        </Chip>
+                        <Dot />
+                        <Chip icon={<CalendarClock className="h-3.5 w-3.5" />}>
+                          {fmtDateShort(item.startTime)}
+                        </Chip>
+                        {item.experience?.name ? (
+                          <>
+                            <Dot />
+                            <Chip icon={<MapPin className="h-3.5 w-3.5" />}>
+                              {item.experience?.name}
+                              {isPrivate && (
+                                <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                  Private
+                                </span>
+                              )}
+                            </Chip>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-semibold text-neutral-900">
+                      {heroShowLoading
+                        ? "…"
+                        : fmtMoney(heroValue, heroCurrency)}
+                    </div>
+                    <div className="text-xs text-neutral-500">{heroLabel}</div>
+
+                    {paymentMethod?.label && (
+                      <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-700">
+                        <CreditCard className="h-3 w-3" />
+                        {paymentMethod.label}
+                      </div>
+                    )}
+
+                    {stripeErr && (
+                      <div className="mt-1 text-[11px] text-red-500">
+                        {stripeErr}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Grid cards */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Card title="Reservation info">
+                <Row label="Date">{fmtDateLong(item.startTime)}</Row>
+                <Row label="Experience">
+                  {item.experience?.name || "-"}
+                  {isPrivate && (
+                    <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                      Private
+                    </span>
+                  )}
+                </Row>
+                <Row
+                  label={
+                    <span className="inline-flex items-center gap-1">
+                      <MapPin className="h-4 w-4" /> Location
+                    </span>
+                  }
+                >
+                  {item.experience?.location || "-"}
+                </Row>
+                <Row label="Duration">
+                  {Number.isFinite(item.duration)
+                    ? `${item.duration} min`
+                    : "-"}
+                </Row>
+                <Row label="Code" mono>
+                  <Copyable value={item.code} empty="-" />
+                </Row>
+                <Row label="Price / adult">
+                  {fmtMoney(priceAdult, currency)}
+                </Row>
+                <Row label="Price / kid">{fmtMoney(priceKid, currency)}</Row>
+                <Row label="Created">{fmtDateShort(item.createdAt)}</Row>
+                <Row label="Updated">{fmtDateShort(item.updatedAt)}</Row>
+                <Row label="Source" mono>
+                  {item.source || "-"}
+                </Row>
+              </Card>
+
+              <Card title="Customer">
+                <Row
+                  label={
+                    <span className="inline-flex items-center gap-1">
+                      <User2 className="h-4 w-4" /> Name
+                    </span>
+                  }
+                >
+                  {guestName || "-"}
+                </Row>
+                <Row
+                  label={
+                    <span className="inline-flex items-center gap-1">
+                      <Mail className="h-4 w-4" /> Email
+                    </span>
+                  }
+                  mono
+                >
+                  {item.guest?.email ? (
+                    <a
+                      className="hover:underline"
+                      href={`mailto:${item.guest.email}`}
+                    >
+                      {item.guest.email}
+                    </a>
+                  ) : (
+                    "-"
+                  )}
+                </Row>
+                <Row
+                  label={
+                    <span className="inline-flex items-center gap-1">
+                      <Phone className="h-4 w-4" /> Phone
+                    </span>
+                  }
+                  mono
+                >
+                  {item.guest?.phone ? (
+                    <a
+                      className="hover:underline"
+                      href={`tel:${item.guest.phone}`}
+                    >
+                      {item.guest.phone}
+                    </a>
+                  ) : (
+                    "-"
+                  )}
+                </Row>
+                <Row label="Notes">{item.notes || "-"}</Row>
+              </Card>
+
+              <Card title="Payment">
+                <Row label="Payment status">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={statusNorm} />
+                  </div>
+                </Row>
+                <Row label="Payment method">
+                  {paymentMethod?.label
+                    ? paymentMethod.label
+                    : hasPI
+                    ? stripeLoading
+                      ? "…"
+                      : "Card"
+                    : "—"}
+                </Row>
+
+                {paymentCard && (
+                  <Row label="Card details">
+                    <div className="space-y-0.5 text-xs text-neutral-800">
+                      <div>
+                        {(paymentCard.brand || "Card").toUpperCase()}
+                        {paymentCard.last4 && (
+                          <span className="ml-2">•••• {paymentCard.last4}</span>
+                        )}
+                      </div>
+
+                      {(paymentCard.expMonth || paymentCard.expYear) && (
+                        <div className="text-neutral-600">
+                          Expires{" "}
+                          {paymentCard.expMonth
+                            ? String(paymentCard.expMonth).padStart(2, "0")
+                            : "??"}
+                          /
+                          {paymentCard.expYear
+                            ? String(paymentCard.expYear).slice(-2)
+                            : "??"}
+                        </div>
+                      )}
+
+                      {paymentCard.funding && (
+                        <div className="text-neutral-500 capitalize">
+                          {paymentCard.funding} card
+                        </div>
+                      )}
+
+                      {paymentCard.country && (
+                        <div className="text-neutral-500">
+                          Issuer country: {paymentCard.country}
+                        </div>
+                      )}
+                    </div>
+                  </Row>
+                )}
+
+                {promoCode ? (
+                  <Row label="Promo code" mono>
+                    {promoCode}
+                  </Row>
+                ) : null}
+                {discountValue > 0 ? (
+                  <Row label="Discount" mono>
+                    −{fmtMoney(discountValue, moneyCurrency)}
+                  </Row>
+                ) : null}
+
+                <Row
+                  label={
+                    <span className="inline-flex items-center gap-1">
+                      <CreditCard className="h-4 w-4" /> Stripe Session
+                    </span>
+                  }
+                  mono
+                >
+                  {item?.payments?.stripeSessionId ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => setShowStripeSession(true)}
+                        className=""
+                      >
+                        Show
+                      </Button>
+                    </div>
+                  ) : (
+                    "-"
+                  )}
+                </Row>
+
+                <Row
+                  label={
+                    <span className="inline-flex items-center gap-1">
+                      <CreditCard className="h-4 w-4" /> Payment Intent
+                    </span>
+                  }
+                  mono
+                >
+                  <Copyable
+                    value={item.payments?.stripePaymentIntentId}
+                    empty="-"
+                  />
+                </Row>
+
+                {hasPI ? (
+                  <>
+                    <Row label="Stripe collected" mono>
+                      {stripeLoading
+                        ? "…"
+                        : fmtMoney(
+                            minorToMajor(collectedCents, stripeCurrency),
+                            stripeCurrency
+                          )}
+                    </Row>
+                    <Row label="Stripe refunded" mono>
+                      {stripeLoading
+                        ? "…"
+                        : fmtMoney(
+                            minorToMajor(refundedCents, stripeCurrency),
+                            stripeCurrency
+                          )}
+                    </Row>
+                    <Row label="Stripe net (after refunds)" mono>
+                      {stripeLoading
+                        ? "…"
+                        : fmtMoney(
+                            minorToMajor(netCents, stripeCurrency),
+                            stripeCurrency
+                          )}
+                    </Row>
+
+                    {refunds.length > 0 && (
+                      <div className="mt-2 rounded-xl border bg-neutral-50/60 p-3">
+                        <div className="mb-1 text-xs font-semibold text-neutral-700">
+                          Refunds
+                        </div>
+                        <ul className="divide-y">
+                          {refunds.map((r) => (
+                            <li
+                              key={r.id}
+                              className="py-1.5 text-xs flex items-center justify-between gap-3"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-neutral-600">
+                                  <code className="rounded bg-white px-1 py-0.5">
+                                    {r.id}
+                                  </code>
+                                  <span className="mx-1">•</span>
+                                  <span className="capitalize">
+                                    {r.status || "unknown"}
+                                  </span>
+                                  {r.reason ? (
+                                    <span className="opacity-70">
+                                      {" "}
+                                      — {r.reason}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="opacity-70">
+                                  {fmtTs(r.created)}
+                                </div>
+                              </div>
+                              <div className="font-semibold text-rose-700">
+                                -
+                                {fmtMoney(
+                                  minorToMajor(r.amount, r.currency),
+                                  r.currency
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                ) : null}
+
+                <Row
+                  label={
+                    typeof item?.money?.totalPaidAmount === "number"
+                      ? "Total paid (editor)"
+                      : "Total (editor)"
+                  }
+                  mono
+                >
+                  {fmtMoney(paidTotal, moneyCurrency)}
+                  {balance < 0 && (
+                    <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      Overpaid by{" "}
+                      <strong>
+                        {fmtMoney(Math.abs(balance), moneyCurrency)}
+                      </strong>
+                      . Consider issuing a refund or keeping it as credit.
+                    </div>
+                  )}
+                </Row>
+              </Card>
+
+              {Array.isArray(item?.attendees) && item.attendees.length > 0 && (
+                <Card title="Attendees">
+                  <div className="divide-y rounded-xl border bg-neutral-50/60">
+                    {item.attendees.map((a, idx) => {
+                      const name =
+                        a?.name ||
+                        [a?.firstName, a?.lastName].filter(Boolean).join(" ") ||
+                        `#${idx + 1}`;
+                      const type = a?.type || a?.category || "adult";
+                      const age =
+                        typeof a?.age === "number" && Number.isFinite(a.age)
+                          ? a.age
+                          : null;
+
+                      const notes =
+                        (typeof a?.notes === "string" && a.notes.trim()) ||
+                        (typeof a?.allergies === "string" &&
+                          a.allergies.trim()) ||
+                        (typeof a?.dietary === "string" && a.dietary.trim()) ||
+                        (typeof a?.comment === "string" && a.comment.trim()) ||
+                        null;
+
+                      return (
+                        <div
+                          key={idx}
+                          className="px-3 py-2 hover:bg-neutral-100/60"
+                        >
+                          <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="truncate">{name}</span>
+                            <div className="flex items-center gap-2">
+                              {age !== null && (
+                                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
+                                  {age}
+                                </span>
+                              )}
+                              <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
+                                {type}
+                              </span>
+                            </div>
+                          </div>
+
+                          {notes && (
+                            <div className="mt-1 text-xs text-neutral-600">
+                              Notes: {notes}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Stripe session modal */}
+      {showStripeSession && (
+        <Modal
+          onClose={() => setShowStripeSession(false)}
+          title="Stripe Session ID"
+        >
+          <div className="space-y-3">
+            <textarea
+              readOnly
+              value={item?.payments?.stripeSessionId || ""}
+              rows={8}
+              className="mt-1 w-full rounded-xl border p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setShowStripeSession(false)}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  const v = item?.payments?.stripeSessionId || "";
+                  if (navigator?.clipboard?.writeText) {
+                    navigator.clipboard.writeText(v);
+                    toast.success("Copied");
+                  } else {
+                    toast.error("Copy not supported");
+                  }
+                }}
+              >
+                Copy
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Cancel modal */}
+      {showCancel && (
+        <Modal onClose={() => setShowCancel(false)} title="Cancel reservation">
+          <div className="space-y-4">
+            <p className="text-sm text-neutral-600">
+              Are you sure you want to cancel this reservation?{" "}
+              {isPrivate
+                ? "This will release the private time."
+                : "This will free up seats for this slot."}
+            </p>
+            <label className="block text-sm">
+              <span className="text-neutral-700">Reason (optional)</span>
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                rows={3}
+                placeholder="Add an internal note for this cancellation…"
+              />
+            </label>
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setShowCancel(false)}>
+                Close
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() =>
+                  cancelBooking().catch((e) => toast.error(e.message))
+                }
+              >
+                Cancel reservation
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Reschedule modal */}
+      {showReschedule && !isPrivate && (
+        <Modal
+          onClose={() => setShowReschedule(false)}
+          title="Reschedule reservation"
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div>
+                <label className="text-xs text-neutral-600">From</label>
+                <input
+                  type="date"
+                  value={slotFrom}
+                  onChange={(e) => setSlotFrom(e.target.value)}
+                  className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-600">To</label>
+                <input
+                  type="date"
+                  value={slotTo}
+                  onChange={(e) => setSlotTo(e.target.value)}
+                  className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
+                />
+              </div>
+              <div className="flex items-end">
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={loadSlots}
+                  disabled={slotsLoading}
+                >
+                  {slotsLoading ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                    </span>
+                  ) : (
+                    "Load availability"
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border bg-neutral-50/60">
+              <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs text-neutral-500">Current slot</div>
+                  <div className="text-sm">{fmtDateShort(item?.startTime)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-neutral-500">New slot</div>
+                  <select
+                    value={targetSlotId}
+                    onChange={(e) => setTargetSlotId(e.target.value)}
+                    className="mt-1 w-full rounded-xl border bg-white p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                  >
+                    <option value="">— Select —</option>
+                    {slots.length === 0 && !slotsLoading && (
+                      <option value="" disabled>
+                        No availability loaded
+                      </option>
+                    )}
+                    {slotsLoading ? (
+                      <option value="" disabled>
+                        Loading…
+                      </option>
+                    ) : (
+                      slots.map((s) => (
+                        <option
+                          key={s.id}
+                          value={s.id}
+                          disabled={(s.available ?? 0) <= 0}
+                        >
+                          {fmtDateShort(s.date)} — {s.experienceName} •
+                          Available: {s.available}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setShowReschedule(false)}>
+                Close
+              </Button>
+              <Button
+                variant="amber"
+                onClick={() =>
+                  submitReschedule().catch((e) => toast.error(e.message))
+                }
+                disabled={!targetSlotId}
+              >
+                Reschedule
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* print helpers */}
+      <style jsx global>{`
+        @media print {
+          .print\:hidden {
+            display: none !important;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ---------------------------- Subcomponents ---------------------------- */
+function Card({ title, children }) {
+  return (
+    <div className="rounded-3xl border bg-white shadow-sm hover:shadow-md transition-shadow">
+      <div className="border-b px-4 py-3 text-sm font-semibold text-neutral-800">
+        {title}
+      </div>
+      <div className="space-y-2 p-4">{children}</div>
+    </div>
+  );
+}
+
+function Row({ label, children, mono }) {
+  return (
+    <div className="flex items-start justify-between gap-4 text-sm">
+      <div className="min-w-[160px] pt-0.5 text-neutral-500">{label}</div>
+      <div className={cx("flex-1 text-neutral-900", mono && "font-mono")}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const s = String(status || "").toLowerCase();
+  const map = {
+    paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    confirmed: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    completed: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    checked_in: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    pending: "bg-amber-100 text-amber-800 border-amber-200",
+    cancelled: "bg-red-100 text-red-800 border-red-200",
+    draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
+    converted: "bg-sky-100 text-sky-800 border-sky-200",
+  };
+  const dotMap = {
+    paid: "bg-emerald-500",
+    confirmed: "bg-emerald-500",
+    completed: "bg-emerald-500",
+    checked_in: "bg-emerald-500",
+    pending: "bg-amber-500",
+    cancelled: "bg-red-500",
+    draft: "bg-neutral-400",
+    converted: "bg-sky-500",
+  };
+  const labelMap = {
+    paid: "Paid",
+    confirmed: "Confirmed",
+    completed: "Completed",
+    checked_in: "Checked-in",
+    pending: "Pending",
+    cancelled: "Cancelled",
+    draft: "Draft",
+    converted: "Converted",
+  };
+  const cls = map[s] || "bg-neutral-100 text-neutral-700 border-neutral-200";
+  const dot = dotMap[s] || "bg-neutral-400";
+  const label = labelMap[s] || status || "-";
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+        cls
+      )}
+    >
+      <span className={cx("h-1.5 w-1.5 rounded-full", dot)} />
+      {label}
+    </span>
+  );
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 print:hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h3 className="text-base font-semibold text-neutral-800">{title}</h3>
+          <button
+            className="rounded-lg p-1 hover:bg-neutral-100"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Skeleton() {
+  return (
+    <div className="mx-auto mt-6 max-w-5xl space-y-4">
+      <div className="h-24 animate-pulse rounded-3xl bg-neutral-100" />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
+        <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
+        <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
+        <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
+      </div>
+    </div>
+  );
+}
+
+function IconButton({ children, className, title, ariaLabel, ...props }) {
+  return (
+    <button
+      className={cx(
+        "rounded-xl border p-2 text-sm hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 disabled:opacity-50",
+        className
+      )}
+      title={title}
+      aria-label={ariaLabel || title}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Button({ variant = "default", className, children, ...props }) {
+  const base =
+    "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50";
+  const variants = {
+    default:
+      "border-neutral-200 bg-white hover:bg-neutral-50 focus-visible:ring-neutral-300",
+    ghost:
+      "border-transparent bg-transparent hover:bg-neutral-50 focus-visible:ring-neutral-300",
+    destructive:
+      "border-red-600 bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-300",
+    amber:
+      "border-amber-600 bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-300",
+  };
+  return (
+    <button className={cx(base, variants[variant], className)} {...props}>
+      {children}
+    </button>
+  );
+}
+
+function Chip({ children, icon }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
+      {icon}
+      {children}
+    </span>
+  );
+}
+
+function Dot() {
+  return (
+    <span className="mx-2 inline-block h-1 w-1 rounded-full bg-neutral-300 align-middle" />
+  );
+}
+
+function Copyable({ value, empty = "-" }) {
+  if (!value) return <span>{empty}</span>;
+  return (
+    <span className="group inline-flex max-w-full items-center gap-2">
+      <span className="truncate">{value}</span>
+      <button
+        type="button"
+        onClick={() => {
+          const ok =
+            typeof navigator !== "undefined" && navigator.clipboard?.writeText;
+          if (ok) {
+            navigator.clipboard.writeText(String(value));
+            toast.success("Copied!");
+          } else {
+            toast.error("Copy not supported");
+          }
+        }}
+        className="invisible rounded-lg border p-1 text-xs group-hover:visible hover:bg-neutral-50"
+        title="Copy"
+        aria-label="Copy"
+      >
+        <Copy className="h-3.5 w-3.5" />
+      </button>
+    </span>
+  );
+}

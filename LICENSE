@@ -1,0 +1,42 @@
+LICENSE AGREEMENT FOR OASIS
+
+Copyright (c) 2025, Pantelis Karabetsos  
+All rights reserved.
+
+This software, together with all associated source code, configuration files,
+database schemas, build scripts, assets (including but not limited to images,
+copy, layouts, styles), and documentation (collectively, the “Software”), is
+proprietary to the copyright holder named above.
+
+Except where you have an explicit, prior written agreement with the copyright
+holder, YOU ARE NOT PERMITTED TO:
+
+- Use, copy or reproduce the Software, in whole or in part;
+- Modify, adapt, translate, reverse engineer, decompile, disassemble, or create
+  derivative works based on the Software;
+- Distribute, publish, transmit, sell, license, sublicense, lease, rent, lend,
+  or otherwise make the Software available to any third party;
+- Deploy, host, or run the Software in any public, private, development,
+  staging, or production environment;
+- Use any part of the Software (including individual components such as UI
+  elements, flows, email templates, or database structures) in any commercial
+  or non-commercial project.
+
+NO LICENSE IS GRANTED.
+
+The Software is NOT open-source. Any use, reproduction, modification,
+distribution, hosting, or other exploitation of the Software without prior
+written permission from the copyright holder is strictly prohibited and may
+result in civil and/or criminal liability.
+
+DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OF, OR OTHER DEALINGS IN, THE SOFTWARE.
+
+For permissions, licensing inquiries, or other questions, please contact:  
+contact@pkarabetsos.com
