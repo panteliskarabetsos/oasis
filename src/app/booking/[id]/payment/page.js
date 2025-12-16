@@ -618,8 +618,8 @@ export default function PaymentPage() {
                   </div>
 
                   <p className="mt-3 text-[11px] text-[#7a6a58]">
-                    All taxes included. You’ll receive a confirmation email
-                    after successful payment.
+                    Prices include Greek VAT (24%). You’ll receive a
+                    confirmation email after successful payment.
                   </p>
                 </div>
               </div>
