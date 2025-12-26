@@ -5,48 +5,87 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+
 const MAX_NOTES_LEN = 2000;
+const ALLOWED_ROLES = new Set(["admin", "user"]);
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const err = (msg, status = 500) =>
   NextResponse.json({ error: msg }, { status });
 
-/** Resolve current user and verify admin */
+function normalizeEmail(v) {
+  return String(v || "")
+    .trim()
+    .toLowerCase();
+}
+
+function isEmail(v) {
+  return /^\S+@\S+\.\S+$/.test(String(v || "").trim());
+}
+
+function parseId(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function readJson(req) {
+  try {
+    return await req.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve current auth user and verify admin */
 async function requireAdmin() {
   const supa = await createSupabaseServer();
   const { data, error } = await supa.auth.getUser();
-  if (error || !data?.user) return err("Unauthorized", 401);
+
+  if (error || !data?.user) {
+    return { ok: false, res: err("Unauthorized", 401) };
+  }
 
   const admin = createSupabaseAdmin();
-  if (!admin) return err("Server not configured", 500);
+  if (!admin) {
+    return { ok: false, res: err("Server not configured", 500) };
+  }
 
-  // Quick metadata check
+  const authUser = data.user;
+
+  // Fast path: metadata role
   const roleMeta =
-    data.user?.app_metadata?.role || data.user?.user_metadata?.role;
-  if (roleMeta === "admin") return { admin, authUser: data.user };
+    authUser?.app_metadata?.role || authUser?.user_metadata?.role || null;
 
-  // Fallback: check DB role (by auth_user_id; change to email if needed)
+  if (roleMeta === "admin") {
+    return { ok: true, admin, authUser };
+  }
+
+  // Fallback: DB role check
   const { data: dbUser, error: dbErr } = await admin
     .from("User")
     .select("role")
-    .eq("auth_user_id", data.user.id)
+    .eq("auth_user_id", authUser.id)
     .maybeSingle();
 
   if (dbErr) {
     console.error("[admin/users] role lookup error", dbErr);
-    return err("Server error", 500);
+    return { ok: false, res: err("Server error", 500) };
   }
-  if (dbUser?.role === "admin") return { admin, authUser: data.user };
 
-  return err("Unauthorized", 401);
+  if (dbUser?.role === "admin") {
+    return { ok: true, admin, authUser };
+  }
+
+  return { ok: false, res: err("Forbidden", 403) };
 }
 
 /* ========================== GET (Admin) ========================== */
 export async function GET() {
   const gate = await requireAdmin();
-  if ("body" in gate) return gate;
+  if (!gate.ok) return gate.res;
 
   const { admin } = gate;
+
   try {
     const { data, error } = await admin
       .from("User")
@@ -58,22 +97,19 @@ export async function GET() {
     if (error) throw error;
     return ok(Array.isArray(data) ? data : []);
   } catch (e) {
-    console.error("Failed to fetch users:", e);
+    console.error("[admin/users] GET failed:", e);
     return err("Failed to fetch users", 500);
   }
 }
 
-/* ========================== POST (Admin) ========================= *
- * Creates a Supabase Auth user + profile row in public."User".
- * Accepts: { email, password?, name, surname, phone, role, dateOfBirth }
- * If password is omitted, a strong temporary one is generated.
- */
+/* ========================== POST (Admin) ========================= */
 export async function POST(req) {
   const gate = await requireAdmin();
-  if ("body" in gate) return gate;
+  if (!gate.ok) return gate.res;
 
   const { admin } = gate;
-  const body = await req.json().catch(() => null);
+
+  const body = await readJson(req);
   if (!body) return err("Invalid JSON", 400);
 
   let {
@@ -87,18 +123,35 @@ export async function POST(req) {
     notes,
   } = body;
 
-  if (!email || !name || !surname) {
-    return err("Missing required fields: email, name, surname", 400);
+  email = normalizeEmail(email);
+
+  if (!email || !isEmail(email)) return err("Invalid email", 400);
+  if (!name || !surname)
+    return err("Missing required fields: name, surname", 400);
+
+  if (typeof role !== "string" || !ALLOWED_ROLES.has(role)) {
+    return err("Invalid role", 400);
   }
 
-  email = String(email).trim().toLowerCase();
+  if (password && String(password).length < 8) {
+    return err("Password must be at least 8 characters", 400);
+  }
+
   if (!password) {
-    // generate a temp password (you can switch to invite flow if you prefer)
     password = `Tmp-${Math.random().toString(36).slice(2)}-${Date.now()}`;
   }
 
+  const safeNotes =
+    notes == null
+      ? null
+      : String(notes).trim()
+      ? String(notes).trim().slice(0, MAX_NOTES_LEN)
+      : null;
+
+  let createdAuthUserId = null;
+
   try {
-    // 1) Create auth user
+    // 1) Create Auth user
     const { data: created, error: createErr } =
       await admin.auth.admin.createUser({
         email,
@@ -107,179 +160,249 @@ export async function POST(req) {
         user_metadata: { name, surname, phone, dateOfBirth },
         app_metadata: { role },
       });
+
     if (createErr) {
       const msg = createErr.message || "Failed to create auth user";
-      const isDup =
-        msg.toLowerCase().includes("already") ||
-        msg.toLowerCase().includes("duplicate");
+      const m = msg.toLowerCase();
+      const isDup = m.includes("already") || m.includes("duplicate");
       return err(msg, isDup ? 409 : 500);
     }
-    const authUserId = created.user.id;
+
+    createdAuthUserId = created.user.id;
 
     // 2) Upsert profile row
     const dobTs = dateOfBirth ? `${dateOfBirth}T00:00:00` : null;
+
     const payload = {
-      auth_user_id: authUserId,
+      auth_user_id: createdAuthUserId,
       email,
       password: "<managed-by-auth>",
-      name: name?.trim() || null,
-      surname: surname?.trim() || null,
-      phone: phone?.trim() || null,
-      role: role || "user",
+      name: String(name).trim() || null,
+      surname: String(surname).trim() || null,
+      phone: phone ? String(phone).trim() : null,
+      role,
       dateOfBirth: dobTs,
       updatedAt: new Date().toISOString(),
-      notes: notes?.trim() || null,
+      notes: safeNotes,
     };
 
-    let upsertErr = null;
+    // Try auth_user_id conflict first, fallback to email if no unique index
     let upsertRes = await admin
       .from("User")
       .upsert(payload, { onConflict: "auth_user_id" })
       .select("id")
       .single();
+
     if (upsertRes.error && upsertRes.error.code === "42P10") {
-      // no matching unique index -> retry with email
       upsertRes = await admin
         .from("User")
         .upsert(payload, { onConflict: "email" })
         .select("id")
         .single();
     }
-    upsertErr = upsertRes.error;
-    if (upsertErr) {
-      console.error("[admin/users] profile upsert error", upsertErr);
+
+    if (upsertRes.error) {
+      console.error("[admin/users] profile upsert error", upsertRes.error);
+
+      // rollback auth user (best-effort)
+      try {
+        await admin.auth.admin.deleteUser(createdAuthUserId);
+      } catch (rbErr) {
+        console.warn("[admin/users] rollback auth delete failed", rbErr);
+      }
+
       return err("Failed to save profile", 500);
     }
 
-    return ok({ id: upsertRes.data?.id, authUserId }, 201);
+    return ok({ id: upsertRes.data?.id, authUserId: createdAuthUserId }, 201);
   } catch (e) {
-    console.error("Failed to create user:", e);
+    console.error("[admin/users] POST failed:", e);
+
+    // if we created an auth user but crashed later, try to rollback
+    if (createdAuthUserId) {
+      try {
+        await admin.auth.admin.deleteUser(createdAuthUserId);
+      } catch (rbErr) {
+        console.warn("[admin/users] rollback auth delete failed", rbErr);
+      }
+    }
+
     return err("Failed to create user", 500);
   }
 }
 
 /* ========================== PUT (Admin) ========================== */
-
 export async function PUT(req) {
   const gate = await requireAdmin();
-  if ("body" in gate) return gate;
+  if (!gate.ok) return gate.res;
 
-  const { admin } = gate;
-  const body = await req.json().catch(() => null);
+  const { admin, authUser } = gate;
+
+  const body = await readJson(req);
   if (!body) return err("Invalid JSON", 400);
 
   const { id, email, name, surname, phone, role, dateOfBirth, notes } = body;
-  if (!id) return err("Missing user id", 400);
+
+  const userId = parseId(id);
+  if (!userId) return err("Invalid user id", 400);
+
+  if (
+    role !== undefined &&
+    (typeof role !== "string" || !ALLOWED_ROLES.has(role))
+  ) {
+    return err("Invalid role", 400);
+  }
 
   try {
-    // Load current to get auth_user_id
+    // Load current record
     const { data: current, error: curErr } = await admin
       .from("User")
-      .select("id,auth_user_id,role")
-      .eq("id", Number(id))
+      .select("id,auth_user_id,role,email")
+      .eq("id", userId)
       .single();
+
     if (curErr) throw curErr;
     if (!current) return err("User not found", 404);
 
-    const updates = {
-      updatedAt: new Date().toISOString(),
-    };
-    if (email != null) updates.email = String(email).trim().toLowerCase();
-    if (name != null) updates.name = name?.trim() || null;
-    if (surname != null) updates.surname = surname?.trim() || null;
-    if (phone != null) updates.phone = phone?.trim() || null;
-    if (typeof role === "string") updates.role = role || "user";
-    if (dateOfBirth !== undefined)
-      updates.dateOfBirth = dateOfBirth ? `${dateOfBirth}T00:00:00` : null;
-    if (notes !== undefined) {
-      const t = typeof notes === "string" ? notes : String(notes ?? "");
-      updates.notes = t.trim() ? t.slice(0, MAX_NOTES_LEN) : null;
+    // Prevent self-demotion
+    const isSelf = String(current.auth_user_id) === String(authUser.id);
+    if (isSelf && typeof role === "string" && role !== "admin") {
+      return err("You cannot demote your own admin account.", 400);
     }
+
+    const updates = { updatedAt: new Date().toISOString() };
+
+    if (email != null) {
+      const em = normalizeEmail(email);
+      if (!isEmail(em)) return err("Invalid email", 400);
+      updates.email = em;
+    }
+
+    if (name != null) updates.name = String(name).trim() || null;
+    if (surname != null) updates.surname = String(surname).trim() || null;
+    if (phone != null) updates.phone = String(phone).trim() || null;
+
+    if (typeof role === "string") updates.role = role;
+
+    if (dateOfBirth !== undefined) {
+      updates.dateOfBirth = dateOfBirth ? `${dateOfBirth}T00:00:00` : null;
+    }
+
+    if (notes !== undefined) {
+      const t = String(notes ?? "").trim();
+      updates.notes = t ? t.slice(0, MAX_NOTES_LEN) : null;
+    }
+
     const { data: updated, error: upErr } = await admin
       .from("User")
       .update(updates)
-      .eq("id", Number(id))
+      .eq("id", userId)
       .select(
         "id,auth_user_id,role,email,name,surname,phone,dateOfBirth,createdAt,notes"
       )
       .single();
+
     if (upErr) throw upErr;
 
-    // If role changed, sync to Auth
-    if (
-      typeof role === "string" &&
-      role !== current.role &&
-      updated?.auth_user_id
-    ) {
-      try {
-        await admin.auth.admin.updateUserById(updated.auth_user_id, {
-          app_metadata: { role },
-        });
-      } catch (authSyncErr) {
-        console.warn(
-          "[admin/users] failed to sync role to auth app_metadata",
-          authSyncErr
-        );
+    // Best-effort sync to Auth (role/email/metadata)
+    if (updated?.auth_user_id) {
+      const authPatch = {};
+
+      if (typeof role === "string" && role !== current.role) {
+        authPatch.app_metadata = { role };
+      }
+
+      if (email != null) {
+        const newEmail = normalizeEmail(email);
+        if (newEmail && newEmail !== current.email) authPatch.email = newEmail;
+      }
+
+      // keep metadata in sync too
+      authPatch.user_metadata = {
+        name: updated.name ?? null,
+        surname: updated.surname ?? null,
+        phone: updated.phone ?? null,
+        dateOfBirth: updated.dateOfBirth ?? null,
+      };
+
+      // only call if we actually have something
+      if (Object.keys(authPatch).length > 0) {
+        try {
+          await admin.auth.admin.updateUserById(
+            updated.auth_user_id,
+            authPatch
+          );
+        } catch (syncErr) {
+          console.warn("[admin/users] auth sync failed (non-fatal)", syncErr);
+        }
       }
     }
 
     return ok(updated);
   } catch (e) {
-    console.error("Failed to update user:", e);
+    console.error("[admin/users] PUT failed:", e);
     return err("Failed to update user", 500);
   }
 }
 
-/* ========================= DELETE (Admin) ======================== *
- * Deletes the profile row; attempts to delete Auth user as well.
- * Accepts: { id }
- */
+/* ========================= DELETE (Admin) ======================== */
 export async function DELETE(req) {
   const gate = await requireAdmin();
-  if ("body" in gate) return gate;
+  if (!gate.ok) return gate.res;
 
-  const { admin } = gate;
-  const { id } = await req.json().catch(() => ({}));
-  if (!id) return err("Missing user id", 400);
+  const { admin, authUser } = gate;
+
+  const body = await readJson(req);
+  const userId = parseId(body?.id);
+  if (!userId) return err("Invalid user id", 400);
 
   try {
-    // Load to get auth_user_id
+    // Load target
     const { data: existing, error: exErr } = await admin
       .from("User")
       .select("id,auth_user_id")
-      .eq("id", Number(id))
+      .eq("id", userId)
       .single();
+
     if (exErr) throw exErr;
     if (!existing) return err("User not found", 404);
+
+    // ✅ HARD BLOCK: cannot delete yourself
+    if (String(existing.auth_user_id) === String(authUser.id)) {
+      return err("You cannot delete your own admin account.", 400);
+    }
 
     // Delete profile row
     const { error: delErr } = await admin
       .from("User")
       .delete()
-      .eq("id", Number(id));
+      .eq("id", userId);
+
     if (delErr) {
-      // 23503 => foreign key violation (bookings, etc.)
       if (delErr.code === "23503") {
         return err(
-          "Cannot delete user. User has related records (bookings/favourites). Delete them first.",
+          "Cannot delete user. There are related records referencing this user.",
           400
         );
       }
       throw delErr;
     }
 
-    // Try deleting the auth user (best-effort)
+    // Best-effort: delete auth user
     if (existing.auth_user_id) {
       try {
         await admin.auth.admin.deleteUser(existing.auth_user_id);
       } catch (authDelErr) {
-        console.warn("[admin/users] failed to delete auth user", authDelErr);
+        console.warn(
+          "[admin/users] auth delete failed (non-fatal)",
+          authDelErr
+        );
       }
     }
 
     return ok({ success: true });
   } catch (e) {
-    console.error("Error deleting user:", e);
+    console.error("[admin/users] DELETE failed:", e);
     return err("Failed to delete user.", 500);
   }
 }
