@@ -37,6 +37,7 @@ import {
   PackagePlus,
   Boxes,
   ShoppingCart,
+  ShieldUser,
 } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
@@ -137,6 +138,14 @@ export default function AdminDashboardPage() {
         desc: "Availability and slots.",
         onClick: () => go("/admin/schedule"),
         keywords: ["schedule", "slots", "availability", "calendar"],
+      },
+      {
+        key: "accounts",
+        icon: <ShieldUser size={22} aria-hidden />,
+        title: "Manage Administrators",
+        desc: "Manage and create administrator accounts.",
+        onClick: () => go("/admin/accounts"),
+        keywords: ["accounts", "administrators", "admins", "users"],
       },
       // money ops
       {
