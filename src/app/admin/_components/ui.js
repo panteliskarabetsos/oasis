@@ -169,21 +169,33 @@ export function Td({ children, className = "", colSpan }) {
 
 export function SideDrawer({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-50 flex">
-      <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="w-full max-w-xl h-full bg-white shadow-2xl border-l border-[#e0dcd4] animate-in slide-in-from-right">
-        <div className="px-6 py-4 border-b border-[#eee8df] flex items-center justify-between">
-          <h3 className="text-xl font-serif text-[#5a4a3f]">{title}</h3>
+    <div className="fixed inset-0 z-50">
+      {/* overlay */}
+      <div
+        className="absolute inset-0 bg-black/30"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* panel */}
+      <aside className="absolute right-0 top-0 h-[100dvh] w-full max-w-[560px] bg-[#f6f3ee] border-l border-[#e7e0d6] shadow-2xl flex flex-col">
+        {/* header (fixed) */}
+        <div className="shrink-0 px-5 py-4 border-b border-[#efe9e1] bg-white/80 backdrop-blur flex items-center justify-between gap-3">
+          <div className="text-base font-semibold text-[#4f4137]">{title}</div>
           <button
+            type="button"
             onClick={onClose}
-            aria-label="Close"
-            className="p-2 rounded-full hover:bg-[#f4f1ec]"
+            className="rounded-xl border border-[#e7e0d6] bg-white px-3 py-2 text-sm text-[#4f4137] hover:bg-[#f5f1ea]"
           >
-            <X size={18} />
+            Close
           </button>
         </div>
-        <div className="p-6 overflow-y-auto h-full">{children}</div>
-      </div>
+
+        {/* body (scrollable) */}
+        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
+          {children}
+        </div>
+      </aside>
     </div>
   );
 }

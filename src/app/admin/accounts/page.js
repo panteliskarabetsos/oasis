@@ -276,6 +276,8 @@ export default function AdminAccountsPage() {
   const [showAddDrawer, setShowAddDrawer] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  // success modal
+  const [createdAdmin, setCreatedAdmin] = useState(null);
 
   const [errorMessage, setErrorMessage] = useState("");
   const { toasts, toast } = useToasts();
@@ -312,11 +314,6 @@ export default function AdminAccountsPage() {
     };
   }, [addPw]);
 
-  const pwMatch = useMemo(() => {
-    if (!addPw2) return true;
-    return addPw === addPw2;
-  }, [addPw, addPw2]);
-
   useEffect(() => {
     if (showAddDrawer) {
       setAddEmail("");
@@ -325,7 +322,7 @@ export default function AdminAccountsPage() {
       setPwVisible(false);
       setPwJustCopied(false);
       setAddPw("");
-      setAddPw2("");
+
       setTimeout(() => addEmailRef.current?.focus(), 80);
     }
   }, [showAddDrawer]);
@@ -599,7 +596,6 @@ export default function AdminAccountsPage() {
 
     const email = (addEmail || "").trim();
     const password = addPw || "";
-    const passwordConfirm = addPw2 || "";
 
     const name = (form.name.value || "").trim();
     const surname = (form.surname.value || "").trim();
@@ -607,10 +603,6 @@ export default function AdminAccountsPage() {
     const dateOfBirth = form.dateOfBirth.value || null;
 
     if (!emailOk) {
-      setAddFormError("Please enter a valid email address.");
-      return;
-    }
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
       setAddFormError("Please enter a valid email address.");
       return;
     }
@@ -639,17 +631,35 @@ export default function AdminAccountsPage() {
 
       const data = await res.json();
 
-      if (res.ok) {
-        form.reset();
-        setAddPw("");
-        setAddPw2("");
-        setShowAddDrawer(false);
-        toast({ title: "Admin created", icon: Check });
-        startTransition(fetchUsers);
-      } else {
+      if (!res.ok) {
         setErrorMessage(data?.error || "Something went wrong.");
         setTimeout(() => setErrorMessage(""), 6000);
+        return;
       }
+
+      form.reset();
+      setAddEmail("");
+      setAddPw("");
+      setPwVisible(false);
+      setPwJustCopied(false);
+
+      //Close drawer first
+      setShowAddDrawer(false);
+
+      setSearchTerm("");
+      setSortKey("createdAt");
+      setSortDir("desc");
+      setPage(1);
+      setSelectedIds(new Set());
+
+      // Refresh list
+      await fetchUsers();
+
+      // Pop success window
+      setCreatedAdmin({ email, name, surname });
+
+      // optional toast (keep if you want)
+      toast({ title: "Admin created", icon: Check });
     } catch {
       setErrorMessage("Network error. Please try again.");
       setTimeout(() => setErrorMessage(""), 6000);
@@ -1511,22 +1521,25 @@ export default function AdminAccountsPage() {
             </div>
 
             {/* Footer actions */}
-            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowAddDrawer(false)}
-                className={`${ui.btn.base} ${ui.btn.ghost} sm:min-w-[140px]`}
-              >
-                Cancel
-              </button>
+            {/* Footer actions */}
+            <div className="sticky bottom-0 -mx-5 mt-6 border-t border-[#efe9e1] bg-white/85 backdrop-blur px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddDrawer(false)}
+                  className={`${ui.btn.base} ${ui.btn.ghost} sm:min-w-[140px]`}
+                >
+                  Cancel
+                </button>
 
-              <button
-                type="submit"
-                className={`${ui.btn.base} ${ui.btn.primary} sm:min-w-[180px]`}
-                disabled={isPending || !emailOk || addPw.length < 8}
-              >
-                <Check size={16} /> Create Admin
-              </button>
+                <button
+                  type="submit"
+                  className={`${ui.btn.base} ${ui.btn.primary} sm:min-w-[180px]`}
+                  disabled={isPending || !emailOk || addPw.length < 8}
+                >
+                  <Check size={16} /> Create Admin
+                </button>
+              </div>
             </div>
           </form>
         </SideDrawer>
@@ -1626,6 +1639,71 @@ export default function AdminAccountsPage() {
           onCancel={() => setConfirmDeleteId(null)}
           onConfirm={() => handleDelete(confirmDeleteId)}
         />
+      ) : null}
+
+      {createdAdmin ? (
+        <Modal
+          title="Admin created successfully"
+          onClose={() => setCreatedAdmin(null)}
+        >
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              The admin account has been created and the list was refreshed.
+            </div>
+
+            <div className="rounded-2xl border border-[#efe9e1] bg-white/70 px-4 py-3">
+              <div className="text-xs uppercase tracking-widest text-[#a79a8f]">
+                Account
+              </div>
+              <div className="mt-1 text-sm text-[#4f4137]">
+                <b>Email:</b>{" "}
+                <button
+                  type="button"
+                  className="hover:underline underline-offset-2"
+                  onClick={async () => {
+                    const ok = await copyToClipboard(createdAdmin.email);
+                    toast({
+                      title: ok ? "Email copied" : "Copy failed",
+                      type: ok ? undefined : "error",
+                    });
+                  }}
+                >
+                  {createdAdmin.email}
+                </button>
+              </div>
+
+              {createdAdmin.name || createdAdmin.surname ? (
+                <div className="mt-1 text-sm text-[#4f4137]">
+                  <b>Name:</b>{" "}
+                  {`${createdAdmin.name || ""} ${
+                    createdAdmin.surname || ""
+                  }`.trim() || "—"}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatedAdmin(null);
+                  setShowAddDrawer(true);
+                }}
+                className={`${ui.btn.base} ${ui.btn.subtle}`}
+              >
+                Create another
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCreatedAdmin(null)}
+                className={`${ui.btn.base} ${ui.btn.primary}`}
+              >
+                <Check size={16} /> Done
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
 
       <ToastHost toasts={toasts} />

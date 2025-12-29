@@ -103,6 +103,7 @@ export async function GET() {
 }
 
 /* ========================== POST (Admin) ========================= */
+/* ========================== POST (Admin) ========================= */
 export async function POST(req) {
   const gate = await requireAdmin();
   if (!gate.ok) return gate.res;
@@ -125,21 +126,35 @@ export async function POST(req) {
 
   email = normalizeEmail(email);
 
+  // ✅ only email is required
   if (!email || !isEmail(email)) return err("Invalid email", 400);
-  if (!name || !surname)
-    return err("Missing required fields: name, surname", 400);
 
   if (typeof role !== "string" || !ALLOWED_ROLES.has(role)) {
     return err("Invalid role", 400);
   }
 
-  if (password && String(password).length < 8) {
+  if (
+    password != null &&
+    String(password).length > 0 &&
+    String(password).length < 8
+  ) {
     return err("Password must be at least 8 characters", 400);
   }
 
   if (!password) {
     password = `Tmp-${Math.random().toString(36).slice(2)}-${Date.now()}`;
   }
+
+  const cleanName = name != null ? String(name).trim() : "";
+  const cleanSurname = surname != null ? String(surname).trim() : "";
+  const cleanPhone = phone != null ? String(phone).trim() : "";
+
+  // keep auth metadata clean (don’t store undefined)
+  const user_metadata = {};
+  if (cleanName) user_metadata.name = cleanName;
+  if (cleanSurname) user_metadata.surname = cleanSurname;
+  if (cleanPhone) user_metadata.phone = cleanPhone;
+  if (dateOfBirth) user_metadata.dateOfBirth = dateOfBirth;
 
   const safeNotes =
     notes == null
@@ -157,14 +172,17 @@ export async function POST(req) {
         email,
         password,
         email_confirm: true,
-        user_metadata: { name, surname, phone, dateOfBirth },
+        user_metadata,
         app_metadata: { role },
       });
 
     if (createErr) {
       const msg = createErr.message || "Failed to create auth user";
       const m = msg.toLowerCase();
-      const isDup = m.includes("already") || m.includes("duplicate");
+      const isDup =
+        m.includes("already") ||
+        m.includes("duplicate") ||
+        m.includes("registered");
       return err(msg, isDup ? 409 : 500);
     }
 
@@ -177,16 +195,15 @@ export async function POST(req) {
       auth_user_id: createdAuthUserId,
       email,
       password: "<managed-by-auth>",
-      name: String(name).trim() || null,
-      surname: String(surname).trim() || null,
-      phone: phone ? String(phone).trim() : null,
+      name: cleanName || null,
+      surname: cleanSurname || null,
+      phone: cleanPhone || null,
       role,
       dateOfBirth: dobTs,
       updatedAt: new Date().toISOString(),
       notes: safeNotes,
     };
 
-    // Try auth_user_id conflict first, fallback to email if no unique index
     let upsertRes = await admin
       .from("User")
       .upsert(payload, { onConflict: "auth_user_id" })
@@ -218,7 +235,6 @@ export async function POST(req) {
   } catch (e) {
     console.error("[admin/users] POST failed:", e);
 
-    // if we created an auth user but crashed later, try to rollback
     if (createdAuthUserId) {
       try {
         await admin.auth.admin.deleteUser(createdAuthUserId);
@@ -231,7 +247,6 @@ export async function POST(req) {
   }
 }
 
-/* ========================== PUT (Admin) ========================== */
 export async function PUT(req) {
   const gate = await requireAdmin();
   if (!gate.ok) return gate.res;
