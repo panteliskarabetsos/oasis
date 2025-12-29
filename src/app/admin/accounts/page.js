@@ -290,7 +290,7 @@ export default function AdminAccountsPage() {
   const addEmailRef = useRef(null);
   const [addEmail, setAddEmail] = useState("");
   const [addPw, setAddPw] = useState("");
-  const [addPw2, setAddPw2] = useState("");
+  // const [addPw2, setAddPw2] = useState("");
   const [addFormError, setAddFormError] = useState("");
   const [pwVisible, setPwVisible] = useState(false);
   const [pwJustCopied, setPwJustCopied] = useState(false);
@@ -616,10 +616,6 @@ export default function AdminAccountsPage() {
     }
     if (password.length < 8) {
       setAddFormError("Password must be at least 8 characters.");
-      return;
-    }
-    if (password !== passwordConfirm) {
-      setAddFormError("Passwords do not match.");
       return;
     }
 
@@ -1365,7 +1361,7 @@ export default function AdminAccountsPage() {
                         onClick={() => {
                           const pw = generatePassword();
                           setAddPw(pw);
-                          setAddPw2(pw);
+                          // setAddPw2(pw);
                           setAddFormError("");
                           setPwJustCopied(false);
                           toast({
@@ -1527,7 +1523,7 @@ export default function AdminAccountsPage() {
               <button
                 type="submit"
                 className={`${ui.btn.base} ${ui.btn.primary} sm:min-w-[180px]`}
-                disabled={isPending || !emailOk || addPw.length < 8 || !pwMatch}
+                disabled={isPending || !emailOk || addPw.length < 8}
               >
                 <Check size={16} /> Create Admin
               </button>
