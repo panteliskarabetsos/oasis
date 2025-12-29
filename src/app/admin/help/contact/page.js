@@ -21,12 +21,11 @@ export default function AdminHelpContactPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
-
   const supportEmail =
-    process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@yourdomain.com";
-  const statusUrl = process.env.NEXT_PUBLIC_STATUS_URL || "";
+    process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "contact@pkarabetsos.com";
+  const statusUrl =
+    process.env.NEXT_PUBLIC_STATUS_URL || "https://status.youroasis.gr";
   const supportPhone = process.env.NEXT_PUBLIC_SUPPORT_PHONE || "";
-
 
   const [dbRole, setDbRole] = useState(null);
   useEffect(() => {
