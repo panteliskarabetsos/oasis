@@ -484,61 +484,61 @@ export default async function ExperienceDetailPage({ params }) {
             })}
           </div>
           {/* Lightbox overlays (CSS-only) */}
-          {() => {
-            const n = parsedImages.length - 1; // slides excluding hero
-            return parsedImages.slice(1).map((img, idx) => {
-              const j = idx + 1;
-              const prev = j - 1 >= 1 ? j - 1 : n;
-              const next = j + 1 <= n ? j + 1 : 1;
-              return (
-                <div
-                  key={`overlay-${j}`}
-                  id={`lb-${j}`}
-                  className="lightbox fixed inset-0 z-[60] hidden"
-                >
-                  <a
-                    href="#_"
-                    className="absolute inset-0 bg-black/80"
-                    aria-label="Close"
-                  />
+          {/* Lightbox overlays (CSS-only) */}
+          {parsedImages.slice(1).map((img, idx) => {
+            const n = parsedImages.length - 1; // Total slides (excluding hero)
+            const j = idx + 1; // Current slide number
+            const prev = j - 1 >= 1 ? j - 1 : n; // Logic for previous slide
+            const next = j + 1 <= n ? j + 1 : 1; // Logic for next slide
 
-                  <div className="absolute inset-0 flex items-center justify-center p-4">
-                    <div className="relative w-[min(92vw,1200px)] h-[80vh]">
-                      <Image
-                        src={img}
-                        alt={`${name} photo ${j + 1}`}
-                        fill
-                        sizes="(max-width: 1400px) 92vw, 1200px"
-                        className="object-contain"
-                      />
-                    </div>
+            return (
+              <div
+                key={`overlay-${j}`}
+                id={`lb-${j}`}
+                className="lightbox fixed inset-0 z-[60] hidden"
+              >
+                <a
+                  href="#_"
+                  className="absolute inset-0 bg-black/80"
+                  aria-label="Close"
+                />
+
+                <div className="absolute inset-0 flex items-center justify-center p-4">
+                  <div className="relative w-[min(92vw,1200px)] h-[80vh]">
+                    <Image
+                      src={img}
+                      alt={`${name} photo ${j + 1}`}
+                      fill
+                      sizes="(max-width: 1400px) 92vw, 1200px"
+                      className="object-contain"
+                    />
                   </div>
-
-                  <a
-                    href={`#lb-${prev}`}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 shadow hover:bg-white"
-                    aria-label="Previous slide"
-                  >
-                    <ChevronLeft size={24} />
-                  </a>
-                  <a
-                    href={`#lb-${next}`}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 shadow hover:bg-white"
-                    aria-label="Next slide"
-                  >
-                    <ChevronRight size={24} />
-                  </a>
-                  <a
-                    href="#_"
-                    className="absolute right-5 top-5 rounded-full bg-white/90 p-2 shadow hover:bg-white"
-                    aria-label="Close slideshow"
-                  >
-                    <X size={20} />
-                  </a>
                 </div>
-              );
-            });
-          }}
+
+                <a
+                  href={`#lb-${prev}`}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 shadow hover:bg-white"
+                  aria-label="Previous slide"
+                >
+                  <ChevronLeft size={24} />
+                </a>
+                <a
+                  href={`#lb-${next}`}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 shadow hover:bg-white"
+                  aria-label="Next slide"
+                >
+                  <ChevronRight size={24} />
+                </a>
+                <a
+                  href="#_"
+                  className="absolute right-5 top-5 rounded-full bg-white/90 p-2 shadow hover:bg-white"
+                  aria-label="Close slideshow"
+                >
+                  <X size={20} />
+                </a>
+              </div>
+            );
+          })}
           )()
           <style>{`
             .lightbox:target { display: block; }
@@ -558,9 +558,9 @@ export default async function ExperienceDetailPage({ params }) {
             <div className="w-full aspect-[16/9]">
               <iframe
                 title={`Map location for ${name}`}
-                src={`https://www.google.com/maps?q=${encodeURIComponent(
+                src={`https://maps.google.com/maps?q=${encodeURIComponent(
                   mapPin
-                )}&z=14&output=embed`}
+                )}&t=&z=13&ie=UTF8&iwloc=&output=embed`}
                 width="100%"
                 height="100%"
                 style={{ border: 0 }}
