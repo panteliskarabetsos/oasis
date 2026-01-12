@@ -9,6 +9,7 @@ import {
   Trash2,
   LogOut,
   ShieldCheck,
+  Heart, // Import Heart icon
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import DeleteAccountModal from "./deleteAccountModal";
@@ -316,7 +317,7 @@ export default function Dashboard() {
           {/* Left: details + actions */}
           <div className="space-y-6 lg:col-span-2">
             {/* Info Card */}
-            <div className="rounded-3xl border border-[#e0dcd4] bg:white/90 bg-white/90 p-6 shadow-[0_18px_45px_rgba(93,71,43,0.06)] backdrop-blur">
+            <div className="rounded-3xl border border-[#e0dcd4] bg-white/90 p-6 shadow-[0_18px_45px_rgba(93,71,43,0.06)] backdrop-blur">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-serif text-[#5a4a3f]">
@@ -389,18 +390,24 @@ export default function Dashboard() {
               </p>
             </div>
 
-            {/* Actions */}
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            {/* Actions Grid - Updated to include Favorites */}
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               <ActionCard
                 icon={<CalendarCheck size={26} />}
                 label="My bookings"
-                description="View your upcoming and past reservations."
+                description="Upcoming & past trips."
                 onClick={() => handleRedirect("/bookings")}
               />
               <ActionCard
+                icon={<Heart size={26} />}
+                label="My favorites"
+                description="Saved experiences."
+                onClick={() => handleRedirect("/favorites")} // Redirect to favorites page
+              />
+              <ActionCard
                 icon={<Settings size={26} />}
-                label="Account settings"
-                description="Update personal info and preferences."
+                label="Settings"
+                description="Preferences & info."
                 onClick={() => handleRedirect("/account/settings")}
               />
             </div>
@@ -442,7 +449,7 @@ export default function Dashboard() {
               >
                 <Trash2 size={16} />
                 {hasActiveReservations
-                  ? "You have upcoming bookings"
+                  ? "Upcoming bookings exist"
                   : "Delete account"}
               </button>
 
@@ -530,25 +537,25 @@ function ActionCard({ icon, label, description, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="group relative flex items-start gap-4 rounded-2xl border border-[#d8cfc3] bg-[#fdfaf7] p-5 text-left shadow-[0_16px_40px_rgba(93,71,43,0.07)] transition-all hover:-translate-y-0.5 hover:border-[#b2976c] hover:bg-[#8b6f47] hover:shadow-[0_20px_55px_rgba(72,54,31,0.35)]"
+      className="group relative flex flex-col items-start gap-3 rounded-2xl border border-[#d8cfc3] bg-[#fdfaf7] p-5 text-left shadow-[0_16px_40px_rgba(93,71,43,0.07)] transition-all hover:-translate-y-0.5 hover:border-[#b2976c] hover:bg-[#8b6f47] hover:shadow-[0_20px_55px_rgba(72,54,31,0.35)] w-full h-full"
     >
-      <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#efe3cf] text-[#5a4a3f] transition group-hover:bg-white/10 group-hover:text-white">
-        {icon}
+      <div className="flex w-full justify-between items-start">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#efe3cf] text-[#5a4a3f] transition group-hover:bg-white/10 group-hover:text-white">
+          {icon}
+        </div>
+        <div className="h-2 w-2 rounded-full bg-[#c9b089] opacity-0 transition group-hover:opacity-100" />
       </div>
-      <div className="pr-8">
+
+      <div>
         <p className="text-sm font-semibold text-[#4d3e33] group-hover:text-white">
           {label}
         </p>
         {description && (
-          <p className="mt-1 text-xs text-[#8b7b6f] group-hover:text-[#f9efe0]">
+          <p className="mt-1 text-xs text-[#8b7b6f] group-hover:text-[#f9efe0] line-clamp-1">
             {description}
           </p>
         )}
-        <p className="mt-2 text-[11px] font-medium text-[#a08c74] group-hover:text-[#fbead1]">
-          Open
-        </p>
       </div>
-      <div className="pointer-events-none absolute right-4 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-[#c9b089] opacity-0 transition group-hover:opacity-100" />
     </button>
   );
 }

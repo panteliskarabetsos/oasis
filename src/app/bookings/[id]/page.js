@@ -35,15 +35,6 @@ import {
 import { useAuth } from "@/app/components/SessionWrapper";
 import QRCode from "qrcode";
 
-/**
- * Booking Details — refined UI/UX
- * - Ambient, soft background and glass cards
- * - Clear status with icon + subtle progress bar
- * - Action toolbar (Add to Calendar, .ics, Directions, Share)
- * - Ticket-like QR card with copy/share/print
- * - Better empty/error states
- * - Small a11y touches & focus styles
- */
 export default function BookingDetailsPage({ params }) {
   const { id } = useUnwrap(params);
   const router = useRouter();
@@ -55,15 +46,15 @@ export default function BookingDetailsPage({ params }) {
   const [copied, setCopied] = useState(false);
   const [downloadingTicket, setDownloadingTicket] = useState(false);
 
-  // redirect if no session
+  // --- Auth & Fetch Logic ---
   useEffect(() => {
     if (!loading && !user) router.push("/login");
   }, [loading, user, router]);
 
   useEffect(() => {
     if (!user || !id) return;
-
     let aborted = false;
+
     const load = async () => {
       try {
         setFetching(true);
@@ -78,15 +69,13 @@ export default function BookingDetailsPage({ params }) {
           }
         }
         if (aborted) return;
-        if (!data || (data && data.error))
-          throw new Error(data?.error || "Not found");
+        if (!data || data.error) throw new Error(data?.error || "Not found");
         setBooking(data);
       } catch (err) {
-        if (aborted) return;
-        console.error(err);
-        setError(
-          "We couldn't load that booking. It may have been removed or the link is incorrect."
-        );
+        if (!aborted) {
+          console.error(err);
+          setError("We couldn't load that booking.");
+        }
       } finally {
         if (!aborted) setFetching(false);
       }
@@ -98,43 +87,34 @@ export default function BookingDetailsPage({ params }) {
     };
   }, [user, id]);
 
+  // --- Actions ---
   async function handleDownloadTicket() {
-    if (!booking?.id || typeof window === "undefined") return;
-
+    if (!booking?.id) return;
     try {
       setDownloadingTicket(true);
-
       const res = await fetch(`/api/bookings/${booking.id}/invoice`, {
         method: "GET",
       });
-
-      if (!res.ok) {
-        console.error("Failed to download ticket PDF");
-        return;
-      }
-
+      if (!res.ok) throw new Error("Failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-
       const a = document.createElement("a");
-      const ref = getPublicBookingRef(booking) || booking.id;
-
       a.href = url;
-      a.download = `ticket-${ref}.pdf`;
+      a.download = `ticket-${getPublicBookingRef(booking)}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error("Error downloading ticket:", err);
+      console.error(err);
+      alert("Could not download ticket PDF.");
     } finally {
       setDownloadingTicket(false);
     }
   }
 
+  // --- Computed Data ---
   const when = useMemo(() => (booking ? whenISO(booking) : null), [booking]);
-
   const dateObj = useMemo(() => {
     if (!when) return null;
     const candidate =
@@ -144,25 +124,23 @@ export default function BookingDetailsPage({ params }) {
 
   const exp = useMemo(() => (booking ? expOf(booking) : null), [booking]);
   const people = useMemo(() => (booking ? peopleOf(booking) : 0), [booking]);
-
-  // Always compute numeric minutes (handles "4 Hours", "2h 30m", etc.)
   const durationMin = useMemo(
     () => getDurationMinutes(booking, exp),
     [booking, exp]
   );
-
   const status = useMemo(
     () => statusFlags(dateObj, durationMin),
     [dateObj, durationMin]
   );
 
+  // Links
   const gcalHref = useMemo(() => {
     if (!dateObj) return "#";
     const startUtc = toCalStamp(dateObj);
     const endUtc = toCalStamp(addMinutes(dateObj, durationMin));
     const text = encodeURIComponent(exp?.name || "Reservation");
     const details = encodeURIComponent(
-      `Booking ID: ${booking?.id}\n${booking?.notes || ""}`
+      `Ref: ${getPublicBookingRef(booking)}\n${booking?.notes || ""}`
     );
     const location = encodeURIComponent(exp?.location || "");
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startUtc}/${endUtc}&details=${details}&location=${location}`;
@@ -173,257 +151,545 @@ export default function BookingDetailsPage({ params }) {
     [exp]
   );
 
-  // ---------- QR support ----------
+  // QR Logic
   const qrValue = useMemo(() => getQrValue(booking), [booking]);
   const shouldShowQr =
     !!dateObj &&
     isValid(dateObj) &&
     !!qrValue &&
     (status.upcoming || status.ongoing);
+
   const {
     dataUrl: qrDataUrl,
     loading: qrLoading,
     error: qrError,
   } = useQrDataUrl(shouldShowQr ? qrValue : null);
-  const canRenderQrImage = !!qrDataUrl && !qrLoading && !qrError;
 
-  // copy feedback
+  // Copy Feedback
   useEffect(() => {
     if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1500);
+    const t = setTimeout(() => setCopied(false), 2000);
     return () => clearTimeout(t);
   }, [copied]);
 
-  if (loading || fetching) {
-    return (
-      <FullScreenCenter>
-        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading booking...
-      </FullScreenCenter>
-    );
-  }
+  // --- RENDER ---
+
+  if (loading) return <LoadingSkeleton />;
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-[#fcfaf7] text-[#3d3d3d]">
-      {/* ambient background */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(28rem_28rem_at_10%_-10%,#fff1d6_0%,transparent_60%),radial-gradient(34rem_34rem_at_120%_10%,#e7f7f7_0%,transparent_55%)]"
-      />
+    <div className="min-h-screen bg-[#fcfaf7] text-[#5a4a3f] selection:bg-[#d4c5b0] selection:text-[#3d2f26]">
+      {/* Background Decor */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-[#f7f0e6] rounded-full blur-3xl opacity-60" />
+        <div className="absolute top-[20%] right-[-5%] w-[400px] h-[400px] bg-[#e8f5f6] rounded-full blur-3xl opacity-60" />
+      </div>
 
-      <main className="max-w-5xl mx-auto pt-20 sm:pt-24 px-4 sm:px-6 pb-28">
-        {/* Header / breadcrumb */}
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/bookings"
-              className="inline-flex items-center gap-2 text-[#5a4a3f] hover:underline"
-            >
-              <ChevronLeft className="w-4 h-4" /> Back to My Bookings
-            </Link>
-            {booking?.id && (
-              <span className="hidden sm:inline-flex items-center gap-1 text-xs rounded-full bg-[#f3efe8] px-2 py-1 border border-[#e8e2d9]">
-                <CalendarDays className="w-3.5 h-3.5" />
-                <span>Ref: {getPublicBookingRef(booking)}</span>
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-24 pb-32">
+        {/* Navigation & Breadcrumbs */}
+        <nav className="flex items-center justify-between mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
+          <Link
+            href="/bookings"
+            className="group inline-flex items-center gap-2 text-sm font-medium text-[#8b6f47] hover:text-[#6b5436] transition-colors"
+          >
+            <div className="w-8 h-8 rounded-full bg-white border border-[#e8e2d9] flex items-center justify-center group-hover:border-[#d4c5b0] transition-colors shadow-sm">
+              <ChevronLeft className="w-4 h-4 relative right-[1px]" />
+            </div>
+            Back to Bookings
+          </Link>
+
+          {booking && (
+            <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-[#8b6f47] bg-[#f4f1ec] px-3 py-1.5 rounded-full border border-[#e8e2d9]">
+              <span>REF:</span>
+              <span className="font-bold tracking-wider">
+                {getPublicBookingRef(booking)}
               </span>
-            )}
-          </div>
-          {/* Status pill with icon */}
-          <StatusPill when={dateObj} durationMin={durationMin} />
-        </div>
+            </div>
+          )}
+        </nav>
 
-        {error ? (
-          <ErrorCard message={error} />
+        {fetching ? (
+          <LoadingSkeleton />
+        ) : error ? (
+          <ErrorState message={error} />
         ) : (
-          <div className="space-y-6">
-            {/* Title */}
-            <header className="flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-3xl sm:text-4xl font-extrabold text-[#5a4a3f] font-serif tracking-tight">
-                  {exp?.name || "Experience"}
-                </h1>
-                <p className="text-sm text-[#7c6f60] mt-1">
-                  Booking ID: {booking?.id}
-                </p>
-              </div>
-            </header>
-
-            {/* subtle status progress */}
-            <StatusProgressBar status={status} />
-
-            {/* Main grid */}
-            <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Details card */}
-              <div className="lg:col-span-2 bg-white/90 backdrop-blur border border-[#e4ddd3] rounded-2xl p-6 shadow-md">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-[#5a4a3f]">
-                  <InfoRow
-                    icon={<CalendarDays className="w-5 h-5 text-[#8b6f47]" />}
-                  >
-                    {dateObj ? (
-                      <span>
-                        {format(dateObj, "PPPP")}{" "}
-                        <span className="text-[#7c6f60]">at</span>{" "}
-                        {format(dateObj, "p")} (<span>{durationMin}</span> min)
-                      </span>
-                    ) : (
-                      <span>—</span>
-                    )}
-                  </InfoRow>
-
-                  {exp?.location && (
-                    <InfoRow
-                      icon={<MapPin className="w-5 h-5 text-[#8b6f47]" />}
-                    >
-                      <span className="truncate" title={exp.location}>
-                        {exp.location}
-                      </span>
-                    </InfoRow>
-                  )}
-
-                  <InfoRow icon={<Users className="w-5 h-5 text-[#8b6f47]" />}>
-                    <span>
-                      {people} {people === 1 ? "person" : "people"}
+          <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
+            {/* Header Section */}
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 mb-10">
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <StatusBadge status={status} />
+                  {exp?.category && (
+                    <span className="text-xs font-medium uppercase tracking-widest text-[#9ca3af]">
+                      {exp.category}
                     </span>
-                  </InfoRow>
+                  )}
+                </div>
+                <h1 className="text-3xl md:text-5xl font-serif text-[#3d2f26] leading-tight">
+                  {exp?.name || "Experience Reservation"}
+                </h1>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[#7c6f60] pt-1">
+                  <div className="flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4 text-[#8b6f47]" />
+                    {dateObj ? format(dateObj, "EEEE, MMMM do") : "Date TBD"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-[#8b6f47]" />
+                    {dateObj ? format(dateObj, "h:mm a") : "--:--"}{" "}
+                    <span className="opacity-50">•</span> {durationMin} min
+                  </div>
+                </div>
+              </div>
 
-                  {booking?.counts && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs rounded-full bg-[#f6f4f0] px-2 py-1 border border-[#e8e2d9]">
-                        adults:{" "}
-                        {booking.counts.adults ?? booking.counts.adult ?? 0}
+              {/* Desktop Actions */}
+              <div className="hidden md:flex flex-wrap items-center justify-end gap-3 max-w-sm">
+                <button
+                  onClick={() => shareBooking(booking, exp, dateObj)}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2.5 text-[#5a4a3f] font-medium shadow-sm hover:bg-[#faf9f6] transition-all active:scale-95"
+                >
+                  <Share2 className="w-4 h-4" /> Share
+                </button>
+                <button
+                  onClick={handleDownloadTicket}
+                  disabled={downloadingTicket}
+                  className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] text-white px-6 py-2.5 font-medium shadow-md hover:bg-[#6b5436] hover:shadow-lg transition-all active:scale-95"
+                >
+                  {downloadingTicket ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                  {downloadingTicket ? "Generating..." : "Download PDF"}
+                </button>
+              </div>
+            </div>
+
+            {/* Content Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* Left Column: Details */}
+              <div className="lg:col-span-7 space-y-8">
+                {/* Summary Card */}
+                <div className="bg-white/80 backdrop-blur-md rounded-2xl p-6 border border-[#e8e2d9] shadow-[0_2px_15px_-3px_rgba(0,0,0,0.05)]">
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-[#8b6f47] mb-4">
+                    Booking Details
+                  </h3>
+
+                  <div className="space-y-5">
+                    <DetailRow
+                      icon={MapPin}
+                      label="Location"
+                      value={exp?.location}
+                      action={
+                        exp?.location
+                          ? { label: "Get Directions", href: mapHref }
+                          : null
+                      }
+                    />
+                    <DetailRow
+                      icon={Users}
+                      label="Guests"
+                      value={`${people} People`}
+                      subValue={formatGuestBreakdown(booking)}
+                    />
+
+                    {booking?.notes && (
+                      <DetailRow
+                        icon={StickyNote}
+                        label="Special Requests"
+                        value={booking.notes}
+                      />
+                    )}
+
+                    <div className="pt-4 mt-4 border-t border-dashed border-[#e8e2d9] flex justify-between items-center">
+                      <span className="text-sm text-[#7c6f60]">
+                        Total Payment
                       </span>
-                      <span className="text-xs rounded-full bg-[#f6f4f0] px-2 py-1 border border-[#e8e2d9]">
-                        kids:{" "}
-                        {booking.counts.kids ?? booking.counts.children ?? 0}
+                      <span className="text-xl font-serif text-[#3d2f26]">
+                        {formatMoney(
+                          booking?.totalPaidAmount ??
+                            booking?.total ??
+                            booking?.price ??
+                            0,
+                          booking?.currency
+                        )}
                       </span>
                     </div>
-                  )}
-
-                  {booking?.notes && (
-                    <InfoRow
-                      icon={<StickyNote className="w-5 h-5 text-[#8b6f47]" />}
-                    >
-                      <span className="whitespace-pre-wrap">
-                        {booking.notes}
-                      </span>
-                    </InfoRow>
-                  )}
-                </div>
-
-                {(booking?.totalPaidAmount ||
-                  booking?.total ||
-                  booking?.price) && (
-                  <div className="mt-6 pt-4 border-t border-[#eee7dc] flex items-center justify-between">
-                    <span className="text-[#7c6f60] text-sm">Total paid</span>
-                    <span className="text-lg font-semibold">
-                      {formatMoney(
-                        booking?.totalPaidAmount ??
-                          booking?.total ??
-                          booking?.price,
-                        booking?.currency || booking?.totalPaidCurrency || "EUR"
-                      )}
-                    </span>
                   </div>
-                )}
+                </div>
 
-                {/* Actions */}
-                {/* Actions */}
-                <div className="mt-6 flex flex-wrap gap-3">
-                  {booking?.id && (
-                    <button
-                      onClick={handleDownloadTicket}
-                      disabled={downloadingTicket}
-                      className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] text-white px-5 py-2 font-medium hover:bg-[#a78b62] transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#8b6f47]"
-                    >
-                      {downloadingTicket ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" /> Preparing
-                          ticket…
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4" /> Download ticket (PDF)
-                        </>
-                      )}
-                    </button>
-                  )}
+                {/* Additional Info / Reschedule */}
+                <div className="bg-[#f4f1ec] rounded-xl p-6 border border-[#e8e2d9] flex items-start gap-4">
+                  <div className="p-2 bg-white rounded-full shadow-sm">
+                    <AlertCircle className="w-5 h-5 text-[#8b6f47]" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-[#5a4a3f]">
+                      Need to reschedule?
+                    </h4>
+                    <p className="text-sm text-[#7c6f60] mt-1 leading-relaxed">
+                      Changes can be made up to 24 hours before your slot.
+                      Please contact support referencing your booking ID.
+                    </p>
+                  </div>
+                </div>
+              </div>
 
-                  <a
-                    href={gcalHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2 text-[#5a4a3f] hover:bg-[#f6f1e6] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#e8e2d9]"
-                  >
-                    <ExternalLink className="w-4 h-4" /> Add to Google Calendar
-                  </a>
+              {/* Right Column: The Ticket */}
+              <div className="lg:col-span-5">
+                <div className="sticky top-28">
+                  <TicketCard
+                    booking={booking}
+                    qrDataUrl={qrDataUrl}
+                    qrLoading={qrLoading}
+                    qrError={qrError}
+                    qrValue={qrValue}
+                    dateObj={dateObj}
+                    status={status}
+                    copied={copied}
+                    onCopy={() => setCopied(true)}
+                  />
 
-                  {exp?.location && (
+                  {/* Print/Calendar Actions below ticket */}
+                  <div className="mt-4 grid grid-cols-2 gap-3">
                     <a
-                      href={mapHref}
+                      href={gcalHref}
                       target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2 text-[#5a4a3f] hover:bg-[#f1efe8]"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 p-3 rounded-xl border border-[#e8e2d9] bg-white text-sm hover:bg-[#faf9f6] transition-colors"
                     >
-                      <Navigation className="w-4 h-4" /> Directions
+                      <ExternalLink className="w-4 h-4" /> Add to Calendar
                     </a>
-                  )}
-
-                  {canShare() && (
                     <button
-                      onClick={() => shareBooking(booking, exp, dateObj)}
-                      className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2 text-[#5a4a3f] hover:bg-[#f6f1e6]"
+                      onClick={() =>
+                        printTicket({
+                          qrDataUrl,
+                          codeText: qrValue,
+                          startsAt: dateObj,
+                        })
+                      }
+                      className="flex items-center justify-center gap-2 p-3 rounded-xl border border-[#e8e2d9] bg-white text-sm hover:bg-[#faf9f6] transition-colors"
                     >
-                      <Share2 className="w-4 h-4" /> Share
+                      <Printer className="w-4 h-4" /> Print Ticket
                     </button>
-                  )}
+                  </div>
                 </div>
               </div>
-
-              {/* Check-in QR card */}
-              <div className="lg:col-span-1">
-                <CheckInCard
-                  visible={shouldShowQr}
-                  qrDataUrl={qrDataUrl}
-                  qrLoading={qrLoading}
-                  qrError={qrError}
-                  codeText={qrValue}
-                  startsAt={dateObj}
-                  endsAt={status.endAt}
-                  ongoing={status.ongoing}
-                  canRenderQrImage={canRenderQrImage}
-                  onCopy={() => setCopied(true)}
-                />
-                {/* tiny toast */}
-                <div
-                  aria-live="polite"
-                  className={`pointer-events-none transition-all duration-300 ${
-                    copied
-                      ? "opacity-100 translate-y-0"
-                      : "opacity-0 translate-y-2"
-                  } mt-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 w-fit mx-auto`}
-                >
-                  Copied!
-                </div>
-              </div>
-            </section>
+            </div>
           </div>
         )}
       </main>
 
-      {/* Sticky mobile toolbar */}
-      {!error && (
-        <MobileToolbar
-          onIcs={() => downloadICS(booking, exp, dateObj, durationMin)}
-          gcalHref={gcalHref}
-          mapHref={mapHref}
-          share={() => canShare() && shareBooking(booking, exp, dateObj)}
+      {/* Mobile Floating Action Bar */}
+      {!error && !fetching && (
+        <MobileActionBar
+          onDownload={handleDownloadTicket}
+          onDirections={() => window.open(mapHref, "_blank")}
+          onShare={() => shareBooking(booking, exp, dateObj)}
         />
       )}
     </div>
   );
 }
 
-/* ---------- helpers ---------- */
+/*  COMPONENT: TICKET CARD  */
+
+function TicketCard({
+  booking,
+  qrDataUrl,
+  qrLoading,
+  qrError,
+  qrValue,
+  dateObj,
+  status,
+  copied,
+  onCopy,
+}) {
+  const isGenerating = qrLoading || (qrValue && !qrDataUrl && !qrError);
+
+  const isExpired = status.past;
+
+  return (
+    <div className="relative group filter drop-shadow-xl transition-transform duration-300 hover:scale-[1.01]">
+      {/* Top Half */}
+      <div
+        className={`rounded-t-2xl p-6 relative overflow-hidden text-[#fcfaf7] transition-colors duration-500 ${
+          isExpired ? "bg-[#5a4a3f]" : "bg-[#3d2f26]"
+        }`}
+      >
+        {/* Decorative Circles */}
+        <div className="absolute top-0 right-0 w-24 h-24 bg-[#ffffff] opacity-5 rounded-full blur-2xl translate-x-8 -translate-y-8" />
+
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <p className="text-[#a89b8e] text-xs font-bold uppercase tracking-widest mb-1">
+              {isExpired ? "Past Event" : "Entry Ticket"}
+            </p>
+            <p className="text-xl font-serif tracking-wide">
+              {getPublicBookingRef(booking)}
+            </p>
+          </div>
+          <div
+            className={`px-2 py-1 rounded text-xs font-bold uppercase border ${
+              status.upcoming
+                ? "border-emerald-500/50 text-emerald-300"
+                : status.ongoing
+                ? "border-amber-500/50 text-amber-300"
+                : "border-white/20 text-white/40 bg-white/5" // Expired style
+            }`}
+          >
+            {status.upcoming ? "Valid" : status.ongoing ? "Active" : "Expired"}
+          </div>
+        </div>
+
+        <div
+          className={`grid grid-cols-2 gap-4 text-sm ${
+            isExpired ? "opacity-50" : ""
+          }`}
+        >
+          <div>
+            <p className="text-[#8b7a6b] text-xs uppercase mb-1">Date</p>
+            <p className="font-medium">
+              {dateObj ? format(dateObj, "MMM dd, yyyy") : "TBD"}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[#8b7a6b] text-xs uppercase mb-1">Time</p>
+            <p className="font-medium">
+              {dateObj ? format(dateObj, "h:mm a") : "--:--"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={`relative h-6 flex items-center ${
+          isExpired ? "bg-[#5a4a3f]" : "bg-[#3d2f26]"
+        }`}
+      >
+        <div className="w-full h-[1px] border-t border-dashed border-[#6b584a] mx-4" />
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-6 bg-[#fcfaf7] rounded-r-full" />
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-6 bg-[#fcfaf7] rounded-l-full" />
+      </div>
+
+      {/* Bottom Half (QR Area) */}
+      <div className="bg-white rounded-b-2xl p-6 flex flex-col items-center justify-center relative border-b border-x border-[#e8e2d9]">
+        {/* CONDITIONAL RENDERING FOR QR AREA */}
+        {isExpired ? (
+          // 1. Expired State
+          <div className="w-48 h-48 flex flex-col items-center justify-center text-[#d4c5b0] gap-2 grayscale opacity-60">
+            <QrCode className="w-12 h-12 mb-1" />
+            <span className="text-xs font-medium uppercase tracking-widest text-[#9ca3af]">
+              Ticket Expired
+            </span>
+          </div>
+        ) : isGenerating ? (
+          // 2. Loading State
+          <div className="w-48 h-48 flex flex-col items-center justify-center text-[#d4c5b0] gap-3">
+            <Loader2 className="w-8 h-8 animate-spin" />
+            <span className="text-xs uppercase tracking-widest">
+              Generating ID
+            </span>
+          </div>
+        ) : qrError || !qrValue ? (
+          // 3. Error State
+          <div className="w-48 h-48 flex flex-col items-center justify-center text-red-400 bg-red-50 rounded-lg">
+            <AlertCircle className="w-8 h-8 mb-2" />
+            <span className="text-xs">Code Unavailable</span>
+          </div>
+        ) : (
+          // 4. Success State (QR)
+          <div className="relative group/qr">
+            {qrDataUrl && (
+              <img
+                src={qrDataUrl}
+                alt="QR Code"
+                className="w-48 h-48 mix-blend-multiply"
+              />
+            )}
+            <button
+              onClick={() => qrDataUrl && openQrInNewTab(qrDataUrl)}
+              className="absolute inset-0 bg-black/5 flex items-center justify-center opacity-0 group-hover/qr:opacity-100 transition-opacity rounded-lg"
+            >
+              <Maximize2 className="w-8 h-8 text-[#3d2f26] drop-shadow-md" />
+            </button>
+          </div>
+        )}
+
+        {/* Copy Button */}
+        {!isExpired && (
+          <div
+            onClick={onCopy}
+            className="mt-4 flex items-center gap-2 text-xs font-mono text-[#7c6f60] bg-[#f6f4f0] px-3 py-1.5 rounded-md cursor-pointer hover:bg-[#e8e2d9] transition-colors active:scale-95 select-none"
+          >
+            {copied ? (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+            <span className={copied ? "text-emerald-700" : ""}>
+              {copied ? "Copied" : qrValue || "BK-######"}
+            </span>
+          </div>
+        )}
+
+        {/* Expired Text Message */}
+        {isExpired && (
+          <div className="mt-4 text-xs text-[#9ca3af] font-medium">
+            Thank you for visiting
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* UI HELPERS */
+
+function MobileActionBar({ onDownload, onDirections, onShare }) {
+  return (
+    <div className="md:hidden fixed bottom-6 left-6 right-6 z-50">
+      <div className="bg-[#3d2f26]/90 backdrop-blur-lg text-white rounded-2xl p-1.5 shadow-2xl flex items-center justify-between border border-[#554335]">
+        <button
+          onClick={onDownload}
+          className="flex-1 flex flex-col items-center py-2 gap-1 rounded-xl active:bg-white/10"
+        >
+          <Download className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Ticket</span>
+        </button>
+        <div className="w-[1px] h-8 bg-white/10" />
+        <button
+          onClick={onDirections}
+          className="flex-1 flex flex-col items-center py-2 gap-1 rounded-xl active:bg-white/10"
+        >
+          <Navigation className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Map</span>
+        </button>
+        <div className="w-[1px] h-8 bg-white/10" />
+        <button
+          onClick={onShare}
+          className="flex-1 flex flex-col items-center py-2 gap-1 rounded-xl active:bg-white/10"
+        >
+          <Share2 className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Share</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({ icon: Icon, label, value, subValue, action }) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-4">
+      <div className="shrink-0 w-10 h-10 rounded-full bg-[#fcfaf7] border border-[#e8e2d9] flex items-center justify-center">
+        <Icon className="w-5 h-5 text-[#8b6f47]" />
+      </div>
+      <div className="flex-1">
+        <p className="text-xs font-semibold uppercase text-[#9ca3af] mb-0.5">
+          {label}
+        </p>
+        <p className="text-[#3d2f26] font-medium text-base leading-snug">
+          {value}
+        </p>
+        {subValue && (
+          <p className="text-sm text-[#7c6f60] mt-0.5">{subValue}</p>
+        )}
+        {action && (
+          <a
+            href={action.href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 mt-1 text-xs font-semibold text-[#8b6f47] hover:underline"
+          >
+            {action.label} <ExternalLink className="w-3 h-3" />
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  if (status.upcoming) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />{" "}
+        Upcoming
+      </span>
+    );
+  }
+  if (status.ongoing) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-100">
+        <Clock className="w-3.5 h-3.5" /> Happening Now
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-200">
+      Completed
+    </span>
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="min-h-screen bg-[#fcfaf7] flex items-center justify-center p-4">
+      <div className="w-full max-w-lg space-y-4 animate-pulse">
+        <div className="h-8 w-2/3 bg-gray-200 rounded mx-auto" />
+        <div className="h-4 w-1/2 bg-gray-200 rounded mx-auto" />
+        <div className="h-64 bg-gray-200 rounded-2xl mt-8" />
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ message }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center animate-in zoom-in-95 duration-300">
+      <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+        <AlertCircle className="w-8 h-8 text-red-400" />
+      </div>
+      <h2 className="text-xl font-serif font-bold text-[#3d2f26] mb-2">
+        Booking Unavailable
+      </h2>
+      <p className="text-[#7c6f60] max-w-md mb-8">{message}</p>
+      <Link
+        href="/bookings"
+        className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] text-white px-6 py-2.5 font-medium shadow-md hover:bg-[#6b5436] hover:shadow-lg transition-all active:scale-95"
+      >
+        Return to My Bookings
+      </Link>
+    </div>
+  );
+}
+
+/* ================= LOGIC HELPERS ================= */
+
+function formatMoney(amount, currency = "EUR") {
+  try {
+    return new Intl.NumberFormat("en-IE", {
+      style: "currency",
+      currency: currency || "EUR",
+    }).format(amount);
+  } catch {
+    return `${amount} ${currency}`;
+  }
+}
+
+function formatGuestBreakdown(b) {
+  if (!b) return "";
+  const a = b.counts?.adults ?? b.counts?.adult ?? 0;
+  const k = b.counts?.kids ?? b.counts?.children ?? 0;
+  if (a || k) {
+    const parts = [];
+    if (a > 0) parts.push(`${a} Adult${a > 1 ? "s" : ""}`);
+    if (k > 0) parts.push(`${k} Child${k > 1 ? "ren" : ""}`);
+    return parts.join(", ");
+  }
+  return null;
+}
+
 function whenISO(b) {
   return b?.scheduleSlot?.date || b?.startTime || null;
 }
@@ -444,111 +710,6 @@ function peopleOf(b) {
   return a + k || fromAttendees || 1;
 }
 
-function toCalStamp(date) {
-  const pad = (n) => String(n).padStart(2, "0");
-  const y = date.getUTCFullYear();
-  const m = pad(date.getUTCMonth() + 1);
-  const d = pad(date.getUTCDate());
-  const hh = pad(date.getUTCHours());
-  const mm = pad(date.getUTCMinutes());
-  const ss = pad(date.getUTCSeconds());
-  return `${y}${m}${d}T${hh}${mm}${ss}Z`;
-}
-
-function formatMoney(amount, currency = "EUR") {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: String(currency || "EUR").toUpperCase(),
-    }).format(amount);
-  } catch {
-    return `${amount} ${currency}`;
-  }
-}
-
-function downloadICS(booking, exp, dateObj, durationMin) {
-  if (!dateObj) return;
-  const dtStart = toCalStamp(dateObj);
-  const dtEnd = toCalStamp(addMinutes(dateObj, durationMin));
-  const uid = `${booking?.id}@yourapp`;
-  const title = (exp?.name || "Reservation").replace(/\n/g, " ");
-  const loc = (exp?.location || "").replace(/\n/g, ", ");
-  const details = `Booking ID: ${booking?.id}\n${booking?.notes || ""}`.replace(
-    /\n/g,
-    "\\n"
-  );
-
-  const ics = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//Your App//EN",
-    "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${toCalStamp(new Date())}`,
-    `DTSTART:${dtStart}`,
-    `DTEND:${dtEnd}`,
-    `SUMMARY:${escapeICS(title)}`,
-    loc ? `LOCATION:${escapeICS(loc)}` : "",
-    details ? `DESCRIPTION:${escapeICS(details)}` : "",
-    "END:VEVENT",
-    "END:VCALENDAR",
-  ]
-    .filter(Boolean)
-    .join("\r\n");
-
-  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${slugify(title)}.ics`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function escapeICS(str) {
-  return String(str)
-    .replace(/\\/g, "\\\\")
-    .replace(/\n/g, "\\n")
-    .replace(/,/g, "\\,")
-    .replace(/;/g, "\\;");
-}
-
-function slugify(s) {
-  return String(s)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-/* ---------- status helpers ---------- */
-function statusFlags(startDate, durationMin = 60) {
-  const dur = Number(durationMin);
-  if (
-    !(startDate instanceof Date) ||
-    !isValid(startDate) ||
-    !Number.isFinite(dur)
-  ) {
-    return { upcoming: false, ongoing: false, past: false, endAt: null };
-  }
-  const endAt = addMinutes(startDate, dur);
-  if (!isValid(endAt)) {
-    return { upcoming: false, ongoing: false, past: false, endAt: null };
-  }
-  const now = new Date();
-  const upcoming = isBefore(now, startDate);
-  const past = isAfter(now, endAt);
-  const ongoing =
-    !upcoming &&
-    !past &&
-    isWithinInterval(now, { start: startDate, end: endAt });
-  return { upcoming, ongoing, past, endAt };
-}
-
-/* ---------- duration parsing ---------- */
 function getDurationMinutes(b, exp) {
   const candidates = [
     b?.durationMinutes,
@@ -561,399 +722,115 @@ function getDurationMinutes(b, exp) {
     const n = Number(c);
     if (Number.isFinite(n) && n > 0) return n;
   }
-  const fromStr =
-    parseDurationToMinutes(b?.duration) ??
-    parseDurationToMinutes(exp?.duration);
-  if (Number.isFinite(fromStr) && fromStr > 0) return fromStr;
-  return 60;
+  const parse = (s) => {
+    if (!s || typeof s !== "string") return 0;
+    const norm = s.toLowerCase();
+    const hm = norm.match(/(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?/);
+    if (hm) return Number(hm[1] || 0) * 60 + Number(hm[2] || 0);
+    return 60;
+  };
+  return parse(b?.duration) || parse(exp?.duration) || 60;
 }
 
-function parseDurationToMinutes(input) {
-  if (!input || typeof input !== "string") return null;
-  const s = input.trim().toLowerCase();
-  // "2h 30m" / "2 hours 30 minutes"
-  const hm = s.match(
-    /(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i
-  );
-  if (hm) {
-    const h = hm[1] ? parseFloat(hm[1]) : 0;
-    const m = hm[2] ? parseInt(hm[2], 10) : 0;
-    if (h || m) return Math.round(h * 60 + m);
-  }
-  // "4h" / "4 hours"
-  const onlyH =
-    s.match(/^(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?$/i) ||
-    s.match(/^(\d+(?:\.\d+)?)\s*hour(?:s)?$/i);
-  if (onlyH) return Math.round(parseFloat(onlyH[1]) * 60);
-  // "150m" / "150 minutes"
-  const onlyM = s.match(/^(\d+)\s*m(?:in(?:utes?)?)?$/i);
-  if (onlyM) return parseInt(onlyM[1], 10);
-  return null;
+function statusFlags(startDate, durationMin) {
+  if (!startDate || !isValid(startDate))
+    return { upcoming: false, ongoing: false, past: false };
+  const endAt = addMinutes(startDate, durationMin);
+  const now = new Date();
+  return {
+    upcoming: isBefore(now, startDate),
+    past: isAfter(now, endAt),
+    ongoing: isWithinInterval(now, { start: startDate, end: endAt }),
+  };
 }
 
-/* ---------- map/share helpers ---------- */
-function toMapHref(location) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-    location
-  )}`;
-}
-
-function canShare() {
-  if (typeof navigator === "undefined") return false;
-  return !!navigator.share;
-}
-
-function shareBooking(booking, exp, dateObj) {
-  if (!canShare()) return;
-  const title = exp?.name || "Reservation";
-  const text = dateObj ? `${title} — ${format(dateObj, "PPPP p")}` : title;
-  const url = typeof window !== "undefined" ? window.location.href : "";
-  navigator.share({ title, text, url }).catch(() => {});
-}
-
-/* ---------- QR helpers ---------- */
 function getPublicBookingRef(b) {
-  // Prefer a human-friendly public ref if your API provides one
-  const ref =
+  return (
     b?.publicId ||
     b?.bookingRef ||
     b?.bookingCode ||
-    b?.reference ||
     b?.code ||
-    (Number.isFinite(b?.id) ? `BK-${String(b.id).padStart(6, "0")}` : "");
-  return ref;
+    (b?.id ? `BK-${b.id}` : "REF-???")
+  );
 }
 
 function getQrValue(b) {
   if (!b) return "";
   const ref = getPublicBookingRef(b);
-  if (!ref) return "";
-  const base =
-    (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_SITE_URL) ||
-    "https://www.youroasis.gr";
-  return `${base.replace(/\/+$/, "")}/bookings/${encodeURIComponent(ref)}`;
+  const base = process.env.NEXT_PUBLIC_SITE_URL || "https://yourapp.com";
+  return `${base}/bookings/${ref}`;
 }
 
-function useQrDataUrl(value) {
-  const [dataUrl, setDataUrl] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+function toMapHref(loc) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    loc
+  )}`;
+}
+
+function toCalStamp(date) {
+  return date.toISOString().replace(/-|:|\.\d\d\d/g, "");
+}
+
+function openQrInNewTab(url) {
+  const w = window.open("");
+  if (w)
+    w.document.write(
+      `<img src="${url}" style="width:100%; height:100%; object-fit:contain;">`
+    );
+}
+
+function shareBooking(b, exp, date) {
+  if (typeof navigator !== "undefined" && navigator.share) {
+    navigator
+      .share({
+        title: exp?.name,
+        text: `Booking for ${exp?.name} on ${date ? format(date, "PPP") : ""}`,
+        url: window.location.href,
+      })
+      .catch(() => {});
+  } else {
+    navigator.clipboard.writeText(window.location.href);
+    alert("Link copied to clipboard");
+  }
+}
+
+function printTicket({ qrDataUrl, codeText, startsAt }) {
+  const win = window.open("", "", "width=600,height=600");
+  if (!win) return;
+  win.document.write(`
+    <html>
+      <body style="font-family: sans-serif; text-align: center; padding: 40px;">
+        <h2>Ticket: ${codeText}</h2>
+        <p>${startsAt ? format(startsAt, "PPPP p") : ""}</p>
+        <img src="${qrDataUrl}" width="300" />
+        <script>window.print(); window.close();</script>
+      </body>
+    </html>
+  `);
+  win.document.close();
+}
+
+function useQrDataUrl(text) {
+  const [state, setState] = useState({
+    dataUrl: "",
+
+    loading: !!text,
+    error: null,
+  });
 
   useEffect(() => {
-    let cancelled = false;
+    if (!text) return;
 
-    if (!value) {
-      setDataUrl("");
-      setLoading(false);
-      setError("");
-      return;
-    }
+    setState((s) => ({ ...s, loading: true }));
 
-    setLoading(true);
-    setError("");
-    setDataUrl(""); // ensure we don't flash a stale QR
+    QRCode.toDataURL(text, {
+      width: 400,
+      margin: 2,
+      color: { dark: "#3d2f26", light: "#ffffff" },
+    })
+      .then((url) => setState({ dataUrl: url, loading: false, error: null }))
+      .catch((err) => setState({ dataUrl: "", loading: false, error: err }));
+  }, [text]);
 
-    QRCode.toDataURL(String(value), { width: 256, margin: 1 })
-      .then((url) => {
-        if (!cancelled) setDataUrl(url || "");
-      })
-      .catch((e) => {
-        console.error(e);
-        if (!cancelled) setError("QR generation failed");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [value]);
-
-  return { dataUrl, loading, error };
-}
-
-/* ---------- UI bits ---------- */
-function FullScreenCenter({ children }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-[#f4f1ec] text-[#5a4a3f] px-4">
-      <div className="inline-flex items-center text-sm sm:text-base">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function ErrorCard({ message }) {
-  return (
-    <div className="bg-white border border-[#e4ddd3] rounded-2xl p-8 text-center shadow text-[#5a4a3f]">
-      <p className="text-lg font-semibold mb-2">Not available</p>
-      <p className="text-sm text-[#7c6f60] mb-6">{message}</p>
-      <Link
-        href="/bookings"
-        className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] text-white px-5 py-2 font-medium hover:bg-[#a78b62] transition-all"
-      >
-        <ChevronLeft className="w-4 h-4" /> Back to My Bookings
-      </Link>
-    </div>
-  );
-}
-
-function StatusPill({ when, durationMin = 60 }) {
-  const { upcoming, ongoing } = statusFlags(when, durationMin);
-  const tone = upcoming
-    ? "bg-cyan-100 text-cyan-700 border-cyan-200"
-    : ongoing
-    ? "bg-amber-100 text-amber-800 border-amber-200"
-    : "bg-emerald-100 text-emerald-700 border-emerald-200";
-  const label = upcoming ? "Upcoming" : ongoing ? "Ongoing" : "Completed";
-  const Icon = upcoming ? CalendarDays : ongoing ? Clock : CheckCircle2;
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 shrink-0 rounded-full px-3 py-1 text-xs font-semibold border ${tone}`}
-    >
-      <Icon className="w-3.5 h-3.5" /> {label}
-    </span>
-  );
-}
-
-function StatusProgressBar({ status }) {
-  const pct = status.ongoing ? 66 : status.past ? 100 : 33;
-  return (
-    <div className="h-1.5 bg-[#eee7dc] rounded-full overflow-hidden">
-      <div
-        className={`h-full transition-all duration-700 ${
-          status.ongoing
-            ? "bg-gradient-to-r from-amber-300 to-amber-500"
-            : status.past
-            ? "bg-emerald-400"
-            : "bg-cyan-300"
-        }`}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  );
-}
-
-function InfoRow({ icon, children }) {
-  return (
-    <div className="flex items-center gap-2">
-      {icon}
-      {children}
-    </div>
-  );
-}
-
-function CheckInCard({
-  visible,
-  qrDataUrl,
-  qrLoading,
-  qrError,
-  codeText,
-  startsAt,
-  endsAt,
-  ongoing,
-  canRenderQrImage,
-  onCopy,
-}) {
-  if (!visible) {
-    return (
-      <div className="bg-white/70 border border-[#e4ddd3] rounded-2xl p-5 shadow-sm">
-        <div className="flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-[#7c6f60] mt-0.5" />
-          <div>
-            <p className="font-medium text-[#5a4a3f]">Check-in unavailable</p>
-            <p className="text-sm text-[#7c6f60]">
-              The QR appears here for upcoming or ongoing bookings.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="rounded-2xl border border-[#e4ddd3] shadow-md p-5 relative bg-[radial-gradient(1rem_1rem_at_0%_1rem,transparent_98%,#fff_100%),radial-gradient(1rem_1rem_at_100%_1rem,transparent_98%,#fff_100%),linear-gradient(180deg,#fffdf8,rgba(255,255,255,0.9))] bg-[length:1rem_1rem,1rem_1rem,auto] bg-[position:0_1rem,calc(100%-0px)_1rem,0_0] bg-no-repeat"
-      title="Your ticket"
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <QrCode className="w-5 h-5 text-[#8b6f47]" />
-          <h2 className="text-base font-semibold text-[#5a4a3f]">
-            Check-in QR
-          </h2>
-        </div>
-        <span className="inline-flex items-center gap-1 text-xs rounded-full bg-[#f1efe8] px-2 py-0.5 border border-[#e8e2d9]">
-          <Clock className="w-3.5 h-3.5" />
-          {ongoing
-            ? "Open now"
-            : startsAt && isValid(startsAt)
-            ? `Opens at ${format(startsAt, "p")}`
-            : "Opens at start time"}
-        </span>
-      </div>
-
-      <div className="rounded-xl border border-[#eee7dc] bg-white p-4 flex flex-col items-center">
-        {qrLoading ? (
-          <div className="h-[220px] flex items-center justify-center">
-            <Loader2 className="w-6 h-6 animate-spin text-[#7c6f60]" />
-          </div>
-        ) : qrError ? (
-          <div className="w-full text-center text-sm text-red-700">
-            Could not render QR. Code: {codeText}
-          </div>
-        ) : canRenderQrImage ? (
-          <img
-            src={qrDataUrl}
-            alt="Check-in QR code"
-            className="w-40 h-40 sm:w-48 sm:h-48 md:w-56 md:h-56 select-none"
-            draggable={false}
-          />
-        ) : (
-          <div className="h-[220px] flex items-center justify-center text-xs text-[#7c6f60]">
-            Preparing QR…
-          </div>
-        )}
-        <div className="mt-3 w-full flex items-center justify-between text-xs text-[#7c6f60]">
-          <span className="truncate" title={codeText}>
-            {codeText}
-          </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => {
-                navigator.clipboard?.writeText(codeText);
-                onCopy?.();
-              }}
-              className="inline-flex items-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-2 py-1 hover:bg-[#f6f1e6]"
-              title="Copy code"
-            >
-              <Copy className="w-3.5 h-3.5" /> Copy
-            </button>
-            {canRenderQrImage && (
-              <button
-                onClick={() => openQrInNewTab(qrDataUrl)}
-                className="inline-flex items-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-2 py-1 hover:bg-[#f6f1e6]"
-                title="Open larger"
-              >
-                <Maximize2 className="w-3.5 h-3.5" /> View
-              </button>
-            )}
-            <button
-              onClick={() =>
-                printTicket({ qrDataUrl, codeText, startsAt, endsAt })
-              }
-              className="inline-flex items-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-2 py-1 hover:bg-[#f6f1e6]"
-              title="Print ticket"
-            >
-              <Printer className="w-3.5 h-3.5" /> Print
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <ul className="mt-4 space-y-2 text-xs text-[#7c6f60]">
-        <li className="flex items-start gap-2">
-          <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600" />
-          Show this QR at check-in. It’s valid until{" "}
-          {endsAt && isValid(endsAt)
-            ? format(endsAt, "p")
-            : "the end of your slot"}
-          .
-        </li>
-      </ul>
-    </div>
-  );
-}
-
-function openQrInNewTab(dataUrl) {
-  try {
-    const win = window.open();
-    if (win) {
-      win.document.write(
-        `<html><head><title>Check-in QR</title><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
-         <body style="margin:0;display:flex;align-items:center;justify-content:center;background:#fff">
-           <img src="${dataUrl}" alt="QR" style="max-width:90vw;max-height:90vh"/>
-         </body></html>`
-      );
-      win.document.close();
-    }
-  } catch {}
-}
-
-function printTicket({ qrDataUrl, codeText, startsAt, endsAt }) {
-  const when =
-    startsAt && isValid(startsAt) ? `${format(startsAt, "PPPP p")}` : "";
-  const until = endsAt && isValid(endsAt) ? `${format(endsAt, "p")}` : "";
-  const html = `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Booking Ticket</title>
-  <style>
-    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
-    .card{max-width:640px;margin:24px auto;padding:24px;border:1px solid #e4ddd3;border-radius:16px}
-    .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-    .muted{color:#6b6256;font-size:12px}
-    img{width:220px;height:220px}
-    .code{font-size:12px;color:#6b6256;word-break:break-all}
-    @media print{.noprint{display:none}}
-  </style>
-  </head>
-  <body>
-    <div class="card">
-      <div class="row"><div><strong>Check-in QR</strong></div><div class="muted">${when}${
-    until ? ` · until ${until}` : ""
-  }</div></div>
-      <div style="border:1px solid #eee;padding:16px;border-radius:12px;text-align:center">
-        ${
-          qrDataUrl
-            ? `<img src="${qrDataUrl}" alt="QR"/>`
-            : `<div style="height:220px;display:flex;align-items:center;justify-content:center;color:#6b6256">QR unavailable</div>`
-        }
-        <div class="row" style="margin-top:8px"><span class="code">${
-          codeText || ""
-        }</span></div>
-      </div>
-    </div>
-    <div class="noprint" style="text-align:center;margin-bottom:24px"><button onclick="window.print()">Print</button></div>
-  </body></html>`;
-  const w = window.open("", "_blank");
-  if (!w) return;
-  w.document.write(html);
-  w.document.close();
-}
-
-function MobileToolbar({ onIcs, gcalHref, mapHref, share }) {
-  return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-20 bg-white/95 backdrop-blur border-t border-[#e4ddd3]">
-      <div className="max-w-5xl mx-auto px-4 py-3 grid grid-cols-4 gap-2 text-xs">
-        <button
-          onClick={onIcs}
-          className="inline-flex items-center justify-center gap-1 rounded-full bg-[#8b6f47] text-white px-3 py-2 font-medium"
-        >
-          <Download className="w-4 h-4" /> .ics
-        </button>
-        <a
-          href={gcalHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-3 py-2 text-[#5a4a3f]"
-        >
-          <ExternalLink className="w-4 h-4" /> GCal
-        </a>
-        <a
-          href={mapHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-3 py-2 text-[#5a4a3f]"
-        >
-          <Navigation className="w-4 h-4" /> Go
-        </a>
-        <button
-          onClick={share}
-          className="inline-flex items-center justify-center gap-1 rounded-full border border-[#e8e2d9] bg-white px-3 py-2 text-[#5a4a3f]"
-        >
-          <Share2 className="w-4 h-4" /> Share
-        </button>
-      </div>
-    </div>
-  );
+  return state;
 }
