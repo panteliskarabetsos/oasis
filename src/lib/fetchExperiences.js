@@ -30,6 +30,7 @@ export async function getExperienceBySlug(slug) {
       "whyYoullLove",
       images,
       "mapPin",
+      "meetupPoints", 
       "guestReviews",
       frequency,
       visibility,
@@ -37,7 +38,7 @@ export async function getExperienceBySlug(slug) {
       "updatedAt",
       "priceAdult",
       "priceKid"
-    `
+    `,
     )
     .eq("slug", slug)
     .eq("visibility", true)
@@ -85,13 +86,13 @@ export async function getPublicExperiences() {
       location,
       duration,
       images,
+      "meetupPoints",
       frequency,
       visibility,
       "createdAt",
       "priceAdult",
-
       "priceKid"
-    `
+    `,
     )
     .eq("visibility", true)
     .order("createdAt", { ascending: false });

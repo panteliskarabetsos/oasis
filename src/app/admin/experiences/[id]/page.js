@@ -3,1095 +3,1023 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Script from "next/script";
+import { toast } from "react-hot-toast";
 import {
-  Eye,
-  Trash2,
   ArrowLeft,
-  Link as LinkIcon,
   Image as ImageIcon,
+  Upload,
+  Check,
+  Loader2,
+  Plus,
+  Trash2,
+  MapPin,
+  Clock,
+  MessageSquare,
+  Star,
+  Info,
+  Eye,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 
-// lightweight slugify to avoid an extra dependency on the client
+/* ---------------------------- helpers ---------------------------- */
 function makeSlug(text = "") {
   return text
     .toString()
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "") // strip diacritics
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)+/g, "")
     .slice(0, 80);
 }
 
+const Field = ({ label, children, hint, required = false, className = "" }) => (
+  <label className={`block group min-w-0 ${className}`}>
+    <span className="flex items-center gap-2 text-sm font-semibold tracking-wide text-[#5a4a3f] mb-1.5">
+      {label} {required ? <span className="text-[#b44d4d]">*</span> : null}
+    </span>
+    <div className="w-full">{children}</div>
+    {hint ? (
+      <p className="mt-1.5 text-xs text-[#7a6a5f] font-medium">{hint}</p>
+    ) : null}
+  </label>
+);
+
 export default function AdminExperienceEditPage() {
   const router = useRouter();
   const params = useParams();
-  const { loading } = useAuth();
+  const { loading: authLoading } = useAuth();
 
   const id = useMemo(() => {
     const raw = params?.id;
     return Array.isArray(raw) ? raw[0] : raw;
   }, [params]);
 
-  const [experience, setExperience] = useState(null);
+  // Loading & Action States
   const [isFetching, setIsFetching] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploadedImages, setUploadedImages] = useState([]);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [guestReviews, setGuestReviews] = useState([]); // array of strings (jsonb)
-  const [slugTouched, setSlugTouched] = useState(false);
+  const [publishing, setPublishing] = useState(false);
 
-  //delete modal state
+  // Modals
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    if (!id || loading) return;
+  // DB fields
+  const [experienceId, setExperienceId] = useState(null);
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [description, setDescription] = useState("");
+  const [location, setLocation] = useState("Chania, Crete");
+  const [duration, setDuration] = useState("");
+  const [priceAdult, setPriceAdult] = useState("85");
+  const [priceKid, setPriceKid] = useState("");
+  const [whatsIncluded, setWhatsIncluded] = useState("");
+  const [whatToBring, setWhatToBring] = useState("");
+  const [whyYoullLove, setWhyYoullLove] = useState("");
+  const [visibility, setVisibility] = useState(true);
+  const [frequency, setFrequency] = useState([]);
+  const [images, setImages] = useState([]);
 
+  // Dynamic Arrays
+  const [meetupPoints, setMeetupPoints] = useState([]);
+  const [reviews, setReviews] = useState([]);
+
+  // derived UI
+  const [status, setStatus] = useState("published");
+  const [slugTouched, setSlugTouched] = useState(true); // Default true for edits
+
+  useEffect(() => {
+    setStatus(visibility ? "published" : "draft");
+  }, [visibility]);
+
+  // Fetch Experience Data
+  useEffect(() => {
+    if (!id || authLoading) return;
     let cancelled = false;
 
     async function fetchOne() {
       setIsFetching(true);
       try {
-        // 1) Prefer dedicated endpoint
         let res = await fetch(`/api/admin/experiences/${id}`, {
           cache: "no-store",
         });
-        if (res.status === 401 || res.status === 403) {
-          router.replace("/");
-          return;
-        }
+        if (res.status === 401 || res.status === 403)
+          return router.replace("/");
+
         if (res.ok) {
           const data = await res.json();
           if (!cancelled) applyIncoming(data);
           return;
         }
 
-        // 2) Try the collection endpoint with query param `id`
         res = await fetch(
           `/api/admin/experiences?id=${encodeURIComponent(id)}`,
-          { cache: "no-store" }
+          { cache: "no-store" },
         );
-        if (res.status === 401 || res.status === 403) {
-          router.replace("/");
-          return;
-        }
         if (res.ok) {
           const data = await res.json();
           const one = Array.isArray(data)
             ? data.find((e) => `${e.id}` === `${id}`)
             : data;
           if (one && !cancelled) applyIncoming(one);
-          return;
-        }
-
-        // 3) Fallback: fetch all and pick by id
-        res = await fetch(`/api/admin/experiences`, { cache: "no-store" });
-        if (res.status === 401 || res.status === 403) {
-          router.replace("/");
-          return;
-        }
-        if (res.ok) {
-          const data = await res.json();
-          const one = Array.isArray(data)
-            ? data.find((e) => `${e.id}` === `${id}`)
-            : null;
-          if (!cancelled) applyIncoming(one || null);
         }
       } catch (e) {
         console.error(e);
-        if (!cancelled) setExperience(null);
       } finally {
         if (!cancelled) setIsFetching(false);
       }
     }
 
     const applyIncoming = (obj) => {
-      if (!obj) {
-        setExperience(null);
-        return;
-      }
-      // Normalize shapes for UI
-      const normalized = {
-        ...obj,
-        images: Array.isArray(obj.images)
-          ? obj.images
-          : obj.images
-          ? [obj.images]
-          : [],
-        guestReviews: Array.isArray(obj.guestReviews)
-          ? obj.guestReviews
-          : obj.guestReviews && typeof obj.guestReviews === "object"
+      if (!obj) return;
+
+      setExperienceId(obj.id);
+      setName(obj.name || "");
+      setSlug(obj.slug || "");
+      setDescription(obj.description || "");
+      setLocation(obj.location || "Chania, Crete");
+      setDuration(obj.duration || "");
+      setPriceAdult(obj.priceAdult ?? "");
+      setPriceKid(obj.priceKid ?? "");
+      setWhatsIncluded(obj.whatsIncluded || "");
+      setWhatToBring(obj.whatToBring || "");
+      setWhyYoullLove(obj.whyYoullLove || "");
+      setVisibility(obj.visibility ?? true);
+      setFrequency(obj.frequency || []);
+
+      // Normalize Images
+      setImages(
+        Array.isArray(obj.images) ? obj.images : obj.images ? [obj.images] : [],
+      );
+
+      // Handle Meetup Points
+      setMeetupPoints(Array.isArray(obj.meetupPoints) ? obj.meetupPoints : []);
+
+      // Handle Reviews (Migrate old string arrays to new object format safely)
+      const fetchedReviews = Array.isArray(obj.guestReviews)
+        ? obj.guestReviews
+        : obj.guestReviews && typeof obj.guestReviews === "object"
           ? Object.values(obj.guestReviews)
-          : [],
-      };
-      setExperience(normalized);
-      setGuestReviews(normalized.guestReviews || []);
+          : [];
+
+      const formattedReviews = fetchedReviews.map((r, i) => {
+        if (typeof r === "string")
+          return { id: `old-${i}`, name: "Guest", comment: r };
+        return {
+          id: r.id || `rev-${i}`,
+          name: r.name || "Guest",
+          comment: r.comment || "",
+        };
+      });
+      setReviews(formattedReviews);
     };
 
     fetchOne();
     return () => {
       cancelled = true;
     };
-  }, [id, loading, router]);
+  }, [id, authLoading, router]);
 
-  // Auto-slug when name changes (unless user touched slug manually)
-  const handleNameChange = useCallback(
-    (e) => {
-      const name = e.target.value;
-      setExperience((prev) => {
-        if (!prev) return prev;
-        const next = { ...prev, name };
-        if (!slugTouched) next.slug = makeSlug(name);
-        return next;
-      });
-    },
-    [slugTouched]
-  );
-
-  // Close delete modal on Escape
-  useEffect(() => {
-    function onKey(e) {
-      if (e.key === "Escape") setDeleteOpen(false);
+  /* --- Input Handlers --- */
+  const handleNameChange = (e) => {
+    const newName = e.target.value;
+    setName(newName);
+    if (!slugTouched) {
+      setSlug(makeSlug(newName));
     }
-    if (deleteOpen) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [deleteOpen]);
+  };
 
-  // Cloudinary upload widget (on-demand creation)
-  const openCloudinaryWidget = () => {
-    if (typeof window === "undefined" || !window.cloudinary) {
-      alert("Cloudinary widget not available in this environment.");
+  function toggleDay(day) {
+    setFrequency((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
+    );
+  }
+
+  const addMeetupPoint = () =>
+    setMeetupPoints((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: "", mapPin: "", instructions: "" },
+    ]);
+  const updateMeetupPoint = (id, field, value) =>
+    setMeetupPoints((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
+    );
+  const removeMeetupPoint = (id) =>
+    setMeetupPoints((prev) => prev.filter((p) => p.id !== id));
+
+  const addReview = () =>
+    setReviews((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: "", comment: "" },
+    ]);
+  const updateReview = (id, field, value) =>
+    setReviews((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)),
+    );
+  const removeReview = (id) =>
+    setReviews((prev) => prev.filter((r) => r.id !== id));
+
+  /* --- Submit --- */
+  const canSubmit = name.trim().length >= 3 && slug.trim().length >= 3;
+
+  async function submit(e, publish = false) {
+    e?.preventDefault?.();
+    if (!canSubmit) {
+      toast.error("Please fill the required fields correctly.");
       return;
     }
-    const widget = window.cloudinary.createUploadWidget(
-      {
-        cloudName: "docgxigth",
-        uploadPreset: "ml_default",
-        multiple: true,
-        maxFiles: 10,
-      },
-      (error, result) => {
-        if (!error && result && result.event === "success") {
-          setUploadedImages((prev) => [...prev, result.info.secure_url]);
-        }
+
+    const finalVisibility = publish ? true : false;
+    publish ? setPublishing(true) : setSaving(true);
+
+    try {
+      const cleanedMeetupPoints = meetupPoints.filter(
+        (p) => p.name.trim() || p.mapPin.trim(),
+      );
+      const cleanedReviews = reviews
+        .filter((r) => r.comment.trim())
+        .map(({ name, comment }) => ({
+          name: name.trim() || "Guest",
+          comment: comment.trim(),
+        }));
+
+      const payload = {
+        id: experienceId,
+        name: name.trim(),
+        slug: makeSlug(slug),
+        description: description.trim() || null,
+        location: location.trim() || "Chania, Crete",
+        duration: duration.trim() || null,
+        whatsIncluded: whatsIncluded.trim() || null,
+        whatToBring: whatToBring.trim() || null,
+        whyYoullLove: whyYoullLove.trim() || null,
+        images,
+        meetupPoints: cleanedMeetupPoints,
+        guestReviews: cleanedReviews,
+        frequency,
+        visibility: finalVisibility,
+        priceAdult: priceAdult === "" ? 85 : Number(priceAdult),
+        priceKid: priceKid === "" ? null : Number(priceKid),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const res = await fetch(`/api/admin/experiences`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save changes.");
       }
-    );
-    widget.open();
-  };
 
-  const handleDeleteExistingImage = (index) => {
-    setExperience((prev) => ({
-      ...prev,
-      images: (prev?.images || []).filter((_, i) => i !== index),
-    }));
-  };
+      toast.success(publish ? "Published successfully!" : "Changes saved.");
+      setVisibility(finalVisibility);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.message || "Something went wrong.");
+    } finally {
+      setSaving(false);
+      setPublishing(false);
+    }
+  }
 
-  const handleDeleteNewImage = (index) => {
-    setUploadedImages((prev) => prev.filter((_, i) => i !== index));
-  };
-
+  /* --- Delete Handling --- */
   const handleDeleteExperience = async () => {
-    if (!experience?.id) return;
+    if (!experienceId) return;
     try {
       setDeleting(true);
       const res = await fetch(`/api/admin/experiences`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: experience.id }),
+        body: JSON.stringify({ id: experienceId }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete.");
+      if (!res.ok) throw new Error("Failed to delete.");
       router.push(`/admin/experiences?toast=deleted`);
     } catch (e) {
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setDeleting(false);
     }
   };
-  const previewImages = useMemo(
-    () => [...(experience?.images || []), ...uploadedImages],
-    [experience?.images, uploadedImages]
-  );
-  const addReview = (val) => {
-    const v = val.trim();
-    if (!v) return;
-    setGuestReviews((prev) => Array.from(new Set([...prev, v])));
-  };
 
-  const removeReview = (idx) => {
-    setGuestReviews((prev) => prev.filter((_, i) => i !== idx));
-  };
+  /* --- Image Upload --- */
+  const openCloudinaryWidget = () => {
+    const cloudName =
+      process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "docgxigth";
+    const uploadPreset =
+      process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "ml_default";
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    if (!experience) return;
-    setSaving(true);
-    const form = e.currentTarget;
-
-    const selectedDays = Array.from(
-      form.querySelectorAll('input[name="frequency"]:checked')
-    ).map((c) => c.value);
-
-    const updated = {
-      id: experience.id,
-      name: form.name.value,
-      slug: form.slug.value || makeSlug(form.name.value),
-      description: form.description.value,
-      location: form.location.value,
-      duration: form.duration.value,
-      whatsIncluded: form.whatsIncluded.value,
-      whatToBring: form.whatToBring.value,
-      whyYoullLove: form.whyYoullLove.value,
-      mapPin: form.mapPin.value,
-      images: [...(experience.images || []), ...uploadedImages],
-      guestReviews: guestReviews, // jsonb array
-      visibility: form.visibility.checked,
-      frequency: selectedDays,
-      priceAdult: parseFloat(form.priceAdult.value),
-      priceKid: form.priceKid.value ? parseFloat(form.priceKid.value) : null,
-      updatedAt: new Date().toISOString(),
-    };
-
-    try {
-      const res = await fetch(`/api/admin/experiences`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to save changes.");
-      setUploadedImages([]);
-      router.push("/admin/experiences?toast=saved");
+    if (typeof window === "undefined" || !window.cloudinary) {
+      toast.error("Cloudinary widget script is not loaded on this page.");
       return;
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setSaving(false);
     }
+
+    const widget = window.cloudinary.createUploadWidget(
+      {
+        cloudName,
+        uploadPreset,
+        multiple: true,
+        maxFiles: 10,
+        folder: "oasis/experiences",
+      },
+      (error, result) => {
+        if (!error && result && result.event === "success") {
+          setImages((prev) => [...prev, result.info.secure_url]);
+          toast.success("Image added to gallery");
+        }
+      },
+    );
+    widget.open();
   };
 
-  if (loading || isFetching) {
-    return (
-      <main className="min-h-screen bg-gradient-to-b from-[#faf8f4] via-white to-[#f4f1ec]">
-        <header className="sticky top-0 z-10 bg-gradient-to-b from-[#faf8f4]/90 to-white/80 backdrop-blur border-b border-[#e8e2d8]">
-          <div className="container mx-auto px-6 py-5">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full border-4 border-[#8b6f47] border-t-transparent animate-spin" />
-              <span className="text-[#5a4a3f] font-serif">Loading…</span>
-            </div>
-          </div>
-        </header>
-      </main>
-    );
-  }
+  const removeImage = (index) =>
+    setImages((prev) => prev.filter((_, i) => i !== index));
 
-  if (!experience) {
+  if (isFetching || authLoading) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-[#faf8f4] via-white to-[#f4f1ec]">
-        <div className="container mx-auto px-6 py-12 text-center">
-          <p className="text-[#5a4a3f] font-serif text-lg">
-            Experience not found.
-          </p>
-          <button
-            onClick={() => router.push("/admin/experiences")}
-            className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#d8cfc3] bg-[#f4f1ec] text-[#5a4a3f] hover:bg-[#eee8e0] hover:border-[#cfc6b8] transition-all shadow-sm"
-          >
-            <ArrowLeft size={18} /> Back to list
-          </button>
+      <main className="min-h-screen bg-[#fdfcf8] flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <Loader2 className="animate-spin text-[#8b6f47]" size={28} />
+          <span className="text-[#5a4a3f] font-serif text-lg">
+            Loading Experience…
+          </span>
         </div>
       </main>
     );
   }
 
-  const createdAt = experience.createdAt
-    ? new Date(experience.createdAt)
-    : null;
-  const updatedAt = experience.updatedAt
-    ? new Date(experience.updatedAt)
-    : null;
-  const confirmMatches =
-    confirmText.trim() === (experience?.name || "").trim() ||
-    confirmText.trim().toUpperCase() === "DELETE";
+  const inputClass =
+    "w-full min-w-0 rounded-xl border border-[#e0dcd4] bg-white px-4 py-2.5 text-sm text-[#3a2f28] placeholder:text-[#a1978d] outline-none transition-all focus:border-[#8b6f47] focus:ring-1 focus:ring-[#8b6f47] shadow-sm";
 
   return (
-    <div className="min-h-screen ">
-      <div className="p-3 sm:p-5">
-        <main className="min-h-[calc(100vh-2rem)] bg-gradient-to-b from-[#faf8f4] via-white to-[#f4f1ec] rounded-[36px] border border-[#e8e2d8] shadow-xl overflow-hidden">
-          {/* Header */}
-          <header className="sticky top-0 z-10 bg-gradient-to-b from-[#faf8f4]/90 to-white/80 backdrop-blur supports-[backdrop-filter]:backdrop-blur border-b border-[#e8e2d8]">
-            <div className="container mx-auto px-6 py-5 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={() => router.push("/admin/experiences")}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-[#d8cfc3] bg-[#f4f1ec] text-[#5a4a3f] hover:bg-[#eee8e0] hover:border-[#cfc6b8] transition-all shadow-sm"
-                >
-                  <ArrowLeft size={18} /> Back
-                </button>
-                <div>
-                  <h1 className="text-2xl md:text-3xl font-serif text-[#5a4a3f]">
-                    {experience.name || "Edit Experience"}
-                  </h1>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-[#7a6a5f]">
-                    <span
-                      className={`px-2 py-0.5 rounded-full border ${
-                        experience.visibility
-                          ? "bg-green-50 text-green-700 border-green-200"
-                          : "bg-red-50 text-red-700 border-red-200"
-                      }`}
-                    >
-                      {experience.visibility ? "Public" : "Private"}
-                    </span>
-                    {createdAt && (
-                      <span>Created: {createdAt.toLocaleDateString()}</span>
-                    )}
-                    {updatedAt && (
-                      <span>
-                        Last updated: {updatedAt.toLocaleDateString()}{" "}
-                        {updatedAt.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
+    <div className="relative pb-24 bg-[#fdfcf8] min-h-screen pt-4">
+      <Script
+        src="https://widget.cloudinary.com/v2.0/global/all.js"
+        strategy="lazyOnload"
+      />
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPreviewOpen(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#e9f0ff] text-[#1f4ea3] hover:bg-[#dbe7ff] transition-all"
-                >
-                  <Eye size={18} /> Preview
-                </button>
-                <button
-                  onClick={() => setDeleteOpen(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-all"
-                >
-                  <Trash2 size={18} /> Delete
-                </button>
-              </div>
+      {/* Top controls (Sticky) */}
+      <div className="sticky top-20 lg:top-24 z-20 mx-auto mb-8 max-w-7xl px-4 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#e6e0d8] bg-white/90 backdrop-blur-md px-4 py-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => router.back()}
+              className="inline-flex items-center gap-2 rounded-full border border-[#e0dcd4] bg-[#fdfaf7] px-4 py-2 text-sm font-medium text-[#5a4a3f] hover:bg-[#f1ede7] transition-colors shrink-0"
+            >
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button
+              onClick={() => setPreviewOpen(true)}
+              className="hidden sm:inline-flex items-center gap-2 rounded-full border border-[#e0dcd4] bg-white px-4 py-2 text-sm font-medium text-[#5a4a3f] hover:bg-[#f6f4f0] transition-colors shrink-0"
+            >
+              <Eye size={16} /> Full Preview
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <button
+              onClick={() => setDeleteOpen(true)}
+              className="p-2 sm:px-4 sm:py-2 rounded-full border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors shadow-sm text-sm font-medium flex items-center gap-2"
+            >
+              <Trash2 size={16} />{" "}
+              <span className="hidden sm:inline">Delete</span>
+            </button>
+
+            <button
+              onClick={(e) => submit(e, false)}
+              disabled={!canSubmit || saving || publishing}
+              className="rounded-full border border-[#e0dcd4] bg-white px-4 sm:px-5 py-2 text-sm font-medium text-[#5a4a3f] hover:bg-[#f6f4f0] disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 transition-colors shadow-sm"
+            >
+              {saving ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Check size={16} />
+              )}
+              Save Changes
+            </button>
+
+            <button
+              onClick={(e) => submit(e, true)}
+              disabled={!canSubmit || saving || publishing}
+              className="rounded-full bg-[#8b6f47] px-4 sm:px-6 py-2 text-sm font-medium text-white hover:bg-[#735b38] disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 transition-colors shadow-md"
+            >
+              {publishing ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Upload size={16} />
+              )}
+              Publish
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Content Layout: 12-column Grid */}
+      <div className="mx-auto grid max-w-7xl grid-cols-1 lg:grid-cols-12 gap-8 px-4 sm:px-6 items-start">
+        {/* Left Column: Form (8 cols on desktop) */}
+        <form className="lg:col-span-8 space-y-8 min-w-0 flex flex-col">
+          {/* Section: Basic Info */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="border-b border-[#e6e0d8] pb-4 mb-2">
+              <h2 className="font-serif text-2xl text-[#3a2f28]">
+                Basic Information
+              </h2>
             </div>
-          </header>
 
-          {/* Content */}
-          <section className="container mx-auto px-6 py-8">
-            <form
-              onSubmit={handleSave}
-              className="grid grid-cols-1 xl:grid-cols-3 gap-6 text-[#5a4a3f] font-serif"
-            >
-              {/* Main form (2 cols) */}
-              <div className="xl:col-span-2 space-y-6">
-                {/* Basics card */}
-                <div className="rounded-3xl border border-[#e8e2d8] bg-white/90 shadow-sm">
-                  <div className="px-6 py-4 border-b border-[#efe9e1] bg-[#faf7f1] rounded-t-3xl">
-                    <h3 className="text-xl font-semibold">Basics</h3>
-                    <p className="text-xs text-[#7a6a5f]">
-                      Title, URL slug, location and timing
-                    </p>
-                  </div>
-                  <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <LabeledInput
-                      name="name"
-                      label="Name"
-                      defaultValue={experience.name}
-                      onChange={handleNameChange}
-                    />
+            <Field label="Experience Name" required>
+              <input
+                value={name}
+                onChange={handleNameChange}
+                className={inputClass}
+                placeholder="e.g. Traditional Olive Harvest"
+              />
+            </Field>
 
-                    <div>
-                      <label className="block text-xs tracking-wide uppercase text-[#8a7c6d] mb-1">
-                        Slug
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          name="slug"
-                          defaultValue={experience.slug}
-                          onChange={() => setSlugTouched(true)}
-                          required
-                          className="w-full px-4 py-2.5 rounded-xl border border-[#dcd2c3] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47] shadow-sm"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const auto = makeSlug(experience?.name || "");
-                            setExperience((p) => ({ ...p, slug: auto }));
-                            setSlugTouched(true);
-                          }}
-                          className="px-3 py-2 rounded-xl border border-[#dcd2c3] bg-[#f7f4ef] hover:bg-[#efeae2]"
-                          title="Generate from name"
-                        >
-                          Auto
-                        </button>
-                      </div>
-                      <div className="mt-1 text-xs text-[#7a6a5f] flex items-center gap-1">
-                        <LinkIcon size={14} />
-                        <span>
-                          /experiences/
-                          <strong>{experience.slug || "your-slug"}</strong>
-                        </span>
-                      </div>
-                    </div>
-
-                    <LabeledInput
-                      name="location"
-                      label="Location"
-                      defaultValue={experience.location || "Chania, Crete"}
-                      onChange={(e) =>
-                        setExperience((p) => ({
-                          ...p,
-                          location: e.target.value,
-                        }))
-                      }
-                    />
-                    <LabeledInput
-                      name="duration"
-                      label="Duration"
-                      defaultValue={experience.duration}
-                      placeholder="e.g., 3 hours"
-                      onChange={(e) =>
-                        setExperience((p) => ({
-                          ...p,
-                          duration: e.target.value,
-                        }))
-                      }
-                    />
-                    <LabeledInput
-                      name="mapPin"
-                      label="Map Pin"
-                      defaultValue={experience.mapPin}
-                      required={false}
-                      placeholder="35.513, 24.019"
-                    />
-                  </div>
-                </div>
-
-                {/* Pricing card */}
-                <div className="rounded-3xl border border-[#e8e2d8] bg-white/90 shadow-sm">
-                  <div className="px-6 py-4 border-b border-[#efe9e1] bg-[#faf7f1] rounded-t-3xl">
-                    <h3 className="text-xl font-semibold">Pricing</h3>
-                    <p className="text-xs text-[#7a6a5f]">
-                      Adult and child pricing
-                    </p>
-                  </div>
-                  <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <LabeledInput
-                      name="priceAdult"
-                      type="number"
-                      label="Adult Price (€)"
-                      defaultValue={experience.priceAdult ?? 85}
-                      placeholder="85"
-                      onChange={(e) =>
-                        setExperience((p) => ({
-                          ...p,
-                          priceAdult:
-                            e.target.value === ""
-                              ? undefined
-                              : parseFloat(e.target.value),
-                        }))
-                      }
-                    />
-                    <LabeledInput
-                      name="priceKid"
-                      type="number"
-                      label="Child Price (€)"
-                      defaultValue={experience.priceKid ?? ""}
-                      required={false}
-                      placeholder="Optional"
-                      onChange={(e) =>
-                        setExperience((p) => ({
-                          ...p,
-                          priceKid:
-                            e.target.value === ""
-                              ? null
-                              : parseFloat(e.target.value),
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-
-                {/* Details card */}
-                <div className="rounded-3xl border border-[#e8e2d8] bg-white/90 shadow-sm">
-                  <div className="px-6 py-4 border-b border-[#efe9e1] bg-[#faf7f1] rounded-t-3xl">
-                    <h3 className="text-xl font-semibold">Details</h3>
-                    <p className="text-xs text-[#7a6a5f]">
-                      Description, inclusions and highlights
-                    </p>
-                  </div>
-                  <div className="p-6 grid grid-cols-1 gap-5">
-                    <LabeledTextarea
-                      name="description"
-                      label="Description"
-                      defaultValue={experience.description}
-                    />
-                    <LabeledTextarea
-                      name="whatsIncluded"
-                      label="What’s Included"
-                      defaultValue={experience.whatsIncluded}
-                      required={false}
-                      placeholder="One per line"
-                    />
-                    <LabeledTextarea
-                      name="whatToBring"
-                      label="What to Bring"
-                      defaultValue={experience.whatToBring}
-                      required={false}
-                    />
-                    <LabeledTextarea
-                      name="whyYoullLove"
-                      label="Why You’ll Love It"
-                      defaultValue={experience.whyYoullLove}
-                      required={false}
-                      onChange={(e) =>
-                        setExperience((p) => ({
-                          ...p,
-                          whyYoullLove: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-
-                {/* Images card */}
-                <div className="rounded-3xl border border-[#e8e2d8] bg-white/90 shadow-sm">
-                  <div className="px-6 py-4 border-b border-[#efe9e1] bg-[#faf7f1] rounded-t-3xl flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xl font-semibold">Images</h3>
-                      <p className="text-xs text-[#7a6a5f]">
-                        Upload and manage gallery
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={openCloudinaryWidget}
-                      className="px-4 py-2 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] transition-all"
-                    >
-                      Upload Images
-                    </button>
-                  </div>
-                  <div className="p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                    {(experience.images || []).map((img, i) => (
-                      <div
-                        key={`old-${i}`}
-                        className="relative aspect-video rounded-xl overflow-hidden border border-[#e8e2d8]"
-                      >
-                        <img
-                          src={img}
-                          alt={`Image ${i + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteExistingImage(i)}
-                          className="absolute top-2 right-2 px-2 py-1 rounded-full text-white bg-red-600/90 text-xs"
-                          title="Remove"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                    {uploadedImages.map((img, i) => (
-                      <div
-                        key={`new-${i}`}
-                        className="relative aspect-video rounded-xl overflow-hidden border border-[#e8e2d8]"
-                      >
-                        <img
-                          src={img}
-                          alt={`New ${i + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteNewImage(i)}
-                          className="absolute top-2 right-2 px-2 py-1 rounded-full text-white bg-red-600/90 text-xs"
-                          title="Remove"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Reviews card */}
-                <div className="rounded-3xl border border-[#e8e2d8] bg-white/90 shadow-sm">
-                  <div className="px-6 py-4 border-b border-[#efe9e1] bg-[#faf7f1] rounded-t-3xl">
-                    <h3 className="text-xl font-semibold">Guest Reviews</h3>
-                    <p className="text-xs text-[#7a6a5f]">
-                      Short quotes shown on the page
-                    </p>
-                  </div>
-                  <div className="p-6">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Type a short quote and press Add"
-                        className="flex-1 px-4 py-2.5 rounded-xl border border-[#dcd2c3] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47] shadow-sm"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            addReview(e.currentTarget.value);
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          const input = e.currentTarget.previousSibling;
-                          if (input && input.value) {
-                            addReview(input.value);
-                            input.value = "";
-                          }
-                        }}
-                        className="px-4 py-2 rounded-full bg-[#8b6f47] text-white hover:bg-[#a78b62]"
-                      >
-                        Add
-                      </button>
-                    </div>
-
-                    {guestReviews.length > 0 && (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {guestReviews.map((r, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#efeae2] border border-[#e0d9cf]"
-                          >
-                            <span className="text-sm italic">“{r}”</span>
-                            <button
-                              type="button"
-                              onClick={() => removeReview(i)}
-                              className="text-[#7a6a5f] hover:text-red-600"
-                            >
-                              ✕
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Side card (visibility, frequency, save) */}
-              {/* Side: preview + controls */}
-              <aside className="xl:col-span-1 space-y-6">
-                {/* Live Preview card */}
-                <div
-                  className="rounded-3xl border border-[#e6e0d8] bg-white/70 p-6 backdrop-blur"
-                  aria-live="polite"
-                >
-                  <h3 className="mb-3 font-serif text-lg text-[#5a4a3f]">
-                    Live Preview
-                  </h3>
-
-                  <div className="overflow-hidden rounded-2xl border border-[#e0dcd4] bg-white shadow-sm">
-                    <div className="relative h-40 w-full bg-[#faf7f1]">
-                      {previewImages?.[0] ||
-                      experience?.images?.[0] ||
-                      uploadedImages?.[0] ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={
-                            previewImages?.[0] ||
-                            experience?.images?.[0] ||
-                            uploadedImages?.[0]
-                          }
-                          alt="Cover preview"
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[#7a6a5f]">
-                          <ImageIcon size={28} />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-2 p-4">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm uppercase tracking-wide text-[#7a6a5f]">
-                          {experience.location || "Location"}
-                        </p>
-                        <p className="rounded-full border border-[#efe7d9] bg-[#fbf7ef] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
-                          {experience.visibility ? "published" : "draft"}
-                        </p>
-                      </div>
-
-                      <h4 className="font-serif text-xl text-[#5a4a3f]">
-                        {experience.name || "Untitled experience"}
-                      </h4>
-
-                      <p className="text-sm text-[#5a4a3f]/90">
-                        {experience.whyYoullLove || "Why guests will love it…"}
-                      </p>
-
-                      <div className="mt-2 flex items-center justify-between text-sm text-[#5a4a3f]">
-                        <span>{experience.duration || "Duration TBD"}</span>
-                        <span className="font-medium">
-                          {typeof experience.priceAdult === "number"
-                            ? `€${Number(experience.priceAdult).toFixed(0)}`
-                            : "Price TBD"}
-                          {typeof experience.priceKid === "number" &&
-                            ` (kid €${Number(experience.priceKid).toFixed(0)})`}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="mt-4 text-xs text-[#7a6a5f]">
-                    The preview is indicative. Final rendering may vary on the
-                    public catalog page.
-                  </p>
-                </div>
-
-                {/* Controls (sticky) */}
-                <div className="rounded-3xl border border-[#e8e2d8] bg-white/90 shadow-sm sticky top-[92px]">
-                  <div className="p-6 space-y-6">
-                    <div>
-                      <h4 className="text-lg font-medium mb-2">Visibility</h4>
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          name="visibility"
-                          defaultChecked={experience.visibility}
-                          onChange={(e) =>
-                            setExperience((p) => ({
-                              ...p,
-                              visibility: e.target.checked,
-                            }))
-                          }
-                        />
-                        <span className="text-sm">
-                          Public (visible on site)
-                        </span>
-                      </label>
-                    </div>
-
-                    <div>
-                      <h4 className="text-lg font-medium mb-2">
-                        Frequency (Select Days)
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          "Monday",
-                          "Tuesday",
-                          "Wednesday",
-                          "Thursday",
-                          "Friday",
-                          "Saturday",
-                          "Sunday",
-                        ].map((day) => (
-                          <label
-                            key={day}
-                            className="inline-flex items-center gap-2 rounded-xl border border-[#e8e2d8] px-3 py-2"
-                          >
-                            <input
-                              type="checkbox"
-                              name="frequency"
-                              value={day}
-                              defaultChecked={experience.frequency?.includes(
-                                day
-                              )}
-                            />
-                            <span className="text-sm">{day}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="w-full px-6 py-3 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] transition-all disabled:opacity-60"
-                    >
-                      {saving ? "Saving…" : "Save Changes"}
-                    </button>
-                  </div>
-                </div>
-              </aside>
-            </form>
-          </section>
-
-          {/* Preview modal */}
-          {previewOpen && (
-            <div
-              className="fixed inset-0 z-50 bg-black/50 p-4 sm:p-6 overflow-y-auto"
-              role="dialog"
-              aria-modal="true"
-            >
-              <div className="mx-auto w-full max-w-6xl">
-                <div className="bg-[#f4f1ec] rounded-3xl shadow-2xl flex flex-col max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]">
-                  <div className="px-6 py-4 border-b border-[#e8e2d8] bg-[#faf7f1] relative sticky top-0 z-10">
-                    <button
-                      onClick={() => setPreviewOpen(false)}
-                      className="absolute right-4 top-3 px-3 py-1.5 rounded-full text-[#5a4a3f] bg-[#efeae2] hover:bg-[#e7e1d7] border border-[#e0d9cf] text-sm"
-                      title="Close"
-                    >
-                      ✕
-                    </button>
-                    <div className="text-center">
-                      <h2 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f]">
-                        {experience.name}
-                      </h2>
-                      <p className="text-sm text-[#7a6a5f]">
-                        {experience.visibility ? "Public" : "Private"} •{" "}
-                        {experience.location}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-8 text-[#2f2f2f]">
-                    <div className="text-center space-y-1">
-                      <p className="text-lg text-[#4a4a4a] italic">
-                        {experience.duration}
-                      </p>
-                      <p className="text-xl text-[#5a4a3f]">
-                        Adult: €{experience.priceAdult ?? 85}
-                        {typeof experience.priceKid === "number"
-                          ? ` • Child: €${experience.priceKid}`
-                          : ""}
-                      </p>
-                    </div>
-
-                    {experience.description && (
-                      <section className="max-w-4xl mx-auto text-center">
-                        <p className="text-lg sm:text-xl leading-relaxed text-[#4a4a4a] whitespace-pre-line">
-                          {experience.description}
-                        </p>
-                      </section>
-                    )}
-
-                    {experience.images?.length > 0 && (
-                      <section className="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                        {experience.images.map((img, i) => (
-                          <div
-                            key={i}
-                            className="relative aspect-video rounded-xl overflow-hidden border-2 border-[#e0dcd4] shadow-lg"
-                          >
-                            <img
-                              src={img}
-                              alt={`Experience Image ${i + 1}`}
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                        ))}
-                      </section>
-                    )}
-
-                    {experience.whatsIncluded && (
-                      <section className="max-w-4xl mx-auto">
-                        <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3 text-center">
-                          What’s Included
-                        </h3>
-                        <ul className="list-disc list-inside text-[#4a4a4a] space-y-1">
-                          {experience.whatsIncluded.split("").map((item, i) => (
-                            <li key={i} className="text-lg">
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    )}
-
-                    {experience.whatToBring && (
-                      <section className="max-w-4xl mx-auto text-center">
-                        <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3">
-                          What to Bring
-                        </h3>
-                        <p className="text-lg text-[#4a4a4a]">
-                          {experience.whatToBring}
-                        </p>
-                      </section>
-                    )}
-
-                    {experience.whyYoullLove && (
-                      <section className="max-w-4xl mx-auto text-center">
-                        <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3">
-                          Why You’ll Love It
-                        </h3>
-                        <p className="text-lg text-[#4a4a4a] whitespace-pre-line">
-                          {experience.whyYoullLove}
-                        </p>
-                      </section>
-                    )}
-
-                    {experience.mapPin && (
-                      <section className="max-w-5xl mx-auto">
-                        <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3 text-center">
-                          Where You'll Be
-                        </h3>
-                        <div className="w-full h-[300px] rounded-xl overflow-hidden shadow-lg border border-[#e0dcd4]">
-                          <iframe
-                            src={`https://www.google.com/maps?q=${experience.mapPin}&z=14&output=embed`}
-                            width="100%"
-                            height="100%"
-                            style={{ border: 0 }}
-                            allowFullScreen
-                            loading="lazy"
-                            title="Map"
-                          />
-                        </div>
-                      </section>
-                    )}
-
-                    {guestReviews.length > 0 && (
-                      <section className="max-w-4xl mx-auto">
-                        <h3 className="text-2xl font-serif text-[#5a4a3f] mb-4 text-center">
-                          Guest Reviews
-                        </h3>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          {guestReviews.map((review, i) => (
-                            <div
-                              key={i}
-                              className="bg-white p-5 rounded-2xl shadow border border-[#e0dcd4]"
-                            >
-                              <p className="font-semibold text-[#5a4a3f]">
-                                Guest
-                              </p>
-                              <p className="italic text-[#4a4a4a] mt-1">
-                                “{review}”
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Delete modal */}
-          {deleteOpen && (
-            <div
-              className="fixed inset-0 z-[60] bg-black/50 p-4 sm:p-6 flex items-center justify-center"
-              role="dialog"
-              aria-modal="true"
-              onClick={() => setDeleteOpen(false)}
-            >
-              <div
-                className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-[#e8e2d8]"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="px-6 py-4 border-b border-[#efe9e1] bg-[#fff8f7] rounded-t-2xl">
-                  <h3 className="text-xl font-serif text-[#5a4a3f]">
-                    Delete Experience
-                  </h3>
-                </div>
-                <div className="px-6 py-5 space-y-4 text-[#5a4a3f]">
-                  <p>
-                    This action{" "}
-                    <span className="font-semibold">cannot be undone</span>. It
-                    will permanently delete
-                    <span className="font-semibold">
-                      {" "}
-                      “{experience.name}”
-                    </span>{" "}
-                    and its media references.
-                  </p>
-                  <p className="text-sm text-[#7a6a5f]">
-                    To confirm, type{" "}
-                    <span className="font-mono bg-[#f7f0ea] px-1 rounded">
-                      {experience.name}
-                    </span>{" "}
-                    or{" "}
-                    <span className="font-mono bg-[#f7f0ea] px-1 rounded">
-                      DELETE
-                    </span>{" "}
-                    below:
-                  </p>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <Field label="URL Slug" required>
+                <div className="flex items-center gap-2">
                   <input
-                    autoFocus
-                    type="text"
-                    value={confirmText}
-                    onChange={(e) => setConfirmText(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-[#dcd2c3] focus:outline-none focus:ring-2 focus:ring-red-400"
-                    placeholder={`Type "${experience.name}" or DELETE`}
+                    value={slug}
+                    onChange={(e) => {
+                      setSlug(e.target.value);
+                      setSlugTouched(true);
+                    }}
+                    className={inputClass}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSlug(makeSlug(name));
+                      setSlugTouched(true);
+                    }}
+                    className="px-4 py-2 rounded-xl border border-[#dcd2c3] bg-[#f7f4ef] hover:bg-[#efeae2] text-sm font-medium shrink-0"
+                  >
+                    Auto
+                  </button>
+                </div>
+              </Field>
+              <Field label="General Location">
+                <input
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+
+            <Field label="Full Description">
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={5}
+                className={inputClass}
+              />
+            </Field>
+
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 p-5 bg-[#fcfbf9] rounded-2xl border border-[#e6e0d8]">
+              <Field label="Duration">
+                <input
+                  value={duration}
+                  onChange={(e) => setDuration(e.target.value)}
+                  className={inputClass}
+                  placeholder="e.g. 4 Hours"
+                />
+              </Field>
+              <Field label="Price per Adult (€)" required>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={priceAdult}
+                  onChange={(e) => setPriceAdult(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Price per Child (€)">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={priceKid}
+                  onChange={(e) => setPriceKid(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+
+            <Field label="Listing Visibility">
+              <label className="flex items-center gap-3 mt-2 cursor-pointer w-fit p-3 pr-5 border border-[#e6e0d8] rounded-xl hover:bg-[#fcfbf9] transition-colors">
+                <div
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${visibility ? "bg-[#8b6f47]" : "bg-gray-300"}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={visibility}
+                    onChange={(e) => setVisibility(e.target.checked)}
+                  />
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${visibility ? "translate-x-6" : "translate-x-1"}`}
                   />
                 </div>
-                <div className="px-6 py-4 border-t border-[#efe9e1] bg-[#faf7f1] rounded-b-2xl flex items-center justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteOpen(false)}
-                    className="px-5 py-2 rounded-full bg-[#efeae2] text-[#5a4a3f] hover:bg-[#e7e1d7] border border-[#e0d9cf]"
+                <span className="text-sm font-medium text-[#3a2f28]">
+                  Make this experience public
+                </span>
+              </label>
+            </Field>
+          </div>
+
+          {/* Section: Itinerary & Logistics */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="border-b border-[#e6e0d8] pb-4 mb-2">
+              <h2 className="font-serif text-2xl text-[#3a2f28]">
+                Itinerary & Details
+              </h2>
+            </div>
+
+            <Field label="Why Guests Will Love It">
+              <textarea
+                value={whyYoullLove}
+                onChange={(e) => setWhyYoullLove(e.target.value)}
+                rows={3}
+                className={inputClass}
+              />
+            </Field>
+
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <Field
+                label="What’s Included"
+                hint="Break items by pressing Enter."
+              >
+                <textarea
+                  value={whatsIncluded}
+                  onChange={(e) => setWhatsIncluded(e.target.value)}
+                  rows={5}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field
+                label="What to Bring"
+                hint="Break items by pressing Enter."
+              >
+                <textarea
+                  value={whatToBring}
+                  onChange={(e) => setWhatToBring(e.target.value)}
+                  rows={5}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+
+            <Field
+              label="Availability Schedule"
+              className="pt-4 border-t border-[#e6e0d8]"
+            >
+              <div className="flex flex-wrap gap-2 mt-2">
+                {[
+                  "Monday",
+                  "Tuesday",
+                  "Wednesday",
+                  "Thursday",
+                  "Friday",
+                  "Saturday",
+                  "Sunday",
+                ].map((day) => {
+                  const isActive = frequency.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => toggleDay(day)}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all ${isActive ? "bg-[#8b6f47] border-[#8b6f47] text-white shadow-sm" : "bg-white border-[#e0dcd4] text-[#5a4a3f] hover:bg-[#f6f4f0]"}`}
+                    >
+                      {day}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+          </div>
+
+          {/* Section: Meeting Points */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e6e0d8] pb-4 mb-6">
+              <h2 className="font-serif text-2xl text-[#3a2f28]">
+                Meeting Points
+              </h2>
+              <button
+                type="button"
+                onClick={addMeetupPoint}
+                className="flex items-center gap-2 px-4 py-2 bg-[#fcfbf9] border border-[#e0dcd4] text-[#3a2f28] text-sm font-medium rounded-full hover:bg-[#f1ede7] transition-colors shadow-sm shrink-0"
+              >
+                <Plus size={16} /> Add Location
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {meetupPoints.length === 0 ? (
+                <div className="p-10 text-center border-2 border-dashed border-[#e6e0d8] rounded-[1.5rem] bg-[#fcfbf9]">
+                  <MapPin className="mx-auto text-[#c5b9aa] mb-3" size={28} />
+                  <p className="text-sm text-[#7a6a5f] font-medium">
+                    No meeting locations defined yet.
+                  </p>
+                </div>
+              ) : (
+                meetupPoints.map((point, index) => (
+                  <div
+                    key={point.id}
+                    className="relative p-6 border border-[#e0dcd4] rounded-[1.5rem] bg-[#fcfbf9] group hover:border-[#8b6f47]/40 transition-colors"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!confirmMatches || deleting}
-                    onClick={handleDeleteExperience}
-                    className={`px-5 py-2 rounded-full text-white border transition-all ${
-                      !confirmMatches || deleting
-                        ? "bg-red-300 cursor-not-allowed"
-                        : "bg-red-600 hover:bg-red-700 border-red-700"
-                    }`}
+                    <button
+                      type="button"
+                      onClick={() => removeMeetupPoint(point.id)}
+                      className="absolute top-5 right-5 p-2 bg-white rounded-full text-[#b44d4d]/70 hover:text-[#b44d4d] hover:bg-red-50 transition-all border border-transparent hover:border-red-100"
+                      title="Remove Location"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+
+                    <h4 className="text-xs font-bold text-[#8b6f47] uppercase tracking-[0.15em] mb-4 pr-10">
+                      Location Option {index + 1}
+                    </h4>
+
+                    <div className="grid sm:grid-cols-2 gap-5">
+                      <Field label="Point Name">
+                        <input
+                          value={point.name}
+                          onChange={(e) =>
+                            updateMeetupPoint(point.id, "name", e.target.value)
+                          }
+                          className={inputClass}
+                          placeholder="Rethymno Center"
+                        />
+                      </Field>
+                      <Field label="Google Map Address">
+                        <input
+                          value={point.mapPin}
+                          onChange={(e) =>
+                            updateMeetupPoint(
+                              point.id,
+                              "mapPin",
+                              e.target.value,
+                            )
+                          }
+                          className={inputClass}
+                          placeholder="Arkadiou 10, Rethymno"
+                        />
+                      </Field>
+                      <Field
+                        label="Arrival Instructions"
+                        className="sm:col-span-2"
+                      >
+                        <textarea
+                          value={point.instructions}
+                          onChange={(e) =>
+                            updateMeetupPoint(
+                              point.id,
+                              "instructions",
+                              e.target.value,
+                            )
+                          }
+                          rows={2}
+                          className={inputClass}
+                          placeholder="Wait by the fountain."
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Section: Guest Reviews Builder */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e6e0d8] pb-4 mb-6">
+              <h2 className="font-serif text-2xl text-[#3a2f28]">
+                Guest Reviews
+              </h2>
+              <button
+                type="button"
+                onClick={addReview}
+                className="flex items-center gap-2 px-4 py-2 bg-[#fcfbf9] border border-[#e0dcd4] text-[#3a2f28] text-sm font-medium rounded-full hover:bg-[#f1ede7] transition-colors shadow-sm shrink-0"
+              >
+                <Plus size={16} /> Add Review
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {reviews.length === 0 ? (
+                <div className="p-10 text-center border-2 border-dashed border-[#e6e0d8] rounded-[1.5rem] bg-[#fcfbf9]">
+                  <MessageSquare
+                    className="mx-auto text-[#c5b9aa] mb-3"
+                    size={28}
+                  />
+                  <p className="text-sm text-[#7a6a5f] font-medium">
+                    No reviews added yet.
+                  </p>
+                </div>
+              ) : (
+                reviews.map((review) => (
+                  <div
+                    key={review.id}
+                    className="relative p-5 pr-12 border border-[#e0dcd4] rounded-2xl bg-white shadow-sm flex flex-col sm:flex-row gap-4 items-start"
                   >
-                    {deleting ? "Deleting…" : "Delete"}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => removeReview(review.id)}
+                      className="absolute top-4 right-4 p-2 text-[#b44d4d]/70 hover:text-[#b44d4d] hover:bg-red-50 rounded-full transition-colors"
+                      title="Delete Review"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+
+                    <div className="w-full sm:w-1/3">
+                      <input
+                        value={review.name}
+                        onChange={(e) =>
+                          updateReview(review.id, "name", e.target.value)
+                        }
+                        className={`${inputClass} !py-2`}
+                        placeholder="Guest Name"
+                      />
+                    </div>
+                    <div className="w-full sm:w-2/3">
+                      <textarea
+                        value={review.comment}
+                        onChange={(e) =>
+                          updateReview(review.id, "comment", e.target.value)
+                        }
+                        rows={2}
+                        className={`${inputClass} !py-2`}
+                        placeholder="An amazing experience..."
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Section: Image Gallery */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white shadow-sm overflow-hidden">
+            <div className="px-6 sm:px-8 py-6 border-b border-[#e6e0d8] bg-[#fcfbf9] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <h3 className="text-xl font-serif text-[#3a2f28]">
+                Image Gallery
+              </h3>
+              <button
+                type="button"
+                onClick={openCloudinaryWidget}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#1a1a1a] text-white text-sm font-medium shadow-sm hover:bg-[#333] transition-colors shrink-0"
+              >
+                <Upload size={16} /> Upload Media
+              </button>
+            </div>
+
+            <div className="p-6 sm:p-8">
+              {images.length === 0 ? (
+                <div className="p-12 text-center border-2 border-dashed border-[#e6e0d8] rounded-[1.5rem] bg-[#fdfaf7]">
+                  <ImageIcon
+                    className="mx-auto text-[#c5b9aa] mb-4"
+                    size={40}
+                  />
+                  <p className="text-sm text-[#7a6a5f] font-medium">
+                    No media uploaded.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  {images.map((img, i) => (
+                    <div
+                      key={i}
+                      className="relative aspect-square rounded-2xl overflow-hidden border border-[#e8e2d8] group bg-[#f4f1ec] shadow-sm"
+                    >
+                      {i === 0 && (
+                        <div className="absolute top-2 left-2 z-10 bg-[#8b6f47] text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg shadow-sm">
+                          Cover
+                        </div>
+                      )}
+                      <img
+                        src={img}
+                        alt={`Gallery Image ${i + 1}`}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300" />
+                      <button
+                        type="button"
+                        onClick={() => removeImage(i)}
+                        className="absolute top-2 right-2 p-2 rounded-full text-white bg-black/50 hover:bg-red-600 shadow-sm transition-all opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0"
+                        title="Remove Image"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </form>
+
+        {/* Right Column: Sticky Preview Card */}
+        <aside className="lg:col-span-4 relative mt-4 lg:mt-0 z-10">
+          <div className="lg:sticky lg:top-40 rounded-[2rem] border border-[#e6e0d8] bg-white p-6 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] flex flex-col max-h-none lg:max-h-[calc(100vh-10rem)]">
+            <div className="flex items-center justify-between mb-5 shrink-0">
+              <h3 className="font-serif text-lg text-[#3a2f28]">
+                Card Preview
+              </h3>
+              <span
+                className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${visibility ? "bg-[#f4f8f4] text-[#4a7854] border border-[#d3e3d3]" : "bg-[#f6f4f0] text-[#7a6a5f] border border-[#e6e0d8]"}`}
+              >
+                {status}
+              </span>
+            </div>
+
+            <div className="overflow-y-auto pr-1 pb-1 -mr-1 no-scrollbar shrink-0">
+              <div className="overflow-hidden rounded-[1.5rem] border border-[#e6e0d8] bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:-translate-y-1">
+                <div className="relative h-48 sm:h-56 w-full bg-[#f4f1ec]">
+                  {images[0] ? (
+                    <img
+                      src={images[0]}
+                      alt="Cover preview"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full flex-col items-center justify-center text-[#c5b9aa] gap-2">
+                      <ImageIcon size={32} />
+                    </div>
+                  )}
+                  {location && (
+                    <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                      <MapPin size={10} /> {location}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 flex flex-col min-h-[160px]">
+                  <div className="flex-1">
+                    <h4 className="font-serif text-xl text-[#1A1A1A] mb-2 leading-tight line-clamp-2">
+                      {name || "Experience Title..."}
+                    </h4>
+                    <p className="text-sm text-[#7a6a5f] line-clamp-2 leading-relaxed">
+                      {whyYoullLove ||
+                        "Write a compelling reason why guests will absolutely love this experience..."}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-[#e6e0d8] flex items-center justify-between shrink-0">
+                    <div className="flex flex-col gap-1">
+                      {reviews.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          <Star
+                            size={12}
+                            className="fill-[#8b6f47] text-[#8b6f47]"
+                          />
+                          <span className="text-[11px] font-bold text-[#3a2f28]">
+                            4.9{" "}
+                            <span className="text-[#a1978d] font-normal">
+                              ({reviews.length})
+                            </span>
+                          </span>
+                        </div>
+                      )}
+                      <span className="text-xs font-medium text-[#7a6a5f] flex items-center gap-1.5">
+                        <Clock size={12} /> {duration || "TBD"}
+                      </span>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[10px] uppercase tracking-wider text-[#a1978d] block mb-0.5">
+                        From
+                      </span>
+                      <span className="font-serif text-lg text-[#1A1A1A]">
+                        {priceAdult ? `€${Number(priceAdult)}` : "—"}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          )}
-        </main>
+
+            <div className="mt-6 p-4 bg-[#fcfbf9] border border-[#e6e0d8] rounded-2xl flex items-start gap-3 shrink-0">
+              <Info size={16} className="text-[#8b6f47] shrink-0 mt-0.5" />
+              <p className="text-[11px] text-[#7a6a5f] leading-relaxed">
+                Make sure your cover image and title are compelling before
+                saving changes.
+              </p>
+            </div>
+          </div>
+        </aside>
       </div>
-    </div>
-  );
-}
 
-function LabeledInput({
-  name,
-  label,
-  defaultValue,
-  type = "text",
-  required = true,
-  placeholder,
-  onChange,
-}) {
-  return (
-    <div>
-      <label className="block text-xs tracking-wide uppercase text-[#8a7c6d] mb-1">
-        {label}
-      </label>
-      <input
-        type={type}
-        name={name}
-        defaultValue={defaultValue}
-        placeholder={placeholder}
-        required={required}
-        onChange={onChange}
-        className="w-full px-4 py-2.5 rounded-xl border border-[#dcd2c3] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47] shadow-sm"
-      />
-    </div>
-  );
-}
+      {/* Delete Confirmation Modal */}
+      {deleteOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setDeleteOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-[2rem] bg-white shadow-2xl overflow-hidden border border-[#e6e0d8]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 sm:p-8 space-y-5 text-center">
+              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-2">
+                <Trash2 size={28} />
+              </div>
+              <h3 className="text-2xl font-serif text-[#3a2f28]">
+                Delete Experience?
+              </h3>
+              <p className="text-[#555] leading-relaxed text-sm">
+                This will permanently delete <strong>{name}</strong> and all
+                associated data. This action cannot be undone.
+              </p>
 
-function LabeledTextarea({
-  name,
-  label,
-  defaultValue,
-  required = true,
-  placeholder,
-  onChange,
-}) {
-  return (
-    <div>
-      <label className="block text-xs tracking-wide uppercase text-[#8a7c6d] mb-1">
-        {label}
-      </label>
-      <textarea
-        name={name}
-        defaultValue={defaultValue}
-        placeholder={placeholder}
-        required={required}
-        rows={3}
-        className="w-full px-4 py-3 rounded-xl border border-[#dcd2c3] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47] shadow-sm"
-      />
+              <div className="bg-[#fcfbf9] border border-[#e6e0d8] rounded-2xl p-4 text-left">
+                <p className="text-xs text-[#7a6a5f] font-medium mb-2">
+                  Please type{" "}
+                  <span className="font-bold text-[#3a2f28]">DELETE</span> to
+                  confirm:
+                </p>
+                <input
+                  autoFocus
+                  type="text"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  className={inputClass}
+                  placeholder="DELETE"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 sm:px-8 sm:pb-8 flex flex-col-reverse sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(false)}
+                className="flex-1 py-3 rounded-full text-sm font-medium border border-[#e0dcd4] text-[#5a4a3f] hover:bg-[#f6f4f0] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={confirmText !== "DELETE" || deleting}
+                onClick={handleDeleteExperience}
+                className="flex-1 py-3 rounded-full text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed transition-colors"
+              >
+                {deleting ? "Deleting…" : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Preview Modal (Optional View) */}
+      {previewOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm p-4 flex items-center justify-center"
+          onClick={() => setPreviewOpen(false)}
+        >
+          <div
+            className="bg-white rounded-[2rem] w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setPreviewOpen(false)}
+              className="sticky top-4 left-[calc(100%-3rem)] bg-white shadow-md p-2 rounded-full border border-[#e6e0d8] hover:bg-gray-50 z-10"
+            >
+              ✕
+            </button>
+            <div className="p-8 sm:p-12 text-center space-y-6">
+              <h2 className="font-serif text-4xl text-[#3a2f28]">{name}</h2>
+              <p className="text-[#7a6a5f] text-lg max-w-2xl mx-auto leading-relaxed">
+                {description}
+              </p>
+
+              {images.length > 0 && (
+                <div className="grid grid-cols-2 gap-4 mt-8 rounded-3xl overflow-hidden border border-[#e6e0d8]">
+                  {images.slice(0, 4).map((img, i) => (
+                    <img
+                      key={i}
+                      src={img}
+                      className="w-full h-48 object-cover"
+                      alt={`Preview ${i}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

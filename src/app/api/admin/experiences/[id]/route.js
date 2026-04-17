@@ -11,7 +11,7 @@ const bad = (msg, status = 400) =>
   NextResponse.json({ error: msg }, { status });
 
 async function requireAdmin() {
-  const supabase = createSupabaseServer();
+  const supabase = await createSupabaseServer();
   if (!supabase)
     return { error: true, response: bad("Server not configured", 500) };
 
@@ -34,12 +34,16 @@ async function requireAdmin() {
   return { error: false, admin };
 }
 
-export async function GET(_req, { params }) {
+export async function GET(req, { params }) {
   const gate = await requireAdmin();
   if (gate.error) return gate.response;
 
   const { admin } = gate;
-  const id = Number(params?.id);
+
+  // Unwrap params safely for Next.js compatibility
+  const resolvedParams = await params;
+  const id = Number(resolvedParams?.id);
+
   if (!id || Number.isNaN(id)) return bad("Missing or invalid ID", 400);
 
   try {
@@ -57,6 +61,7 @@ export async function GET(_req, { params }) {
           "whatToBring",
           "whyYoullLove",
           "mapPin",
+          "meetupPoints", // <-- Added the new jsonb column here
           "images",
           "guestReviews",
           "frequency",
@@ -65,7 +70,7 @@ export async function GET(_req, { params }) {
           "updatedAt",
           "priceAdult",
           "priceKid",
-        ].join(",")
+        ].join(","),
       )
       .eq("id", id)
       .maybeSingle();

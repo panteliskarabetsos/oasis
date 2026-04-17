@@ -3,76 +3,59 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MapPin, Clock, Euro, Pencil, Trash2, Eye } from "lucide-react";
+import {
+  MapPin,
+  Clock,
+  Pencil,
+  Trash2,
+  Eye,
+  Plus,
+  ArrowLeft,
+  Image as ImageIcon,
+  CheckCircle2,
+  AlertCircle,
+  MoreVertical,
+  TriangleAlert, // Added for modal
+  Loader2, // Added for loading state
+} from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 import Link from "next/link";
-function slugifyLocal(str) {
-  return (str || "")
-    .toString()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
-}
 
-// Try to parse guestReviews input as JSON, else treat as CSV -> array of strings
-function parseGuestReviews(input) {
-  const raw = (input || "").trim();
-  if (!raw) return [];
-  if (/^[\s]*[\[{]/.test(raw)) {
-    try {
-      const j = JSON.parse(raw);
-      return j;
-    } catch {
-      // fall through to CSV parsing
-    }
-  }
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-// Normalize for display: accept array of strings or array of objects with "text"/"comment"
+// Normalize reviews for display in the preview modal
 function reviewsToDisplay(rv) {
   if (!rv) return [];
-  if (Array.isArray(rv)) {
-    return rv
-      .map((x) =>
-        typeof x === "string"
-          ? x
-          : typeof x === "object" && (x.text || x.comment)
-          ? String(x.text || x.comment)
-          : null
-      )
-      .filter(Boolean);
-  }
-  // object case not typical, ignore keys
+  if (Array.isArray(rv)) return rv;
   return [];
 }
 
-const AdminExperiencesPage = () => {
+export default function AdminExperiencesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, loading } = useAuth(); // still fine to read, just not used for redirect
+  const { user, loading } = useAuth();
 
   const [isClient, setIsClient] = useState(false);
   const [experiences, setExperiences] = useState(null);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [uploadedImages, setUploadedImages] = useState([]);
   const [previewExperience, setPreviewExperience] = useState(null);
+
+  // Deletion States
+  const [experienceToDelete, setExperienceToDelete] = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Toast State
+  const [toast, setToast] = useState(null);
+  const seenRef = useRef(false);
 
   useEffect(() => setIsClient(true), []);
 
-  // Authorize via SERVER (admin route). If 401/403 => redirect.
+  // Fetch Data & Auth Check
   useEffect(() => {
     if (!isClient || loading) return;
 
     (async () => {
       const res = await fetch("/api/admin/experiences", { cache: "no-store" });
       if (res.status === 401 || res.status === 403) {
-        router.replace("/"); // not authorized
+        router.replace("/");
         return;
       }
       const data = await res.json().catch(() => []);
@@ -80,28 +63,7 @@ const AdminExperiencesPage = () => {
     })();
   }, [isClient, loading, router]);
 
-  // Init Cloudinary upload widget (optional)
-  useEffect(() => {
-    if (!isClient) return;
-    if (typeof window !== "undefined" && window.cloudinary) {
-      window.cloudinary.createUploadWidget(
-        {
-          cloudName: "docgxigth",
-          uploadPreset: "oasis_photos",
-          multiple: true,
-        },
-        (error, result) => {
-          if (!error && result && result.event === "success") {
-            setUploadedImages((prev) => [...prev, result.info.secure_url]);
-          }
-        }
-      );
-    }
-  }, [isClient]);
-
-  const [toast, setToast] = useState(null);
-  const seenRef = useRef(false);
-
+  // Handle URL Toasts (e.g. ?toast=saved)
   useEffect(() => {
     if (seenRef.current) return;
     const t = searchParams.get("toast");
@@ -109,7 +71,7 @@ const AdminExperiencesPage = () => {
 
     const messages = {
       saved: "Experience saved successfully",
-      deleted: "Experience deleted",
+      deleted: "Experience deleted permanently",
     };
     const types = { saved: "success", deleted: "danger" };
 
@@ -125,195 +87,230 @@ const AdminExperiencesPage = () => {
     }
   }, [searchParams]);
 
-  // Handle auto-dismiss independently of URL changes
+  // Auto-dismiss toast
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 3000);
+    const timer = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const openCloudinaryWidget = () => {
-    if (typeof window === "undefined" || !window.cloudinary) return;
-    const widget = window.cloudinary.createUploadWidget(
-      {
-        cloudName: "docgxigth",
-        uploadPreset: "oasis_photos",
-        multiple: true,
-        maxFiles: 5,
-      },
-      (error, result) => {
-        if (!error && result && result.event === "success") {
-          setUploadedImages((prev) => [...prev, result.info.secure_url]);
-        }
+  // This opens the modal
+  const promptDelete = (experience) => {
+    setExperienceToDelete(experience);
+    setDeleteConfirmText("");
+  };
+
+  // This performs the actual API call
+  const handleConfirmDelete = async () => {
+    if (!experienceToDelete || deleteConfirmText !== "DELETE") return;
+
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/experiences`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: experienceToDelete.id }),
+      });
+
+      if (res.ok) {
+        setExperiences((prev) =>
+          prev.filter((e) => e.id !== experienceToDelete.id),
+        );
+        setToast({
+          message: "Experience deleted successfully",
+          type: "success",
+        });
+        setExperienceToDelete(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to delete experience.");
       }
-    );
-    widget.open();
+    } catch (err) {
+      setToast({ message: err.message, type: "danger" });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
-  const handleRemoveUploadedImage = (index) =>
-    setUploadedImages((prev) => prev.filter((_, i) => i !== index));
-
-  const handleDeleteExperience = async (id) => {
-    if (!confirm("Are you sure you want to delete this experience?")) return;
-    const res = await fetch(`/api/admin/experiences`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) setExperiences((prev) => prev.filter((e) => e.id !== id));
-    else alert(data.error || "Failed to delete experience.");
-  };
-
-  const handleAddExperience = async (newExperience) => {
-    const res = await fetch("/api/admin/experiences", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...newExperience, images: uploadedImages }),
-    });
-    const data = await res.json().catch(() => null);
-    if (res.ok && data) setExperiences((prev) => [...prev, data]);
-    else alert((data && data.error) || "Failed to add experience.");
-  };
-
-  // While we’re checking auth (or loading experiences), render nothing / a spinner
   if (!isClient || loading || experiences === null) {
-    return null;
+    return (
+      <main className="min-h-screen bg-[#fdfcf8] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 rounded-full border-4 border-[#8b6f47] border-t-transparent animate-spin" />
+          <span className="text-[#5a4a3f] font-serif text-lg">
+            Loading Experiences…
+          </span>
+        </div>
+      </main>
+    );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#faf8f4] via-white to-[#f4f1ec] rounded-t-3xl text-[#5a4a3f] pt-5">
-      {/* Page header */}
-      <header className="sticky top-0 z-10 bg-gradient-to-b from-[#faf8f4]/90 to-white/80 backdrop-blur supports-[backdrop-filter]:backdrop-blur border-b border-[#e8e2d8]">
-        <div className="container mx-auto px-6 py-5">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-serif text-[#5a4a3f]">
-                Manage Experiences
-              </h1>
-              <p className="text-sm text-[#7a6a5f]">
-                Create, edit, preview and organize your offerings.
-              </p>
+    <main className="min-h-screen bg-[#fdfcf8] text-[#3a2f28] pb-24">
+      {/* Page Header */}
+      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-[#e6e0d8] shadow-sm">
+        <div className="container mx-auto px-4 sm:px-6 py-4 lg:py-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => router.push("/admin/")}
+                className="hidden sm:flex items-center justify-center w-10 h-10 rounded-full border border-[#e0dcd4] bg-[#fdfaf7] text-[#5a4a3f] hover:bg-[#f1ede7] transition-colors shrink-0"
+                title="Back to Dashboard"
+              >
+                <ArrowLeft size={18} />
+              </button>
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-serif text-[#3a2f28]">
+                  Experiences
+                </h1>
+                <p className="text-sm text-[#7a6a5f] mt-1">
+                  Manage, preview, and create your offerings.
+                </p>
+              </div>
             </div>
 
             <div className="flex items-center gap-3">
               <button
                 onClick={() => router.push("/admin/")}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#d8cfc3] bg-[#f4f1ec] text-[#5a4a3f] hover:bg-[#eee8e0] hover:border-[#cfc6b8] transition-all shadow-sm"
+                className="sm:hidden flex items-center justify-center px-4 py-2.5 rounded-full border border-[#e0dcd4] bg-[#fdfaf7] text-[#5a4a3f] hover:bg-[#f1ede7] transition-colors text-sm font-medium"
               >
-                <span className="text-lg leading-none">←</span>
-                Back to Dashboard
+                <ArrowLeft size={16} className="mr-2" /> Dashboard
               </button>
-
               <Link
                 href="/admin/experiences/new"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] focus:outline-none focus:ring-2 focus:ring-[#c7b29e] transition-all"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-[#8b6f47] text-white text-sm font-medium shadow-sm hover:bg-[#735b38] hover:shadow-md transition-all active:scale-95"
               >
-                <span className="text-lg leading-none">＋</span>
-                Add New Experience
+                <Plus size={18} />
+                New Experience
               </Link>
             </div>
           </div>
         </div>
       </header>
 
-      <section className="container mx-auto px-6 pt-6 pb-12">
-        {/* Experiences list */}
-        {!experiences ? (
-          <div className="flex flex-col items-center justify-center mt-16 text-[#5a4a3f] font-serif text-lg">
-            <div className="animate-spin rounded-full h-9 w-9 border-4 border-[#8b6f47] border-t-transparent mb-4" />
-            Loading experiences...
-          </div>
-        ) : experiences.length === 0 ? (
-          <div className="mt-16 text-center">
-            <p className="text-[#5a4a3f] font-serif text-lg italic">
-              No experiences found.
+      <section className="container mx-auto px-4 sm:px-6 pt-8">
+        {/* Empty State */}
+        {experiences.length === 0 ? (
+          <div className="max-w-2xl mx-auto mt-12 p-10 sm:p-16 text-center border-2 border-dashed border-[#e6e0d8] rounded-[2.5rem] bg-white shadow-sm">
+            <div className="w-20 h-20 bg-[#fdfaf7] border border-[#e0dcd4] rounded-full flex items-center justify-center mx-auto mb-6 text-[#c5b9aa]">
+              <ImageIcon size={32} />
+            </div>
+            <h2 className="text-2xl font-serif text-[#3a2f28] mb-3">
+              No Experiences Yet
+            </h2>
+            <p className="text-[#7a6a5f] mb-8 leading-relaxed">
+              You haven't created any experiences. Add your first offering to
+              start accepting bookings and showcasing your agrotourism journeys.
             </p>
+            <Link
+              href="/admin/experiences/new"
+              className="inline-flex items-center gap-2 px-8 py-3.5 rounded-full bg-[#8b6f47] text-white text-sm font-medium hover:bg-[#735b38] transition-all shadow-md hover:shadow-lg"
+            >
+              <Plus size={18} /> Create First Experience
+            </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-7">
+          /* Experiences Grid */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
             {experiences.map((experience) => (
               <div
                 key={experience.id}
-                className="group bg-white rounded-3xl border border-[#e8e2d8] shadow-sm hover:shadow-xl hover:-translate-y-0.5 transition-all overflow-hidden"
+                className="group flex flex-col bg-white rounded-[2rem] border border-[#e6e0d8] shadow-[0_4px_20px_rgb(0,0,0,0.02)] hover:shadow-[0_10px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 transition-all duration-300 overflow-hidden"
               >
-                {/* Optional cover */}
-                {Array.isArray(experience.images) && experience.images[0] && (
-                  <div className="aspect-[16/9] bg-[#f1ede7]">
+                {/* Image Area */}
+                <div className="relative aspect-[4/3] w-full bg-[#f4f1ec] overflow-hidden border-b border-[#e6e0d8]">
+                  {Array.isArray(experience.images) && experience.images[0] ? (
                     <img
                       src={experience.images[0]}
                       alt={experience.name}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                     />
-                  </div>
-                )}
-
-                <div className="p-6 flex flex-col gap-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-xl font-semibold text-[#3b2f23]">
-                        {experience.name}
-                      </h3>
-                      <p className="mt-1 text-sm text-[#7a6a5f] line-clamp-2">
-                        {experience.description}
-                      </p>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[#c5b9aa]">
+                      <ImageIcon size={32} />
                     </div>
+                  )}
 
+                  {/* Status Badge */}
+                  <div className="absolute top-4 left-4">
                     <span
-                      className={`shrink-0 self-start px-2.5 py-1 rounded-full text-xs font-semibold tracking-wide ${
+                      className={`backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm border ${
                         experience.visibility
-                          ? "bg-green-50 text-green-700 border border-green-200"
-                          : "bg-red-50 text-red-700 border border-red-200"
+                          ? "bg-white/90 text-[#4a7854] border-white/50"
+                          : "bg-[#1A1A1A]/80 text-white border-black/20"
                       }`}
-                      title={experience.visibility ? "Public" : "Private"}
                     >
-                      {experience.visibility ? "Public" : "Private"}
+                      {experience.visibility ? "Live Public" : "Draft Hidden"}
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-3 py-1">
-                      <MapPin size={14} className="text-[#8b6f47]" />
-                      {experience.location}
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-3 py-1">
-                      <Clock size={14} className="text-[#8b6f47]" />
-                      {experience.duration}
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-3 py-1">
-                      <Euro size={14} className="text-[#8b6f47]" />€
-                      {experience.priceAdult}
-                      {typeof experience.priceKid === "number" &&
-                        ` (kid €${experience.priceKid})`}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap justify-between gap-2">
+                  {/* Quick Delete Action */}
+                  <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => setPreviewExperience(experience)}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#e9f0ff] text-[#1f4ea3] hover:bg-[#dbe7ff] transition-all"
-                      title="Preview"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        promptDelete(experience); // Changed from handleDeleteExperience
+                      }}
+                      className="p-2 bg-white/90 backdrop-blur text-red-600 hover:bg-red-50 hover:text-red-700 rounded-full shadow-sm transition-colors"
+                      title="Delete Experience"
                     >
-                      <Eye size={18} /> Preview
+                      <Trash2 size={16} />
                     </button>
+                  </div>
+                </div>
+
+                {/* Content Area */}
+                <div className="p-6 sm:p-8 flex flex-col flex-1">
+                  <div className="flex-1 mb-6">
+                    <h3 className="text-2xl font-serif text-[#3a2f28] mb-2 leading-tight group-hover:text-[#8b6f47] transition-colors">
+                      {experience.name}
+                    </h3>
+                    <p className="text-sm text-[#7a6a5f] line-clamp-2 leading-relaxed">
+                      {experience.description || "No description provided."}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 text-xs mb-8 border-l-2 border-[#e6e0d8] pl-3">
+                    {experience.location && (
+                      <span className="flex items-center gap-1.5 text-[#5a4a3f] font-medium">
+                        <MapPin size={12} className="text-[#8b6f47]" />{" "}
+                        {experience.location}
+                      </span>
+                    )}
+                    {experience.duration && (
+                      <span className="flex items-center gap-1.5 text-[#5a4a3f] font-medium">
+                        <Clock size={12} className="text-[#8b6f47]" />{" "}
+                        {experience.duration}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Bottom Actions */}
+                  <div className="flex items-center justify-between pt-5 border-t border-[#e6e0d8]">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase tracking-wider text-[#a1978d] mb-0.5">
+                        Price
+                      </span>
+                      <span className="font-serif text-lg text-[#1A1A1A]">
+                        €{experience.priceAdult || 0}
+                      </span>
+                    </div>
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() =>
-                          router.push(`/admin/experiences/${experience.id}`)
-                        }
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-400 text-white hover:bg-amber-500 transition-all"
-                        title="Edit"
+                        onClick={() => setPreviewExperience(experience)}
+                        className="p-2 rounded-full bg-[#fdfaf7] text-[#5a4a3f] border border-[#e0dcd4] hover:bg-[#f1ede7] transition-colors"
+                        title="Preview Details"
                       >
-                        <Pencil size={18} /> Edit
+                        <Eye size={16} />
                       </button>
-                      {/* <button
-                        onClick={() => handleDeleteExperience(experience.id)}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-all"
-                        title="Delete"
+
+                      <Link
+                        href={`/admin/experiences/${experience.id}`}
+                        className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-[#1A1A1A] text-white text-xs font-bold uppercase tracking-wider hover:bg-[#333] transition-colors"
                       >
-                        <Trash2 size={18} /> Delete
-                      </button> */}
+                        Edit
+                      </Link>
                     </div>
                   </div>
                 </div>
@@ -323,66 +320,90 @@ const AdminExperiencesPage = () => {
         )}
       </section>
 
-      {/* Preview modal — scrollable & viewport-safe */}
+      {/* --- PREVIEW MODAL --- */}
       {previewExperience && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 p-4 sm:p-6 overflow-y-auto"
-          role="dialog"
-          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto flex items-center justify-center"
+          onClick={() => setPreviewExperience(null)}
         >
-          <div className="mx-auto w-full max-w-6xl">
-            <div className="bg-[#f4f1ec] rounded-3xl shadow-2xl flex flex-col max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]">
-              {/* Modal header (sticky so the close button stays visible) */}
-              <div className="px-6 py-4 border-b border-[#e8e2d8] bg-[#faf7f1] relative sticky top-0 z-10">
-                <button
-                  onClick={() => setPreviewExperience(null)}
-                  className="absolute right-4 top-3 px-3 py-1.5 rounded-full text-[#5a4a3f] bg-[#efeae2] hover:bg-[#e7e1d7] border border-[#e0d9cf] text-sm"
-                  title="Close"
+          <div
+            className="w-full max-w-4xl bg-white rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-5 sm:px-8 sm:py-6 border-b border-[#e6e0d8] bg-[#fcfbf9] flex items-center justify-between sticky top-0 z-10">
+              <div>
+                <span
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider mb-2 inline-block ${previewExperience.visibility ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-700"}`}
                 >
-                  ✕
-                </button>
+                  {previewExperience.visibility
+                    ? "Live Public"
+                    : "Draft Hidden"}
+                </span>
+                <h2 className="text-2xl sm:text-3xl font-serif text-[#3a2f28]">
+                  {previewExperience.name}
+                </h2>
+              </div>
+              <button
+                onClick={() => setPreviewExperience(null)}
+                className="w-10 h-10 rounded-full flex items-center justify-center bg-white border border-[#e0dcd4] text-[#5a4a3f] hover:bg-gray-50 transition-colors shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Scrollable Content */}
+            <div className="flex-1 overflow-y-auto p-6 sm:p-10 space-y-12 text-[#3a2f28]">
+              {/* Quick Stats */}
+              <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-12 bg-[#fdfcf8] p-6 rounded-2xl border border-[#e6e0d8]">
                 <div className="text-center">
-                  <h2 className="text-2xl sm:text-3xl font-serif text-[#5a4a3f]">
-                    {previewExperience.name}
-                  </h2>
-                  <p className="text-sm text-[#7a6a5f]">
-                    {previewExperience.visibility ? "Public" : "Private"} •{" "}
-                    {previewExperience.location}
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-[#a1978d] mb-1">
+                    Duration
+                  </p>
+                  <p className="font-serif text-xl">
+                    {previewExperience.duration || "—"}
                   </p>
                 </div>
+                <div className="text-center">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-[#a1978d] mb-1">
+                    Adult Price
+                  </p>
+                  <p className="font-serif text-xl">
+                    €{previewExperience.priceAdult || 0}
+                  </p>
+                </div>
+                {previewExperience.priceKid !== null && (
+                  <div className="text-center">
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-[#a1978d] mb-1">
+                      Child Price
+                    </p>
+                    <p className="font-serif text-xl">
+                      €{previewExperience.priceKid}
+                    </p>
+                  </div>
+                )}
               </div>
 
-              {/* Scrollable content area */}
-              <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-8 text-[#2f2f2f]">
-                <div className="text-center space-y-1">
-                  <p className="text-lg text-[#4a4a4a] italic">
-                    {previewExperience.duration}
+              {previewExperience.description && (
+                <section className="max-w-3xl mx-auto text-center">
+                  <p className="text-lg leading-relaxed text-[#555] whitespace-pre-line">
+                    {previewExperience.description}
                   </p>
-                  <p className="text-2xl font-medium text-[#5a4a3f]">
-                    €{previewExperience.priceAdult}
-                    {typeof previewExperience.priceKid === "number" &&
-                      ` (kid €${previewExperience.priceKid})`}
-                  </p>
-                </div>
+                </section>
+              )}
 
-                {previewExperience.description && (
-                  <section className="max-w-4xl mx-auto text-center">
-                    <p className="text-lg sm:text-xl leading-relaxed text-[#4a4a4a] whitespace-pre-line">
-                      {previewExperience.description}
-                    </p>
-                  </section>
-                )}
-
-                {previewExperience.images?.length > 0 && (
-                  <section className="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                    {previewExperience.images.map((img, i) => (
+              {/* Gallery Preview */}
+              {Array.isArray(previewExperience.images) &&
+                previewExperience.images.length > 0 && (
+                  <section className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {previewExperience.images.slice(0, 3).map((img, i) => (
                       <div
                         key={i}
-                        className="relative aspect-video rounded-xl overflow-hidden border-2 border-[#e0dcd4] shadow-lg"
+                        className="aspect-square rounded-2xl overflow-hidden border border-[#e0dcd4]"
                       >
                         <img
                           src={img}
-                          alt={`Experience Image ${i + 1}`}
+                          alt={`Preview ${i + 1}`}
                           className="w-full h-full object-cover"
                         />
                       </div>
@@ -390,16 +411,23 @@ const AdminExperiencesPage = () => {
                   </section>
                 )}
 
+              {/* Text Grids */}
+              <div className="grid sm:grid-cols-2 gap-8 pt-8 border-t border-[#e6e0d8]">
                 {previewExperience.whatsIncluded && (
-                  <section className="max-w-4xl mx-auto">
-                    <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3 text-center">
+                  <section>
+                    <h3 className="text-xl font-serif text-[#3a2f28] mb-4">
                       What’s Included
                     </h3>
-                    <ul className="list-disc list-inside text-[#4a4a4a] space-y-1">
+                    <ul className="space-y-2">
                       {String(previewExperience.whatsIncluded)
                         .split("\n")
+                        .filter(Boolean)
                         .map((item, i) => (
-                          <li key={i} className="text-lg">
+                          <li
+                            key={i}
+                            className="flex items-start gap-2 text-[#555]"
+                          >
+                            <span className="text-[#8b6f47] mt-1">•</span>{" "}
                             {item}
                           </li>
                         ))}
@@ -408,148 +436,175 @@ const AdminExperiencesPage = () => {
                 )}
 
                 {previewExperience.whatToBring && (
-                  <section className="max-w-4xl mx-auto text-center">
-                    <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3">
+                  <section>
+                    <h3 className="text-xl font-serif text-[#3a2f28] mb-4">
                       What to Bring
                     </h3>
-                    <p className="text-lg text-[#4a4a4a]">
+                    <p className="text-[#555] whitespace-pre-line">
                       {previewExperience.whatToBring}
                     </p>
                   </section>
                 )}
+              </div>
 
-                {previewExperience.whyYoullLove && (
-                  <section className="max-w-4xl mx-auto text-center">
-                    <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3">
-                      Why You’ll Love It
+              {/* Meetup Points Preview */}
+              {Array.isArray(previewExperience.meetupPoints) &&
+                previewExperience.meetupPoints.length > 0 && (
+                  <section className="pt-8 border-t border-[#e6e0d8]">
+                    <h3 className="text-xl font-serif text-[#3a2f28] mb-4 text-center">
+                      Meeting Points
                     </h3>
-                    <p className="text-lg text-[#4a4a4a] whitespace-pre-line">
-                      {previewExperience.whyYoullLove}
-                    </p>
-                  </section>
-                )}
-
-                {previewExperience.mapPin && (
-                  <section className="max-w-5xl mx-auto">
-                    <h3 className="text-2xl font-serif text-[#5a4a3f] mb-3 text-center">
-                      Where You'll Be
-                    </h3>
-                    <div className="w-full h-[300px] rounded-xl overflow-hidden shadow-lg border border-[#e0dcd4]">
-                      <iframe
-                        src={`https://www.google.com/maps?q=${previewExperience.mapPin}&z=14&output=embed`}
-                        width="100%"
-                        height="100%"
-                        style={{ border: 0 }}
-                        allowFullScreen
-                        loading="lazy"
-                        title="Map"
-                      />
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      {previewExperience.meetupPoints.map((point) => (
+                        <div
+                          key={point.id}
+                          className="p-5 border border-[#e0dcd4] rounded-2xl bg-[#fcfbf9]"
+                        >
+                          <h4 className="font-bold text-[#3a2f28] mb-1">
+                            {point.name}
+                          </h4>
+                          <p className="text-sm text-[#7a6a5f]">
+                            {point.mapPin}
+                          </p>
+                        </div>
+                      ))}
                     </div>
                   </section>
                 )}
 
-                {reviewsToDisplay(previewExperience.guestReviews).length >
-                  0 && (
-                  <section className="max-w-4xl mx-auto">
-                    <h3 className="text-2xl font-serif text-[#5a4a3f] mb-4 text-center">
-                      Guest Reviews
-                    </h3>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {reviewsToDisplay(previewExperience.guestReviews).map(
-                        (review, i) => (
-                          <div
-                            key={i}
-                            className="bg-white p-5 rounded-2xl shadow border border-[#e0dcd4]"
-                          >
-                            <p className="font-semibold text-[#5a4a3f]">
-                              Guest
-                            </p>
-                            <p className="italic text-[#4a4a4a] mt-1">
-                              “{review}”
-                            </p>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </section>
-                )}
+              {/* Reviews Preview */}
+              {reviewsToDisplay(previewExperience.guestReviews).length > 0 && (
+                <section className="pt-8 border-t border-[#e6e0d8]">
+                  <h3 className="text-xl font-serif text-[#3a2f28] mb-6 text-center">
+                    Guest Reviews
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {reviewsToDisplay(previewExperience.guestReviews).map(
+                      (review, i) => (
+                        <div
+                          key={i}
+                          className="bg-[#fcfbf9] p-6 rounded-2xl border border-[#e0dcd4]"
+                        >
+                          <p className="font-bold text-sm text-[#8b6f47] mb-2 uppercase tracking-wider">
+                            {review.name || "Guest"}
+                          </p>
+                          <p className="italic text-[#555] leading-relaxed">
+                            “{review.comment || review}”
+                          </p>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </section>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-[#e6e0d8] bg-[#fcfbf9] flex justify-end">
+              <Link
+                href={`/admin/experiences/${previewExperience.id}`}
+                className="px-8 py-3 rounded-full bg-[#1A1A1A] text-white text-sm font-bold uppercase tracking-wider hover:bg-[#333] transition-colors"
+              >
+                Edit Experience
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- DELETE CONFIRMATION MODAL --- */}
+      {experienceToDelete && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center animate-in fade-in duration-200"
+          onClick={() => !isDeleting && setExperienceToDelete(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border border-[#e6e0d8] animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                <TriangleAlert size={32} />
+              </div>
+              <h3 className="text-2xl font-serif text-[#3a2f28] mb-3">
+                Delete Experience?
+              </h3>
+              <p className="text-sm text-[#7a6a5f] leading-relaxed mb-6">
+                You are about to delete{" "}
+                <strong>{experienceToDelete.name}</strong>. This action is
+                permanent and cannot be undone.
+              </p>
+
+              <div className="bg-[#fcfbf9] border border-[#e6e0d8] rounded-2xl p-5 mb-8">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#a1978d] mb-3">
+                  Type <span className="text-red-500">DELETE</span> to confirm
+                </p>
+                <input
+                  autoFocus
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) =>
+                    setDeleteConfirmText(e.target.value.toUpperCase())
+                  }
+                  className="w-full px-4 py-3 rounded-xl border border-[#e0dcd4] bg-white text-center font-bold tracking-[0.2em] outline-none focus:border-red-500 transition-all shadow-sm"
+                  placeholder="••••••"
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  disabled={isDeleting}
+                  onClick={() => setExperienceToDelete(null)}
+                  className="flex-1 py-3.5 rounded-full text-sm font-semibold border border-[#e0dcd4] text-[#5a4a3f] hover:bg-[#f6f4f0] transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={deleteConfirmText !== "DELETE" || isDeleting}
+                  onClick={handleConfirmDelete}
+                  className="flex-1 py-3.5 rounded-full text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed transition-all shadow-md flex items-center justify-center gap-2"
+                >
+                  {isDeleting ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={16} />
+                  )}
+                  Delete Forever
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* --- TOAST NOTIFICATION --- */}
       {toast && (
-        <div
-          className={[
-            "fixed right-4 top-4 z-[60] px-4 py-3 rounded-xl shadow-lg border flex items-center gap-3",
-            toast.type === "success"
-              ? "bg-green-50 text-green-900 border-green-200"
-              : "bg-red-50 text-red-900 border-red-200",
-          ].join(" ")}
-          role="status"
-        >
-          <span className="font-medium">{toast.message}</span>
-          <button
-            onClick={() => setToast(null)}
-            className="ml-2 inline-flex items-center justify-center rounded-md px-2 py-0.5 hover:bg-black/5"
-            aria-label="Dismiss"
-            title="Dismiss"
+        <div className="fixed bottom-6 right-6 sm:bottom-10 sm:right-10 z-[110] animate-fade-in-up">
+          <div
+            className={`px-5 py-4 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.1)] border flex items-center gap-3 pr-12 relative ${
+              toast.type === "success"
+                ? "bg-white border-green-200"
+                : "bg-white border-red-200"
+            }`}
           >
-            ✕
-          </button>
+            {toast.type === "success" ? (
+              <CheckCircle2 size={20} className="text-green-500" />
+            ) : (
+              <AlertCircle size={20} className="text-red-500" />
+            )}
+            <span className="font-medium text-sm text-[#3a2f28]">
+              {toast.message}
+            </span>
+
+            <button
+              onClick={() => setToast(null)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-gray-100 text-gray-400 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
     </main>
   );
-};
-
-function LabeledInput({
-  name,
-  label,
-  defaultValue,
-  type = "text",
-  required = true,
-  placeholder,
-}) {
-  return (
-    <div>
-      <label className="block text-xs tracking-wide uppercase text-[#8a7c6d] mb-1">
-        {label}
-      </label>
-      <input
-        type={type}
-        name={name}
-        defaultValue={defaultValue}
-        placeholder={placeholder}
-        required={required}
-        className="w-full px-4 py-2.5 rounded-xl border border-[#dcd2c3] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47] shadow-sm"
-      />
-    </div>
-  );
 }
-
-function LabeledTextarea({
-  name,
-  label,
-  defaultValue,
-  required = true,
-  placeholder,
-}) {
-  return (
-    <div>
-      <label className="block text-xs tracking-wide uppercase text-[#8a7c6d] mb-1">
-        {label}
-      </label>
-      <textarea
-        name={name}
-        defaultValue={defaultValue}
-        placeholder={placeholder}
-        required={required}
-        rows={3}
-        className="w-full px-4 py-3 rounded-xl border border-[#dcd2c3] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47] shadow-sm"
-      />
-    </div>
-  );
-}
-
-export default AdminExperiencesPage;

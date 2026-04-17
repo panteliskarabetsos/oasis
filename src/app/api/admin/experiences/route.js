@@ -73,15 +73,15 @@ export async function GET() {
         "whyYoullLove",
         "images",
         "mapPin",
+        "meetupPoints", // <-- Added
         "guestReviews",
         "frequency",
         "visibility",
         "createdAt",
         "updatedAt",
         "priceAdult",
-
         "priceKid",
-      ].join(",")
+      ].join(","),
     )
     .order("createdAt", { ascending: false });
 
@@ -119,6 +119,7 @@ export async function POST(req) {
     whyYoullLove,
     images,
     mapPin,
+    meetupPoints, // <-- Added
     guestReviews,
     frequency,
     visibility,
@@ -128,7 +129,6 @@ export async function POST(req) {
 
   // normalize prices
   let pAdult = toNumOrNull(priceAdult ?? price);
-
   let pKid = toNumOrNull(priceKid);
 
   // required: priceAdult (either via priceAdult or legacy price)
@@ -144,18 +144,18 @@ export async function POST(req) {
   const payload = {
     name,
     slug: slugify(String(slug ?? name), { lower: true, strict: true }),
-    description: cleanStr(description), // allow null
-    location: cleanStr(location) || " Not specified", // default if empty
-    duration: cleanStr(duration), // allow null
+    description: cleanStr(description),
+    location: cleanStr(location) || " Not specified",
+    duration: cleanStr(duration),
     whatsIncluded: cleanStr(whatsIncluded),
     whatToBring: cleanStr(whatToBring),
     whyYoullLove: cleanStr(whyYoullLove),
-    images: toArray(images), // always an array
+    images: toArray(images),
     mapPin: cleanStr(mapPin),
+    meetupPoints: Array.isArray(meetupPoints) ? meetupPoints : [], // <-- Safely saves array
     guestReviews: Array.isArray(guestReviews) ? guestReviews : null,
-    frequency: Array.isArray(frequency) ? frequency : [], // default []
+    frequency: Array.isArray(frequency) ? frequency : [],
     visibility: typeof visibility === "boolean" ? visibility : true,
-    // tiered prices
     priceAdult: pAdult,
     priceKid: pKid,
     updatedAt: nowIso,
@@ -194,7 +194,6 @@ export async function PUT(req) {
     description,
     price,
     priceAdult,
-
     priceKid,
     location,
     duration,
@@ -203,6 +202,7 @@ export async function PUT(req) {
     whyYoullLove,
     images,
     mapPin,
+    meetupPoints, // <-- Added
     guestReviews,
     frequency,
     visibility,
@@ -225,15 +225,20 @@ export async function PUT(req) {
     whatsIncluded: whatsIncluded ?? null,
     whatToBring: whatToBring ?? null,
     whyYoullLove: whyYoullLove ?? null,
-    images: Array.isArray(images) ? images : images ?? null,
+    images: Array.isArray(images) ? images : (images ?? null),
     mapPin: mapPin ?? null,
-    guestReviews: guestReviews ?? null,
-    frequency: Array.isArray(frequency) ? frequency : frequency ?? null,
+    meetupPoints: Array.isArray(meetupPoints)
+      ? meetupPoints
+      : (meetupPoints ?? null), // <-- Added
+    guestReviews: Array.isArray(guestReviews)
+      ? guestReviews
+      : (guestReviews ?? null),
+    frequency: Array.isArray(frequency) ? frequency : (frequency ?? null),
     visibility: visibility ?? true,
     updatedAt: new Date().toISOString(),
   };
 
-  // Only set price fields if present in request (so we don't overwrite unintentionally)
+  // Only set price fields if present in request
   if (pAdult !== undefined) {
     const n = Number(pAdult);
     if (!isNonNegative(n)) return bad("priceAdult must be ≥ 0");
@@ -243,7 +248,7 @@ export async function PUT(req) {
   if (pKid !== undefined) {
     const n = toNumOrNull(pKid);
     if (n !== null && !isNonNegative(n)) return bad("priceKid must be ≥ 0");
-    payload.priceKid = n; // can be null
+    payload.priceKid = n;
   }
 
   const { data, error, status } = await admin
@@ -286,7 +291,7 @@ export async function DELETE(req) {
     if (error.code === "23503") {
       return bad(
         "The experience is related to other records (e.g., bookings). Please delete them first.",
-        400
+        400,
       );
     }
     return bad("Failed to delete experience", 500);

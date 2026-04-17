@@ -1,6 +1,7 @@
 // src/app/admin/experiences/new/page.js
 "use client";
-
+// Add this to your imports at the top of the file
+import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
@@ -10,6 +11,13 @@ import {
   Upload,
   Check,
   Loader2,
+  Plus,
+  Trash2,
+  MapPin,
+  Clock,
+  MessageSquare,
+  Star,
+  Info,
 } from "lucide-react";
 
 /* ---------------------------- helpers ---------------------------- */
@@ -21,30 +29,15 @@ const slugify = (s = "") =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)+/g, "");
 
-function parseGuestReviews(input) {
-  const raw = (input || "").trim();
-  if (!raw) return [];
-  if (/^[\s]*[\[{]/.test(raw)) {
-    try {
-      const j = JSON.parse(raw);
-      return j;
-    } catch {
-      // fall through to CSV parsing
-    }
-  }
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-const Field = ({ label, children, hint, required = false }) => (
-  <label className="block">
-    <span className="flex items-center gap-2 text-sm font-medium text-[#5a4a3f]">
+const Field = ({ label, children, hint, required = false, className = "" }) => (
+  <label className={`block group min-w-0 ${className}`}>
+    <span className="flex items-center gap-2 text-sm font-semibold tracking-wide text-[#5a4a3f] mb-1.5">
       {label} {required ? <span className="text-[#b44d4d]">*</span> : null}
     </span>
-    <div className="mt-1">{children}</div>
-    {hint ? <p className="mt-1 text-xs text-[#7a6a5f]/80">{hint}</p> : null}
+    <div className="w-full">{children}</div>
+    {hint ? (
+      <p className="mt-1.5 text-xs text-[#7a6a5f] font-medium">{hint}</p>
+    ) : null}
   </label>
 );
 
@@ -53,33 +46,30 @@ export default function NewExperiencePage() {
 
   const [loading, setLoading] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [experience, setExperience] = useState({ images: [] });
+
   // DB fields
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
-  const [location, setLocation] = useState("Chania, Crete"); // default
-  const [duration, setDuration] = useState(""); // text, e.g. "3 hours"
-  const [priceAdult, setPriceAdult] = useState("85"); // NOT NULL (default 85)
+  const [location, setLocation] = useState("Chania, Crete");
+  const [duration, setDuration] = useState("");
+  const [priceAdult, setPriceAdult] = useState("85");
   const [priceKid, setPriceKid] = useState("");
-  const [mapPin, setMapPin] = useState("");
   const [whatsIncluded, setWhatsIncluded] = useState("");
   const [whatToBring, setWhatToBring] = useState("");
   const [whyYoullLove, setWhyYoullLove] = useState("");
-  const [guestReviewsInput, setGuestReviewsInput] = useState(""); // CSV or JSON
   const [visibility, setVisibility] = useState(true);
-  const [frequency, setFrequency] = useState([]); // text[]
-  const [images, setImages] = useState([]); // text[] (urls)
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const [uploadedImages, setUploadedImages] = useState([]);
+  const [frequency, setFrequency] = useState([]);
+  const [images, setImages] = useState([]);
+
+  // Dynamic Arrays
+  const [meetupPoints, setMeetupPoints] = useState([]);
+  const [reviews, setReviews] = useState([]);
+
   // derived UI
-  const [status, setStatus] = useState("published"); // mirrors visibility
+  const [status, setStatus] = useState("published");
 
-  const coverRef = useRef(null);
-
-  // auto-slug from name (but allow manual edits)
+  // auto-slug from name
   useEffect(() => {
     if (!name) return;
     setSlug((prev) => {
@@ -101,52 +91,48 @@ export default function NewExperiencePage() {
     (priceAdult === "" || !Number.isNaN(Number(priceAdult))) &&
     (priceKid === "" || !Number.isNaN(Number(priceKid)));
 
-  function openCloudinary() {
-    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
-
-    if (!window?.cloudinary) {
-      toast.error("Cloudinary widget not available.");
-      return;
-    }
-    if (!cloudName || !uploadPreset) {
-      toast.error("Missing Cloudinary env (cloud name / upload preset).");
-      return;
-    }
-
-    const widget = window.cloudinary.createUploadWidget(
-      {
-        cloudName,
-        uploadPreset,
-        multiple: true,
-        sources: ["local", "url", "camera"],
-        folder: "oasis/experiences",
-        maxFiles: 10,
-      },
-      (error, result) => {
-        if (error) {
-          console.error(error);
-          toast.error("Upload failed.");
-        } else if (result?.event === "success") {
-          const url = result.info.secure_url;
-          setImages((prev) => [...prev, url]);
-          toast.success("Image uploaded.");
-        }
-      }
-    );
-    widget.open();
-  }
-
-  function removeImage(idx) {
-    setImages((prev) => prev.filter((_, i) => i !== idx));
-  }
-
   function toggleDay(day) {
     setFrequency((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
     );
   }
 
+  /* --- Dynamic Array Handlers --- */
+  const addMeetupPoint = () => {
+    setMeetupPoints((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: "", mapPin: "", instructions: "" },
+    ]);
+  };
+
+  const updateMeetupPoint = (id, field, value) => {
+    setMeetupPoints((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
+    );
+  };
+
+  const removeMeetupPoint = (id) => {
+    setMeetupPoints((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const addReview = () => {
+    setReviews((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: "", comment: "" },
+    ]);
+  };
+
+  const updateReview = (id, field, value) => {
+    setReviews((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)),
+    );
+  };
+
+  const removeReview = (id) => {
+    setReviews((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  /* --- Submit --- */
   async function submit(e, publish = false) {
     e?.preventDefault?.();
     if (!canSubmit) {
@@ -154,11 +140,21 @@ export default function NewExperiencePage() {
       return;
     }
 
-    // visibility from intent
     const finalVisibility = publish ? true : false;
     publish ? setPublishing(true) : setLoading(true);
 
     try {
+      const cleanedMeetupPoints = meetupPoints.filter(
+        (p) => p.name.trim() || p.mapPin.trim(),
+      );
+
+      const cleanedReviews = reviews
+        .filter((r) => r.comment.trim())
+        .map(({ name, comment }) => ({
+          name: name.trim() || "Guest",
+          comment: comment.trim(),
+        }));
+
       const payload = {
         name: name.trim(),
         slug: slugify(slug),
@@ -169,16 +165,15 @@ export default function NewExperiencePage() {
         whatToBring: whatToBring.trim() || null,
         whyYoullLove: whyYoullLove.trim() || null,
         images,
-        mapPin: mapPin.trim() || null,
-        guestReviews: parseGuestReviews(guestReviewsInput), // jsonb
-        frequency, // text[]
-        visibility: finalVisibility, // boolean
-        priceAdult: priceAdult === "" ? 85 : Number(priceAdult), // double precision NOT NULL
-        priceKid: priceKid === "" ? null : Number(priceKid), // double precision NULL
+        meetupPoints: cleanedMeetupPoints,
+        guestReviews: cleanedReviews,
+        frequency,
+        visibility: finalVisibility,
+        priceAdult: priceAdult === "" ? 85 : Number(priceAdult),
+        priceKid: priceKid === "" ? null : Number(priceKid),
         updatedAt: new Date().toISOString(),
       };
 
-      // sanity
       if (!payload.slug) {
         toast.error("Slug could not be generated. Please enter a valid name.");
         return;
@@ -200,8 +195,10 @@ export default function NewExperiencePage() {
       }
 
       const created = await res.json();
-      toast.success(publish ? "Published" : "Saved (private)");
-      // go to edit page if exists, else list
+      toast.success(
+        publish ? "Published successfully!" : "Draft saved securely.",
+      );
+
       if (created?.id) {
         router.push(`/admin/experiences/${created.id}`);
       } else {
@@ -216,151 +213,175 @@ export default function NewExperiencePage() {
     }
   }
 
-  // Close delete modal on Escape
-  useEffect(() => {
-    function onKey(e) {
-      if (e.key === "Escape") setDeleteOpen(false);
-    }
-    if (deleteOpen) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [deleteOpen]);
-
-  // Cloudinary upload widget (on-demand creation)
+  /* --- Image Upload --- */
+  /* --- Image Upload --- */
   const openCloudinaryWidget = () => {
+    // Restored your original hardcoded fallbacks here!
+    const cloudName =
+      process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "docgxigth";
+    const uploadPreset =
+      process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "ml_default";
+
     if (typeof window === "undefined" || !window.cloudinary) {
-      alert("Cloudinary widget not available in this environment.");
+      toast.error("Cloudinary widget script is not loaded on this page.");
+      console.error("Missing Cloudinary script tag in your layout/document.");
       return;
     }
+
+    if (!cloudName) {
+      toast.error("Cloud name is missing.");
+      return;
+    }
+
     const widget = window.cloudinary.createUploadWidget(
       {
-        cloudName: "docgxigth",
-        uploadPreset: "ml_default",
+        cloudName,
+        uploadPreset,
         multiple: true,
         maxFiles: 10,
+        folder: "oasis/experiences",
       },
       (error, result) => {
         if (!error && result && result.event === "success") {
-          setUploadedImages((prev) => [...prev, result.info.secure_url]);
+          setImages((prev) => [...prev, result.info.secure_url]);
+          toast.success("Image added to gallery");
         }
-      }
+      },
     );
     widget.open();
   };
 
-  const handleDeleteExistingImage = (index) => {
-    setExperience((prev) => ({
-      ...prev,
-      images: (prev?.images || []).filter((_, i) => i !== index),
-    }));
+  const removeImage = (index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleDeleteNewImage = (index) => {
-    setUploadedImages((prev) => prev.filter((_, i) => i !== index));
-  };
+  const inputClass =
+    "w-full min-w-0 rounded-xl border border-[#e0dcd4] bg-white px-4 py-2.5 text-sm text-[#3a2f28] placeholder:text-[#a1978d] outline-none transition-all focus:border-[#8b6f47] focus:ring-1 focus:ring-[#8b6f47] shadow-sm";
+
   return (
-    <div className="relative">
-      {/* Top controls */}
-      <div className="sticky top-2 z-30 mx-auto mb-4 max-w-7xl px-2 sm:px-6">
-        <div className="flex items-center justify-between rounded-2xl border border-[#e6e0d8] bg-white/80 backdrop-blur px-3 py-2 shadow-sm">
+    <div className="relative pb-24 bg-[#fdfcf8] min-h-screen pt-4">
+      <Script
+        src="https://widget.cloudinary.com/v2.0/global/all.js"
+        strategy="lazyOnload"
+      />
+      {/* Top controls (Sticky) 
+        FIXED: Changed top-4 to top-20 (to clear the main header) 
+        FIXED: Changed z-40 to z-20 (so it slides under main navigation dropdowns)
+      */}
+      <div className="sticky top-20 lg:top-24 z-20 mx-auto mb-8 max-w-7xl px-4 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#e6e0d8] bg-white/90 backdrop-blur-md px-4 py-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
           <button
             onClick={() => router.back()}
-            className="inline-flex items-center gap-2 rounded-full border border-[#e0dcd4] bg-[#fdfaf7] px-3 py-1.5 text-sm text-[#5a4a3f] hover:bg-[#f1ede7]"
+            className="inline-flex items-center gap-2 rounded-full border border-[#e0dcd4] bg-[#fdfaf7] px-4 py-2 text-sm font-medium text-[#5a4a3f] hover:bg-[#f1ede7] transition-colors shrink-0"
           >
             <ArrowLeft size={16} /> Back
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             <button
               onClick={(e) => submit(e, false)}
               disabled={!canSubmit || loading || publishing}
-              className="rounded-full border border-[#e0dcd4] bg-white px-3 py-1.5 text-sm text-[#5a4a3f] hover:bg-[#fff4e1] disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
-              title="Save as draft (visibility off)"
+              className="rounded-full border border-[#e0dcd4] bg-white px-4 sm:px-5 py-2 text-sm font-medium text-[#5a4a3f] hover:bg-[#f6f4f0] disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 transition-colors shadow-sm"
             >
               {loading ? (
                 <Loader2 size={16} className="animate-spin" />
               ) : (
                 <Check size={16} />
               )}
-              Save draft
+              Save Draft
             </button>
             <button
               onClick={(e) => submit(e, true)}
               disabled={!canSubmit || loading || publishing}
-              className="rounded-full bg-[#8b6f47] px-4 py-1.5 text-sm text-white hover:bg-[#7a5f3a] disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
-              title="Publish (visibility on)"
+              className="rounded-full bg-[#8b6f47] px-4 sm:px-6 py-2 text-sm font-medium text-white hover:bg-[#735b38] disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 transition-colors shadow-md"
             >
               {publishing ? (
                 <Loader2 size={16} className="animate-spin" />
               ) : (
                 <Upload size={16} />
               )}
-              Publish
+              Publish Live
             </button>
           </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-6 lg:grid-cols-[1.2fr_0.8fr]">
-        {/* Left: form */}
-        <form
-          onSubmit={(e) => submit(e, false)}
-          className="rounded-3xl border border-[#e6e0d8] bg-white/80 p-6 backdrop-blur"
-        >
-          <div className="grid gap-5">
-            <Field label="Name" required hint="A short, descriptive title.">
+      {/* Content Layout: 12-column Grid */}
+      <div className="mx-auto grid max-w-7xl grid-cols-1 lg:grid-cols-12 gap-8 px-4 sm:px-6 items-start">
+        {/* Left Column: Form (8 cols on desktop) */}
+        <form className="lg:col-span-8 space-y-8 min-w-0 flex flex-col">
+          {/* Section: Basic Info */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="border-b border-[#e6e0d8] pb-4 mb-2">
+              <h2 className="font-serif text-2xl text-[#3a2f28]">
+                Basic Information
+              </h2>
+              <p className="text-sm text-[#7a6a5f] mt-1">
+                The core details displayed on the primary listing.
+              </p>
+            </div>
+
+            <Field
+              label="Experience Name"
+              required
+              hint="A short, evocative title."
+            >
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                placeholder="Olive Harvest & Brunch"
+                className={inputClass}
+                placeholder="e.g. Traditional Olive Harvest & Feast"
               />
             </Field>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Slug" required hint="URL-safe identifier">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <Field
+                label="URL Slug"
+                required
+                hint="Auto-generates from the name."
+              >
                 <input
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                  placeholder="olive-harvest-brunch"
+                  className={inputClass}
+                  placeholder="traditional-olive-harvest"
                 />
               </Field>
 
-              <Field label="Location" hint='Defaults to "Chania, Crete".'>
+              <Field label="General Location" hint="Displayed on badges.">
                 <input
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                  className={inputClass}
                   placeholder="Chania, Crete"
                 />
               </Field>
             </div>
 
             <Field
-              label="Description"
-              hint="Long-form details about the experience."
+              label="Full Description"
+              hint="Tell the story. Use paragraphs to format nicely on the front end."
             >
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={6}
-                className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                placeholder="What guests can expect..."
+                rows={5}
+                className={inputClass}
+                placeholder="Immerse yourself in the authentic rhythm of Cretan life..."
               />
             </Field>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field label="Duration (text)">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 p-5 bg-[#fcfbf9] rounded-2xl border border-[#e6e0d8]">
+              <Field label="Duration">
                 <input
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                  placeholder="3 hours"
+                  className={inputClass}
+                  placeholder="e.g. 4 Hours"
                 />
               </Field>
 
-              <Field label="Price Adult (€)" required>
+              <Field label="Price per Adult (€)" required>
                 <input
                   type="number"
                   min="0"
@@ -368,12 +389,12 @@ export default function NewExperiencePage() {
                   inputMode="numeric"
                   value={priceAdult}
                   onChange={(e) => setPriceAdult(e.target.value)}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                  className={inputClass}
                   placeholder="85"
                 />
               </Field>
 
-              <Field label="Price Kid (€)">
+              <Field label="Price per Child (€)">
                 <input
                   type="number"
                   min="0"
@@ -381,236 +402,452 @@ export default function NewExperiencePage() {
                   inputMode="numeric"
                   value={priceKid}
                   onChange={(e) => setPriceKid(e.target.value)}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+                  className={inputClass}
                   placeholder="45"
                 />
               </Field>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Map Pin" hint="lat,lng">
-                <input
-                  value={mapPin}
-                  onChange={(e) => setMapPin(e.target.value)}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                  placeholder="35.513, 24.019"
-                />
-              </Field>
-
-              <Field label="Visibility">
-                <div className="flex items-center gap-2">
+            <Field label="Listing Visibility">
+              <label className="flex items-center gap-3 mt-2 cursor-pointer w-fit p-3 pr-5 border border-[#e6e0d8] rounded-xl hover:bg-[#fcfbf9] transition-colors">
+                <div
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${visibility ? "bg-[#8b6f47]" : "bg-gray-300"}`}
+                >
                   <input
-                    id="vis"
                     type="checkbox"
+                    className="sr-only"
                     checked={visibility}
                     onChange={(e) => setVisibility(e.target.checked)}
                   />
-                  <label htmlFor="vis" className="text-sm text-[#5a4a3f]">
-                    Public (visible on site)
-                  </label>
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${visibility ? "translate-x-6" : "translate-x-1"}`}
+                  />
                 </div>
-              </Field>
+                <span className="text-sm font-medium text-[#3a2f28]">
+                  Make this experience public
+                </span>
+              </label>
+            </Field>
+          </div>
+
+          {/* Section: Itinerary & Logistics */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="border-b border-[#e6e0d8] pb-4 mb-2">
+              <h2 className="font-serif text-2xl text-[#3a2f28]">
+                Itinerary & Details
+              </h2>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field
+              label="Why Guests Will Love It"
+              hint="Highlight the emotional or premium aspects."
+            >
+              <textarea
+                value={whyYoullLove}
+                onChange={(e) => setWhyYoullLove(e.target.value)}
+                rows={3}
+                className={inputClass}
+                placeholder="You'll step away from the tourist path and connect with local culture..."
+              />
+            </Field>
+
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <Field
                 label="What’s Included"
-                hint="One per line (will render as a list)."
+                hint="Break items by pressing Enter. Renders as a checkmark list."
               >
                 <textarea
                   value={whatsIncluded}
                   onChange={(e) => setWhatsIncluded(e.target.value)}
-                  rows={4}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                  placeholder="Guided tour&#10;Tasting&#10;Transfers"
+                  rows={5}
+                  className={inputClass}
+                  placeholder="Welcome coffee&#10;Guided farm walk&#10;Full traditional meal"
                 />
               </Field>
 
-              <Field label="What to Bring">
+              <Field
+                label="What to Bring"
+                hint="Break items by pressing Enter."
+              >
                 <textarea
                   value={whatToBring}
                   onChange={(e) => setWhatToBring(e.target.value)}
-                  rows={4}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                  placeholder="Comfortable shoes, hat..."
+                  rows={5}
+                  className={inputClass}
+                  placeholder="Comfortable closed-toe shoes&#10;Sunscreen&#10;A light jacket"
                 />
               </Field>
             </div>
 
-            <Field label="Why You’ll Love It">
-              <textarea
-                value={whyYoullLove}
-                onChange={(e) => setWhyYoullLove(e.target.value)}
-                rows={4}
-                className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                placeholder="Authentic, intimate, unforgettable..."
-              />
-            </Field>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field
-                label="Guest Reviews"
-                hint='CSV or JSON array, e.g. `Great!, Amazing!` or `["Great!","Amazing!"]`'
-              >
-                <textarea
-                  value={guestReviewsInput}
-                  onChange={(e) => setGuestReviewsInput(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-[#e0dcd4] bg-white px-3 py-2 text-sm text-[#5a4a3f] outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                />
-              </Field>
-
-              <Field label="Frequency (days)">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {[
-                    "Monday",
-                    "Tuesday",
-                    "Wednesday",
-                    "Thursday",
-                    "Friday",
-                    "Saturday",
-                    "Sunday",
-                  ].map((day) => (
-                    <label
+            <Field
+              label="Availability Schedule"
+              className="pt-4 border-t border-[#e6e0d8]"
+            >
+              <div className="flex flex-wrap gap-2 mt-2">
+                {[
+                  "Monday",
+                  "Tuesday",
+                  "Wednesday",
+                  "Thursday",
+                  "Friday",
+                  "Saturday",
+                  "Sunday",
+                ].map((day) => {
+                  const isActive = frequency.includes(day);
+                  return (
+                    <button
                       key={day}
-                      className="inline-flex items-center gap-2 rounded-xl border border-[#e8e2d8] px-3 py-2 hover:bg-[#fbfaf7]"
+                      type="button"
+                      onClick={() => toggleDay(day)}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all ${
+                        isActive
+                          ? "bg-[#8b6f47] border-[#8b6f47] text-white shadow-sm"
+                          : "bg-white border-[#e0dcd4] text-[#5a4a3f] hover:bg-[#f6f4f0]"
+                      }`}
                     >
-                      <input
-                        type="checkbox"
-                        checked={frequency.includes(day)}
-                        onChange={() => toggleDay(day)}
-                      />
-                      <span className="text-sm">{day}</span>
-                    </label>
-                  ))}
-                </div>
-              </Field>
+                      {day}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+          </div>
+
+          {/* Section: Meeting Points */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e6e0d8] pb-4 mb-6">
+              <div>
+                <h2 className="font-serif text-2xl text-[#3a2f28]">
+                  Meeting Points
+                </h2>
+                <p className="text-sm text-[#7a6a5f] mt-1">
+                  Options for the client to select at checkout.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={addMeetupPoint}
+                className="flex items-center gap-2 px-4 py-2 bg-[#fcfbf9] border border-[#e0dcd4] text-[#3a2f28] text-sm font-medium rounded-full hover:bg-[#f1ede7] transition-colors shadow-sm shrink-0"
+              >
+                <Plus size={16} /> Add Location
+              </button>
             </div>
 
-            {/* Images */}
-            <div className="rounded-3xl border border-[#e8e2d8] bg-white/90 shadow-sm">
-              <div className="px-6 py-4 border-b border-[#efe9e1] bg-[#faf7f1] rounded-t-3xl flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-semibold">Images</h3>
-                  <p className="text-xs text-[#7a6a5f]">
-                    Upload and manage gallery
+            <div className="space-y-4">
+              {meetupPoints.length === 0 ? (
+                <div className="p-10 text-center border-2 border-dashed border-[#e6e0d8] rounded-[1.5rem] bg-[#fcfbf9]">
+                  <MapPin className="mx-auto text-[#c5b9aa] mb-3" size={28} />
+                  <p className="text-sm text-[#7a6a5f] font-medium">
+                    No meeting locations defined yet.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={openCloudinaryWidget}
-                  className="px-4 py-2 rounded-full bg-[#8b6f47] text-white font-medium shadow-sm hover:bg-[#a78b62] transition-all"
-                >
-                  Upload Images
-                </button>
-              </div>
-              <div className="p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                {(experience.images || []).map((img, i) => (
+              ) : (
+                meetupPoints.map((point, index) => (
                   <div
-                    key={`old-${i}`}
-                    className="relative aspect-video rounded-xl overflow-hidden border border-[#e8e2d8]"
+                    key={point.id}
+                    className="relative p-6 border border-[#e0dcd4] rounded-[1.5rem] bg-[#fcfbf9] group hover:border-[#8b6f47]/40 transition-colors"
                   >
-                    <img
-                      src={img}
-                      alt={`Image ${i + 1}`}
-                      className="w-full h-full object-cover"
-                    />
                     <button
                       type="button"
-                      onClick={() => handleDeleteExistingImage(i)}
-                      className="absolute top-2 right-2 px-2 py-1 rounded-full text-white bg-red-600/90 text-xs"
-                      title="Remove"
+                      onClick={() => removeMeetupPoint(point.id)}
+                      className="absolute top-5 right-5 p-2 bg-white rounded-full text-[#b44d4d]/70 hover:text-[#b44d4d] hover:bg-red-50 transition-all border border-transparent hover:border-red-100"
+                      title="Remove Location"
                     >
-                      Remove
+                      <Trash2 size={16} />
                     </button>
+
+                    <h4 className="text-xs font-bold text-[#8b6f47] uppercase tracking-[0.15em] mb-4 pr-10">
+                      Location Option {index + 1}
+                    </h4>
+
+                    <div className="grid sm:grid-cols-2 gap-5">
+                      <Field label="Point Name" hint="e.g. Rethymno Center">
+                        <input
+                          value={point.name}
+                          onChange={(e) =>
+                            updateMeetupPoint(point.id, "name", e.target.value)
+                          }
+                          className={inputClass}
+                          placeholder="Rethymno Center"
+                        />
+                      </Field>
+
+                      <Field
+                        label="Google Map Address"
+                        hint="Must be exact for map embeds."
+                      >
+                        <input
+                          value={point.mapPin}
+                          onChange={(e) =>
+                            updateMeetupPoint(
+                              point.id,
+                              "mapPin",
+                              e.target.value,
+                            )
+                          }
+                          className={inputClass}
+                          placeholder="Arkadiou 10, Rethymno 741 00"
+                        />
+                      </Field>
+
+                      <Field
+                        label="Arrival Instructions"
+                        className="sm:col-span-2"
+                      >
+                        <textarea
+                          value={point.instructions}
+                          onChange={(e) =>
+                            updateMeetupPoint(
+                              point.id,
+                              "instructions",
+                              e.target.value,
+                            )
+                          }
+                          rows={2}
+                          className={inputClass}
+                          placeholder="Wait by the large fountain. Guide wears a beige hat."
+                        />
+                      </Field>
+                    </div>
                   </div>
-                ))}
-                {uploadedImages.map((img, i) => (
-                  <div
-                    key={`new-${i}`}
-                    className="relative aspect-video rounded-xl overflow-hidden border border-[#e8e2d8]"
-                  >
-                    <img
-                      src={img}
-                      alt={`New ${i + 1}`}
-                      className="w-full h-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteNewImage(i)}
-                      className="absolute top-2 right-2 px-2 py-1 rounded-full text-white bg-red-600/90 text-xs"
-                      title="Remove"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Section: Guest Reviews Builder */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e6e0d8] pb-4 mb-6">
+              <div>
+                <h2 className="font-serif text-2xl text-[#3a2f28]">
+                  Guest Reviews
+                </h2>
+                <p className="text-sm text-[#7a6a5f] mt-1">
+                  Add curated past reviews to build trust.
+                </p>
               </div>
+              <button
+                type="button"
+                onClick={addReview}
+                className="flex items-center gap-2 px-4 py-2 bg-[#fcfbf9] border border-[#e0dcd4] text-[#3a2f28] text-sm font-medium rounded-full hover:bg-[#f1ede7] transition-colors shadow-sm shrink-0"
+              >
+                <Plus size={16} /> Add Review
+              </button>
             </div>
 
-            <div className="pt-2">
-              <p className="text-xs text-[#7a6a5f]">
-                Status:{" "}
-                <span className="rounded-full border border-[#efe7d9] bg-[#fbf7ef] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
-                  {status}
-                </span>
-              </p>
+            <div className="space-y-4">
+              {reviews.length === 0 ? (
+                <div className="p-10 text-center border-2 border-dashed border-[#e6e0d8] rounded-[1.5rem] bg-[#fcfbf9]">
+                  <MessageSquare
+                    className="mx-auto text-[#c5b9aa] mb-3"
+                    size={28}
+                  />
+                  <p className="text-sm text-[#7a6a5f] font-medium">
+                    No reviews added yet.
+                  </p>
+                </div>
+              ) : (
+                reviews.map((review) => (
+                  <div
+                    key={review.id}
+                    className="relative p-5 pr-12 border border-[#e0dcd4] rounded-2xl bg-white shadow-sm flex flex-col sm:flex-row gap-4 items-start"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => removeReview(review.id)}
+                      className="absolute top-4 right-4 p-2 text-[#b44d4d]/70 hover:text-[#b44d4d] hover:bg-red-50 rounded-full transition-colors"
+                      title="Delete Review"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+
+                    <div className="w-full sm:w-1/3">
+                      <input
+                        value={review.name}
+                        onChange={(e) =>
+                          updateReview(review.id, "name", e.target.value)
+                        }
+                        className={`${inputClass} !py-2`}
+                        placeholder="Guest Name (e.g. Sarah M.)"
+                      />
+                    </div>
+                    <div className="w-full sm:w-2/3">
+                      <textarea
+                        value={review.comment}
+                        onChange={(e) =>
+                          updateReview(review.id, "comment", e.target.value)
+                        }
+                        rows={2}
+                        className={`${inputClass} !py-2`}
+                        placeholder="An amazing, authentic experience..."
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Section: Image Gallery */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white shadow-sm overflow-hidden">
+            <div className="px-6 sm:px-8 py-6 border-b border-[#e6e0d8] bg-[#fcfbf9] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-serif text-[#3a2f28]">
+                  Image Gallery
+                </h3>
+                <p className="text-sm text-[#7a6a5f] mt-1">
+                  Upload high-quality photos. The first acts as the cover.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={openCloudinaryWidget}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#1a1a1a] text-white text-sm font-medium shadow-sm hover:bg-[#333] transition-colors shrink-0"
+              >
+                <Upload size={16} /> Upload Media
+              </button>
+            </div>
+
+            <div className="p-6 sm:p-8">
+              {images.length === 0 ? (
+                <div className="p-12 text-center border-2 border-dashed border-[#e6e0d8] rounded-[1.5rem] bg-[#fdfaf7]">
+                  <ImageIcon
+                    className="mx-auto text-[#c5b9aa] mb-4"
+                    size={40}
+                  />
+                  <p className="text-sm text-[#7a6a5f] font-medium">
+                    No media uploaded.
+                  </p>
+                  <p className="text-xs text-[#a1978d] mt-1">
+                    Click the button above to select images.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  {images.map((img, i) => (
+                    <div
+                      key={i}
+                      className="relative aspect-square rounded-2xl overflow-hidden border border-[#e8e2d8] group bg-[#f4f1ec] shadow-sm"
+                    >
+                      {i === 0 && (
+                        <div className="absolute top-2 left-2 z-10 bg-[#8b6f47] text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg shadow-sm">
+                          Cover
+                        </div>
+                      )}
+                      <img
+                        src={img}
+                        alt={`Gallery Image ${i + 1}`}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300" />
+                      <button
+                        type="button"
+                        onClick={() => removeImage(i)}
+                        className="absolute top-2 right-2 p-2 rounded-full text-white bg-black/50 hover:bg-red-600 shadow-sm transition-all opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0"
+                        title="Remove Image"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </form>
 
-        {/* Right: preview card */}
-        <aside className="rounded-3xl border border-[#e6e0d8] bg-white/70 p-6 backdrop-blur">
-          <h3 className="mb-3 font-serif text-lg text-[#5a4a3f]">
-            Live Preview
-          </h3>
-
-          <div className="overflow-hidden rounded-2xl border border-[#e0dcd4] bg-white shadow-sm">
-            <div className="relative h-40 w-full bg-[#faf7f1]">
-              {images[0] ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={images[0]}
-                  alt="Cover preview"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-[#7a6a5f]">
-                  <ImageIcon size={28} />
-                </div>
-              )}
+        {/* Right Column: Sticky Preview Card 
+          FIXED: Adjusted top-28 to top-40 so it doesn't collide with the newly lowered top bar
+        */}
+        <aside className="lg:col-span-4 relative mt-4 lg:mt-0 z-10">
+          <div className="lg:sticky lg:top-40 rounded-[2rem] border border-[#e6e0d8] bg-white p-6 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] flex flex-col max-h-none lg:max-h-[calc(100vh-10rem)]">
+            <div className="flex items-center justify-between mb-5 shrink-0">
+              <h3 className="font-serif text-lg text-[#3a2f28]">
+                Card Preview
+              </h3>
+              <span
+                className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${visibility ? "bg-[#f4f8f4] text-[#4a7854] border border-[#d3e3d3]" : "bg-[#f6f4f0] text-[#7a6a5f] border border-[#e6e0d8]"}`}
+              >
+                {status}
+              </span>
             </div>
-            <div className="space-y-2 p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm uppercase tracking-wide text-[#7a6a5f]">
-                  {location || "Location"}
-                </p>
-                <p className="rounded-full border border-[#efe7d9] bg-[#fbf7ef] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
-                  {visibility ? "published" : "draft"}
-                </p>
+
+            <div className="overflow-y-auto pr-1 pb-1 -mr-1 no-scrollbar shrink-0">
+              <div className="overflow-hidden rounded-[1.5rem] border border-[#e6e0d8] bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:-translate-y-1">
+                <div className="relative h-48 sm:h-56 w-full bg-[#f4f1ec]">
+                  {images[0] ? (
+                    <img
+                      src={images[0]}
+                      alt="Cover preview"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full flex-col items-center justify-center text-[#c5b9aa] gap-2">
+                      <ImageIcon size={32} />
+                      <span className="text-xs font-medium">Cover Image</span>
+                    </div>
+                  )}
+
+                  {location && (
+                    <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                      <MapPin size={10} /> {location}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 flex flex-col min-h-[160px]">
+                  <div className="flex-1">
+                    <h4 className="font-serif text-xl text-[#1A1A1A] mb-2 leading-tight line-clamp-2">
+                      {name || "Experience Title..."}
+                    </h4>
+                    <p className="text-sm text-[#7a6a5f] line-clamp-2 leading-relaxed">
+                      {whyYoullLove ||
+                        "Write a compelling reason why guests will absolutely love this experience..."}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-[#e6e0d8] flex items-center justify-between shrink-0">
+                    <div className="flex flex-col gap-1">
+                      {reviews.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          <Star
+                            size={12}
+                            className="fill-[#8b6f47] text-[#8b6f47]"
+                          />
+                          <span className="text-[11px] font-bold text-[#3a2f28]">
+                            4.9{" "}
+                            <span className="text-[#a1978d] font-normal">
+                              ({reviews.length})
+                            </span>
+                          </span>
+                        </div>
+                      )}
+                      <span className="text-xs font-medium text-[#7a6a5f] flex items-center gap-1.5">
+                        <Clock size={12} /> {duration || "TBD"}
+                      </span>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[10px] uppercase tracking-wider text-[#a1978d] block mb-0.5">
+                        From
+                      </span>
+                      <span className="font-serif text-lg text-[#1A1A1A]">
+                        {priceAdult ? `€${Number(priceAdult)}` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <h4 className="font-serif text-xl text-[#5a4a3f]">
-                {name || "Untitled experience"}
-              </h4>
-              <p className="text-sm text-[#5a4a3f]/90">
-                {whyYoullLove || "Why guests will love it…"}
+            </div>
+
+            <div className="mt-6 p-4 bg-[#fcfbf9] border border-[#e6e0d8] rounded-2xl flex items-start gap-3 shrink-0">
+              <Info size={16} className="text-[#8b6f47] shrink-0 mt-0.5" />
+              <p className="text-[11px] text-[#7a6a5f] leading-relaxed">
+                This preview shows how the primary card will look on the public
+                catalog. Make sure your cover image and title are compelling.
               </p>
-              <div className="mt-2 flex items-center justify-between text-sm text-[#5a4a3f]">
-                <span>{duration ? duration : "Duration TBD"}</span>
-                <span className="font-medium">
-                  {priceAdult
-                    ? `€${Number(priceAdult).toFixed(0)}`
-                    : "Price TBD"}
-                  {priceKid && ` (kid €${Number(priceKid).toFixed(0)})`}
-                </span>
-              </div>
             </div>
           </div>
-
-          <p className="mt-4 text-xs text-[#7a6a5f]">
-            The preview is indicative. Final rendering may vary on the public
-            catalog page.
-          </p>
         </aside>
       </div>
     </div>

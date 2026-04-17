@@ -1,3 +1,4 @@
+// src/app/experiences/[slug]/page.js
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -19,6 +20,8 @@ import {
   Heart,
   Sparkles,
   Sun,
+  Leaf,
+  Utensils,
 } from "lucide-react";
 import LinkWithLoader from "@/app/components/LinkWithLoader";
 import { getExperienceBySlug } from "@/lib/fetchExperiences";
@@ -26,6 +29,7 @@ import ShareButton from "@/app/components/ShareButton";
 import FavoriteButton from "@/app/components/FavoriteButton";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import ExperienceGallery from "@/app/components/ExperienceGallery";
+import InteractiveMeetingPoints from "@/app/components/InteractiveMeetingPoints";
 
 // ---- Fonts Configuration ----
 const fontSerif = Playfair_Display({
@@ -61,13 +65,13 @@ function eur(n) {
 }
 function minDefined(...vals) {
   const nums = vals.filter(
-    (v) => typeof v === "number" && Number.isFinite(v) && v > 0
+    (v) => typeof v === "number" && Number.isFinite(v) && v > 0,
   );
   return nums.length ? Math.min(...nums) : null;
 }
 function maxDefined(...vals) {
   const nums = vals.filter(
-    (v) => typeof v === "number" && Number.isFinite(v) && v > 0
+    (v) => typeof v === "number" && Number.isFinite(v) && v > 0,
   );
   return nums.length ? Math.max(...nums) : null;
 }
@@ -116,7 +120,7 @@ export default async function ExperienceDetailPage({ params }) {
     whatToBring,
     whyYoullLove,
     images,
-    mapPin,
+    meetupPoints,
     guestReviews,
   } = experience;
 
@@ -130,6 +134,9 @@ export default async function ExperienceDetailPage({ params }) {
         .map((r) => (typeof r === "string" ? { name: "Guest", comment: r } : r))
         .filter(Boolean)
     : [];
+
+  // Parse Meetup Points
+  const parsedMeetupPoints = Array.isArray(meetupPoints) ? meetupPoints : [];
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "";
   const pageUrl = `${siteUrl}/experiences/${slug}`;
@@ -147,7 +154,7 @@ export default async function ExperienceDetailPage({ params }) {
 
   return (
     <main
-      className={`${fontSerif.variable} ${fontSans.variable} font-sans bg-[#FDFCF8] text-[#1A1A1A] min-h-screen selection:bg-[#C8AA86] selection:text-white pb-32 lg:pb-0 overflow-x-hidden`}
+      className={`${fontSerif.variable} ${fontSans.variable} font-sans bg-[#FDFCF8] text-[#1A1A1A] min-h-screen selection:bg-[#C8AA86] selection:text-white pb-36 lg:pb-40 overflow-x-hidden`}
     >
       <Script
         id="json-ld"
@@ -156,10 +163,8 @@ export default async function ExperienceDetailPage({ params }) {
       />
 
       {/* ---- HERO SECTION ---- */}
-      {/* IMPROVED: Used svh for mobile URL bar stability */}
       <section className="relative w-full h-[80svh] lg:h-[85vh] min-h-[500px] flex flex-col justify-end overflow-hidden">
-        {/* Background Layer */}
-        <div className="absolute inset-0 z-0 select-none">
+        <div className="absolute inset-0 z-0 select-none bg-[#EAE6DF]">
           {parsedImages?.[0] ? (
             <div className="relative w-full h-full">
               <Image
@@ -172,28 +177,27 @@ export default async function ExperienceDetailPage({ params }) {
                 sizes="100vw"
                 style={{ objectPosition: "center" }}
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/30" />
-              <div className="absolute inset-0 opacity-[0.04] mix-blend-overlay pointer-events-none bg-[url('https://grainy-gradients.vercel.app/noise.svg')]"></div>
+              <div className="absolute inset-0 bg-gradient-to-t from-[#1A1A1A]/95 via-[#1A1A1A]/40 to-transparent" />
+              <div className="absolute inset-0 opacity-[0.03] mix-blend-overlay pointer-events-none bg-[url('https://grainy-gradients.vercel.app/noise.svg')]"></div>
             </div>
           ) : (
             <div className="w-full h-full bg-[#C8AA86]" />
           )}
         </div>
 
-        {/* Top Nav Overlay */}
-        <div className="absolute top-0 left-0 right-0 p-4 md:p-8 z-30 flex justify-between items-start">
+        <div className="absolute top-0 left-0 right-0 p-5 md:p-8 z-30 flex justify-between items-start">
           <LinkWithLoader href="/experiences">
-            <button className="group flex items-center gap-2 pr-4 pl-2 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-all duration-300">
+            <button className="group flex items-center gap-2 pr-5 pl-2.5 py-2.5 rounded-full bg-black/20 backdrop-blur-md border border-white/10 text-white hover:bg-black/40 transition-all duration-300 shadow-sm">
               <div className="bg-white/20 rounded-full p-1.5 group-hover:-translate-x-1 transition-transform">
                 <ArrowLeft size={16} />
               </div>
-              <span className="hidden sm:inline text-xs font-bold uppercase tracking-widest">
+              <span className="hidden sm:inline text-[11px] font-bold uppercase tracking-widest">
                 Back
               </span>
             </button>
           </LinkWithLoader>
 
-          <div className="flex gap-2 sm:gap-3">
+          <div className="flex gap-3">
             <ShareButton
               title={name}
               text={`Check out this experience: ${name}`}
@@ -207,63 +211,59 @@ export default async function ExperienceDetailPage({ params }) {
           </div>
         </div>
 
-        {/* Hero Content */}
-        <div className="relative z-20 w-full max-w-7xl mx-auto px-5 md:px-12 pb-12 lg:pb-20">
-          <div className="animate-fade-in-up space-y-4 sm:space-y-6 max-w-5xl">
-            {/* Badges */}
-            <div className="flex gap-2 sm:gap-3 flex-wrap">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/20 bg-black/20 backdrop-blur-md text-[#F4EFE9]">
+        <div className="relative z-20 w-full max-w-5xl mx-auto px-6 md:px-12 pb-14 lg:pb-24 text-center sm:text-left">
+          <div className="animate-fade-in-up space-y-5 sm:space-y-6">
+            <div className="flex gap-3 flex-wrap justify-center sm:justify-start">
+              <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-white/15 bg-white/10 backdrop-blur-md text-white shadow-sm">
                 <Sparkles size={12} className="text-[#C8AA86]" />
-                <span className="text-[10px] font-bold uppercase tracking-[0.15em]">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em]">
                   Premium
                 </span>
               </div>
               {location && (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/20 bg-white/10 backdrop-blur-md text-white">
+                <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-white/15 bg-white/10 backdrop-blur-md text-white shadow-sm">
                   <MapPin size={12} />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.15em]">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em]">
                     {location}
                   </span>
                 </div>
               )}
             </div>
 
-            {/* Title - Optimized for mobile line breaks */}
-            <h1 className="font-serif text-4xl sm:text-6xl lg:text-8xl text-white leading-[1.05] sm:leading-[0.9] tracking-tight text-balance shadow-black drop-shadow-2xl">
+            <h1 className="font-serif text-4xl sm:text-6xl lg:text-[5.5rem] text-white leading-[1.05] sm:leading-[0.95] tracking-tight text-balance drop-shadow-md">
               {name}
             </h1>
 
-            {/* Quick Stats */}
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-white/90 pt-4 border-t border-white/10 mt-4 sm:mt-6">
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-8 gap-y-4 text-white/90 pt-6 border-t border-white/15 mt-6 sm:mt-8">
               {duration && (
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 bg-white/10 rounded-full backdrop-blur-sm">
-                    <Clock size={14} />
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-white/10 rounded-full backdrop-blur-sm">
+                    <Clock size={16} />
                   </div>
-                  <span className="text-sm sm:text-base font-light tracking-wide">
+                  <span className="text-sm sm:text-base font-medium tracking-wide">
                     {duration}
                   </span>
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-white/10 rounded-full backdrop-blur-sm">
-                  <Users size={14} />
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-white/10 rounded-full backdrop-blur-sm">
+                  <Users size={16} />
                 </div>
-                <span className="text-sm sm:text-base font-light tracking-wide">
+                <span className="text-sm sm:text-base font-medium tracking-wide">
                   Small Groups
                 </span>
               </div>
-              <div className="flex items-center gap-2 sm:ml-auto mt-2 sm:mt-0">
+              <div className="flex items-center gap-2.5 mt-2 sm:mt-0">
                 <div className="flex -space-x-1">
                   {[...Array(5)].map((_, i) => (
                     <Star
                       key={i}
-                      size={14}
+                      size={16}
                       className="fill-[#C8AA86] text-[#C8AA86]"
                     />
                   ))}
                 </div>
-                <span className="text-sm font-medium border-b border-white/30 pb-0.5">
+                <span className="text-sm font-medium border-b border-white/30 pb-0.5 hover:border-white transition-colors cursor-pointer">
                   4.9 (120)
                 </span>
               </div>
@@ -271,259 +271,271 @@ export default async function ExperienceDetailPage({ params }) {
           </div>
         </div>
 
-        {/* Scroll Indicator */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/50 animate-bounce hidden md:block">
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/50 animate-bounce hidden md:block">
           <ChevronDown size={28} strokeWidth={1.5} />
         </div>
       </section>
 
       {/* ---- STICKY NAV ---- */}
-      <div className="sticky top-4 z-40 flex justify-center pointer-events-none mb-8 sm:mb-12 px-4">
-        <nav className="pointer-events-auto bg-white/70 backdrop-blur-xl border border-white/60 shadow-xl shadow-black/5 rounded-full px-2 py-1.5 flex items-center gap-1 overflow-x-auto max-w-full no-scrollbar ring-1 ring-black/5">
+      <div className="sticky top-6 z-40 flex justify-center pointer-events-none mb-10 sm:mb-16 px-4">
+        <nav className="pointer-events-auto bg-white/80 backdrop-blur-xl border border-[#EAE6DF] shadow-[0_8px_30px_rgb(0,0,0,0.06)] rounded-full px-2 py-2 flex items-center gap-1 overflow-x-auto max-w-full no-scrollbar">
           <NavLink href="#overview" label="Overview" active />
           <NavLink href="#details" label="Details" />
-          <NavLink href="#gallery" label="Gallery" />
-          <NavLink href="#location" label="Location" />
+          <NavLink href="#philosophy" label="Philosophy" />
+          <NavLink href="#meeting-points" label="Location" />
           <NavLink href="#reviews" label="Reviews" />
-          {/* Hide price on mobile nav to save space */}
-          <div className="w-px h-4 bg-gray-300 mx-2 hidden md:block"></div>
-          <span className="hidden md:block text-xs font-bold text-[#1A1A1A] px-3">
-            {fromPrice ? eur(fromPrice) : ""}
-          </span>
         </nav>
       </div>
 
-      {/* ---- MAIN LAYOUT ---- */}
-      <div className="relative z-10 max-w-7xl mx-auto px-5 md:px-12">
-        <div className="grid lg:grid-cols-[1fr_380px] gap-12 lg:gap-20 items-start">
-          {/* LEFT COLUMN */}
-          <div className="space-y-16 sm:space-y-24">
-            {/* Overview Section */}
-            <section id="overview" className="scroll-mt-32">
-              <SectionHeader title="The Experience" />
-              {/* Added prose-p styling for better mobile readability */}
-              <div className="prose prose-stone prose-base sm:prose-lg max-w-none text-[#4A4A4A] leading-relaxed font-light prose-headings:font-serif prose-p:mb-6">
-                <p className="whitespace-pre-line first-letter:text-5xl sm:first-letter:text-6xl first-letter:font-serif first-letter:text-[#C8AA86] first-letter:float-left first-letter:mr-3 first-letter:mt-[-4px]">
-                  {description}
+      {/* ---- MAIN LAYOUT (Single Column) ---- */}
+      <div className="relative z-10 max-w-4xl mx-auto px-6 md:px-12 space-y-20 sm:space-y-28">
+        {/* Overview Section */}
+        <section id="overview" className="scroll-mt-40">
+          <SectionHeader title="The Experience" />
+          <div className="prose prose-stone prose-lg max-w-none text-[#555] leading-loose font-normal prose-headings:font-serif prose-p:mb-8">
+            <p className="whitespace-pre-line first-letter:text-6xl sm:first-letter:text-7xl first-letter:font-serif first-letter:text-[#C8AA86] first-letter:float-left first-letter:mr-4 first-letter:mt-[-8px] first-letter:leading-none">
+              {description}
+            </p>
+          </div>
+
+          {whyYoullLove && (
+            <div className="mt-10 sm:mt-16 bg-[#F6F4F0]/80 rounded-[2rem] p-8 sm:p-12 relative overflow-hidden group border border-[#EAE6DF]">
+              <Quote
+                size={80}
+                className="text-[#C8AA86]/10 absolute -top-4 -right-4 rotate-12 group-hover:-rotate-6 transition-transform duration-700"
+              />
+              <div className="relative z-10">
+                <h3 className="font-serif text-2xl sm:text-3xl text-[#1A1A1A] mb-5 flex items-center gap-3">
+                  <Heart size={24} className="text-[#C8AA86] fill-[#C8AA86]" />
+                  Why you'll love this
+                </h3>
+                <p className="text-[#4A4A4A] text-lg leading-relaxed">
+                  {whyYoullLove}
+                </p>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Gallery (Visual Journey) */}
+        {parsedImages.length > 1 && (
+          <section id="gallery" className="scroll-mt-40">
+            {/* Break out of max-w-4xl for the gallery to be wider */}
+            <div className="-mx-6 md:-mx-12 lg:-mx-24">
+              <ExperienceGallery images={parsedImages} title={name} />
+            </div>
+          </section>
+        )}
+
+        {/* Details Bento Grid */}
+        <section id="details" className="scroll-mt-40">
+          <SectionHeader title="Essential Details" />
+          <div className="grid md:grid-cols-2 gap-5 sm:gap-6">
+            {whatsIncluded && (
+              <div className="bg-white p-8 rounded-[2rem] border border-[#EAE6DF] shadow-[0_4px_20px_rgb(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 transition-all duration-300">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 bg-[#F4F8F4] rounded-full flex items-center justify-center text-[#4A7854]">
+                    <Check size={22} />
+                  </div>
+                  <h3 className="font-serif text-2xl text-[#1A1A1A]">
+                    What's Included
+                  </h3>
+                </div>
+                <ul className="space-y-4">
+                  {splitItems(whatsIncluded).map((item, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-3 text-base text-[#555] group"
+                    >
+                      <Check
+                        size={18}
+                        className="text-[#C8AA86] mt-0.5 shrink-0"
+                      />
+                      <span className="group-hover:text-[#1A1A1A] transition-colors">
+                        {item}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {whatToBring && (
+              <div className="bg-white p-8 rounded-[2rem] border border-[#EAE6DF] shadow-[0_4px_20px_rgb(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 transition-all duration-300">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 bg-[#FFF8F0] rounded-full flex items-center justify-center text-[#D88A4A]">
+                    <Sun size={22} />
+                  </div>
+                  <h3 className="font-serif text-2xl text-[#1A1A1A]">
+                    What to Bring
+                  </h3>
+                </div>
+                <div className="text-base text-[#555] leading-relaxed whitespace-pre-line">
+                  {whatToBring}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Our Philosophy: Eco & Dietary */}
+        <section id="philosophy" className="scroll-mt-40">
+          <div className="bg-[#F6F8F6] p-8 sm:p-12 rounded-[2rem] border border-[#E6EBE6] shadow-[0_4px_20px_rgb(0,0,0,0.02)]">
+            <SectionHeader title="Our Philosophy" className="mb-10" />
+
+            <div className="grid sm:grid-cols-2 gap-10 sm:gap-12">
+              <div className="flex flex-col gap-4">
+                <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center text-[#4A7854] shadow-sm border border-[#E6EBE6] transition-transform hover:scale-105 duration-300">
+                  <Leaf size={24} strokeWidth={1.5} />
+                </div>
+                <h4 className="font-serif text-2xl text-[#1A1A1A]">
+                  100% Eco-Friendly
+                </h4>
+                <p className="text-[#555] text-base leading-relaxed">
+                  We are deeply committed to sustainable agrotourism. Our estate
+                  operates in complete harmony with nature, utilizing organic
+                  farming methods, responsible water usage, and zero-waste
+                  practices to protect the pristine Cretan landscape.
                 </p>
               </div>
 
-              {whyYoullLove && (
-                <div className="mt-8 sm:mt-12 bg-[#F6F4F0] rounded-3xl p-6 sm:p-10 relative overflow-hidden group">
-                  <Quote
-                    size={60}
-                    className="text-[#C8AA86]/10 absolute -top-2 -right-2 rotate-12 group-hover:rotate-0 transition-transform duration-700 sm:w-20 sm:h-20 sm:-top-4 sm:-right-4"
-                  />
-                  <div className="relative z-10">
-                    <h3 className="font-serif text-xl sm:text-2xl text-[#1A1A1A] mb-4 flex items-center gap-3">
-                      <Heart
-                        size={20}
-                        className="text-[#C8AA86] fill-[#C8AA86]"
-                      />
-                      Why you'll love this
-                    </h3>
-                    <p className="text-[#555] text-base sm:text-lg leading-relaxed">
-                      {whyYoullLove}
-                    </p>
-                  </div>
+              <div className="flex flex-col gap-4">
+                <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center text-[#D88A4A] shadow-sm border border-[#EAE6DF] transition-transform hover:scale-105 duration-300">
+                  <Utensils size={24} strokeWidth={1.5} />
                 </div>
-              )}
-            </section>
-
-            {/* Gallery (Visual Journey) */}
-            {parsedImages.length > 1 && (
-              <section id="gallery" className="scroll-mt-32">
-                <ExperienceGallery images={parsedImages} title={name} />
-              </section>
-            )}
-
-            {/* Details Bento Grid */}
-            <section id="details" className="scroll-mt-32">
-              <SectionHeader title="Essential Details" />
-              <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
-                {/* Included Card */}
-                {whatsIncluded && (
-                  <div className="bg-white p-6 sm:p-8 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-4 mb-6">
-                      <div className="w-10 h-10 bg-[#E8F5E9] rounded-full flex items-center justify-center text-[#2E7D32]">
-                        <Check size={20} />
-                      </div>
-                      <h3 className="font-serif text-xl text-[#1A1A1A]">
-                        What's Included
-                      </h3>
-                    </div>
-                    <ul className="space-y-3">
-                      {splitItems(whatsIncluded).map((item, i) => (
-                        <li
-                          key={i}
-                          className="flex items-start gap-3 text-sm text-[#555] group"
-                        >
-                          <Check
-                            size={16}
-                            className="text-[#C8AA86] mt-0.5 shrink-0"
-                          />
-                          <span className="group-hover:text-[#1A1A1A] transition-colors">
-                            {item}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Bring Card */}
-                {whatToBring && (
-                  <div className="bg-white p-6 sm:p-8 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-4 mb-6">
-                      <div className="w-10 h-10 bg-[#FFF3E0] rounded-full flex items-center justify-center text-[#EF6C00]">
-                        <Sun size={20} />
-                      </div>
-                      <h3 className="font-serif text-xl text-[#1A1A1A]">
-                        What to Bring
-                      </h3>
-                    </div>
-                    <div className="text-sm text-[#555] leading-relaxed whitespace-pre-line">
-                      {whatToBring}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Location */}
-            {mapPin && (
-              <section id="location" className="scroll-mt-32">
-                <SectionHeader title="Meeting Point" />
-                {/* IMPROVED: Responsive Map Container */}
-                <div className="relative rounded-3xl overflow-hidden border border-gray-200 h-[300px] sm:h-[400px] bg-gray-100 group">
-                  <iframe
-                    title="Location Map"
-                    src={`https://maps.google.com/maps?q=${encodeURIComponent(
-                      mapPin
-                    )}&t=&z=13&ie=UTF8&iwloc=&output=embed`}
-                    width="100%"
-                    height="100%"
-                    className="grayscale-[0.5] group-hover:grayscale-0 transition-all duration-700"
-                    style={{ border: 0 }}
-                    loading="lazy"
-                  />
-                  {/* Desktop Floating Card (Hidden on Mobile) */}
-                  <div className="hidden sm:block absolute top-4 left-auto right-4 w-72 bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/50">
-                    <LocationInfoCard mapPin={mapPin} />
-                  </div>
-                </div>
-                {/* Mobile Static Card (Below Map) */}
-                <div className="sm:hidden mt-4 bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-                  <LocationInfoCard mapPin={mapPin} />
-                </div>
-              </section>
-            )}
-
-            {/* Reviews */}
-            {parsedReviews.length > 0 && (
-              <section
-                id="reviews"
-                className="scroll-mt-32 pb-10 border-b border-gray-100"
-              >
-                <div className="flex items-center justify-between mb-8">
-                  <h2 className="font-serif text-2xl sm:text-3xl text-[#1A1A1A]">
-                    Guest Reviews
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    <Star size={18} className="fill-[#C8AA86] text-[#C8AA86]" />
-                    <span className="font-bold text-lg">4.9</span>
-                    <span className="text-gray-400 text-sm">/ 5.0</span>
-                  </div>
-                </div>
-
-                <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
-                  {parsedReviews.slice(0, 4).map((review, i) => (
-                    <div
-                      key={i}
-                      className="bg-white p-6 rounded-2xl border border-gray-100 hover:border-[#C8AA86]/30 transition-colors"
-                    >
-                      <div className="flex gap-1 mb-3">
-                        {[...Array(5)].map((_, j) => (
-                          <Star
-                            key={j}
-                            size={12}
-                            className="fill-[#C8AA86] text-[#C8AA86]"
-                          />
-                        ))}
-                      </div>
-                      <p className="text-[#4A4A4A] text-sm leading-relaxed italic mb-4">
-                        "{review.comment}"
-                      </p>
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-[#F0F0F0] flex items-center justify-center text-xs font-bold text-gray-500">
-                          {initials(review.name || "G")}
-                        </div>
-                        <span className="text-xs font-bold uppercase text-[#1A1A1A]">
-                          {review.name || "Guest"}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-
-          {/* RIGHT COLUMN: Sticky Sidebar (Desktop Only) */}
-          <aside className="hidden lg:block h-full">
-            <div className="sticky top-28 w-full">
-              <div className="bg-white rounded-[2rem] p-8 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.08)] border border-gray-100 relative overflow-hidden ring-1 ring-black/5">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                      Starting from
-                    </span>
-                    <div className="flex items-baseline gap-1 mt-1">
-                      <span className="text-4xl font-serif text-[#1A1A1A]">
-                        {fromPrice !== null ? eur(fromPrice) : "N/A"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3 mb-8">
-                  <PricingRow label="Adults" price={prices.adult} />
-                  {prices.kid && (
-                    <PricingRow label="Children (3-12)" price={prices.kid} />
-                  )}
-                </div>
-
-                <LinkWithLoader href={`/check-availability/${slug}`}>
-                  <button className="w-full bg-[#1A1A1A] hover:bg-[#C8AA86] text-white py-4 rounded-xl font-bold text-xs tracking-[0.15em] uppercase transition-all duration-300 shadow-xl shadow-black/5 hover:shadow-[#C8AA86]/20 transform active:scale-[0.98]">
-                    Check Availability
-                  </button>
-                </LinkWithLoader>
-
-                <div className="mt-6 pt-6 border-t border-gray-50 grid grid-cols-2 gap-y-3">
-                  <Feature text="Free Cancellation" />
-                  <Feature text="Instant Book" />
-                  <Feature text="Mobile Ticket" />
-                  <Feature text="English Guide" />
-                </div>
+                <h4 className="font-serif text-2xl text-[#1A1A1A]">
+                  Vegetarian & Vegan Friendly
+                </h4>
+                <p className="text-[#555] text-base leading-relaxed">
+                  The true magic of the Cretan diet stems from the soil. Our
+                  farm-to-table culinary experiences celebrate organic
+                  vegetables, wild herbs, and our own olive oil. We happily and
+                  creatively accommodate vegetarian, vegan, and gluten-free
+                  diets.
+                </p>
               </div>
             </div>
-          </aside>
-        </div>
+          </div>
+        </section>
+
+        {/* Meeting Points */}
+        {parsedMeetupPoints.length > 0 && (
+          <section id="meeting-points" className="scroll-mt-40">
+            <SectionHeader title="Meeting Points" className="mb-4" />
+            <p className="text-[#555] mb-10 text-lg font-light max-w-2xl leading-relaxed">
+              Select a location below to view it on the map. You will be able to
+              choose your preferred starting point during the final checkout.
+            </p>
+
+            <InteractiveMeetingPoints points={parsedMeetupPoints} />
+          </section>
+        )}
+
+        {/* Reviews */}
+        {parsedReviews.length > 0 && (
+          <section id="reviews" className="scroll-mt-40">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10">
+              <SectionHeader title="Guest Reviews" className="mb-0" />
+              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full border border-[#EAE6DF] shadow-sm">
+                <Star size={18} className="fill-[#C8AA86] text-[#C8AA86]" />
+                <span className="font-bold text-lg text-[#1A1A1A]">4.9</span>
+                <span className="text-[#A1A1A1] text-sm">/ 5.0</span>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-5 sm:gap-6">
+              {parsedReviews.slice(0, 4).map((review, i) => (
+                <div
+                  key={i}
+                  className="bg-white p-8 rounded-[2rem] border border-[#EAE6DF] hover:border-[#C8AA86]/40 hover:shadow-md transition-all duration-300"
+                >
+                  <div className="flex gap-1 mb-4">
+                    {[...Array(5)].map((_, j) => (
+                      <Star
+                        key={j}
+                        size={14}
+                        className="fill-[#C8AA86] text-[#C8AA86]"
+                      />
+                    ))}
+                  </div>
+                  <p className="text-[#4A4A4A] text-base leading-relaxed italic mb-6">
+                    "{review.comment}"
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[#F6F4F0] border border-[#EAE6DF] flex items-center justify-center text-sm font-bold text-[#8b7a6b]">
+                      {initials(review.name || "G")}
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">
+                      {review.name || "Guest"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ---- BOTTOM CTA BOOKING SECTION ---- */}
+        <section className="pt-8 text-center pb-8">
+          <h2 className="font-serif text-4xl sm:text-5xl text-[#1A1A1A] mb-4">
+            Join the Journey
+          </h2>
+          <p className="text-lg text-[#555] mb-10 max-w-lg mx-auto">
+            Check our live calendar for availability and secure your spot for an
+            unforgettable Cretan experience.
+          </p>
+
+          <div className="bg-white p-8 sm:p-10 rounded-[2.5rem] shadow-[0_10px_30px_rgb(0,0,0,0.04)] border border-[#EAE6DF] flex flex-col sm:flex-row items-center justify-between gap-8">
+            <div className="text-left space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#8b7a6b]">
+                Starting from
+              </span>
+              <div className="flex items-baseline gap-1 mt-1">
+                <span className="text-4xl font-serif text-[#1A1A1A]">
+                  {fromPrice !== null ? eur(fromPrice) : "N/A"}
+                </span>
+                <span className="text-sm text-[#A1A1A1]">/ person</span>
+              </div>
+              <div className="flex items-center gap-4 mt-2">
+                <span className="text-[11px] font-medium text-[#7a6a5f] flex items-center gap-1.5">
+                  <Clock size={12} /> {duration}
+                </span>
+                <span className="text-[11px] font-medium text-[#7a6a5f] flex items-center gap-1.5">
+                  <Check size={12} /> Free Cancellation
+                </span>
+              </div>
+            </div>
+
+            <LinkWithLoader
+              href={`/check-availability/${slug}`}
+              className="w-full sm:w-auto shrink-0"
+            >
+              <button className="w-full sm:w-auto bg-[#1A1A1A] hover:bg-[#C8AA86] text-white px-10 py-5 rounded-2xl font-bold text-xs tracking-[0.2em] uppercase transition-all duration-300 shadow-[0_8px_20px_rgb(26,26,26,0.2)] hover:shadow-[0_8px_25px_rgb(200,170,134,0.4)] transform hover:-translate-y-0.5 active:scale-[0.98]">
+                Check Availability
+              </button>
+            </LinkWithLoader>
+          </div>
+        </section>
       </div>
 
-      {/* ---- MOBILE BOTTOM BAR ---- */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-xl border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] pb-[env(safe-area-inset-bottom)]">
-        <div className="p-4 flex items-center justify-between gap-4 max-w-md mx-auto">
+      {/* ---- STICKY BOTTOM BOOKING BAR (Visible on all screens) ---- */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-2xl border-t border-[#EAE6DF] shadow-[0_-10px_40px_rgba(0,0,0,0.08)] pb-[env(safe-area-inset-bottom)] transition-all duration-300">
+        <div className="py-4 px-6 md:px-12 flex items-center justify-between gap-4 max-w-4xl mx-auto">
           <div className="flex flex-col">
-            <span className="text-[10px] uppercase tracking-wider text-gray-500">
-              Total Price
+            <span className="text-[10px] md:text-[11px] font-bold uppercase tracking-[0.2em] text-[#8b7a6b]">
+              Starting from
             </span>
-            <span className="font-serif text-xl sm:text-2xl text-[#1A1A1A] leading-none">
-              {fromPrice !== null ? eur(fromPrice) : "—"}
-            </span>
+            <div className="flex items-baseline gap-1 mt-1">
+              <span className="font-serif text-2xl md:text-3xl text-[#1A1A1A] leading-none">
+                {fromPrice !== null ? eur(fromPrice) : "—"}
+              </span>
+              <span className="text-sm text-[#A1A1A1] hidden sm:inline-block">
+                / person
+              </span>
+            </div>
           </div>
           <LinkWithLoader href={`/check-availability/${slug}`}>
-            <button className="bg-[#1A1A1A] text-white px-8 py-3.5 rounded-full font-bold text-xs uppercase tracking-wider hover:bg-[#C8AA86] transition-colors shadow-lg shadow-black/20 w-full sm:w-auto active:scale-95 transform duration-150">
+            <button className="bg-[#1A1A1A] text-white px-8 md:px-10 py-3.5 md:py-4 rounded-full font-bold text-xs uppercase tracking-[0.15em] hover:bg-[#C8AA86] transition-colors shadow-lg shadow-black/20 w-full sm:w-auto active:scale-95 transform duration-150">
               Check Availability
             </button>
           </LinkWithLoader>
@@ -535,39 +547,13 @@ export default async function ExperienceDetailPage({ params }) {
 
 // ---- Sub-Components ----
 
-function LocationInfoCard({ mapPin }) {
-  return (
-    <>
-      <div className="flex items-start gap-3">
-        <MapPin size={20} className="text-[#C8AA86] mt-1 shrink-0" />
-        <div>
-          <p className="text-[10px] font-bold uppercase text-gray-400 tracking-wider mb-1">
-            Address
-          </p>
-          <p className="text-sm font-medium text-[#1A1A1A] leading-snug">
-            {mapPin}
-          </p>
-        </div>
-      </div>
-      <a
-        href={`http://maps.google.com/?q=${encodeURIComponent(mapPin)}`}
-        target="_blank"
-        rel="noreferrer"
-        className="mt-3 w-full flex items-center justify-center gap-2 py-2 bg-[#1A1A1A] text-white text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-[#C8AA86] transition-colors"
-      >
-        Get Directions <ArrowLeft size={12} className="rotate-[135deg]" />
-      </a>
-    </>
-  );
-}
-
-function SectionHeader({ title, className = "mb-6 sm:mb-8" }) {
+function SectionHeader({ title, className = "mb-8 sm:mb-10" }) {
   return (
     <div className={className}>
-      <h2 className="text-[10px] sm:text-xs font-bold uppercase tracking-[0.2em] text-[#C8AA86] mb-2 sm:mb-3">
+      <h2 className="text-[11px] font-bold uppercase tracking-[0.25em] text-[#C8AA86] mb-3">
         Discover
       </h2>
-      <h3 className="font-serif text-3xl md:text-4xl text-[#1A1A1A]">
+      <h3 className="font-serif text-3xl md:text-5xl text-[#1A1A1A] tracking-tight">
         {title}
       </h3>
     </div>
@@ -578,35 +564,14 @@ function NavLink({ href, label, active }) {
   return (
     <a
       href={href}
-      className={`px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all whitespace-nowrap snap-center ${
+      className={`px-5 py-2.5 rounded-full text-[11px] font-bold uppercase tracking-[0.15em] transition-all whitespace-nowrap snap-center ${
         active
-          ? "bg-[#1A1A1A] text-white shadow-md"
-          : "text-[#555] hover:bg-white hover:text-[#1A1A1A]"
+          ? "bg-[#1A1A1A] text-white shadow-md shadow-black/10"
+          : "text-[#555] hover:bg-[#F6F4F0] hover:text-[#1A1A1A]"
       }`}
     >
       {label}
     </a>
-  );
-}
-
-function PricingRow({ label, price }) {
-  if (typeof price !== "number") return null;
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-[#555]">{label}</span>
-      <span className="font-medium text-[#1A1A1A]">{eur(price)}</span>
-    </div>
-  );
-}
-
-function Feature({ text }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="w-1.5 h-1.5 rounded-full bg-[#C8AA86]" />
-      <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">
-        {text}
-      </span>
-    </div>
   );
 }
 
@@ -655,22 +620,23 @@ function buildJsonLd({ name, description, prices, location, images, pageUrl }) {
 
 function NotAvailable() {
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[#FDFCF8]">
+    <main className="min-h-screen flex items-center justify-center bg-[#FDFCF8] selection:bg-[#C8AA86] selection:text-white">
       <div className="text-center p-8 max-w-md">
-        <div className="w-20 h-20 bg-[#F0F0F0] rounded-full flex items-center justify-center mx-auto mb-6 text-gray-400">
-          <Info size={32} />
+        <div className="w-24 h-24 bg-[#F6F4F0] border border-[#EAE6DF] rounded-full flex items-center justify-center mx-auto mb-8 text-[#C8AA86]">
+          <Info size={36} strokeWidth={1.5} />
         </div>
-        <h1 className="text-3xl font-serif text-[#1A1A1A] mb-4">
-          Experience Not Found
+        <h1 className="text-4xl font-serif text-[#1A1A1A] mb-4">
+          Experience Unavailable
         </h1>
-        <p className="text-gray-500 mb-8 leading-relaxed">
-          The experience you are looking for is currently unavailable.
+        <p className="text-[#555] mb-10 leading-relaxed text-lg">
+          The journey you are looking for is currently not available or has been
+          moved.
         </p>
         <Link
           href="/experiences"
-          className="inline-flex items-center gap-2 bg-[#1A1A1A] text-white px-8 py-3 rounded-full hover:bg-[#C8AA86] transition font-bold text-xs uppercase tracking-wider"
+          className="inline-flex items-center gap-3 bg-[#1A1A1A] text-white px-8 py-4 rounded-full hover:bg-[#C8AA86] transition-all duration-300 font-bold text-xs uppercase tracking-[0.2em] shadow-lg shadow-black/10 hover:-translate-y-0.5"
         >
-          <ArrowLeft size={14} /> Back to Experiences
+          <ArrowLeft size={16} /> Back to Experiences
         </Link>
       </div>
     </main>
