@@ -32,6 +32,29 @@ const ui = {
   cta: "bg-[#8b6f47] text-white hover:bg-[#7a5f3a]",
 };
 
+// All valid admin-level roles
+const ADMIN_ROLES = [
+  "superadmin",
+  "manager",
+  "finance",
+  "marketing",
+  "support",
+  "partner",
+  "admin", // Legacy fallback
+];
+
+// Display labels for the user badge
+const ROLE_DISPLAY_LABELS = {
+  superadmin: "Super Admin",
+  manager: "Manager",
+  finance: "Finance",
+  marketing: "Marketing",
+  support: "Support",
+  partner: "Partner",
+  admin: "Admin",
+  user: "Explorer",
+};
+
 /* ------------------------------- helpers -------------------------------- */
 function safeTitle(str = "") {
   return String(str)
@@ -104,7 +127,7 @@ function PublicHeader() {
 
   const [isOpen, setIsOpen] = useState(false);
   const [menuSection, setMenuSection] = useState(
-    /** @type {"nav"|"account"} */ ("nav")
+    /** @type {"nav"|"account"} */ ("nav"),
   );
   const [hasShadow, setHasShadow] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -196,7 +219,7 @@ function PublicHeader() {
       { name: "About", href: "/about" },
       { name: "Contact", href: "/contact" },
     ],
-    []
+    [],
   );
 
   // Fetch profile from your API (DB-first identity)
@@ -253,19 +276,15 @@ function PublicHeader() {
     const first = dbProfile?.name?.trim?.() || metaFirst;
     const last = dbProfile?.surname?.trim?.() || metaLast;
 
+    const role = dbProfile?.role || md.role || "user";
+    const isAdmin = ADMIN_ROLES.includes(role);
+
     return {
       first: first ? safeTitle(first) : "",
       last: last ? safeTitle(last) : "",
       email: dbProfile?.email || user?.email || "",
-      badge:
-        dbProfile?.badge ||
-        dbProfile?.role ||
-        md.badge ||
-        md.role ||
-        "Explorer",
-      isAdmin:
-        (dbProfile?.badge || dbProfile?.role || md.badge || md.role) ===
-        "admin",
+      badge: ROLE_DISPLAY_LABELS[role] || "Explorer",
+      isAdmin,
     };
   }, [dbProfile, user]);
 
@@ -282,7 +301,7 @@ function PublicHeader() {
       setRouteBusy(true);
       routeLoader?.triggerRouteChange(href);
     },
-    [routeLoader]
+    [routeLoader],
   );
   const loadingClasses = isLoading
     ? "opacity-0 -translate-y-2 pointer-events-none"
@@ -353,7 +372,6 @@ function PublicHeader() {
                 aria-current={active ? "page" : undefined}
               >
                 {l.name}
-                {/* Active underline */}
               </button>
             );
           })}
@@ -405,8 +423,7 @@ function PublicHeader() {
                       <span
                         className={`mt-2 inline-flex items-center gap-1 rounded-full border ${ui.borderSoft} ${ui.bgChip} px-2 py-0.5 text-[11px] ${ui.text}`}
                       >
-                        <ShieldCheck size={12} />{" "}
-                        {safeTitle(finalProfile.badge)}
+                        <ShieldCheck size={12} /> {finalProfile.badge}
                       </span>
                     </div>
 
@@ -438,9 +455,9 @@ function PublicHeader() {
                           setDropdownOpen(false);
                           go("/admin");
                         }}
-                        className={`block w-full px-4 py-2 text-left text-sm ${ui.text} hover:${ui.bgSoft}`}
+                        className={`block w-full px-4 py-2 text-left text-sm ${ui.text} hover:${ui.bgSoft} font-medium`}
                       >
-                        Admin Dashboard
+                        Admin Area
                       </button>
                     )}
 
@@ -668,7 +685,7 @@ function PublicHeader() {
                     <span
                       className={`ml-auto inline-flex items-center gap-1 rounded-full border ${ui.borderSoft} ${ui.bgElevated} px-2 py-0.5 text-[11px] ${ui.text}`}
                     >
-                      <ShieldCheck size={12} /> {safeTitle(finalProfile.badge)}
+                      <ShieldCheck size={12} /> {finalProfile.badge}
                     </span>
                   </div>
 
@@ -698,9 +715,9 @@ function PublicHeader() {
                           setIsOpen(false);
                           go("/admin");
                         }}
-                        className={`rounded-xl px-4 py-3 text-left text-base ${ui.text} ${ui.bgHover}`}
+                        className={`rounded-xl px-4 py-3 text-left text-base ${ui.text} ${ui.bgHover} font-medium`}
                       >
-                        Admin Dashboard
+                        Admin Area
                       </button>
                     )}
                     <button

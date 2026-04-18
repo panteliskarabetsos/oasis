@@ -19,10 +19,11 @@ import {
   MapPin,
   Info,
   PauseCircle,
+  CheckCircle2,
 } from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
-/*                               Helper utils                                 */
+/* Helper utils                                 */
 /* -------------------------------------------------------------------------- */
 
 const formatEuro = (n) => `€${(Number(n) || 0).toFixed(2)}`;
@@ -38,7 +39,7 @@ const normalizePricing = (exp) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                               Main component                               */
+/* Main component                               */
 /* -------------------------------------------------------------------------- */
 
 export default function CheckAvailabilityPage() {
@@ -331,94 +332,103 @@ export default function CheckAvailabilityPage() {
   const priceLiveId = useId();
 
   return (
-    <main className="relative min-h-screen bg-gradient-to-b from-[#f4f1ec] via-[#faf9f7] to-[#f4f1ec] text-[#2f2f2f] overflow-x-clip">
+    <main className="relative min-h-screen bg-[#f4f1ec] text-[#2f2f2f] overflow-x-clip selection:bg-[#8b6f47] selection:text-white">
       {/* Ambient blobs */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -top-32 left-10 h-64 w-64 rounded-full bg-[#e8dfcf]/80 blur-3xl" />
-        <div className="absolute top-40 -right-24 h-72 w-72 rounded-full bg-[#d7c6af]/70 blur-3xl" />
-        <div className="absolute bottom-[-5rem] left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-[#e7dcc9]/60 blur-3xl" />
-        <div className="absolute inset-0 opacity-[0.06] [background:radial-gradient(circle_at_center,rgba(90,74,63,0.45)_1px,transparent_1px)] [background-size:26px_26px]" />
+        <div className="absolute -top-32 left-10 h-[30rem] w-[30rem] rounded-full bg-[#e8dfcf]/60 blur-3xl" />
+        <div className="absolute top-40 -right-24 h-[35rem] w-[35rem] rounded-full bg-[#d7c6af]/40 blur-3xl" />
+        <div className="absolute inset-0 opacity-[0.05] [background:radial-gradient(circle_at_center,rgba(90,74,63,0.4)_1px,transparent_1px)] [background-size:24px_24px]" />
       </div>
 
-      <div className="relative pt-20 sm:pt-24 pb-24">
+      <div className="relative pt-16 sm:pt-8 pb-32">
         {/* Top bar */}
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+        <div className="mx-auto max-w-6xl px-4 sm:px-8">
           <div className="flex items-center justify-between pb-4">
             <button
               onClick={() => router.back()}
-              className="inline-flex items-center gap-2 text-[#8b6f47] text-sm border border-[#cbb89e] rounded-full px-4 py-2 bg-white/80 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
+              className="group flex items-center gap-2 pr-5 pl-3 py-1.5 rounded-full border border-[#d3c2aa] bg-white/60 backdrop-blur-sm hover:bg-white text-[#5a4a3f] transition-all duration-300 shadow-sm"
             >
-              <ArrowLeft size={16} />
-              Back
+              <div className="bg-[#f4ede4] text-[#8b6f47] rounded-full p-1 group-hover:-translate-x-1 transition-transform">
+                <ArrowLeft size={14} />
+              </div>
+              <span className="text-[11px] font-bold uppercase tracking-widest">
+                Back
+              </span>
             </button>
             {experience?.name && (
-              <div className="hidden sm:flex items-center gap-2 text-[#6b5e53] text-sm">
-                <Users className="w-4 h-4" /> Max {MAX_PER_BOOKING} / booking
+              <div className="hidden sm:flex items-center gap-2 text-[#8b6f47] text-[10px] font-bold uppercase tracking-widest bg-white/50 px-3 py-1.5 rounded-full border border-[#e2d7c7]">
+                <Users size={12} /> Max {MAX_PER_BOOKING} guests
               </div>
             )}
           </div>
         </div>
 
         {/* Header banner */}
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="relative overflow-hidden rounded-[2rem] border border-[#e5e0d8] bg-[#fcf9f4] shadow-[0_16px_40px_rgba(90,74,63,0.12)]">
-            <div className="absolute inset-0 bg-gradient-to-r from-[#efe9df] via-transparent to-[#efe9df]" />
-            {firstImage ? (
+        <div className="mx-auto max-w-6xl px-4 sm:px-8">
+          {/* Reduced border radius and padding to make it thinner */}
+          <div className="relative overflow-hidden rounded-[2rem] border border-[#e2d7c7] bg-white shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+            <div className="absolute inset-0 bg-gradient-to-r from-[#fdfbf9] via-white/80 to-[#fdfbf9]" />
+            {firstImage && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={firstImage}
                 alt={experience?.name || "Experience"}
-                className="absolute inset-0 h-full w-full object-cover opacity-20"
+                className="absolute inset-0 h-full w-full object-cover opacity-10 mix-blend-multiply pointer-events-none"
               />
-            ) : null}
+            )}
 
             <div className="relative z-10 p-6 sm:p-8">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 rounded-full bg-[#efeae2] p-2">
-                    <CalendarDays className="h-5 w-5 text-[#8b6f47]" />
-                  </div>
-                  <div>
-                    <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif text-[#5a4a3f] leading-tight">
-                      {experience?.name || "Experience"}
-                    </h1>
-                    {experience?.location ? (
-                      <p className="mt-1 flex items-center gap-2 text-sm text-[#6b5e53]">
-                        <MapPin size={14} className="text-[#8b6f47]" />
-                        {experience.location}
-                      </p>
-                    ) : null}
-                  </div>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="flex flex-col gap-2 max-w-2xl">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#8b6f47]">
+                    Availability & Booking
+                  </span>
+                  <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif text-[#3a2f28] leading-[1.1]">
+                    {experience?.name || "Experience"}
+                  </h1>
+                  {experience?.location && (
+                    <p className="flex items-center gap-1.5 text-sm text-[#6b625a]">
+                      <MapPin size={14} className="text-[#8b6f47]" />
+                      {experience.location}
+                    </p>
+                  )}
                 </div>
-                {fromPrice !== null ? (
-                  <div className="mt-2 sm:mt-0 rounded-xl border border-[#e0dcd4] bg-white px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
-                    From{" "}
-                    <span className="font-semibold">
-                      {formatEuro(fromPrice)}
-                    </span>{" "}
-                    / person
+
+                {fromPrice !== null && (
+                  <div className="flex flex-col items-start lg:items-end">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#8b7a6b] mb-1">
+                      Starting from
+                    </span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl sm:text-3xl font-serif text-[#1A1A1A]">
+                        {formatEuro(fromPrice)}
+                      </span>
+                      <span className="text-sm text-[#a7988a]">/ person</span>
+                    </div>
                   </div>
-                ) : null}
+                )}
               </div>
 
               {/* Stepper */}
-              <div className="mt-6">
-                <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm">
+              <div className="mt-6 max-w-3xl">
+                <div className="grid grid-cols-3 gap-4 mb-3">
                   <Step
-                    label="Choose date"
+                    num={1}
+                    label="Date"
                     active={step >= 1}
                     done={step > 1}
                   />
                   <Step
-                    label="Choose time"
+                    num={2}
+                    label="Time"
                     active={step >= 2}
                     done={step > 2}
                   />
-                  <Step label="Group size" active={step >= 3} />
+                  <Step num={3} label="Guests" active={step >= 3} />
                 </div>
-                <div className="mt-3 h-1.5 w-full rounded-full bg-[#ece6dc]">
+                <div className="h-1 w-full rounded-full bg-[#f4ede4] overflow-hidden">
                   <div
-                    className="h-1.5 rounded-full bg-[#8b6f47] transition-all"
+                    className="h-full rounded-full bg-[#8b6f47] transition-all duration-500 ease-out"
                     style={{ width: `${(step / 3) * 100}%` }}
                     aria-hidden
                   />
@@ -427,22 +437,19 @@ export default function CheckAvailabilityPage() {
 
               {/* Info / Pause banner */}
               {settingsLoading ? (
-                <div
-                  className="mt-4 flex items-center gap-2 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm"
-                  aria-busy
-                >
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[#8b6f47]" />
-                  Loading booking status…
+                <div className="mt-5 flex items-center gap-3 rounded-xl border border-[#e2d7c7] bg-[#fdfbf9] px-4 py-3 text-sm text-[#6b625a] max-w-3xl">
+                  <Loader2 className="h-4 w-4 animate-spin text-[#8b6f47]" />
+                  Checking availability status...
                 </div>
               ) : pausedNow ? (
-                <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#f1d7d7] bg-[#fff6f6] px-3 py-2 text-xs text-[#7a4a4a] shadow-sm">
-                  <PauseCircle size={14} className="mt-0.5 text-[#b14545]" />
+                <div className="mt-5 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 max-w-3xl shadow-sm">
+                  <PauseCircle size={16} className="mt-0.5 shrink-0" />
                   <div>
-                    <p className="font-medium">
+                    <p className="font-bold">
                       Bookings are temporarily paused.
                     </p>
-                    {globalSettings.bookingsPausedUntil ? (
-                      <p>
+                    {globalSettings.bookingsPausedUntil && (
+                      <p className="mt-1 opacity-90 text-xs">
                         Resuming after{" "}
                         <span className="font-semibold">
                           {format(
@@ -452,23 +459,22 @@ export default function CheckAvailabilityPage() {
                         </span>
                         .
                       </p>
-                    ) : null}
-                    {globalSettings.bookingsPausedMessage ? (
-                      <p className="mt-1">
+                    )}
+                    {globalSettings.bookingsPausedMessage && (
+                      <p className="mt-1 opacity-90 text-xs">
                         {globalSettings.bookingsPausedMessage}
                       </p>
-                    ) : null}
+                    )}
                   </div>
                 </div>
               ) : (
-                <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[#ede7db] bg-white px-3 py-2 text-xs text-[#6b5e53] shadow-sm">
-                  <Info size={14} className="mt-0.5 text-[#8b6f47]" />
-                  <p>
-                    Pick a date and time, then set your group split. You’ll fill
-                    attendee details on the next page.
-                  </p>
-                  <span className="ml-auto text-[11px] text-[#8b6f47]">
-                    Times shown in {tz}
+                <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-[#e2d7c7] bg-[#fdfbf9] px-4 py-3 text-xs sm:text-sm text-[#6b625a] max-w-3xl">
+                  <div className="flex items-center gap-2">
+                    <Info size={16} className="text-[#8b6f47] shrink-0" />
+                    <p>Select your date, time, and group size to continue.</p>
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#a7988a] whitespace-nowrap bg-white px-2.5 py-1 rounded-full border border-[#e2d7c7]">
+                    Times in {tz}
                   </span>
                 </div>
               )}
@@ -477,45 +483,37 @@ export default function CheckAvailabilityPage() {
         </div>
 
         {/* Content */}
-        <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-8 sm:pt-10">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+        <main className="mx-auto max-w-6xl px-4 sm:px-8 pt-6 md:pt-8">
+          <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-8 md:gap-10">
             {/* Left: Calendar */}
             <section
-              className={`relative rounded-3xl border border-[#ece6dc] bg-white/95 p-6 sm:p-7 shadow-[0_14px_34px_rgba(90,74,63,0.08)] ${
-                pausedNow ? "opacity-75" : ""
+              className={`relative rounded-[2rem] border border-[#e2d7c7] bg-white p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ${
+                pausedNow ? "opacity-75 pointer-events-none" : ""
               }`}
             >
               {/* Header row: selected date + quick actions */}
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[11px] uppercase tracking-[0.16em] text-[#b09f8a]">
-                    Step 1
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-serif text-lg text-[#5a4a3f]">
-                      Choose your date
-                    </h2>
-                  </div>
-
-                  <div className="mt-1">
-                    {selectedDate ? (
-                      <SelectedDatePill
-                        date={selectedDate}
-                        onClear={() => setSelectedDate(null)}
-                      />
-                    ) : (
-                      <span className="text-xs text-[#7a6a58]">
-                        Pick a day to reveal available times.
-                      </span>
-                    )}
-                  </div>
+              <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-serif text-xl sm:text-2xl text-[#3a2f28] mb-1">
+                    1. Choose a date
+                  </h2>
+                  {selectedDate ? (
+                    <SelectedDatePill
+                      date={selectedDate}
+                      onClear={() => setSelectedDate(null)}
+                    />
+                  ) : (
+                    <span className="text-sm text-[#8b7a6b]">
+                      Select an available highlighted day.
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setSelectedDate(new Date())}
-                    className="rounded-full border border-[#e0dcd4] px-3 py-1.5 text-xs text-[#5a4a3f] bg-white hover:bg-[#faf7f1] focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
+                    className="rounded-full border border-[#d3c2aa] px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-[#5a4a3f] bg-white hover:bg-[#f4ede4] transition-colors"
                   >
                     Today
                   </button>
@@ -525,7 +523,7 @@ export default function CheckAvailabilityPage() {
                       const d = earliestDayWithAvailability(availableSlots);
                       if (d && !pausedNow) setSelectedDate(d);
                     }}
-                    className="rounded-full bg-[#8b6f47] px-3 py-1.5 text-xs text-white hover:bg-[#7a5f3a] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
+                    className="rounded-full bg-[#1A1A1A] px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-white hover:bg-[#8b6f47] transition-all disabled:opacity-50 disabled:bg-[#d3c2aa]"
                     disabled={!hasAnySlots}
                   >
                     First available
@@ -536,17 +534,20 @@ export default function CheckAvailabilityPage() {
               {loadingSlots ? (
                 <SkeletonCalendar />
               ) : !hasAnySlots ? (
-                <div className="py-10 text-center text-[#5a4a3f]">
-                  <p className="font-medium text-sm sm:text-base">
-                    No upcoming availability yet.
+                <div className="py-16 text-center text-[#5a4a3f]">
+                  <div className="w-16 h-16 bg-[#f4ede4] text-[#8b6f47] rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CalendarDays size={24} />
+                  </div>
+                  <p className="font-serif text-xl mb-2">
+                    No upcoming availability.
                   </p>
-                  <p className="text-xs sm:text-sm text-[#7a6a5a] mt-1">
-                    Please check back soon or reach out for custom dates.
+                  <p className="text-sm text-[#7a6a5a]">
+                    Please check back soon or reach out for a private booking.
                   </p>
                 </div>
               ) : (
                 <>
-                  <div className="mt-1 flex justify-center">
+                  <div className="flex justify-center border border-[#f4ede4] rounded-[1.5rem] p-4 sm:p-6 bg-[#fcfbf9]">
                     <DayPicker
                       mode="single"
                       selected={selectedDate}
@@ -576,86 +577,73 @@ export default function CheckAvailabilityPage() {
                       classNames={{
                         root: "rdp-root",
                         caption:
-                          "rdp-caption mb-4 flex items-center justify-between text-[#141010]",
+                          "rdp-caption mb-6 flex items-center justify-between text-[#3a2f28]",
                         caption_label:
-                          "text-lg font-serif font-semibold tracking-tight",
+                          "text-xl font-serif font-semibold tracking-tight",
                         nav: "rdp-nav flex items-center gap-2",
                         nav_button:
-                          "rdp-nav_button h-8 w-8 grid place-items-center rounded-full border border-transparent hover:border-[#e4ddcf] hover:bg-[#faf6ff] text-[#6f4aff] text-sm",
+                          "rdp-nav_button h-9 w-9 grid place-items-center rounded-full border border-[#e2d7c7] hover:border-[#8b6f47] hover:text-[#8b6f47] bg-white text-[#6b625a] transition-all",
                         table:
-                          "rdp-table border-separate border-spacing-y-1 border-spacing-x-1",
+                          "rdp-table border-separate border-spacing-y-2 border-spacing-x-2",
                         head_row: "rdp-head_row",
                         head_cell:
-                          "rdp-head_cell text-[11px] font-medium text-[#a59686] pb-2 uppercase tracking-[0.16em]",
+                          "rdp-head_cell text-[10px] font-bold text-[#a7988a] pb-3 uppercase tracking-[0.2em]",
                         row: "rdp-row",
-                        cell: "rdp-cell text-center align-middle h-10 w-10 [&_.rdp-day_selected]:!bg-white",
-                        day: "rdp-day !rounded-full focus:outline-none focus:ring-2 focus:ring-[#cbb89e] transition-all duration-150 text-[13px] text-[#4a4136]",
+                        cell: "rdp-cell text-center align-middle h-10 w-10 sm:h-11 sm:w-11 [&_.rdp-day_selected]:!bg-[#8b6f47] [&_.rdp-day_selected]:!text-white",
+                        day: "rdp-day !rounded-full focus:outline-none focus:ring-2 focus:ring-[#8b6f47] transition-all duration-200 text-sm font-medium text-[#5a4a3f]",
                         day_selected:
-                          "rdp-day_selected !bg-white !text-[#141010] !rounded-[0.85rem] outline outline-2 outline-[#6f4aff] shadow-sm font-semibold",
+                          "rdp-day_selected !bg-[#8b6f47] !text-white !rounded-full shadow-md font-bold",
                         day_today:
-                          "rdp-day_today border border-[#6f4aff] !rounded-[0.85rem] text-[#6f4aff] font-semibold bg-white",
-                        day_outside: "rdp-day_outside text-[#d3c6b8]",
+                          "rdp-day_today border-2 border-[#8b6f47] text-[#8b6f47] font-bold bg-white",
+                        day_outside:
+                          "rdp-day_outside text-[#d3c2aa] font-normal",
                         day_disabled:
-                          "rdp-day_disabled text-[#d3c6b8] opacity-60 line-through",
+                          "rdp-day_disabled text-[#d3c2aa] opacity-50",
                       }}
                       modifiersClassNames={{
                         plenty:
-                          "bg-[#e0f1e6] hover:bg-[#d7ecde] text-[#1f4b33]",
-                        some: "bg-[#f2ebe0] hover:bg-[#ece2d4] text-[#4a4136]",
-                        few: "bg-[#fff4d7] hover:bg-[#ffeed0] text-[#5a4a3f] ring-1 ring-[#f3c766]",
-                        weekend: "bg-[#faf6f0]",
+                          "bg-[#eaf0ea] hover:bg-[#d8e6d8] text-[#3e5c46]",
+                        some: "bg-[#f4efe8] hover:bg-[#ebdccc] text-[#5a4a3f]",
+                        few: "bg-[#fdf3e1] hover:bg-[#fae2b8] text-[#8b6324]",
+                        weekend: "", // Handled naturally or add subtle bg if desired
                       }}
                       components={{ DayContent }}
                     />
                   </div>
 
                   <Legend />
-
-                  <p className="mt-3 text-center text-[11px] text-[#7a6a58]">
-                    Showing availability for the next 6 months.
-                  </p>
-                </>
-              )}
-
-              {pausedNow && (
-                <>
-                  <div className="pointer-events-none absolute inset-0 rounded-3xl" />
-                  <div className="absolute right-4 top-4 rounded-full bg-[#8b6f47]/90 px-3 py-1.5 text-xs text-white shadow">
-                    Bookings paused
-                  </div>
                 </>
               )}
             </section>
 
             {/* Right: Times + Group */}
-            <section className="space-y-6" ref={slotsContainerRef}>
-              {/* Times */}
+            <section className="space-y-6 md:space-y-8" ref={slotsContainerRef}>
+              {/* Times Box */}
               <div
-                className={`rounded-3xl border border-[#e8e5df] bg-white/95 p-6 shadow-[0_12px_30px_rgba(90,74,63,0.08)] ${
-                  pausedNow ? "opacity-60" : ""
+                className={`rounded-[2rem] border border-[#e2d7c7] bg-white p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ${
+                  pausedNow ? "opacity-60 pointer-events-none" : ""
                 }`}
               >
-                <h3 className="mb-3 text-lg font-serif text-[#5a4a3f] flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-[#8b6f47]" />
-                  {selectedDate
-                    ? `Available times on ${format(selectedDate, "PPP")}`
-                    : "Select a date"}
+                <h3 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-serif text-[#3a2f28]">
+                  2. Select a time
                 </h3>
 
                 {!selectedDate ? (
-                  <p className="text-sm text-[#7a6a5a]">
-                    Choose a date to see times.
-                  </p>
+                  <div className="flex items-center gap-3 p-4 bg-[#fcfbf9] border border-[#f4ede4] rounded-2xl text-[#6b625a] text-sm">
+                    <Clock className="w-5 h-5 text-[#8b6f47]" />
+                    Choose a date to see available times.
+                  </div>
                 ) : slotsOnSelectedDay.length === 0 ? (
-                  <p className="text-sm text-[#7a6a5a]">
-                    No times available for this day.
-                  </p>
+                  <div className="flex items-center gap-3 p-4 bg-[#fdf3f3] border border-[#fbe5e5] rounded-2xl text-[#a34b4b] text-sm">
+                    <Clock className="w-5 h-5" />
+                    No availability for {format(selectedDate, "MMM d, yyyy")}.
+                  </div>
                 ) : (
                   <div
                     ref={timesListRef}
                     role="radiogroup"
                     aria-label="Available start times"
-                    className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+                    className="grid grid-cols-1 sm:grid-cols-2 gap-3"
                   >
                     {slotsOnSelectedDay.map((slot) => {
                       const available =
@@ -677,52 +665,44 @@ export default function CheckAvailabilityPage() {
                           onClick={() =>
                             !isDisabled && setSelectedSlotId(slot.id)
                           }
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              !isDisabled && setSelectedSlotId(slot.id);
-                            }
-                          }}
                           disabled={isDisabled}
                           role="radio"
                           aria-checked={isSelected}
-                          className={`flex items-center justify-between rounded-xl border p-4 text-left transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#cbb89e] ${
+                          className={`relative flex items-center justify-between rounded-2xl border p-4 text-left transition-all duration-300 outline-none focus:ring-2 focus:ring-[#8b6f47] ${
                             isDisabled
-                              ? "bg-[#f1ede7] border-[#ded6c9] text-[#b3aa9c] cursor-not-allowed"
+                              ? "bg-[#fcfbf9] border-[#e2d7c7] opacity-60 cursor-not-allowed"
                               : isSelected
-                                ? "bg-[#f5efe4] border-[#8b6f47]"
-                                : "bg-white border-[#e8e5df] hover:shadow-md"
-                          }`}
-                          aria-label={`Start time ${time}${
-                            available > 0
-                              ? `, ${available} spots left`
-                              : ", fully booked"
+                                ? "bg-[#f4ede4] border-[#8b6f47] shadow-sm"
+                                : "bg-white border-[#e2d7c7] hover:border-[#8b6f47] hover:bg-[#fcfbf9]"
                           }`}
                         >
                           <div>
-                            <div className="text-sm font-semibold text-[#5a4a3f]">
+                            <div
+                              className={`text-base font-bold ${isSelected ? "text-[#8b6f47]" : "text-[#3a2f28]"}`}
+                            >
                               {time}
                             </div>
                             <div
-                              className={`text-xs font-medium ${
+                              className={`text-[11px] font-bold uppercase tracking-wider mt-0.5 ${
                                 available <= 0
-                                  ? "text-[#a89f92]"
-                                  : "text-[#2f6b3f]"
+                                  ? "text-[#a7988a]"
+                                  : "text-[#5e8c6a]"
                               }`}
                             >
-                              {available <= 0
-                                ? "Fully booked"
-                                : `${available} available`}
+                              {available <= 0 ? "Booked" : `${available} spots`}
                             </div>
                           </div>
-                          <input
-                            type="radio"
-                            name="slot"
-                            className="accent-[#8b6f47]"
-                            checked={isSelected}
-                            readOnly
-                            tabIndex={-1}
-                          />
+                          <div
+                            className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                              isSelected
+                                ? "border-[#8b6f47] bg-[#8b6f47]"
+                                : "border-[#d3c2aa] bg-white"
+                            }`}
+                          >
+                            {isSelected && (
+                              <div className="w-2 h-2 rounded-full bg-white" />
+                            )}
+                          </div>
                         </button>
                       );
                     })}
@@ -730,14 +710,54 @@ export default function CheckAvailabilityPage() {
                 )}
               </div>
 
-              {/* Group & Summary */}
-              <div className="lg:sticky lg:top-28">
-                <div className="rounded-3xl border border-[#e8e5df] bg-[#fcf9f4]/95 p-6 shadow-[0_12px_32px_rgba(90,74,63,0.12)]">
-                  <h3 className="text-lg font-serif text-[#5a4a3f]">
-                    Your group
+              {/* Group & Summary Box */}
+              <div
+                className={`rounded-[2rem] border border-[#e2d7c7] bg-white p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] lg:sticky lg:top-8 ${pausedNow ? "opacity-60 pointer-events-none" : ""}`}
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl sm:text-2xl font-serif text-[#3a2f28]">
+                    3. Who's coming?
                   </h3>
+                  {(adults !== 1 || kids !== 0) && (
+                    <button
+                      type="button"
+                      className="text-[11px] font-bold uppercase tracking-wider text-[#8b6f47] hover:text-[#5a4a3f] transition-colors bg-[#f4ede4] px-3 py-1.5 rounded-full"
+                      onClick={() => {
+                        setAdults(1);
+                        setKids(0);
+                      }}
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
 
-                  {selectedSlot && (
+                <div className="space-y-3 mb-6">
+                  <Counter
+                    label="Adults"
+                    sublabel="Ages 15+"
+                    value={adults}
+                    onChange={(v) => setAdults(clampGroup(v, 1, "adults"))}
+                    min={1}
+                    disabled={!selectedSlot || pausedNow || bookingCap === 0}
+                  />
+                  <Counter
+                    label="Kids"
+                    sublabel="Ages 3–14"
+                    value={kids}
+                    onChange={(v) => setKids(clampGroup(v, 0, "kids"))}
+                    disabled={!selectedSlot || pausedNow || bookingCap === 0}
+                  />
+                </div>
+
+                {selectedSlot && (
+                  <div className="bg-[#fcfbf9] border border-[#f4ede4] rounded-2xl p-4 mb-6">
+                    <p className="text-xs text-[#6b625a] flex items-center justify-between">
+                      <span className="font-medium text-[#3a2f28]">
+                        Total Guests: {totalPeople}
+                      </span>
+                      <span>Max {MAX_PER_BOOKING} / booking</span>
+                    </p>
                     <CapacityBar
                       total={selectedSlot.totalSlots}
                       booked={
@@ -750,129 +770,66 @@ export default function CheckAvailabilityPage() {
                         )
                       }
                     />
-                  )}
+                  </div>
+                )}
 
-                  <div className={`mt-4 ${pausedNow ? "opacity-60" : ""}`}>
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-[#7a6a58]">
-                        Adults 15+, Kids 3–14.
-                      </p>
-                      {(adults !== 1 || kids !== 0) && (
-                        <button
-                          type="button"
-                          className="text-[11px] underline text-[#8b6f47] hover:text-[#6f583c]"
-                          onClick={() => {
-                            setAdults(1);
-                            setKids(0);
-                          }}
-                        >
-                          Reset
-                        </button>
-                      )}
-                    </div>
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <Counter
-                        label="Adults"
-                        value={adults}
-                        onChange={(v) => setAdults(clampGroup(v, 1, "adults"))}
-                        min={1}
-                        disabled={
-                          !selectedSlot || pausedNow || bookingCap === 0
-                        }
-                      />
-
-                      <Counter
-                        label="Kids"
-                        value={kids}
-                        onChange={(v) => setKids(clampGroup(v, 0, "kids"))}
-                        disabled={
-                          !selectedSlot || pausedNow || bookingCap === 0
-                        }
-                      />
-
-                      <div className="bg-white border border-[#e2ddd2] rounded-xl p-3 shadow-sm flex flex-col justify-center">
-                        <div className="text-sm text-[#5a4a3f] mb-1">Total</div>
-                        <div className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                          {totalPeople}
-                        </div>
+                {/* Price summary */}
+                <div
+                  id={priceLiveId}
+                  role="status"
+                  aria-live="polite"
+                  className="rounded-2xl border border-[#e2d7c7] bg-[#fdfbf9] p-5 shadow-sm"
+                >
+                  <div className="space-y-3 text-sm text-[#5a4a3f]">
+                    {adults > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span>Adults × {adults}</span>
+                        <span>{formatEuro(lineAdult)}</span>
                       </div>
-                    </div>
-
-                    {selectedSlot && (
-                      <p className="mt-2 text-xs text-[#5a4a3f]">
-                        {totalPeople} selected —{" "}
-                        {Math.max(0, bookingCap - totalPeople)} of {bookingCap}{" "}
-                        allowed for this booking (max {MAX_PER_BOOKING}; limited
-                        by remaining availability).
-                      </p>
+                    )}
+                    {kids > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span>Kids × {kids}</span>
+                        <span>{formatEuro(lineKid)}</span>
+                      </div>
                     )}
                   </div>
 
-                  {/* Price summary */}
-                  <div
-                    id={priceLiveId}
-                    role="status"
-                    aria-live="polite"
-                    className="mt-6 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner"
-                  >
-                    <div className="space-y-1 text-sm text-[#5a4a3f]">
-                      {adults > 0 && (
-                        <div className="flex items-center justify-between">
-                          <span>
-                            Adults × {adults} @ {formatEuro(prices.adult)}
-                          </span>
-                          <span className="font-semibold">
-                            {formatEuro(lineAdult)}
-                          </span>
-                        </div>
-                      )}
-
-                      {kids > 0 && (
-                        <div className="flex items-center justify-between">
-                          <span>
-                            Kids × {kids} @ {formatEuro(prices.kid)}
-                          </span>
-                          <span className="font-semibold">
-                            {formatEuro(lineKid)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-3 border-t border-[#e5e0d8] pt-3 flex items-center justify-between">
-                      <span className="text-sm text-[#5a4a3f]">Total</span>
-                      <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                        {formatEuro(totalPrice)}
-                      </span>
-                    </div>
+                  <div className="mt-4 border-t border-[#e2d7c7] pt-4 flex items-center justify-between">
+                    <span className="text-base font-bold text-[#3a2f28]">
+                      Total Price
+                    </span>
+                    <span className="text-2xl font-serif text-[#8b6f47]">
+                      {formatEuro(totalPrice)}
+                    </span>
                   </div>
-
-                  {/* Continue (desktop) */}
-                  <button
-                    onClick={handleContinue}
-                    disabled={!canContinue || isSubmitting}
-                    className={`mt-6 w-full py-3 rounded-full font-semibold text-sm sm:text-base transition-all flex items-center justify-center gap-2 shadow-md sm:flex ${
-                      !canContinue
-                        ? "bg-[#c3b8a9] cursor-not-allowed text-white"
-                        : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
-                    }`}
-                  >
-                    {pausedNow ? (
-                      "Bookings are paused"
-                    ) : isSubmitting ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Starting your booking...
-                      </>
-                    ) : !selectedSlotId ? (
-                      "Select a time"
-                    ) : totalPeople <= 0 ? (
-                      "Add people"
-                    ) : (
-                      "Continue to details"
-                    )}
-                  </button>
                 </div>
+
+                {/* Continue (desktop) */}
+                <button
+                  onClick={handleContinue}
+                  disabled={!canContinue || isSubmitting}
+                  className={`mt-6 w-full py-4 rounded-full text-[11px] sm:text-xs font-bold uppercase tracking-[0.15em] transition-all duration-300 flex items-center justify-center gap-2 shadow-lg sm:flex ${
+                    !canContinue
+                      ? "bg-[#d3c2aa] cursor-not-allowed text-white opacity-80"
+                      : "bg-[#1A1A1A] hover:bg-[#8b6f47] hover:shadow-xl hover:-translate-y-0.5 text-white"
+                  }`}
+                >
+                  {pausedNow ? (
+                    "Bookings Paused"
+                  ) : isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Securing Spot...
+                    </>
+                  ) : !selectedSlotId ? (
+                    "Select a Time to Continue"
+                  ) : totalPeople <= 0 ? (
+                    "Add Guests"
+                  ) : (
+                    "Continue to Details"
+                  )}
+                </button>
               </div>
             </section>
           </div>
@@ -880,35 +837,31 @@ export default function CheckAvailabilityPage() {
       </div>
 
       {/* Mobile sticky action bar */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 border-t border-[#e5e0d8] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 px-4 py-3">
-        <div className="mx-auto max-w-6xl flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xs text-[#7a6a58]">Total</div>
-            <div className="text-xl font-bold text-[#5a4a3f]">
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 border-t border-[#e2d7c7] bg-white/90 backdrop-blur-xl px-6 py-4 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] z-50">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#a7988a]">
+              Total
+            </span>
+            <span className="text-2xl font-serif text-[#8b6f47] leading-none mt-1">
               {formatEuro(totalPrice)}
-            </div>
+            </span>
           </div>
           <button
             onClick={handleContinue}
             disabled={!canContinue || isSubmitting}
-            className={`flex-1 justify-center py-3 rounded-full font-semibold text-base transition-all flex items-center gap-2 shadow-md ${
+            className={`flex-1 justify-center py-3.5 rounded-full text-[11px] font-bold uppercase tracking-[0.1em] transition-all flex items-center gap-2 shadow-md ${
               !canContinue
-                ? "bg-[#c3b8a9] cursor-not-allowed text-white"
-                : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
+                ? "bg-[#d3c2aa] cursor-not-allowed text-white"
+                : "bg-[#1A1A1A] hover:bg-[#8b6f47] text-white active:scale-95"
             }`}
-            aria-label="Continue to details"
           >
             {pausedNow ? (
               "Paused"
             ) : isSubmitting ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Continue…
-              </>
+              <Loader2 className="w-4 h-4 animate-spin" />
             ) : !selectedSlotId ? (
-              "Select a time"
-            ) : totalPeople <= 0 ? (
-              "Add people"
+              "Select Time"
             ) : (
               "Continue"
             )}
@@ -921,28 +874,27 @@ export default function CheckAvailabilityPage() {
 
 /* -------------------------------- Subcomponents ------------------------------- */
 
-function Step({ label, active, done }) {
+function Step({ num, label, active, done }) {
   return (
-    <div
-      className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${
-        active
-          ? "border-[#dcd3c6] bg-white shadow-sm"
-          : "border-[#e9e4da] bg-white/70"
-      }`}
-    >
-      <span
-        className={`inline-grid h-5 w-5 place-items-center rounded-full text-[10px] ${
-          done
-            ? "bg-[#8b6f47] text-white"
-            : active
-              ? "bg-[#efe9df] text-[#5a4a3f] border border-[#e1d8c9]"
-              : "bg-[#f2ede6] text-[#8b6f47]"
-        }`}
-        aria-hidden
-      >
-        {done ? "✓" : "•"}
-      </span>
-      <span className="text-xs text-[#5a4a3f]">{label}</span>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <div
+          className={`flex h-5 w-5 sm:h-6 sm:w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition-colors ${
+            done
+              ? "bg-[#8b6f47] text-white"
+              : active
+                ? "bg-[#1A1A1A] text-white"
+                : "bg-[#e2d7c7] text-[#a7988a]"
+          }`}
+        >
+          {done ? <CheckCircle2 size={12} strokeWidth={3} /> : num}
+        </div>
+        <span
+          className={`text-[10px] sm:text-[11px] font-bold uppercase tracking-wider ${active ? "text-[#3a2f28]" : "text-[#a7988a]"}`}
+        >
+          {label}
+        </span>
+      </div>
     </div>
   );
 }
@@ -953,48 +905,51 @@ function CapacityBar({ total = 0, booked = 0 }) {
     total > 0 ? Math.min(100, Math.round((booked / total) * 100)) : 0;
   const tone =
     usedPct >= 80
-      ? "bg-rose-500"
+      ? "bg-[#c46c6c]"
       : usedPct >= 50
-        ? "bg-amber-500"
-        : "bg-emerald-600";
+        ? "bg-[#d49a5b]"
+        : "bg-[#5e8c6a]";
 
   return (
-    <div className="mt-3">
-      <div className="mb-1 flex items-center justify-between text-xs text-[#7a6a58]">
-        <span>Capacity</span>
-        <span>
-          {available} / {total} available
-        </span>
-      </div>
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-[#ece6dc]"
-        aria-hidden
-      >
+    <div className="mt-2">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#e2d7c7]">
         <div
-          className={`h-2 ${tone} transition-all`}
+          className={`h-full ${tone} transition-all duration-500`}
           style={{ width: `${usedPct}%` }}
         />
       </div>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-[#a7988a] mt-1.5 text-right">
+        {available} spots remaining
+      </p>
     </div>
   );
 }
 
-function Counter({ label, value, onChange, min = 0, disabled = false }) {
+function Counter({
+  label,
+  sublabel,
+  value,
+  onChange,
+  min = 0,
+  disabled = false,
+}) {
   const inputId = useId();
   return (
-    <div className="bg-white border border-[#e2ddd2] rounded-xl p-3 shadow-sm">
-      <label htmlFor={inputId} className="text-sm text-[#5a4a3f] mb-2 block">
-        {label}
-      </label>
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex items-center justify-between bg-[#fcfbf9] border border-[#e2d7c7] rounded-2xl p-3 sm:p-4 transition-colors hover:border-[#d3c2aa]">
+      <div className="flex flex-col">
+        <label htmlFor={inputId} className="text-sm font-bold text-[#3a2f28]">
+          {label}
+        </label>
+        <span className="text-[11px] text-[#8b7a6b]">{sublabel}</span>
+      </div>
+      <div className="flex items-center gap-2 sm:gap-3">
         <button
           type="button"
           onClick={() => !disabled && onChange(Math.max(min, (value || 0) - 1))}
-          disabled={disabled}
-          className="text-[#8b6f47] p-1 disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#cbb89e] rounded"
-          aria-label={`Decrease ${label}`}
+          disabled={disabled || value <= min}
+          className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-white border border-[#e2d7c7] text-[#5a4a3f] transition-all hover:border-[#8b6f47] hover:text-[#8b6f47] disabled:opacity-40 disabled:hover:border-[#e2d7c7] disabled:hover:text-[#5a4a3f]"
         >
-          <Minus className="w-4 h-4" />
+          <Minus className="w-3 h-3 sm:w-4 sm:h-4" />
         </button>
         <input
           id={inputId}
@@ -1004,19 +959,17 @@ function Counter({ label, value, onChange, min = 0, disabled = false }) {
           onChange={(e) =>
             !disabled && onChange(Math.max(min, Number(e.target.value) || 0))
           }
-          className="w-12 text-center text-[#5a4a3f] bg-transparent border-0 focus:outline-none font-semibold"
+          className="w-8 text-center text-sm sm:text-base font-bold text-[#3a2f28] bg-transparent border-0 outline-none p-0"
           disabled={disabled}
-          aria-label={`${label} count`}
-          inputMode="numeric"
+          readOnly // Better UX on mobile so keyboard doesn't pop up over standard buttons
         />
         <button
           type="button"
           onClick={() => !disabled && onChange((value || 0) + 1)}
           disabled={disabled}
-          className="text-[#8b6f47] p-1 disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#cbb89e] rounded"
-          aria-label={`Increase ${label}`}
+          className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-white border border-[#e2d7c7] text-[#5a4a3f] transition-all hover:border-[#8b6f47] hover:text-[#8b6f47] disabled:opacity-40 disabled:hover:border-[#e2d7c7] disabled:hover:text-[#5a4a3f]"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="w-3 h-3 sm:w-4 sm:h-4" />
         </button>
       </div>
     </div>
@@ -1027,19 +980,16 @@ function Counter({ label, value, onChange, min = 0, disabled = false }) {
 
 function SkeletonCalendar() {
   return (
-    <div className="py-6">
-      <div className="mx-auto h-6 w-28 rounded bg-[#ece6dc]" />
-      <div className="mt-4 grid grid-cols-7 gap-2">
+    <div className="py-8">
+      <div className="mx-auto h-8 w-40 rounded-lg bg-[#f4ede4] animate-pulse mb-8" />
+      <div className="grid grid-cols-7 gap-2">
         {Array.from({ length: 35 }).map((_, i) => (
           <div
             key={i}
-            className="h-10 rounded-full bg-[#f0ebe3] animate-pulse"
+            className="h-10 w-10 sm:h-11 sm:w-11 mx-auto rounded-full bg-[#f4ede4] animate-pulse"
           />
         ))}
       </div>
-      <p className="mt-3 text-center text-xs text-[#7a6a58]">
-        Loading availability…
-      </p>
     </div>
   );
 }
@@ -1059,71 +1009,38 @@ function earliestDayWithAvailability(slots = []) {
 
 function SelectedDatePill({ date, onClear }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-3 py-1.5 text-xs text-[#5a4a3f]">
-      <CalendarDays className="h-3.5 w-3.5 text-[#8b6f47]" />
-      {format(date, "EEE, d MMM")}
-      <button
-        type="button"
-        onClick={onClear}
-        className="ml-1 rounded-full px-1.5 py-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#cbb89e]"
-        aria-label="Clear selected date"
-      >
-        ×
-      </button>
-    </span>
+    <div className="inline-flex items-center gap-2 mt-2">
+      <span className="text-sm sm:text-base font-bold text-[#8b6f47] bg-[#f4ede4] px-3 sm:px-4 py-1.5 rounded-full flex items-center gap-2">
+        {format(date, "EEEE, MMMM d")}
+        <button
+          type="button"
+          onClick={onClear}
+          className="bg-white/50 hover:bg-white text-[#5a4a3f] rounded-full p-0.5 transition-colors"
+        >
+          <Minus size={14} />
+        </button>
+      </span>
+    </div>
   );
 }
 
 function Legend() {
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-[11px] text-[#7a6a58]">
-      <LegendChip label="Plenty" swatchClass="bg-[#cfe7d7]" />
-      <LegendChip label="Some" swatchClass="bg-[#e7dbca]" />
-      <LegendChip label="Few left" swatchClass="bg-[#f7da8a]" />
-      <LegendChip label="Today" swatchClass="bg-[#6f4aff]" />
-      <LegendChip label="Weekend" swatchClass="bg-[#f3ebdf]" wide />
+    <div className="mt-6 flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-[10px] font-bold uppercase tracking-wider text-[#a7988a] border-t border-[#f4ede4] pt-5">
+      <LegendChip label="Plenty" swatchClass="bg-[#eaf0ea] border-[#d8e6d8]" />
+      <LegendChip label="Limited" swatchClass="bg-[#fdf3e1] border-[#fae2b8]" />
+      <LegendChip label="Selected" swatchClass="bg-[#8b6f47]" />
     </div>
   );
 }
 
-function LegendChip({ label, swatchClass, wide = false }) {
+function LegendChip({ label, swatchClass }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f7f3ed] px-2.5 py-1 border border-[#ebe4d8]">
+    <span className="flex items-center gap-1.5">
       <span
-        className={[
-          "inline-block rounded-full",
-          wide ? "h-2 w-5" : "h-2.5 w-2.5",
-          swatchClass,
-        ]
-          .filter(Boolean)
-          .join(" ")}
+        className={`h-2.5 w-2.5 sm:h-3 sm:w-3 rounded-full border ${swatchClass}`}
       />
       <span>{label}</span>
     </span>
-  );
-}
-
-function DayDot({ date, countsByYMD }) {
-  const ymd = [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
-  const remaining = countsByYMD.get(ymd) || 0;
-  if (!remaining) return null;
-
-  const few = remaining <= 3;
-
-  return (
-    <span
-      className={[
-        "pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 h-1.5 w-1.5 rounded-full",
-        "shadow-[0_0_0_1px_rgba(255,255,255,0.9)]",
-        few ? "bg-amber-600" : "bg-[#4f7d5c]",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      aria-hidden="true"
-    />
   );
 }

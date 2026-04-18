@@ -21,8 +21,12 @@ export default function ExperiencesFilterBar({
 
   useEffect(() => {
     const d = new Date();
-    const iso = d.toISOString().split("T")[0];
-    setToday(iso);
+    // Adjust for local timezone offset to get accurate YYYY-MM-DD
+    const offset = d.getTimezoneOffset() * 60000;
+    const localISOTime = new Date(d.getTime() - offset)
+      .toISOString()
+      .split("T")[0];
+    setToday(localISOTime);
   }, []);
 
   useEffect(() => {
@@ -40,7 +44,7 @@ export default function ExperiencesFilterBar({
       const fromDate = new Date(from);
       const toDate = new Date(to);
       if (toDate < fromDate) {
-        setDateError("End date must be after start date.");
+        setDateError("End date must be after check-in.");
       } else {
         setDateError("");
       }
@@ -103,129 +107,127 @@ export default function ExperiencesFilterBar({
   return (
     <form
       onSubmit={handleSubmit}
-      className="w-full rounded-[32px] border border-[#e2d7c7] bg-[#fdf9f3]/90 px-4 py-3 shadow-sm backdrop-blur-sm flex flex-col gap-4 md:flex-row md:items-center md:justify-between md:px-6 md:py-4"
+      className="w-full flex flex-col md:flex-row gap-3 md:gap-4 md:items-center"
     >
-      <div className="flex-1 grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-3">
-        {/* From date */}
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-medium tracking-[0.18em] uppercase text-[#8b7a6b]">
-            From
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+        {/* Check-In Field */}
+        <div className="group relative flex flex-col justify-center px-4 lg:px-5 py-2.5 rounded-2xl border border-[#e2d7c7] bg-white transition-all duration-300 focus-within:border-[#8b6f47] focus-within:ring-1 focus-within:ring-[#8b6f47]/50 hover:border-[#d3c2aa] shadow-sm min-h-[56px] lg:min-h-[60px]">
+          <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#a7988a] group-focus-within:text-[#8b6f47] mb-0.5 transition-colors">
+            Check In
           </label>
-          <div className="relative">
-            <Calendar className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-[#b39c86]" />
+          <div className="relative flex items-center">
             <input
               type="date"
-              aria-label="From date"
               value={from}
-              onChange={(e) => setFrom(e.target.value)}
               min={today || undefined}
-              className="w-full min-h-[44px] rounded-full border border-[#e2d7c7] bg-[#f9f6f1] pl-10 pr-4 py-3 text-base md:text-sm text-[#3c332c] placeholder:text-[#b3a598] focus:outline-none focus:ring-2 focus:ring-[#c6a77a] focus:border-transparent appearance-none"
+              onChange={(e) => setFrom(e.target.value)}
+              className={`w-full bg-transparent text-sm outline-none cursor-pointer appearance-none ${
+                from ? "text-[#3a2f28] font-medium" : "text-[#bbaea0]"
+              } 
+              /* Invisible overlay to make the entire container trigger the native date picker */
+              [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
             />
+            <Calendar className="absolute right-0 h-4 w-4 text-[#d3c2aa] group-focus-within:text-[#8b6f47] transition-colors pointer-events-none" />
           </div>
-          <p className="hidden text-[11px] text-[#a19081] sm:block">
-            Start of your stay or preferred date.
-          </p>
         </div>
 
-        {/* To date */}
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-medium tracking-[0.18em] uppercase text-[#8b7a6b]">
-            To
+        {/* Check-Out Field */}
+        <div className="group relative flex flex-col justify-center px-4 lg:px-5 py-2.5 rounded-2xl border border-[#e2d7c7] bg-white transition-all duration-300 focus-within:border-[#8b6f47] focus-within:ring-1 focus-within:ring-[#8b6f47]/50 hover:border-[#d3c2aa] shadow-sm min-h-[56px] lg:min-h-[60px]">
+          <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#a7988a] group-focus-within:text-[#8b6f47] mb-0.5 transition-colors">
+            Check Out
           </label>
-          <div className="relative">
-            <Calendar className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-[#b39c86]" />
+          <div className="relative flex items-center">
             <input
               type="date"
-              aria-label="To date"
               value={to}
-              onChange={(e) => setTo(e.target.value)}
               min={from || today || undefined}
-              className="w-full min-h-[44px] rounded-full border border-[#e2d7c7] bg-[#f9f6f1] pl-10 pr-4 py-3 text-base md:text-sm text-[#3c332c] placeholder:text-[#b3a598] focus:outline-none focus:ring-2 focus:ring-[#c6a77a] focus:border-transparent appearance-none"
+              onChange={(e) => setTo(e.target.value)}
+              className={`w-full bg-transparent text-sm outline-none cursor-pointer appearance-none ${
+                to ? "text-[#3a2f28] font-medium" : "text-[#bbaea0]"
+              } 
+              [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
             />
+            <Calendar className="absolute right-0 h-4 w-4 text-[#d3c2aa] group-focus-within:text-[#8b6f47] transition-colors pointer-events-none" />
           </div>
-          {dateError ? (
-            <p className="text-[11px] text-[#b4533b]">{dateError}</p>
-          ) : (
-            <p className="hidden text-[11px] text-[#a19081] sm:block">
-              End of your stay or latest possible date.
-            </p>
+          {dateError && (
+            <span className="absolute -bottom-5 left-2 text-[10px] font-medium text-red-500">
+              {dateError}
+            </span>
           )}
         </div>
 
-        {/* Party size */}
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-medium tracking-[0.18em] uppercase text-[#8b7a6b]">
-            Party size
+        {/* Party Size Field */}
+        <div className="group relative flex flex-col justify-center px-3 lg:px-5 py-2.5 rounded-2xl border border-[#e2d7c7] bg-white transition-all duration-300 focus-within:border-[#8b6f47] focus-within:ring-1 focus-within:ring-[#8b6f47]/50 hover:border-[#d3c2aa] shadow-sm min-h-[56px] lg:min-h-[60px]">
+          <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#a7988a] group-focus-within:text-[#8b6f47] mb-1 transition-colors px-1 lg:px-0">
+            Guests
           </label>
-          <div className="flex items-center justify-between rounded-full border border-[#e2d7c7] bg-[#f9f6f1] px-2 py-1.5">
+          <div className="flex items-center justify-between mt-[-2px]">
             <button
               type="button"
               onClick={handleDecrement}
               disabled={!canDecrement}
-              className={`flex h-10 w-10 md:h-8 md:w-8 items-center justify-center rounded-full text-xs transition-colors touch-manipulation ${
+              className={`flex h-6 w-6 items-center justify-center rounded-full transition-all touch-manipulation shrink-0 ${
                 canDecrement
-                  ? "bg-white/80 text-[#5a4a3f] hover:bg-[#f0e6d9]"
-                  : "bg-transparent text-[#c4b6a7] cursor-not-allowed"
+                  ? "bg-[#f4ede4] text-[#8b6f47] hover:bg-[#8b6f47] hover:text-white"
+                  : "bg-gray-100 text-gray-300 cursor-not-allowed"
               }`}
             >
-              <Minus className="h-4 w-4" />
+              <Minus strokeWidth={2.5} className="h-3 w-3" />
             </button>
 
-            <div className="flex items-center gap-2 text-sm text-[#3c332c]">
-              <Users className="h-4 w-4 text-[#b39c86]" />
-              <span>
-                {partyNumber > 0
-                  ? `${partyNumber} guest${partyNumber > 1 ? "s" : ""}`
-                  : "Add guests"}
-              </span>
+            <div className="flex items-center gap-1 lg:gap-2 text-xs lg:text-sm font-medium text-[#3a2f28] text-center">
+              {partyNumber > 0 ? (
+                <span className="whitespace-nowrap">
+                  {partyNumber} Guest{partyNumber > 1 ? "s" : ""}
+                </span>
+              ) : (
+                <span className="text-[#bbaea0] font-normal whitespace-nowrap">
+                  Add guests
+                </span>
+              )}
             </div>
 
             <button
               type="button"
               onClick={handleIncrement}
               disabled={!canIncrement}
-              className={`flex h-10 w-10 md:h-8 md:w-8 items-center justify-center rounded-full text-xs transition-colors touch-manipulation ${
+              className={`flex h-6 w-6 items-center justify-center rounded-full transition-all touch-manipulation shrink-0 ${
                 canIncrement
-                  ? "bg-white/80 text-[#5a4a3f] hover:bg-[#f0e6d9]"
-                  : "bg-transparent text-[#c4b6a7] cursor-not-allowed"
+                  ? "bg-[#f4ede4] text-[#8b6f47] hover:bg-[#8b6f47] hover:text-white"
+                  : "bg-gray-100 text-gray-300 cursor-not-allowed"
               }`}
             >
-              <Plus className="h-4 w-4" />
+              <Plus strokeWidth={2.5} className="h-3 w-3" />
             </button>
           </div>
-          <p className="hidden text-[11px] text-[#a19081] sm:block">
-            Up to 8 guests per booking.
-          </p>
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center md:justify-end md:gap-3">
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row items-center gap-2 lg:gap-3 shrink-0">
         <button
           type="submit"
           disabled={!canSearch}
-          className={`inline-flex w-full md:w-auto items-center justify-center rounded-full px-5 py-3 text-sm font-medium text-white transition-all min-h-[48px] touch-manipulation ${
+          className={`group flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl px-6 lg:px-8 py-3 lg:py-4 text-[11px] font-bold uppercase tracking-[0.15em] text-white transition-all duration-300 shadow-md h-full min-h-[56px] lg:min-h-[60px] ${
             canSearch
-              ? "bg-[#8b6f47] hover:bg-[#a78b62]"
-              : "bg-[#c7b6a1] cursor-not-allowed"
+              ? "bg-[#1A1A1A] hover:bg-[#8b6f47] hover:shadow-lg active:scale-95"
+              : "bg-[#d3c2aa] cursor-not-allowed opacity-80"
           }`}
         >
-          <Search className="h-4 w-4 mr-2" />
-          <span className="truncate">Show available experiences</span>
+          <Search className="h-4 w-4" />
+          <span>Search</span>
         </button>
-        <button
-          type="button"
-          onClick={handleClear}
-          disabled={!hasFilters}
-          className={`inline-flex w-full md:w-auto items-center justify-center rounded-full border px-4 py-3 text-xs md:text-sm font-medium transition-all min-h-[44px] touch-manipulation ${
-            hasFilters
-              ? "border-[#d8c8b5] text-[#5a4a3f] hover:bg-[#f7f2eb]"
-              : "border-transparent text-[#b3a79b] cursor-not-allowed"
-          }`}
-        >
-          <X className="h-3.5 w-3.5 mr-1" />
-          Clear
-        </button>
+
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="flex w-full sm:w-auto items-center justify-center gap-1.5 rounded-2xl border border-[#e2d7c7] bg-white/50 px-5 lg:px-6 py-3 lg:py-4 text-[11px] font-bold uppercase tracking-[0.15em] text-[#6b625a] transition-all hover:bg-white hover:text-[#3a2f28] h-full min-h-[56px] lg:min-h-[60px] active:scale-95"
+          >
+            <X className="h-3.5 w-3.5" />
+            Clear
+          </button>
+        )}
       </div>
     </form>
   );

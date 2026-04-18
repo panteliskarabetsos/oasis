@@ -168,148 +168,237 @@ export default async function Experiences({ searchParams }) {
       {/* Experiences grid */}
       <section className="max-w-6xl mx-auto grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-10">
         {count > 0 ? (
-          filteredExperiences.map((exp) => {
-            const hasImg =
-              Array.isArray(exp.images) &&
-              exp.images.length > 0 &&
-              typeof exp.images[0] === "string" &&
-              (exp.images[0].startsWith("http") ||
-                exp.images[0].startsWith("/"));
+          <>
+            {filteredExperiences.map((exp) => {
+              const hasImg =
+                Array.isArray(exp.images) &&
+                exp.images.length > 0 &&
+                typeof exp.images[0] === "string" &&
+                (exp.images[0].startsWith("http") ||
+                  exp.images[0].startsWith("/"));
 
-            const fromPrice = getFromPrice(exp);
-            const freqArray = Array.isArray(exp.frequency)
-              ? exp.frequency.filter(Boolean)
-              : [];
-            const freqLabel = getFrequencyLabel(freqArray);
+              const fromPrice = getFromPrice(exp);
+              const freqArray = Array.isArray(exp.frequency)
+                ? exp.frequency.filter(Boolean)
+                : [];
+              const freqLabel = getFrequencyLabel(freqArray);
 
-            const shortDescription =
-              (exp.description || "").length > 130
-                ? `${exp.description.slice(0, 130)}…`
-                : exp.description || "";
+              const shortDescription =
+                (exp.description || "").length > 130
+                  ? `${exp.description.slice(0, 130)}…`
+                  : exp.description || "";
 
-            return (
-              <article
-                key={exp.id}
-                className="group relative flex flex-col rounded-[2rem] bg-white ring-1 ring-black/5 shadow-sm overflow-hidden transition-all duration-500 hover:-translate-y-1.5 hover:shadow-xl hover:ring-black/10"
-              >
-                {/* Image Area */}
-                <div className="relative h-64 w-full overflow-hidden bg-[#f1ede7]">
-                  {hasImg ? (
-                    <Image
-                      src={exp.images[0]}
-                      alt={exp.name}
-                      width={600}
-                      height={400}
-                      className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-[#c9b9a5] font-serif italic text-lg">
-                      Visualizing shortly...
-                    </div>
-                  )}
-
-                  {/* Subtle Image Overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#2f2f2f]/60 via-transparent to-[#2f2f2f]/10" />
-
-                  {/* Top Badges */}
-                  <div className="absolute top-4 left-4 right-4 flex justify-between items-start">
-                    {exp.duration && (
-                      <span className="rounded-full bg-white/70 backdrop-blur-md text-xs font-medium text-[#5a4a3f] px-3 py-1.5 shadow-sm border border-white/20">
-                        {exp.duration}
-                      </span>
+              return (
+                <article
+                  key={exp.id}
+                  className="group relative flex flex-col rounded-[2rem] bg-white ring-1 ring-black/5 shadow-sm overflow-hidden transition-all duration-500 hover:-translate-y-1.5 hover:shadow-xl hover:ring-black/10"
+                >
+                  {/* Image Area */}
+                  <div className="relative h-64 w-full overflow-hidden bg-[#f1ede7]">
+                    {hasImg ? (
+                      <Image
+                        src={exp.images[0]}
+                        alt={exp.name}
+                        width={600}
+                        height={400}
+                        className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-[#c9b9a5] font-serif italic text-lg">
+                        Visualizing shortly...
+                      </div>
                     )}
-                    {fromPrice !== null && (
-                      <span className="rounded-full bg-[#5a4a3f]/90 backdrop-blur-md text-xs font-medium text-white px-3 py-1.5 shadow-sm border border-white/10">
-                        From {eur(fromPrice)}
+
+                    {/* Subtle Image Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#2f2f2f]/60 via-transparent to-[#2f2f2f]/10" />
+
+                    {/* Top Badges */}
+                    <div className="absolute top-4 left-4 right-4 flex justify-between items-start">
+                      {exp.duration && (
+                        <span className="rounded-full bg-white/70 backdrop-blur-md text-xs font-medium text-[#5a4a3f] px-3 py-1.5 shadow-sm border border-white/20">
+                          {exp.duration}
+                        </span>
+                      )}
+                      {fromPrice !== null && (
+                        <span className="rounded-full bg-[#5a4a3f]/90 backdrop-blur-md text-xs font-medium text-white px-3 py-1.5 shadow-sm border border-white/10">
+                          From {eur(fromPrice)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Bottom Badges */}
+                    {exp.location && (
+                      <span className="absolute bottom-4 left-4 rounded-full bg-black/40 backdrop-blur-md text-[11px] tracking-wide text-white px-3 py-1.5 border border-white/10 flex items-center gap-1.5">
+                        <svg
+                          className="w-3 h-3"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                          />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                        </svg>
+                        {exp.location}
                       </span>
                     )}
                   </div>
 
-                  {/* Bottom Badges */}
-                  {exp.location && (
-                    <span className="absolute bottom-4 left-4 rounded-full bg-black/40 backdrop-blur-md text-[11px] tracking-wide text-white px-3 py-1.5 border border-white/10 flex items-center gap-1.5">
-                      <svg
-                        className="w-3 h-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                        />
-                      </svg>
-                      {exp.location}
-                    </span>
-                  )}
-                </div>
+                  {/* Body Area */}
+                  <div className="p-7 flex flex-col flex-1">
+                    <div className="flex-1 flex flex-col gap-3">
+                      <h3 className="text-2xl font-serif text-[#3a2f28] leading-snug group-hover:text-[#8b6f47] transition-colors">
+                        {exp.name}
+                      </h3>
 
-                {/* Body Area */}
-                <div className="p-7 flex flex-col flex-1">
-                  <div className="flex-1 flex flex-col gap-3">
-                    <h3 className="text-2xl font-serif text-[#3a2f28] leading-snug group-hover:text-[#8b6f47] transition-colors">
-                      {exp.name}
-                    </h3>
-
-                    {shortDescription && (
-                      <p className="text-sm text-[#6b625a] leading-relaxed">
-                        {shortDescription}
-                      </p>
-                    )}
-
-                    <div className="mt-2 flex flex-col gap-1.5 border-l-2 border-[#e2d7c7] pl-3">
-                      {freqLabel && (
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b7a6b]">
-                          {freqLabel}
+                      {shortDescription && (
+                        <p className="text-sm text-[#6b625a] leading-relaxed">
+                          {shortDescription}
                         </p>
                       )}
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b7a6b]">
-                        Small groups • Slow-paced
-                      </p>
+
+                      <div className="mt-2 flex flex-col gap-1.5 border-l-2 border-[#e2d7c7] pl-3">
+                        {freqLabel && (
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b7a6b]">
+                            {freqLabel}
+                          </p>
+                        )}
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b7a6b]">
+                          Small groups • Slow-paced
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="mt-8 flex flex-col gap-4">
+                      {fromPrice === null ? (
+                        <LinkWithLoader className="w-full" href="/contact">
+                          <button className="w-full bg-[#8b6f47] text-white px-6 py-3.5 rounded-full text-sm font-medium hover:bg-[#735b38] hover:shadow-md transition-all duration-300">
+                            Contact Us
+                          </button>
+                        </LinkWithLoader>
+                      ) : (
+                        <LinkWithLoader
+                          className="w-full"
+                          href={`/check-availability/${exp.slug}`}
+                        >
+                          <button className="w-full bg-[#8b6f47] text-white px-6 py-3.5 rounded-full text-sm font-medium hover:bg-[#735b38] hover:shadow-md transition-all duration-300">
+                            Check Availability
+                          </button>
+                        </LinkWithLoader>
+                      )}
+
+                      <LinkWithLoader
+                        className="w-full group/btn"
+                        href={`/experiences/${exp.slug}`}
+                      >
+                        <button className="w-full flex items-center justify-center gap-2 text-sm font-medium text-[#5a4a3f] hover:text-[#8b6f47] transition-colors">
+                          View more details
+                          <span className="transition-transform duration-300 group-hover/btn:translate-x-1">
+                            →
+                          </span>
+                        </button>
+                      </LinkWithLoader>
                     </div>
                   </div>
+                </article>
+              );
+            })}
 
-                  {/* Actions */}
-                  <div className="mt-8 flex flex-col gap-4">
-                    <LinkWithLoader
-                      className="w-full"
-                      href={`/check-availability/${exp.slug}`}
-                    >
-                      <button className="w-full bg-[#8b6f47] text-white px-6 py-3.5 rounded-full text-sm font-medium hover:bg-[#735b38] hover:shadow-md transition-all duration-300">
-                        Check Availability
-                      </button>
-                    </LinkWithLoader>
+            {/* HARDCODED CUSTOM EXPERIENCE CARD */}
+            <article className="group relative flex flex-col rounded-[2rem] bg-white ring-1 ring-black/5 shadow-sm overflow-hidden transition-all duration-500 hover:-translate-y-1.5 hover:shadow-xl hover:ring-black/10">
+              {/* Image Area */}
+              <div className="relative h-64 w-full overflow-hidden bg-[#f1ede7]">
+                <Image
+                  src="/bespoke-event.jpg"
+                  alt="Bespoke and Private Events in Crete"
+                  fill
+                  className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+                />
 
-                    <LinkWithLoader
-                      className="w-full group/btn"
-                      href={`/experiences/${exp.slug}`}
-                    >
-                      <button className="w-full flex items-center justify-center gap-2 text-sm font-medium text-[#5a4a3f] hover:text-[#8b6f47] transition-colors">
-                        View more details
-                        <span className="transition-transform duration-300 group-hover/btn:translate-x-1">
-                          →
-                        </span>
-                      </button>
-                    </LinkWithLoader>
+                {/* Subtle Image Overlay */}
+                <div className="absolute inset-0 bg-gradient-to-t from-[#2f2f2f]/60 via-transparent to-[#2f2f2f]/10" />
+
+                {/* Top Badges */}
+                <div className="absolute top-4 left-4 right-4 flex justify-between items-start">
+                  <span className="rounded-full bg-white/70 backdrop-blur-md text-xs font-medium text-[#5a4a3f] px-3 py-1.5 shadow-sm border border-white/20">
+                    Custom Duration
+                  </span>
+                  <span className="rounded-full bg-[#5a4a3f]/90 backdrop-blur-md text-xs font-medium text-white px-3 py-1.5 shadow-sm border border-white/10">
+                    On Request
+                  </span>
+                </div>
+              </div>
+
+              {/* Body Area */}
+              <div className="p-7 flex flex-col flex-1">
+                <div className="flex-1 flex flex-col gap-3">
+                  <h3 className="text-2xl font-serif text-[#3a2f28] leading-snug group-hover:text-[#8b6f47] transition-colors">
+                    Bespoke &amp; Private Events
+                  </h3>
+
+                  <p className="text-sm text-[#6b625a] leading-relaxed">
+                    Looking for something uniquely yours? From engagement
+                    proposals and birthday celebrations to fully customized
+                    private retreats, let us craft an unforgettable memory
+                    tailored exactly to your vision.
+                  </p>
+
+                  <div className="mt-2 flex flex-col gap-1.5 border-l-2 border-[#e2d7c7] pl-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b7a6b]">
+                      Any Day
+                    </p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b7a6b]">
+                      Fully Customizable • Private Group
+                    </p>
                   </div>
                 </div>
-              </article>
-            );
-          })
+
+                {/* Actions */}
+                <div className="mt-8 flex flex-col gap-4">
+                  <LinkWithLoader className="w-full" href="/contact">
+                    <button className="w-full bg-transparent border-2 border-[#8b6f47] text-[#8b6f47] px-6 py-3 rounded-full text-sm font-medium hover:bg-[#8b6f47] hover:text-white transition-all duration-300">
+                      Inquire Now
+                    </button>
+                  </LinkWithLoader>
+                </div>
+              </div>
+            </article>
+          </>
         ) : (
-          <div className="col-span-full py-10">
-            <div className="max-w-xl mx-auto text-center rounded-[2.5rem] border border-[#e2d7c7] bg-white/60 backdrop-blur-sm px-8 py-12 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
-              <div className="mx-auto w-16 h-16 bg-[#f4ede4] text-[#8b6f47] rounded-full flex items-center justify-center mb-6">
+          /* BIG CARD EMPTY STATE */
+          <div className="col-span-full w-full relative overflow-hidden rounded-[2.5rem] bg-white ring-1 ring-[#e2d7c7] shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col md:flex-row group">
+            {/* Image Area (Left on desktop, Top on mobile) */}
+            <div className="relative w-full md:w-5/12 h-64 md:h-auto overflow-hidden bg-[#f1ede7]">
+              <Image
+                src="/bespoke-event.jpg"
+                alt="Private Bespoke Experience"
+                fill
+                className="object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t md:bg-gradient-to-r from-[#2f2f2f]/50 via-[#2f2f2f]/20 to-transparent" />
+
+              <div className="absolute top-6 left-6 flex gap-2">
+                <span className="rounded-full bg-white/30 backdrop-blur-md text-[10px] font-bold tracking-widest uppercase text-white px-4 py-2 border border-white/20">
+                  Custom
+                </span>
+              </div>
+            </div>
+
+            {/* Text & Action Area (Right on desktop, Bottom on mobile) */}
+            <div className="flex-1 p-8 md:p-12 lg:p-16 flex flex-col justify-center bg-gradient-to-br from-white to-[#fcfbf9]">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#f4ede4] text-[#8b6f47] text-[10px] font-bold uppercase tracking-[0.2em] w-max mb-6">
                 <svg
-                  className="w-8 h-8"
+                  className="w-3.5 h-3.5"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -317,54 +406,60 @@ export default async function Experiences({ searchParams }) {
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth={1.5}
+                    strokeWidth={2}
                     d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                   />
                 </svg>
+                {filtersApplied ? "Fully Booked" : "Updating Calendar"}
               </div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-[#8b6f47] mb-3">
-                {filtersApplied ? "No matching dates" : "Currently unavailable"}
-              </p>
-              <h2 className="text-3xl font-serif text-[#3a2f28] mb-4">
-                {filtersApplied
-                  ? "We’re fully booked for these dates"
-                  : "Our public calendar is being updated"}
-              </h2>
-              <p className="text-base text-[#6b625a] mb-8 leading-relaxed max-w-md mx-auto">
-                {filtersApplied ? (
-                  <>
-                    We don&apos;t have any public availability for your selected
-                    dates and group size. Try adjusting your search, or{" "}
-                    <span className="text-[#5a4a3f] font-medium border-b border-[#d1c3b1]">
-                      reach out for a private journey.
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    We&apos;re currently updating our experiences. In the
-                    meantime, you can{" "}
-                    <span className="text-[#5a4a3f] font-medium border-b border-[#d1c3b1]">
-                      contact us for a private booking
-                    </span>{" "}
-                    tailored exactly to your group.
-                  </>
-                )}
-              </p>
 
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <h2 className="text-3xl md:text-4xl lg:text-5xl font-serif text-[#3a2f28] mb-5 leading-[1.1]">
+                {filtersApplied
+                  ? "We're currently full for these dates."
+                  : "Our public calendar is being updated."}
+              </h2>
+
+              <div className="text-base md:text-lg text-[#6b625a] mb-10 leading-relaxed max-w-xl space-y-4">
+                {filtersApplied ? (
+                  <p>
+                    Our scheduled small-group journeys are fully booked for your
+                    selected dates. However, the magic doesn't have to stop
+                    here.
+                  </p>
+                ) : (
+                  <p>
+                    We are currently crafting and updating our upcoming public
+                    experiences. In the meantime, your journey doesn't have to
+                    wait.
+                  </p>
+                )}
+                <p>
+                  We can design a{" "}
+                  <strong className="font-medium text-[#5a4a3f]">
+                    fully private, bespoke experience
+                  </strong>{" "}
+                  tailored exactly to your group's timeframe and wishes. Let us
+                  create a memory that is entirely yours.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <LinkWithLoader href="/contact" className="w-full sm:w-auto">
+                  <button className="w-full sm:w-auto px-8 py-4 rounded-full bg-[#8b6f47] text-white text-xs font-bold uppercase tracking-[0.15em] hover:bg-[#735b38] hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+                    Plan a Private Journey
+                  </button>
+                </LinkWithLoader>
+
                 {filtersApplied && (
-                  <LinkWithLoader href="/experiences">
-                    <button className="px-6 py-3 rounded-full bg-white border border-[#e2d7c7] text-sm font-medium text-[#5a4a3f] hover:bg-[#fcfbf9] hover:border-[#c9b9a5] transition-all">
-                      Clear filters
+                  <LinkWithLoader
+                    href="/experiences"
+                    className="w-full sm:w-auto"
+                  >
+                    <button className="w-full sm:w-auto px-8 py-4 rounded-full bg-transparent border border-[#d3c2aa] text-[#5a4a3f] text-xs font-bold uppercase tracking-[0.15em] hover:bg-[#f4ede4] hover:-translate-y-0.5 transition-all duration-300">
+                      Clear Dates
                     </button>
                   </LinkWithLoader>
                 )}
-
-                <LinkWithLoader href="/contact">
-                  <button className="px-6 py-3 rounded-full bg-[#8b6f47] text-sm text-white font-medium hover:bg-[#735b38] hover:shadow-md transition-all">
-                    Inquire about a private booking
-                  </button>
-                </LinkWithLoader>
               </div>
             </div>
           </div>

@@ -534,13 +534,15 @@ export default async function ExperienceDetailPage({ params }) {
           <div className="bg-white p-8 sm:p-10 rounded-[2.5rem] shadow-[0_10px_30px_rgb(0,0,0,0.04)] border border-[#EAE6DF] flex flex-col sm:flex-row items-center justify-between gap-8">
             <div className="text-left space-y-2">
               <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#8b7a6b]">
-                Starting from
+                {fromPrice !== null ? "Starting from" : "Pricing"}
               </span>
               <div className="flex items-baseline gap-1 mt-1">
                 <span className="text-4xl font-serif text-[#1A1A1A]">
-                  {fromPrice !== null ? eur(fromPrice) : "N/A"}
+                  {fromPrice !== null ? eur(fromPrice) : "On Request"}
                 </span>
-                <span className="text-sm text-[#A1A1A1]">/ person</span>
+                {fromPrice !== null && (
+                  <span className="text-sm text-[#A1A1A1]">/ person</span>
+                )}
               </div>
               <div className="flex items-center gap-4 mt-2">
                 <span className="text-[11px] font-medium text-[#7a6a5f] flex items-center gap-1.5">
@@ -553,11 +555,13 @@ export default async function ExperienceDetailPage({ params }) {
             </div>
 
             <LinkWithLoader
-              href={`/check-availability/${slug}`}
+              href={
+                fromPrice !== null ? `/check-availability/${slug}` : "/contact"
+              }
               className="w-full sm:w-auto shrink-0"
             >
               <button className="w-full sm:w-auto bg-[#1A1A1A] hover:bg-[#C8AA86] text-white px-10 py-5 rounded-2xl font-bold text-xs tracking-[0.2em] uppercase transition-all duration-300 shadow-[0_8px_20px_rgb(26,26,26,0.2)] hover:shadow-[0_8px_25px_rgb(200,170,134,0.4)] transform hover:-translate-y-0.5 active:scale-[0.98]">
-                Check Availability
+                {fromPrice !== null ? "Check Availability" : "Inquire Now"}
               </button>
             </LinkWithLoader>
           </div>
@@ -569,24 +573,30 @@ export default async function ExperienceDetailPage({ params }) {
         <div className="py-4 px-6 md:px-12 flex items-center justify-between gap-4 max-w-4xl mx-auto">
           <div className="flex flex-col">
             <span className="text-[10px] md:text-[11px] font-bold uppercase tracking-[0.2em] text-[#8b7a6b]">
-              Starting from
+              {fromPrice !== null ? "Starting from" : "Pricing"}
             </span>
             <div className="flex items-baseline gap-1 mt-1">
               <span className="font-serif text-2xl md:text-3xl text-[#1A1A1A] leading-none">
-                {fromPrice !== null ? eur(fromPrice) : "—"}
+                {fromPrice !== null ? eur(fromPrice) : "On Request"}
               </span>
-              <span className="text-sm text-[#A1A1A1] hidden sm:inline-block">
-                / person
-              </span>
+              {fromPrice !== null && (
+                <span className="text-sm text-[#A1A1A1] hidden sm:inline-block">
+                  / person
+                </span>
+              )}
             </div>
             {/* Dynamic policy label in sticky bar */}
             <span className="text-[9px] font-bold text-[#4A7854] uppercase tracking-wider mt-1">
               {activePolicy.short}
             </span>
           </div>
-          <LinkWithLoader href={`/check-availability/${slug}`}>
+          <LinkWithLoader
+            href={
+              fromPrice !== null ? `/check-availability/${slug}` : "/contact"
+            }
+          >
             <button className="bg-[#1A1A1A] text-white px-8 md:px-10 py-3.5 md:py-4 rounded-full font-bold text-xs uppercase tracking-[0.15em] hover:bg-[#C8AA86] transition-colors shadow-lg shadow-black/20 w-full sm:w-auto active:scale-95 transform duration-150">
-              Check Availability
+              {fromPrice !== null ? "Check Availability" : "Inquire Now"}
             </button>
           </LinkWithLoader>
         </div>

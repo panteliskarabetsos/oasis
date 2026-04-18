@@ -1,3 +1,4 @@
+// src/app/admin/page.js
 "use client";
 
 import {
@@ -38,22 +39,134 @@ import {
   TrendingUp,
   Activity,
   Sparkles,
-  Loader2,
+  Shield,
+  Briefcase,
+  Calculator,
+  Megaphone,
+  Headset,
+  UserCheck,
 } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 
 export const dynamic = "force-dynamic";
 
+/* ------------------------------ Roles & Permissions Map ------------------------------ */
+
+const PERMISSIONS = {
+  experiences: "Experiences",
+  bookings: "Bookings",
+  guests: "Guests & CRM",
+  schedule: "Schedule",
+  admins: "Admins",
+  payments: "Payments",
+  invoices: "Invoices",
+  promotions: "Promotions",
+  checkins: "Check-ins",
+  pos: "POS",
+  eshop: "e-Shop",
+  giftcards: "Gift Cards",
+  bundles: "Bundles",
+  waitlist: "Waitlist",
+  loyalty: "Loyalty",
+  addons: "Add-ons",
+  waivers: "Waivers",
+  corporate: "Corporate",
+  integrations: "Integrations",
+  settings: "Settings",
+};
+
+const ADMIN_ROLES = [
+  {
+    id: "superadmin",
+    title: "Super Admin",
+    icon: Shield,
+    color: "text-purple-700",
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    permissions: Object.keys(PERMISSIONS),
+  },
+  {
+    id: "manager",
+    title: "Operations Manager",
+    icon: Briefcase,
+    color: "text-blue-700",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    permissions: [
+      "experiences",
+      "bookings",
+      "guests",
+      "schedule",
+      "checkins",
+      "pos",
+      "waitlist",
+      "addons",
+      "waivers",
+    ],
+  },
+  {
+    id: "finance",
+    title: "Finance & Billing",
+    icon: Calculator,
+    color: "text-emerald-700",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    permissions: ["payments", "invoices", "corporate", "giftcards", "pos"],
+  },
+  {
+    id: "marketing",
+    title: "Marketing & Growth",
+    icon: Megaphone,
+    color: "text-pink-700",
+    bg: "bg-pink-50",
+    border: "border-pink-200",
+    permissions: [
+      "guests",
+      "promotions",
+      "eshop",
+      "bundles",
+      "loyalty",
+      "integrations",
+      "settings",
+    ],
+  },
+  {
+    id: "support",
+    title: "Support Agent",
+    icon: Headset,
+    color: "text-amber-700",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    permissions: ["bookings", "guests", "checkins", "waitlist"],
+  },
+  {
+    id: "partner",
+    title: "External Partner",
+    icon: UserCheck,
+    color: "text-teal-700",
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    permissions: ["schedule", "checkins"],
+  },
+];
+
+const getRoleConfig = (roleId) =>
+  ADMIN_ROLES.find((r) => r.id === roleId) || ADMIN_ROLES[0];
+const isAdminRole = (r) =>
+  ADMIN_ROLES.some((role) => role.id === r) || r === "admin"; // 'admin' is legacy fallback to superadmin
+
+/* ------------------------------------------------------------------------------------- */
+
 export default function AdminDashboardPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
-  const [isAdmin, setIsAdmin] = useState(null);
+  const [role, setRole] = useState(null);
   const [booted, setBooted] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
 
-  const [isNavigating, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const go = useCallback(
     (p) => startTransition(() => router.push(p)),
     [router],
@@ -68,7 +181,6 @@ export default function AdminDashboardPage() {
   );
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
-  const reduceMotion = useReducedMotion();
 
   const categories = [
     { id: "all", label: "All Modules", icon: <Boxes size={14} /> },
@@ -77,7 +189,8 @@ export default function AdminDashboardPage() {
     { id: "finance", label: "Finance", icon: <CreditCard size={14} /> },
   ];
 
-  const actions = useMemo(
+  // ALL possible actions
+  const ALL_ACTIONS = useMemo(
     () => [
       {
         key: "experiences",
@@ -98,13 +211,13 @@ export default function AdminDashboardPage() {
         keywords: ["booking", "calendar"],
       },
       {
-        key: "clients",
+        key: "guests", // Mapped to PERMISSIONS.guests
         cat: "growth",
         icon: <Users size={20} />,
         title: "Guests & CRM",
         desc: "User segmentation",
         onClick: () => go("/admin/users"),
-        keywords: ["client", "user"],
+        keywords: ["client", "user", "guest"],
       },
       {
         key: "schedule",
@@ -116,13 +229,13 @@ export default function AdminDashboardPage() {
         keywords: ["slots", "calendar"],
       },
       {
-        key: "accounts",
-        cat: "finance",
+        key: "admins", // Mapped to PERMISSIONS.admins
+        cat: "finance", // Security/Admin
         icon: <ShieldUser size={20} />,
         title: "Admins",
         desc: "Access control",
         onClick: () => go("/admin/accounts"),
-        keywords: ["admin", "staff"],
+        keywords: ["admin", "staff", "security"],
       },
       {
         key: "payments",
@@ -158,7 +271,7 @@ export default function AdminDashboardPage() {
         title: "Check-ins",
         desc: "Arrivals & QR",
         onClick: () => go("/admin/checkins"),
-        keywords: ["qr", "arrival"],
+        keywords: ["qr", "arrival", "scan"],
       },
       {
         key: "pos",
@@ -167,7 +280,7 @@ export default function AdminDashboardPage() {
         title: "POS",
         desc: "In-person sales",
         onClick: () => go("/admin/pos"),
-        keywords: ["pos", "terminal"],
+        keywords: ["pos", "terminal", "register"],
       },
       {
         key: "eshop",
@@ -176,10 +289,10 @@ export default function AdminDashboardPage() {
         title: "e-Shop",
         desc: "Product inventory",
         onClick: () => go("/admin/eshop"),
-        keywords: ["shop", "stock"],
+        keywords: ["shop", "stock", "product"],
       },
       {
-        key: "vouchers",
+        key: "giftcards", // Mapped to PERMISSIONS.giftcards
         cat: "growth",
         icon: <Gift size={20} />,
         title: "Gift Cards",
@@ -203,7 +316,7 @@ export default function AdminDashboardPage() {
         title: "Waitlist",
         desc: "Demand capture",
         onClick: () => go("/admin/waitlist"),
-        keywords: ["waitlist"],
+        keywords: ["waitlist", "demand"],
       },
       {
         key: "loyalty",
@@ -212,7 +325,7 @@ export default function AdminDashboardPage() {
         title: "Loyalty",
         desc: "Reward tiers",
         onClick: () => go("/admin/loyalty"),
-        keywords: ["points", "tier"],
+        keywords: ["points", "tier", "reward"],
       },
       {
         key: "addons",
@@ -221,7 +334,7 @@ export default function AdminDashboardPage() {
         title: "Add-ons",
         desc: "Upsells & extras",
         onClick: () => go("/admin/addons"),
-        keywords: ["upsell", "addon"],
+        keywords: ["upsell", "addon", "extra"],
       },
       {
         key: "waivers",
@@ -230,7 +343,7 @@ export default function AdminDashboardPage() {
         title: "Waivers",
         desc: "Legal & safety",
         onClick: () => go("/admin/waivers"),
-        keywords: ["waiver", "safety"],
+        keywords: ["waiver", "safety", "legal"],
       },
       {
         key: "corporate",
@@ -239,7 +352,7 @@ export default function AdminDashboardPage() {
         title: "Corporate",
         desc: "B2B & bulk",
         onClick: () => go("/admin/corporate"),
-        keywords: ["b2b", "company"],
+        keywords: ["b2b", "company", "bulk"],
       },
       {
         key: "integrations",
@@ -248,7 +361,7 @@ export default function AdminDashboardPage() {
         title: "Integrations",
         desc: "Webhooks & OTAs",
         onClick: () => go("/admin/integrations"),
-        keywords: ["webhook", "zapier"],
+        keywords: ["webhook", "zapier", "ota"],
       },
       {
         key: "settings",
@@ -257,29 +370,41 @@ export default function AdminDashboardPage() {
         title: "Settings",
         desc: "Brand & Email",
         onClick: () => go("/admin/settings"),
-        keywords: ["settings"],
+        keywords: ["settings", "brand"],
       },
     ],
     [go],
   );
 
+  // Filter actions based on logged in user's role
+  const permittedActions = useMemo(() => {
+    if (!role) return [];
+    // Treat legacy 'admin' as 'superadmin'
+    const activeRoleConfig = getRoleConfig(
+      role === "admin" ? "superadmin" : role,
+    );
+    return ALL_ACTIONS.filter((action) =>
+      activeRoleConfig.permissions.includes(action.key),
+    );
+  }, [ALL_ACTIONS, role]);
+
   const filtered = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
-    return actions.filter((a) => {
+    return permittedActions.filter((a) => {
       const matchesQuery =
         !q ||
         (a.title + a.desc + a.keywords.join(" ")).toLowerCase().includes(q);
       const matchesTab = activeTab === "all" || a.cat === activeTab;
       return matchesQuery && matchesTab;
     });
-  }, [actions, deferredQuery, activeTab]);
+  }, [permittedActions, deferredQuery, activeTab]);
 
   useEffect(() => {
     let cancelled = false;
     async function resolveRole() {
       if (!user) {
         if (!cancelled) {
-          setIsAdmin(false);
+          setRole(null);
           setBooted(true);
         }
         return;
@@ -290,14 +415,14 @@ export default function AdminDashboardPage() {
           credentials: "include",
         });
         const data = await res.json();
-        const role = data?.role || user?.app_metadata?.role || "user";
+        const foundRole = data?.role || user?.app_metadata?.role || "user";
         if (!cancelled) {
-          setIsAdmin(role === "admin");
+          setRole(foundRole);
           setBooted(true);
         }
       } catch (e) {
         if (!cancelled) {
-          setIsAdmin(user?.app_metadata?.role === "admin");
+          setRole(user?.app_metadata?.role || "user");
           setBooted(true);
         }
       }
@@ -309,7 +434,7 @@ export default function AdminDashboardPage() {
   }, [user, loading]);
 
   useEffect(() => {
-    if (!booted || isAdmin !== true) return;
+    if (!booted || !isAdminRole(role)) return;
     (async function fetchMetrics() {
       try {
         const mRes = await fetch(
@@ -330,10 +455,13 @@ export default function AdminDashboardPage() {
         /* ignore */
       }
     })();
-  }, [booted, isAdmin]);
+  }, [booted, role]);
 
-  if (loading || !booted || isAdmin === null) return <Skeleton />;
-  if (!isAdmin) return null;
+  if (loading || !booted || role === null) return <Skeleton />;
+  if (!isAdminRole(role)) return null;
+
+  const roleConfig = getRoleConfig(role === "admin" ? "superadmin" : role);
+  const RoleIcon = roleConfig.icon;
 
   return (
     <div className="min-h-screen bg-[#fdfcfb] text-[#3f3127] selection:bg-[#8b6f47]/20 pb-20">
@@ -347,9 +475,11 @@ export default function AdminDashboardPage() {
         {/* Header */}
         <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="px-2 py-0.5 rounded-md bg-[#8b6f47]/10 text-[#8b6f47] text-[10px] font-bold uppercase tracking-wider border border-[#8b6f47]/20">
-                Central Command
+            <div className="flex items-center gap-2 mb-2">
+              <span
+                className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1.5 ${roleConfig.bg} ${roleConfig.border} ${roleConfig.color}`}
+              >
+                <RoleIcon size={12} /> {roleConfig.title}
               </span>
               <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
               <time className="text-[10px] text-[#7a6a5f] font-medium uppercase tracking-widest">
@@ -368,67 +498,77 @@ export default function AdminDashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => go("/admin/reports")}
-              className="p-2.5 rounded-xl border border-[#e3ddd2] bg-white hover:bg-[#fdfaf5] transition-all shadow-sm group"
-            >
-              <FileBarChart2
-                size={18}
-                className="text-[#5a4a3f] group-hover:scale-110 transition-transform"
-              />
-            </button>
-            <button
-              onClick={() => go("/admin/settings")}
-              className="p-2.5 rounded-xl border border-[#e3ddd2] bg-white hover:bg-[#fdfaf5] transition-all shadow-sm group"
-            >
-              <Settings
-                size={18}
-                className="text-[#5a4a3f] group-hover:rotate-45 transition-transform duration-500"
-              />
-            </button>
-            <div className="h-10 w-[1px] bg-[#e3ddd2] mx-1 hidden sm:block" />
-            <button
-              onClick={() => go("/admin/experiences/new")}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-[#1a1a1a] text-white hover:bg-[#333] transition-all shadow-lg shadow-black/10 text-sm font-semibold active:scale-95"
-            >
-              <Plus size={16} strokeWidth={3} />
-              New Experience
-            </button>
+            {roleConfig.permissions.includes("settings") && (
+              <>
+                <button
+                  onClick={() => go("/admin/reports")}
+                  className="p-2.5 rounded-xl border border-[#e3ddd2] bg-white hover:bg-[#fdfaf5] transition-all shadow-sm group"
+                >
+                  <FileBarChart2
+                    size={18}
+                    className="text-[#5a4a3f] group-hover:scale-110 transition-transform"
+                  />
+                </button>
+                <button
+                  onClick={() => go("/admin/settings")}
+                  className="p-2.5 rounded-xl border border-[#e3ddd2] bg-white hover:bg-[#fdfaf5] transition-all shadow-sm group"
+                >
+                  <Settings
+                    size={18}
+                    className="text-[#5a4a3f] group-hover:rotate-45 transition-transform duration-500"
+                  />
+                </button>
+                <div className="h-10 w-[1px] bg-[#e3ddd2] mx-1 hidden sm:block" />
+              </>
+            )}
+
+            {roleConfig.permissions.includes("experiences") && (
+              <button
+                onClick={() => go("/admin/experiences/new")}
+                className="flex items-center gap-2 px-6 py-3 rounded-xl bg-[#1a1a1a] text-white hover:bg-[#333] transition-all shadow-lg shadow-black/10 text-sm font-semibold active:scale-95"
+              >
+                <Plus size={16} strokeWidth={3} />
+                New Experience
+              </button>
+            )}
           </div>
         </header>
 
-        {/* KPI Grid - Hidden on mobile devices */}
-        <section className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
-          <StatCard
-            label="Total Bookings"
-            value={metrics?.bookings ?? 0}
-            trend={metricsSeries.bookings}
-            delta="+12%"
-            icon={<CalendarDays size={14} />}
-          />
-          <StatCard
-            label="Avg Occupancy"
-            value={formatPercent(metrics?.occupancyPct ?? 0)}
-            trend={metricsSeries.occupancyPct}
-            delta="-2%"
-            icon={<Activity size={14} />}
-          />
-          <StatCard
-            label="Monthly Revenue"
-            value={formatCurrency(metrics?.revenue ?? 0)}
-            trend={metricsSeries.revenue}
-            delta="+18.4%"
-            tone="green"
-            icon={<TrendingUp size={14} />}
-          />
-          <StatCard
-            label="Available Slots"
-            value={metrics?.openSlots ?? 0}
-            trend={metricsSeries.openSlots}
-            tone="blue"
-            icon={<Sparkles size={14} />}
-          />
-        </section>
+        {/* KPI Grid - Only show if role has access to bookings/finance */}
+        {(roleConfig.permissions.includes("bookings") ||
+          roleConfig.permissions.includes("payments")) && (
+          <section className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+            <StatCard
+              label="Total Bookings"
+              value={metrics?.bookings ?? 0}
+              trend={metricsSeries.bookings}
+              delta="+12%"
+              icon={<CalendarDays size={14} />}
+            />
+            <StatCard
+              label="Avg Occupancy"
+              value={formatPercent(metrics?.occupancyPct ?? 0)}
+              trend={metricsSeries.occupancyPct}
+              delta="-2%"
+              icon={<Activity size={14} />}
+            />
+            <StatCard
+              label="Monthly Revenue"
+              value={formatCurrency(metrics?.revenue ?? 0)}
+              trend={metricsSeries.revenue}
+              delta="+18.4%"
+              tone="green"
+              icon={<TrendingUp size={14} />}
+            />
+            <StatCard
+              label="Available Slots"
+              value={metrics?.openSlots ?? 0}
+              trend={metricsSeries.openSlots}
+              tone="blue"
+              icon={<Sparkles size={14} />}
+            />
+          </section>
+        )}
 
         {/* Filters & Actions Container */}
         <div className="space-y-8">
@@ -462,11 +602,11 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* Action Grid - Fixed Spread issue */}
+          {/* Action Grid */}
           <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             <AnimatePresence mode="popLayout">
               {filtered.map((a, idx) => {
-                const { key, ...restProps } = a; // Extracted key to fix spread warning
+                const { key, ...restProps } = a;
                 return (
                   <motion.div
                     key={key}
@@ -481,44 +621,54 @@ export default function AdminDashboardPage() {
                 );
               })}
             </AnimatePresence>
+
+            {filtered.length === 0 && (
+              <div className="col-span-full py-12 text-center text-[#7a6a5f]">
+                No modules match your search or role permissions.
+              </div>
+            )}
           </div>
 
-          {/* Growth Insight Footer Section */}
-          <section className="mt-16 pt-10 border-t border-[#e3ddd2]">
-            <div className="bg-[#1a1a1a] rounded-[2.5rem] p-8 sm:p-12 text-white relative overflow-hidden group shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8">
-              <div className="absolute -top-24 -left-24 w-64 h-64 bg-[#8b6f47]/10 rounded-full blur-[100px] pointer-events-none" />
-              <div className="relative z-10 max-w-xl text-center md:text-left">
-                <div className="flex items-center justify-center md:justify-start gap-3 mb-4 text-[#8b6f47]">
-                  <Sparkles size={24} />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.3em]">
-                    Operational Insight
-                  </span>
+          {/* Growth Insight Footer Section - Only show to Superadmin & Marketing */}
+          {(role === "superadmin" ||
+            role === "admin" ||
+            role === "marketing") && (
+            <section className="mt-16 pt-10 border-t border-[#e3ddd2]">
+              <div className="bg-[#1a1a1a] rounded-[2.5rem] p-8 sm:p-12 text-white relative overflow-hidden group shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8">
+                <div className="absolute -top-24 -left-24 w-64 h-64 bg-[#8b6f47]/10 rounded-full blur-[100px] pointer-events-none" />
+                <div className="relative z-10 max-w-xl text-center md:text-left">
+                  <div className="flex items-center justify-center md:justify-start gap-3 mb-4 text-[#8b6f47]">
+                    <Sparkles size={24} />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.3em]">
+                      Operational Insight
+                    </span>
+                  </div>
+                  <h3 className="font-serif text-3xl mb-4">Grow your Oasis</h3>
+                  <p className="text-white/60 text-lg leading-relaxed">
+                    Experiences with at least 5 high-quality photos and clear
+                    arrival instructions convert 40% higher than average.
+                    <span className="text-white block mt-2">
+                      Check your "Waitlist" module to see unfulfilled demand.
+                    </span>
+                  </p>
                 </div>
-                <h3 className="font-serif text-3xl mb-4">Grow your Oasis</h3>
-                <p className="text-white/60 text-lg leading-relaxed">
-                  Experiences with at least 5 high-quality photos and clear
-                  arrival instructions convert 40% higher than average.
-                  <span className="text-white block mt-2">
-                    Check your "Waitlist" module to see unfulfilled demand.
-                  </span>
-                </p>
+                <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto relative z-10">
+                  <button
+                    onClick={() => go("/admin/experiences")}
+                    className="px-8 py-4 rounded-xl bg-white text-black text-xs font-bold uppercase tracking-widest hover:bg-[#e3ddd2] transition-all active:scale-95 shadow-lg"
+                  >
+                    Optimize Listings
+                  </button>
+                  <button
+                    onClick={() => go("/admin/reports")}
+                    className="px-8 py-4 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-bold uppercase tracking-widest hover:bg-white/20 transition-all active:scale-95 backdrop-blur-sm"
+                  >
+                    Full Analytics
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto relative z-10">
-                <button
-                  onClick={() => go("/admin/experiences")}
-                  className="px-8 py-4 rounded-xl bg-white text-black text-xs font-bold uppercase tracking-widest hover:bg-[#e3ddd2] transition-all active:scale-95 shadow-lg"
-                >
-                  Optimize Listings
-                </button>
-                <button
-                  onClick={() => go("/admin/reports")}
-                  className="px-8 py-4 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-bold uppercase tracking-widest hover:bg-white/20 transition-all active:scale-95 backdrop-blur-sm"
-                >
-                  Full Analytics
-                </button>
-              </div>
-            </div>
-          </section>
+            </section>
+          )}
         </div>
       </div>
     </div>

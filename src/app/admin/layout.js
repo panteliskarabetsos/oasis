@@ -28,6 +28,17 @@ export const metadata = {
   },
 };
 
+// Define all valid admin-level roles
+const ADMIN_ROLES = [
+  "superadmin",
+  "manager",
+  "finance",
+  "marketing",
+  "support",
+  "partner",
+  "admin", // Kept for legacy/fallback purposes
+];
+
 export default async function AdminLayout({ children }) {
   const supa = await createSupabaseServer();
   const {
@@ -45,8 +56,15 @@ export default async function AdminLayout({ children }) {
     .eq("auth_user_id", user.id)
     .maybeSingle();
 
-  const role = row?.role ?? "user";
-  if (role !== "admin") redirect("/");
+  // Check DB role first, fallback to Auth metadata, then finally "user"
+  const role =
+    row?.role ??
+    user?.app_metadata?.role ??
+    user?.user_metadata?.role ??
+    "user";
+
+  // Check if the user's role is in our permitted list
+  if (!ADMIN_ROLES.includes(role)) redirect("/");
 
   const displayName =
     row?.name || row?.surname

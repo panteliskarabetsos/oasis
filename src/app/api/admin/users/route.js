@@ -7,7 +7,21 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 const MAX_NOTES_LEN = 2000;
-const ALLOWED_ROLES = new Set(["admin", "user"]);
+
+// Expanded to support all granular admin roles + base user
+const ALLOWED_ROLES = new Set([
+  "superadmin",
+  "manager",
+  "finance",
+  "marketing",
+  "support",
+  "partner",
+  "admin", // Keep for legacy/fallback
+  "user",
+]);
+
+// Helper to determine if a role has admin-level access to this page
+const isAdminRole = (r) => r && r !== "user";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const err = (msg, status = 500) =>
@@ -56,8 +70,8 @@ async function requireAdmin() {
   const roleMeta =
     authUser?.app_metadata?.role || authUser?.user_metadata?.role || null;
 
-  if (roleMeta === "admin") {
-    return { ok: true, admin, authUser };
+  if (isAdminRole(roleMeta)) {
+    return { ok: true, admin, authUser, role: roleMeta };
   }
 
   // Fallback: DB role check
@@ -72,8 +86,8 @@ async function requireAdmin() {
     return { ok: false, res: err("Server error", 500) };
   }
 
-  if (dbUser?.role === "admin") {
-    return { ok: true, admin, authUser };
+  if (isAdminRole(dbUser?.role)) {
+    return { ok: true, admin, authUser, role: dbUser.role };
   }
 
   return { ok: false, res: err("Forbidden", 403) };
@@ -90,7 +104,7 @@ export async function GET() {
     const { data, error } = await admin
       .from("User")
       .select(
-        "id,auth_user_id,email,name,surname,phone,role,dateOfBirth,createdAt,notes"
+        "id,auth_user_id,email,name,surname,phone,role,dateOfBirth,createdAt,notes",
       )
       .order("createdAt", { ascending: false });
 
@@ -102,7 +116,6 @@ export async function GET() {
   }
 }
 
-/* ========================== POST (Admin) ========================= */
 /* ========================== POST (Admin) ========================= */
 export async function POST(req) {
   const gate = await requireAdmin();
@@ -160,8 +173,8 @@ export async function POST(req) {
     notes == null
       ? null
       : String(notes).trim()
-      ? String(notes).trim().slice(0, MAX_NOTES_LEN)
-      : null;
+        ? String(notes).trim().slice(0, MAX_NOTES_LEN)
+        : null;
 
   let createdAuthUserId = null;
 
@@ -247,6 +260,7 @@ export async function POST(req) {
   }
 }
 
+/* ========================== PUT (Admin) ========================== */
 export async function PUT(req) {
   const gate = await requireAdmin();
   if (!gate.ok) return gate.res;
@@ -279,10 +293,15 @@ export async function PUT(req) {
     if (curErr) throw curErr;
     if (!current) return err("User not found", 404);
 
-    // Prevent self-demotion
+    // Prevent self-demotion from superadmin
     const isSelf = String(current.auth_user_id) === String(authUser.id);
-    if (isSelf && typeof role === "string" && role !== "admin") {
-      return err("You cannot demote your own admin account.", 400);
+    if (
+      isSelf &&
+      typeof role === "string" &&
+      role !== "superadmin" &&
+      current.role === "superadmin"
+    ) {
+      return err("You cannot demote your own Super Admin account.", 400);
     }
 
     const updates = { updatedAt: new Date().toISOString() };
@@ -313,7 +332,7 @@ export async function PUT(req) {
       .update(updates)
       .eq("id", userId)
       .select(
-        "id,auth_user_id,role,email,name,surname,phone,dateOfBirth,createdAt,notes"
+        "id,auth_user_id,role,email,name,surname,phone,dateOfBirth,createdAt,notes",
       )
       .single();
 
@@ -345,7 +364,7 @@ export async function PUT(req) {
         try {
           await admin.auth.admin.updateUserById(
             updated.auth_user_id,
-            authPatch
+            authPatch,
           );
         } catch (syncErr) {
           console.warn("[admin/users] auth sync failed (non-fatal)", syncErr);
@@ -397,7 +416,7 @@ export async function DELETE(req) {
       if (delErr.code === "23503") {
         return err(
           "Cannot delete user. There are related records referencing this user.",
-          400
+          400,
         );
       }
       throw delErr;
@@ -410,7 +429,7 @@ export async function DELETE(req) {
       } catch (authDelErr) {
         console.warn(
           "[admin/users] auth delete failed (non-fatal)",
-          authDelErr
+          authDelErr,
         );
       }
     }
