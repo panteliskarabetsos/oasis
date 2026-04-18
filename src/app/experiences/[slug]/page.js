@@ -22,6 +22,7 @@ import {
   Sun,
   Leaf,
   Utensils,
+  ShieldCheck, // Added for policies
 } from "lucide-react";
 import LinkWithLoader from "@/app/components/LinkWithLoader";
 import { getExperienceBySlug } from "@/lib/fetchExperiences";
@@ -47,6 +48,27 @@ const fontSans = DM_Sans({
 
 // ---- Data fetch ----
 const getExperience = cache((slug) => getExperienceBySlug(slug));
+
+// ---- Cancellation Policy Helper ----
+const POLICY_MAP = {
+  flexible: {
+    label: "Flexible",
+    short: "Refund up to 48h",
+    description: "Full refund up to 48 hours before the experience starts.",
+  },
+  moderate: {
+    label: "Moderate",
+    short: "Refund up to 7 days",
+    description:
+      "Full refund up to 7 days before. 50% refund up to 48 hours before.",
+  },
+  strict: {
+    label: "Strict (Bespoke)",
+    short: "Bespoke Policy",
+    description:
+      "100% refund up to 14 days before. 50% refund 7-13 days before. No refund under 7 days.",
+  },
+};
 
 // ---- Helpers (pricing) ----
 function normalizePricing(exp) {
@@ -119,6 +141,7 @@ export default async function ExperienceDetailPage({ params }) {
     whatsIncluded,
     whatToBring,
     whyYoullLove,
+    cancellationPolicy = "strict", // Default to strict if missing
     images,
     meetupPoints,
     guestReviews,
@@ -126,6 +149,7 @@ export default async function ExperienceDetailPage({ params }) {
 
   const prices = normalizePricing(experience);
   const fromPrice = minDefined(prices.adult, prices.kid);
+  const activePolicy = POLICY_MAP[cancellationPolicy] || POLICY_MAP.strict;
 
   // Clean data
   const parsedImages = (Array.isArray(images) ? images : []).filter(Boolean);
@@ -360,21 +384,43 @@ export default async function ExperienceDetailPage({ params }) {
               </div>
             )}
 
-            {whatToBring && (
+            <div className="space-y-5 sm:space-y-6">
+              {whatToBring && (
+                <div className="bg-white p-8 rounded-[2rem] border border-[#EAE6DF] shadow-[0_4px_20px_rgb(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 transition-all duration-300">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-12 h-12 bg-[#FFF8F0] rounded-full flex items-center justify-center text-[#D88A4A]">
+                      <Sun size={22} />
+                    </div>
+                    <h3 className="font-serif text-2xl text-[#1A1A1A]">
+                      What to Bring
+                    </h3>
+                  </div>
+                  <div className="text-base text-[#555] leading-relaxed whitespace-pre-line">
+                    {whatToBring}
+                  </div>
+                </div>
+              )}
+
+              {/* Cancellation Policy Block */}
               <div className="bg-white p-8 rounded-[2rem] border border-[#EAE6DF] shadow-[0_4px_20px_rgb(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 transition-all duration-300">
                 <div className="flex items-center gap-4 mb-6">
-                  <div className="w-12 h-12 bg-[#FFF8F0] rounded-full flex items-center justify-center text-[#D88A4A]">
-                    <Sun size={22} />
+                  <div className="w-12 h-12 bg-[#FDF8F4] rounded-full flex items-center justify-center text-[#8b6f47]">
+                    <ShieldCheck size={22} />
                   </div>
                   <h3 className="font-serif text-2xl text-[#1A1A1A]">
-                    What to Bring
+                    Booking Policy
                   </h3>
                 </div>
-                <div className="text-base text-[#555] leading-relaxed whitespace-pre-line">
-                  {whatToBring}
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#C8AA86]">
+                    {activePolicy.label} Policy
+                  </p>
+                  <p className="text-base text-[#555] leading-relaxed">
+                    {activePolicy.description}
+                  </p>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </section>
 
@@ -501,7 +547,7 @@ export default async function ExperienceDetailPage({ params }) {
                   <Clock size={12} /> {duration}
                 </span>
                 <span className="text-[11px] font-medium text-[#7a6a5f] flex items-center gap-1.5">
-                  <Check size={12} /> Free Cancellation
+                  <ShieldCheck size={12} /> {activePolicy.short}
                 </span>
               </div>
             </div>
@@ -533,6 +579,10 @@ export default async function ExperienceDetailPage({ params }) {
                 / person
               </span>
             </div>
+            {/* Dynamic policy label in sticky bar */}
+            <span className="text-[9px] font-bold text-[#4A7854] uppercase tracking-wider mt-1">
+              {activePolicy.short}
+            </span>
           </div>
           <LinkWithLoader href={`/check-availability/${slug}`}>
             <button className="bg-[#1A1A1A] text-white px-8 md:px-10 py-3.5 md:py-4 rounded-full font-bold text-xs uppercase tracking-[0.15em] hover:bg-[#C8AA86] transition-colors shadow-lg shadow-black/20 w-full sm:w-auto active:scale-95 transform duration-150">

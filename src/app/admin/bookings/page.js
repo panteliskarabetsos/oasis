@@ -22,22 +22,19 @@ import {
   Info,
   Plus,
   Trash2,
+  CalendarDays,
+  CreditCard,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Users,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Link from "next/link";
-import { is } from "date-fns/locale";
-/* ------------------------------------------------------------------
-   Visual refresh goals
-   - Softer, more consistent cards and spacing
-   - Cleaner filters with mobile drawer + advanced section
-   - Subtle stat bar with total/paid/pending for the current result set
-   - Sticky table header, zebra rows, focus rings, better empty/skeleton
-   - Action buttons with tooltips and accessible labels
-   - Keeps ALL your data & fetch logic as-is
-------------------------------------------------------------------- */
+import { AnimatePresence, motion } from "framer-motion";
 
 /* ---------------------------- helpers ---------------------------- */
-const LOCALE = "en-GB"; // UI in English; keep EUR
+const LOCALE = "en-GB";
 const TIMEZONE = "Europe/Athens";
 
 const fmtDate = (d) =>
@@ -55,10 +52,11 @@ const fmtMoney = (n) =>
     : "-";
 
 const cx = (...xs) => xs.filter(Boolean).join(" ");
+
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
-  { value: "confirmed", label: "Confirmed" }, // paid & confirmed
-  { value: "pending", label: "Pending" }, // seat on hold until paid
+  { value: "confirmed", label: "Confirmed" },
+  { value: "pending", label: "Pending" },
   { value: "checked_in", label: "Checked-in" },
   { value: "no_show", label: "No-show" },
   { value: "cancelled", label: "Cancelled" },
@@ -73,8 +71,8 @@ export default function ReservationsPage() {
   // Filters & state
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
-  const [from, setFrom] = useState(""); // YYYY-MM-DD
-  const [to, setTo] = useState(""); // YYYY-MM-DD
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [experienceId, setExperienceId] = useState("");
 
   const [page, setPage] = useState(1);
@@ -89,8 +87,8 @@ export default function ReservationsPage() {
 
   // UI polish
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [density, setDensity] = useState("compact"); // "cozy" | "compact"
-  const [filtersOpen, setFiltersOpen] = useState(false); // mobile drawer
+  const [density, setDensity] = useState("compact");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Actions state
   const [selected, setSelected] = useState(null);
@@ -107,7 +105,8 @@ export default function ReservationsPage() {
   const [slotFrom, setSlotFrom] = useState(() => today());
   const [slotTo, setSlotTo] = useState(() => plusDays(60));
   const [targetSlotId, setTargetSlotId] = useState("");
-  const isPrivateBooking = (row) => !row?.scheduleSlotId; // no slot => private
+
+  const isPrivateBooking = (row) => !row?.scheduleSlotId;
   const safeExperienceName = (row) =>
     row?.experienceName || row?.customExperienceName || "Private booking";
 
@@ -116,7 +115,7 @@ export default function ReservationsPage() {
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / pageSize)),
-    [total, pageSize]
+    [total, pageSize],
   );
 
   const activeFilterCount = useMemo(() => {
@@ -141,7 +140,6 @@ export default function ReservationsPage() {
       s.total += 1;
 
       const t = rowTotal(r);
-      // revenue only for money-realized states
       if (typeof t === "number" && ["confirmed", "checked_in"].includes(k)) {
         s.revenue += t;
       }
@@ -156,9 +154,13 @@ export default function ReservationsPage() {
     return () => clearTimeout(id);
   }, [query]);
 
-  // Keyboard shortcuts (UX): "/" focus search, "r" refresh, "e" export
+  // Keyboard shortcuts (UX)
   useEffect(() => {
     const onKey = (e) => {
+      // Ignore shortcuts while typing in inputs
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
       if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
@@ -172,10 +174,9 @@ export default function ReservationsPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-  // Load experiences for filter (runs once; non-blocking)
+  // Load experiences for filter
   useEffect(() => {
     const ac = new AbortController();
     (async () => {
@@ -186,7 +187,7 @@ export default function ReservationsPage() {
             signal: ac.signal,
             cache: "no-store",
             credentials: "include",
-          }
+          },
         );
         if (!res.ok) throw new Error("Failed to load experiences");
         const data = await res.json();
@@ -213,16 +214,12 @@ export default function ReservationsPage() {
         pageSize: String(pageSize),
       });
 
-      // special syntax: "#1234" => search by booking code/id only
       if (debouncedQuery) {
         const raw = debouncedQuery.trim();
-        const match = raw.match(/^#\s*(.+)$/); // everything after "#"
+        const match = raw.match(/^#\s*(.+)$/);
         if (match && match[1]) {
-          const bookingToken = match[1].trim();
-       
-          qs.set("code", bookingToken);
+          qs.set("code", match[1].trim());
         } else {
-          // normal free-text search
           qs.set("q", raw);
         }
       }
@@ -250,7 +247,7 @@ export default function ReservationsPage() {
         setRows(items);
         setTotal(Number(data?.total || items.length));
       } catch (e) {
-        if (e?.name === "AbortError") return; // ignore aborted fetches
+        if (e?.name === "AbortError") return;
         setError(e?.message || "Failed to load");
       } finally {
         setLoading(false);
@@ -317,14 +314,14 @@ export default function ReservationsPage() {
       r.guestPhone || "",
       r.adults ?? "",
       r.kids ?? "",
-      r.totalPaidAmount ?? r.totalAmount ?? "",
+      rowTotal(r) ?? "",
       r.status || "",
       r.createdAt || "",
     ]);
 
     const csv = [headers, ...lines]
       .map((row) =>
-        row.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")
+        row.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(","),
       )
       .join("\n");
 
@@ -346,6 +343,7 @@ export default function ReservationsPage() {
     setCancelReason("");
     setShowCancel(true);
   }
+
   async function submitCancel() {
     if (!selected) return;
     try {
@@ -355,16 +353,16 @@ export default function ReservationsPage() {
         credentials: "include",
         body: JSON.stringify({ reason: cancelReason }),
       });
-      if (!res.ok) {
-        const msg =
-          (await res.json().catch(() => ({})))?.error || "Cancel failed";
-        throw new Error(msg);
-      }
+      if (!res.ok)
+        throw new Error(
+          (await res.json().catch(() => ({})))?.error || "Cancel failed",
+        );
+
       toast.success("Booking cancelled");
       setRows((cur) =>
         cur.map((r) =>
-          r.id === selected.id ? { ...r, status: "cancelled" } : r
-        )
+          r.id === selected.id ? { ...r, status: "cancelled" } : r,
+        ),
       );
       setShowCancel(false);
       setSelected(null);
@@ -377,7 +375,6 @@ export default function ReservationsPage() {
     setSelected(r);
     setShowReschedule(true);
     setTargetSlotId("");
-    // preset date window around today or the current reservation date
     const base = r?.startTime ? new Date(r.startTime) : new Date();
     const fromStr = toDateInput(base);
     const toStr = toDateInput(plusDaysFrom(base, 60));
@@ -385,32 +382,30 @@ export default function ReservationsPage() {
     setSlotTo(toStr);
     loadSlots(r.experienceId, fromStr, toStr);
   }
+
   function openDelete(row) {
-    setSelected(row); // reuse your existing `selected` state
+    setSelected(row);
     setDeleteError("");
-    setForceDelete(row?.status !== "cancelled"); // default force if not cancelled
+    setForceDelete(row?.status !== "cancelled");
     setShowDelete(true);
   }
 
-  // submit
   async function submitDelete() {
     if (!selected?.id) return;
     setDeleting(true);
     setDeleteError("");
     try {
       const res = await fetch(
-        `/api/admin/reservations/${selected.id}${
-          forceDelete ? "?force=1" : ""
-        }`,
-        { method: "DELETE" }
+        `/api/admin/reservations/${selected.id}${forceDelete ? "?force=1" : ""}`,
+        { method: "DELETE" },
       );
       const j = await safeJson(res);
       if (!res.ok) throw new Error(j?.error || "Failed to delete booking");
 
-      // optimistic remove
       setRows((prev) => prev.filter((x) => x.id !== selected.id));
       setTotal((t) => Math.max(0, t - 1));
       setShowDelete(false);
+      toast.success("Booking deleted");
     } catch (e) {
       setDeleteError(e?.message || "Something went wrong while deleting");
     } finally {
@@ -439,7 +434,7 @@ export default function ReservationsPage() {
       });
       if (!res.ok)
         throw new Error(
-          (await res.json().catch(() => ({})))?.error || "Error loading slots"
+          (await res.json().catch(() => ({})))?.error || "Error loading slots",
         );
       const data = await res.json();
       setSlots(data?.items || []);
@@ -461,22 +456,21 @@ export default function ReservationsPage() {
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({ scheduleSlotId: Number(targetSlotId) }),
-        }
+        },
       );
-      if (!res.ok) {
-        const msg =
-          (await res.json().catch(() => ({})))?.error || "Error rescheduling";
-        throw new Error(msg);
-      }
+      if (!res.ok)
+        throw new Error(
+          (await res.json().catch(() => ({})))?.error || "Error rescheduling",
+        );
+
       const payload = await res.json().catch(() => ({}));
-      const newStartTime = payload?.newStartTime;
       toast.success("Booking was rescheduled");
       setRows((cur) =>
         cur.map((r) =>
           r.id === selected.id
-            ? { ...r, startTime: newStartTime || r.startTime }
-            : r
-        )
+            ? { ...r, startTime: payload?.newStartTime || r.startTime }
+            : r,
+        ),
       );
       setShowReschedule(false);
       setSelected(null);
@@ -500,267 +494,255 @@ export default function ReservationsPage() {
       .then(() => toast.success(label));
   }
 
-  const pad = density === "compact" ? "py-2" : "py-3";
+  const pad = density === "compact" ? "py-2.5" : "py-4";
 
   return (
-    <div className="min-h-screen bg-[#f4f1ec]">
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 sm:py-8">
-        <div className="rounded-3xl border border-[#e2d6c8] bg-white/80 shadow-[0_18px_45px_rgba(15,14,11,0.08)] backdrop-blur-sm">
-          <div className="px-4 pb-6 pt-5 sm:px-6 sm:pt-6">
-            {/* Header */}
-            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-[#f5ece3] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.15em] text-[#6f5a4a]">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#c29b72]" />
-                  Booking overview
-                </div>
-                <h1 className="mt-3 text-2xl font-semibold tracking-tight text-[#2f261f] sm:text-3xl">
-                  Bookings
-                </h1>
-                <p className="mt-1 text-sm text-[#7b6a5f]">
-                  Search, filter and manage all experiences in one place.
-                </p>
-              </div>
+    <div className="min-h-screen bg-[#fdfcfb] text-[#3f3127] selection:bg-[#8b6f47]/20 pb-24">
+      {/* Ambient background decoration */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute -top-[10%] -left-[5%] w-[40%] h-[40%] rounded-full bg-[#8b6f47]/5 blur-[120px]" />
+        <div className="absolute top-[20%] -right-[10%] w-[30%] h-[50%] rounded-full bg-[#e3ddd2]/30 blur-[100px]" />
+      </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <ToolbarButton onClick={() => router.back()} icon={ArrowLeft}>
-                  Back
-                </ToolbarButton>
-
-                <ToolbarButton
-                  onClick={() => window.location.reload()}
-                  icon={RefreshCw}
-                >
-                  Refresh
-                </ToolbarButton>
-
-                <ToolbarButton onClick={onExportCSV} icon={DownloadIcon}>
-                  Export CSV
-                </ToolbarButton>
-
-                <Link
-                  href="/admin/bookings/new"
-                  className="inline-flex items-center gap-2 rounded-full bg-[#2f261f] px-4 py-2 text-sm font-medium text-white shadow-lg shadow-[#2f261f33] transition hover:-translate-y-0.5 hover:bg-[#463629]"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add booking
-                </Link>
-              </div>
+      <div className="relative z-10 mx-auto px-4 sm:px-8 py-6 max-w-7xl">
+        {/* Header */}
+        <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 rounded-md bg-[#8b6f47]/10 text-[#8b6f47] text-[10px] font-bold uppercase tracking-wider border border-[#8b6f47]/20">
+                Operations
+              </span>
             </div>
+            <h1 className="text-3xl sm:text-4xl font-serif tracking-tight text-[#2a1f18]">
+              Bookings
+            </h1>
+            <p className="text-[#7a6a5f] text-sm">
+              Search, filter, and manage all reservations in one place.
+            </p>
+          </div>
 
-            {/* Stat bar (current view) */}
-            <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <StatPill label="Results" value={viewStats.total} />
-              <StatPill
-                label="Confirmed"
-                value={viewStats.confirmed}
-                tone="green"
+          <div className="flex flex-wrap items-center gap-3">
+            <ToolbarButton
+              onClick={() => router.back()}
+              icon={ArrowLeft}
+              title="Back"
+            >
+              Back
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={() => window.location.reload()}
+              icon={RefreshCw}
+              title="Refresh (r)"
+            />
+            <ToolbarButton
+              onClick={onExportCSV}
+              icon={DownloadIcon}
+              title="Export to CSV (e)"
+            />
+            <div className="h-8 w-[1px] bg-[#e3ddd2] mx-1 hidden sm:block" />
+            <Link
+              href="/admin/bookings/new"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#1a1a1a] text-white hover:bg-[#333] transition-all shadow-lg shadow-black/10 text-sm font-semibold active:scale-95"
+            >
+              <Plus size={16} strokeWidth={3} />
+              New Booking
+            </Link>
+          </div>
+        </header>
+
+        {/* KPI Grid */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatPill
+            label="Total Results"
+            value={viewStats.total}
+            icon={<ListFilter size={16} />}
+          />
+          <StatPill
+            label="Confirmed"
+            value={viewStats.confirmed}
+            tone="green"
+            icon={<CheckCircle2 size={16} />}
+          />
+          <StatPill
+            label="Pending"
+            value={viewStats.pending}
+            tone="amber"
+            icon={<Clock size={16} />}
+          />
+          <StatPill
+            label="Revenue (View)"
+            value={fmtMoney(viewStats.revenue)}
+            tone="blue"
+            icon={<CreditCard size={16} />}
+          />
+        </section>
+
+        {/* Filters Card */}
+        <div className="mb-6 rounded-2xl border border-[#e3ddd2] bg-white shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between gap-2 border-b border-[#e3ddd2] px-5 py-3.5 bg-[#fdfcfb]">
+            <button
+              type="button"
+              onClick={() => setFiltersOpen((open) => !open)}
+              className="inline-flex items-center gap-2 text-sm font-semibold text-[#3f3127]"
+            >
+              <ListFilter className="h-4 w-4 text-[#8b6f47]" />
+              <span>Filters</span>
+              {!!activeFilterCount && (
+                <span className="rounded-full bg-[#8b6f47] px-2 py-0.5 text-[10px] font-bold text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+              <ChevronDown
+                className={cx(
+                  "h-4 w-4 transition-transform",
+                  filtersOpen && "rotate-180",
+                )}
               />
-              <StatPill
-                label="Pending"
-                value={viewStats.pending}
-                tone="amber"
-              />
-              <StatPill
-                label="Revenue (view)"
-                value={fmtMoney(viewStats.revenue)}
-              />
+            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAdvanced((s) => !s)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#e3ddd2] bg-white px-3 py-1.5 text-xs font-medium text-[#5a4a3f] shadow-sm hover:bg-[#fdfaf5] transition-colors"
+              >
+                {showAdvanced ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+                <span className="hidden sm:inline">Advanced</span>
+              </button>
+              <button
+                onClick={resetFilters}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#e3ddd2] bg-white px-3 py-1.5 text-xs font-medium text-[#5a4a3f] shadow-sm hover:bg-[#fdfaf5] transition-colors"
+              >
+                <XIcon className="h-3.5 w-3.5" /> Clear
+              </button>
             </div>
+          </div>
 
-            {/* Filters Card */}
-            {/* Filters Card */}
-            <div className="mb-4 rounded-2xl border bg-white/80 shadow-sm backdrop-blur">
-              {/* Header row with toggle */}
-              <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-                <button
-                  type="button"
-                  onClick={() => setFiltersOpen((open) => !open)}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-neutral-800"
-                >
-                  <ListFilter className="h-4 w-4" />
-                  <span>Filters</span>
-                  {!!activeFilterCount && (
-                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
-                      {activeFilterCount}
-                    </span>
-                  )}
-                  <ChevronDown
-                    className={cx(
-                      "h-4 w-4 transition-transform",
-                      filtersOpen && "rotate-180"
-                    )}
-                  />
-                </button>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowAdvanced((s) => !s)}
-                    className="inline-flex items-center gap-1 rounded-xl border bg-white px-3 py-1.5 text-xs shadow-sm hover:bg-neutral-50"
-                  >
-                    {showAdvanced ? (
-                      <>
-                        <ChevronUp className="h-4 w-4" /> Close advanced
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown className="h-4 w-4" /> Advanced
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={resetFilters}
-                    className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-1.5 text-xs shadow-sm hover:bg-neutral-50"
-                  >
-                    <FilterIcon className="h-4 w-4" /> Clear
-                  </button>
-                </div>
-              </div>
-
-              {/* Collapsible body */}
-              {filtersOpen && (
-                <>
-                  <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 lg:grid-cols-6">
-                    {/* search */}
-                    <div className="col-span-2">
-                      <label className="text-xs text-[#6e5e54]">Search</label>
-                      <div className="relative mt-1">
-                        <SearchIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-                        <input
-                          ref={searchRef}
-                          className="w-full rounded-xl border bg-white px-8 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-[#d9c6b8]"
-                          placeholder="Name, email, phone or booking code… (try #1234)"
-                          value={query}
-                          onChange={(e) => {
-                            setPage(1);
-                            setQuery(e.target.value);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Escape") setQuery("");
-                          }}
-                          aria-label="Search bookings"
-                        />
-
-                        {query && (
-                          <button
-                            onClick={() => setQuery("")}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-neutral-100"
-                            aria-label="Clear search"
-                          >
-                            <XIcon className="h-4 w-4 text-neutral-500" />
-                          </button>
-                        )}
-                      </div>
-                      {/* Quick status chips */}
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {[
-                          { v: "", l: "All" },
-                          { v: "confirmed", l: "Confirmed" },
-                          { v: "pending", l: "Pending" },
-                          { v: "checked_in", l: "Checked-in" },
-                          { v: "no_show", l: "No-show" },
-                          { v: "cancelled", l: "Cancelled" },
-                        ].map((o) => (
-                          <button
-                            key={o.v}
-                            onClick={() => {
-                              setStatus(o.v);
-                              setPage(1);
-                            }}
-                            className={cx(
-                              "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition",
-                              status === o.v
-                                ? "border-neutral-900 bg-neutral-900 text-white"
-                                : "bg-white hover:bg-neutral-50"
-                            )}
-                            aria-pressed={status === o.v}
-                          >
-                            <span>{o.l}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* status */}
-                    <div>
-                      <label className="text-xs text-[#6e5e54]">Status</label>
-                      <select
-                        className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
-                        value={status}
-                        onChange={(e) => {
-                          setPage(1);
-                          setStatus(e.target.value);
-                        }}
-                      >
-                        {STATUS_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* experience */}
-                    <div>
-                      <label className="text-xs text-[#6e5e54]">
-                        Experience
-                      </label>
-                      <select
-                        className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
-                        value={experienceId}
-                        onChange={(e) => {
-                          setPage(1);
-                          setExperienceId(e.target.value);
-                        }}
-                      >
-                        <option value="">All</option>
-                        {experiences?.map((ex) => (
-                          <option key={ex.id} value={ex.id}>
-                            {ex.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* from */}
-                    <div>
-                      <label className="flex items-center gap-1 text-xs text-[#6e5e54]">
-                        From <CalendarIcon className="h-3 w-3" />
-                      </label>
+          <AnimatePresence>
+            {filtersOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2 lg:grid-cols-6 border-b border-[#e3ddd2]">
+                  {/* Search */}
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
+                      Search
+                    </label>
+                    <div className="relative">
+                      <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a09084]" />
                       <input
-                        type="date"
-                        className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
-                        value={from}
+                        ref={searchRef}
+                        className="w-full rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] pl-9 pr-8 py-2.5 text-sm text-[#3f3127] placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 transition-all shadow-sm"
+                        placeholder="Name, email, code (e.g. #123) or '/' to focus"
+                        value={query}
                         onChange={(e) => {
                           setPage(1);
-                          setFrom(e.target.value);
+                          setQuery(e.target.value);
                         }}
+                        onKeyDown={(e) => e.key === "Escape" && setQuery("")}
                       />
-                    </div>
-
-                    {/* to */}
-                    <div>
-                      <label className="flex items-center gap-1 text-xs text-[#6e5e54]">
-                        To <CalendarIcon className="h-3 w-3" />
-                      </label>
-                      <input
-                        type="date"
-                        className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
-                        value={to}
-                        onChange={(e) => {
-                          setPage(1);
-                          setTo(e.target.value);
-                        }}
-                      />
+                      {query && (
+                        <button
+                          onClick={() => setQuery("")}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-[#e3ddd2]/50 text-[#a09084]"
+                        >
+                          <XIcon className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Advanced row */}
-                  {showAdvanced && (
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-t p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-neutral-600">
-                          Quick ranges:
-                        </span>
+                  {/* Status */}
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
+                      Status
+                    </label>
+                    <select
+                      className="w-full rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] px-3 py-2.5 text-sm text-[#3f3127] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 transition-all"
+                      value={status}
+                      onChange={(e) => {
+                        setPage(1);
+                        setStatus(e.target.value);
+                      }}
+                    >
+                      {STATUS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Experience */}
+                  <div className="col-span-1 lg:col-span-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
+                      Experience
+                    </label>
+                    <select
+                      className="w-full rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] px-3 py-2.5 text-sm text-[#3f3127] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 transition-all"
+                      value={experienceId}
+                      onChange={(e) => {
+                        setPage(1);
+                        setExperienceId(e.target.value);
+                      }}
+                    >
+                      <option value="">All Experiences</option>
+                      {experiences?.map((ex) => (
+                        <option key={ex.id} value={ex.id}>
+                          {ex.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Date From */}
+                  <div>
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5">
+                      From <CalendarIcon className="h-3 w-3" />
+                    </label>
+                    <input
+                      type="date"
+                      className="w-full rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] px-3 py-2.5 text-sm text-[#3f3127] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 transition-all"
+                      value={from}
+                      onChange={(e) => {
+                        setPage(1);
+                        setFrom(e.target.value);
+                      }}
+                    />
+                  </div>
+
+                  {/* Date To */}
+                  <div>
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5">
+                      To <CalendarIcon className="h-3 w-3" />
+                    </label>
+                    <input
+                      type="date"
+                      className="w-full rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] px-3 py-2.5 text-sm text-[#3f3127] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 transition-all"
+                      value={to}
+                      onChange={(e) => {
+                        setPage(1);
+                        setTo(e.target.value);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Advanced row */}
+                {showAdvanced && (
+                  <div className="bg-[#fcfbf9] px-5 py-4 border-b border-[#e3ddd2]">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#a09084]">
+                        Quick Ranges:
+                      </span>
+                      <div className="flex flex-wrap gap-2">
                         <QuickRange
                           onClick={quickRange}
                           label="Today"
@@ -788,686 +770,651 @@ export default function ReservationsPage() {
                         />
                       </div>
                     </div>
-                  )}
-
-                  {/* Active filter chips */}
-                  {!!activeFilterCount && (
-                    <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
-                      {status && (
-                        <Chip onClear={() => clearChip("status")}>
-                          Status:{" "}
-                          <strong className="ml-1">
-                            {labelStatus(status)}
-                          </strong>
-                        </Chip>
-                      )}
-                      {experienceId && (
-                        <Chip onClear={() => clearChip("experience")}>
-                          Experience:{" "}
-                          <strong className="ml-1">
-                            {experiences.find(
-                              (x) => String(x.id) === String(experienceId)
-                            )?.name || experienceId}
-                          </strong>
-                        </Chip>
-                      )}
-                      {from && (
-                        <Chip onClear={() => clearChip("from")}>
-                          From: <strong className="ml-1">{from}</strong>
-                        </Chip>
-                      )}
-                      {to && (
-                        <Chip onClear={() => clearChip("to")}>
-                          To: <strong className="ml-1">{to}</strong>
-                        </Chip>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Table Card */}
-            <div className="relative overflow-hidden rounded-2xl border border-[#e4d8cc] bg-white shadow-sm">
-              {/* top tools */}
-              <div className="flex flex-col gap-3 border-b border-[#eee1d3] bg-[#faf7f3] p-3 sm:flex-row sm:items-center sm:justify-between">
-                <div
-                  className="text-xs font-medium uppercase tracking-[0.18em] text-[#7b6a5f]"
-                  aria-live="polite"
-                >
-                  {error ? (
-                    <span className="text-red-600">{error}</span>
-                  ) : (
-                    <span>
-                      Showing{" "}
-                      <span className="font-semibold text-[#43352a]">
-                        {rows.length ? (page - 1) * pageSize + 1 : 0}–
-                        {Math.min(page * pageSize, total)}
-                      </span>{" "}
-                      of {total}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Optional density pill if you already use `density` */}
-                  <div className="hidden items-center gap-1 rounded-full border border-[#e1d4c6] bg-white/80 px-2 py-1.5 text-[11px] text-[#6a594b] sm:flex">
-                    <span className="px-2 font-medium uppercase tracking-[0.16em] opacity-80">
-                      Density
-                    </span>
-                    <button
-                      onClick={() => setDensity("cozy")}
-                      className={cx(
-                        "rounded-full px-2.5 py-1 font-medium",
-                        "transition",
-                        density === "cozy"
-                          ? "bg-[#2f261f] text-white"
-                          : "hover:bg-[#f3e8dc]"
-                      )}
-                    >
-                      Cozy
-                    </button>
-                    <button
-                      onClick={() => setDensity("compact")}
-                      className={cx(
-                        "rounded-full px-2.5 py-1 font-medium",
-                        "transition",
-                        density === "compact"
-                          ? "bg-[#2f261f] text-white"
-                          : "hover:bg-[#f3e8dc]"
-                      )}
-                    >
-                      Compact
-                    </button>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-neutral-600">Per page</label>
-                    <select
-                      className="rounded-full border border-[#e1d4c6] bg-white/90 px-3 py-1.5 text-xs text-[#2f261f]"
-                      value={pageSize}
-                      onChange={(e) => {
-                        setPageSize(Number(e.target.value));
-                        setPage(1);
-                      }}
-                    >
-                      {PAGE_SIZE_OPTIONS.map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="relative overflow-x-auto" aria-busy={loading}>
-                {loading && rows.length > 0 && (
-                  <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-9 bg-gradient-to-b from-white/95 to-transparent" />
                 )}
 
-                <table className="min-w-full table-fixed text-[13px]">
-                  <thead className="sticky top-0 z-10 bg-[#faf7f3] text-[#7a6a5d] shadow-[0_1px_0_rgba(15,14,11,0.04)]">
-                    <tr className="text-left">
-                      <Th className="w-[140px]">Booking Code</Th>
-                      <Th>Date</Th>
-                      <Th>Experience</Th>
-                      <Th>Client</Th>
-                      <Th>Phone</Th>
-                      <Th className="text-right">People</Th>
-                      <Th className="text-right">Total</Th>
-                      <Th>Status</Th>
-                      <Th className="w-[130px] text-right">Actions</Th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-neutral-100">
-                    {loading && rows.length === 0 && (
-                      <SkeletonRows columns={9} rows={8} />
+                {/* Active filter chips */}
+                {!!activeFilterCount && (
+                  <div className="flex flex-wrap items-center gap-2 px-5 py-3 bg-white">
+                    {status && (
+                      <Chip onClear={() => clearChip("status")}>
+                        Status:{" "}
+                        <strong className="ml-1">{labelStatus(status)}</strong>
+                      </Chip>
                     )}
-
-                    {!loading && rows.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={9}
-                          className="p-10 text-center text-neutral-600"
-                        >
-                          <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-neutral-100">
-                            <SearchIcon className="h-5 w-5 text-neutral-500" />
-                          </div>
-                          <p className="font-medium text-neutral-800">
-                            No bookings found.
-                          </p>
-                          <p className="mt-1 text-sm text-neutral-500">
-                            Try adjusting your search or filters.
-                          </p>
-                          <div className="mt-3">
-                            <button
-                              onClick={resetFilters}
-                              className="inline-flex items-center gap-2 rounded-full border border-[#e1d4c6] bg-white px-4 py-2 text-sm shadow-sm hover:bg-[#f7efe7]"
-                            >
-                              <FilterIcon className="h-4 w-4" /> Clear filters
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                    {experienceId && (
+                      <Chip onClear={() => clearChip("experience")}>
+                        Exp:{" "}
+                        <strong className="ml-1">
+                          {experiences.find(
+                            (x) => String(x.id) === String(experienceId),
+                          )?.name || experienceId}
+                        </strong>
+                      </Chip>
                     )}
-
-                    {rows.map((r) => (
-                      <tr
-                        key={r.id}
-                        className={cx(
-                          "group cursor-pointer transition-colors",
-                          "odd:bg-[#fbf8f4]",
-                          r.status === "cancelled"
-                            ? "opacity-70"
-                            : "hover:bg-[#f3ece4]"
-                        )}
-                      >
-                        <Td className={pad + " font-mono"}>
-                          <div className="flex items-center gap-2">
-                            <span className="truncate" title={r.code || r.id}>
-                              {r.code || r.id}
-                            </span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                copy(r.code || r.id, "Booking code copied");
-                              }}
-                              className="invisible rounded p-1 hover:bg-neutral-100 group-hover:visible"
-                              title="Copy booking code"
-                              aria-label="Copy booking code"
-                            >
-                              <Copy className="h-3.5 w-3.5 text-neutral-500" />
-                            </button>
-                          </div>
-                        </Td>
-
-                        <Td className={pad}>
-                          {fmtDate(r.startTime || r.date)}
-                        </Td>
-
-                        <Td className={pad + " max-w-[260px] truncate"}>
-                          <div className="flex items-center gap-2 truncate">
-                            <span
-                              className="truncate"
-                              title={safeExperienceName(r)}
-                            >
-                              {safeExperienceName(r)}
-                            </span>
-                            {isPrivateBooking(r) && (
-                              <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                                Private
-                              </span>
-                            )}
-                          </div>
-                        </Td>
-
-                        <Td className={pad}>
-                          <div className="flex flex-col">
-                            <span className="font-medium text-neutral-900">
-                              {r.guestName}
-                            </span>
-                            <a
-                              href={
-                                r.guestEmail
-                                  ? `mailto:${r.guestEmail}`
-                                  : undefined
-                              }
-                              onClick={(e) =>
-                                !r.guestEmail && e.preventDefault()
-                              }
-                              className={cx(
-                                "text-[12px] text-neutral-500 hover:text-neutral-700 hover:underline",
-                                !r.guestEmail && "pointer-events-none"
-                              )}
-                              onMouseDown={(e) => e.stopPropagation()}
-                            >
-                              {r.guestEmail || "—"}
-                            </a>
-                          </div>
-                        </Td>
-
-                        <Td className={pad + " whitespace-nowrap"}>
-                          <a
-                            href={
-                              r.guestPhone ? `tel:${r.guestPhone}` : undefined
-                            }
-                            onClick={(e) => !r.guestPhone && e.preventDefault()}
-                            className={cx(
-                              "text-[13px] hover:text-neutral-800 hover:underline",
-                              !r.guestPhone &&
-                                "pointer-events-none text-neutral-500"
-                            )}
-                            onMouseDown={(e) => e.stopPropagation()}
-                          >
-                            {r.guestPhone || "—"}
-                          </a>
-                        </Td>
-
-                        <Td className={pad + " text-right"}>
-                          {(() => {
-                            const a =
-                              typeof r.adults === "number" ? r.adults : null;
-                            const k =
-                              typeof r.kids === "number" ? r.kids : null;
-                            if (a !== null || k !== null) {
-                              return (
-                                <span className="inline-flex items-center justify-end gap-1 tabular-nums">
-                                  {a ?? 0}
-                                  {k !== null ? (
-                                    <span className="text-neutral-500">
-                                      + {k}
-                                    </span>
-                                  ) : null}
-                                </span>
-                              );
-                            }
-                            const total =
-                              typeof r.numberOfPeople === "number"
-                                ? r.numberOfPeople
-                                : 0;
-                            return (
-                              <span className="inline-flex items-center justify-end tabular-nums">
-                                {total}
-                              </span>
-                            );
-                          })()}
-                        </Td>
-
-                        <Td className={pad + " text-right tabular-nums"}>
-                          {fmtMoney(rowTotal(r))}
-                        </Td>
-
-                        <Td className={pad}>
-                          <StatusBadge status={r.status} />
-                        </Td>
-
-                        <Td className={pad}>
-                          <div className="flex items-center justify-end gap-1">
-                            <IconButton
-                              onClick={() =>
-                                window.open(`/admin/bookings/${r.id}`, "_self")
-                              }
-                              title="View"
-                              ariaLabel="View booking"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </IconButton>
-
-                            {r.status !== "cancelled" &&
-                              !isPrivateBooking(r) && (
-                                <IconButton
-                                  disabled={isPrivateBooking(r)}
-                                  onClick={() => openReschedule(r)}
-                                  title="Reschedule"
-                                  ariaLabel="Reschedule booking"
-                                  tone="amber"
-                                >
-                                  <CalendarClock className="h-4 w-4" />
-                                </IconButton>
-                              )}
-
-                            {r.status !== "cancelled" && (
-                              <IconButton
-                                onClick={() => openCancel(r)}
-                                title="Cancel"
-                                ariaLabel="Cancel booking"
-                                tone="red"
-                              >
-                                <XCircleIcon className="h-4 w-4" />
-                              </IconButton>
-                            )}
-
-                            {r.status === "cancelled" && (
-                              <IconButton
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openDelete(r);
-                                }}
-                                title="Delete"
-                                aria-label="Delete booking"
-                                className={cx(
-                                  "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm",
-                                  "border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
-                                  deletingId === r.id &&
-                                    "cursor-wait opacity-60"
-                                )}
-                              >
-                                {deletingId === r.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-4 w-4" />
-                                )}
-                                Delete
-                              </IconButton>
-                            )}
-                          </div>
-                        </Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* footer */}
-              <div className="flex flex-col gap-3 border-t border-[#eee1d3] bg-[#faf7f3] p-3 md:flex-row md:items-center md:justify-between">
-                <div
-                  className="text-xs font-medium uppercase tracking-[0.18em] text-[#7b6a5f]"
-                  aria-live="polite"
-                >
-                  {error ? (
-                    <span className="text-red-600">{error}</span>
-                  ) : (
-                    <span>
-                      Showing{" "}
-                      <span className="font-semibold text-[#43352a]">
-                        {rows.length ? (page - 1) * pageSize + 1 : 0}–
-                        {Math.min(page * pageSize, total)}
-                      </span>{" "}
-                      of {total}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className={cx(
-                      "rounded-full border border-[#e1d4c6] px-3 py-1.5 text-sm",
-                      page <= 1
-                        ? "cursor-not-allowed opacity-40"
-                        : "bg-white/80 text-[#4a3a2d] hover:bg-[#f3e8dc]"
+                    {from && (
+                      <Chip onClear={() => clearChip("from")}>
+                        From: <strong className="ml-1">{from}</strong>
+                      </Chip>
                     )}
-                  >
-                    Previous
-                  </button>
-                  <span className="text-sm text-[#4a3a2d]">
-                    Page <span className="font-semibold">{page}</span> /{" "}
-                    {totalPages}
-                  </span>
-                  <button
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className={cx(
-                      "rounded-full border border-[#e1d4c6] px-3 py-1.5 text-sm",
-                      page >= totalPages
-                        ? "cursor-not-allowed opacity-40"
-                        : "bg-white/80 text-[#4a3a2d] hover:bg-[#f3e8dc]"
+                    {to && (
+                      <Chip onClear={() => clearChip("to")}>
+                        To: <strong className="ml-1">{to}</strong>
+                      </Chip>
                     )}
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-
-              {loading && rows.length > 0 && (
-                <div className="absolute inset-0 z-10 grid place-items-center bg-white/50 backdrop-blur-sm">
-                  <div className="inline-flex items-center gap-2 rounded-lg border border-[#e1d4c6] bg-white px-3 py-2 text-sm text-[#4a3a2d] shadow-sm">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading…
                   </div>
-                </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Table Card */}
+        <div className="rounded-2xl border border-[#e3ddd2] bg-white shadow-sm overflow-hidden flex flex-col">
+          {/* Table Header Controls */}
+          <div className="flex flex-col gap-3 border-b border-[#e3ddd2] bg-[#fdfcfb] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div
+              className="text-xs font-semibold uppercase tracking-wider text-[#7a6a5f]"
+              aria-live="polite"
+            >
+              {error ? (
+                <span className="text-red-600 flex items-center gap-1.5">
+                  <AlertTriangle size={14} /> {error}
+                </span>
+              ) : (
+                <span>
+                  Showing{" "}
+                  <span className="text-[#3f3127]">
+                    {rows.length ? (page - 1) * pageSize + 1 : 0} –{" "}
+                    {Math.min(page * pageSize, total)}
+                  </span>{" "}
+                  of {total}
+                </span>
               )}
             </div>
 
-            {/* Cancel modal */}
-            {showCancel && (
-              <Modal
-                onClose={() => setShowCancel(false)}
-                title="Cancel Booking"
-              >
-                <div className="space-y-3">
-                  {selected && (
-                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                      The booking{" "}
-                      <span className="font-mono">
-                        {selected.code || selected.id}
-                      </span>{" "}
-                      for
-                      <span className="font-semibold">
-                        {" "}
-                        {selected.guestName}
-                      </span>{" "}
-                      on {fmtDate(selected.startTime)} will be cancelled.
-                    </div>
+            <div className="flex items-center gap-4">
+              <div className="hidden sm:flex items-center gap-1 rounded-lg border border-[#e3ddd2] bg-[#fdfcfb] p-1">
+                <button
+                  onClick={() => setDensity("cozy")}
+                  className={cx(
+                    "rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors",
+                    density === "cozy"
+                      ? "bg-[#3f3127] text-white shadow-sm"
+                      : "text-[#7a6a5f] hover:bg-[#f5f1ea]",
                   )}
-                  <p className="text-sm text-neutral-600">
-                    Are you sure you want to cancel? This action cannot be
-                    undone.
-                  </p>
-                  <label className="block text-sm">
-                    <span className="text-neutral-700">Reason (optional)</span>
-                    <textarea
-                      value={cancelReason}
-                      onChange={(e) => setCancelReason(e.target.value)}
-                      className="mt-1 w-full rounded-xl border p-2 text-sm"
-                      rows={3}
-                      placeholder="e.g. customer unable to attend"
-                    />
-                  </label>
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      className="rounded-xl border px-3 py-2 text-sm"
-                      onClick={() => setShowCancel(false)}
-                    >
-                      Close
-                    </button>
-                    <button
-                      className="rounded-xl border bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700"
-                      onClick={submitCancel}
-                    >
-                      Cancel booking
-                    </button>
-                  </div>
+                >
+                  Cozy
+                </button>
+                <button
+                  onClick={() => setDensity("compact")}
+                  className={cx(
+                    "rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors",
+                    density === "compact"
+                      ? "bg-[#3f3127] text-white shadow-sm"
+                      : "text-[#7a6a5f] hover:bg-[#f5f1ea]",
+                  )}
+                >
+                  Compact
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-[#7a6a5f]">
+                  Per page:
+                </label>
+                <select
+                  className="rounded-lg border border-[#e3ddd2] bg-white px-2 py-1.5 text-xs text-[#3f3127] font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30"
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                >
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative overflow-x-auto min-h-[400px]">
+            {loading && rows.length > 0 && (
+              <div className="absolute inset-0 z-20 bg-white/50 backdrop-blur-[2px] flex items-start justify-center pt-20">
+                <div className="bg-white border border-[#e3ddd2] rounded-full px-4 py-2 shadow-lg flex items-center gap-2 text-sm font-medium text-[#3f3127]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[#8b6f47]" />{" "}
+                  Updating...
                 </div>
-              </Modal>
+              </div>
             )}
 
-            {showDelete && selected && (
-              <Modal
-                onClose={() => setShowDelete(false)}
-                title="Delete Booking"
-              >
-                <div className="space-y-4">
-                  {/* Warning banner */}
-                  <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                    This will permanently delete booking{" "}
-                    <span className="font-mono">
-                      {selected.code || selected.id}
-                    </span>{" "}
-                    for{" "}
-                    <span className="font-semibold">
-                      {selected.guestName || "-"}
-                    </span>
-                    {selected.startTime ? (
-                      <> on {fmtDate(selected.startTime)}</>
-                    ) : null}
-                    . This action cannot be undone.
-                  </div>
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="sticky top-0 z-10 bg-[#fdfaf5] text-[#a09084] border-b border-[#e3ddd2] shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+                <tr>
+                  <Th className="pl-6 w-[130px]">Code</Th>
+                  <Th>Date & Time</Th>
+                  <Th>Experience</Th>
+                  <Th>Client Details</Th>
+                  <Th className="text-center">Guests</Th>
+                  <Th className="text-right">Total</Th>
+                  <Th>Status</Th>
+                  <Th className="text-right pr-6 w-[160px]">Actions</Th>
+                </tr>
+              </thead>
 
-                  {/* Extra option for non-cancelled */}
-                  {selected.status !== "cancelled" && (
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={forceDelete}
-                        onChange={(e) => setForceDelete(e.target.checked)}
-                      />
-                      <span>
-                        Force delete (booking is{" "}
-                        <strong>{selected.status}</strong>)
-                      </span>
-                    </label>
-                  )}
+              <tbody className="divide-y divide-[#e3ddd2]/60">
+                {loading && rows.length === 0 && (
+                  <SkeletonRows columns={8} rows={10} />
+                )}
 
-                  {/* Error */}
-                  {!!deleteError && (
-                    <div className="rounded-xl border border-red-200 bg-red-50 p-2 text-sm text-red-700">
-                      {deleteError}
-                    </div>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      className="rounded-xl border px-3 py-2 text-sm"
-                      onClick={() => setShowDelete(false)}
-                      disabled={deleting}
+                {!loading && rows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-6 py-16 text-center bg-[#fdfcfb]"
                     >
-                      Close
-                    </button>
-                    <button
-                      className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-60"
-                      onClick={submitDelete}
-                      disabled={deleting}
-                    >
-                      {deleting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                      {deleting ? "Deleting…" : "Delete booking"}
-                    </button>
-                  </div>
-                </div>
-              </Modal>
-            )}
-
-            {/* Reschedule modal */}
-            {showReschedule && (
-              <Modal
-                onClose={() => setShowReschedule(false)}
-                title="Reschedule Booking"
-              >
-                <div className="space-y-3">
-                  {selected && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                      Choose a new slot for booking{" "}
-                      <span className="font-mono">
-                        {selected.code || selected.id}
-                      </span>{" "}
-                      of
-                      <span className="font-semibold">
-                        {" "}
-                        {selected.guestName}
-                      </span>{" "}
-                      (current: {fmtDate(selected.startTime)}).
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div>
-                      <label className="text-xs text-neutral-600">From</label>
-                      <input
-                        type="date"
-                        value={slotFrom}
-                        onChange={(e) => setSlotFrom(e.target.value)}
-                        className="mt-1 w-full rounded-xl border p-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-neutral-600">To</label>
-                      <input
-                        type="date"
-                        value={slotTo}
-                        onChange={(e) => setSlotTo(e.target.value)}
-                        className="mt-1 w-full rounded-xl border p-2 text-sm"
-                      />
-                    </div>
-                    <div className="flex items-end">
+                      <div className="w-16 h-16 bg-[#fdfaf5] border border-[#e3ddd2] rounded-full flex items-center justify-center mx-auto mb-4 text-[#c5b9aa]">
+                        <SearchIcon size={24} />
+                      </div>
+                      <h3 className="text-lg font-serif text-[#3f3127] mb-1">
+                        No bookings found
+                      </h3>
+                      <p className="text-sm text-[#7a6a5f] mb-6">
+                        Try adjusting your filters or search query.
+                      </p>
                       <button
-                        onClick={() =>
-                          loadSlots(selected?.experienceId, slotFrom, slotTo)
-                        }
-                        className="w-full rounded-xl border px-3 py-2 text-sm sm:w-auto"
+                        onClick={resetFilters}
+                        className="inline-flex items-center gap-2 rounded-full border border-[#e3ddd2] bg-white px-5 py-2.5 text-sm font-medium text-[#3f3127] shadow-sm hover:bg-[#fdfaf5] transition-colors"
                       >
-                        Load available slots
+                        <FilterIcon className="h-4 w-4" /> Clear all filters
                       </button>
-                    </div>
-                  </div>
+                    </td>
+                  </tr>
+                )}
 
-                  <label className="block text-sm">
-                    <span className="text-neutral-700">New slot</span>
-                    <select
-                      value={targetSlotId}
-                      onChange={(e) => setTargetSlotId(e.target.value)}
-                      className="mt-1 w-full rounded-xl border p-2 text-sm"
-                    >
-                      <option value="">— Select —</option>
-                      {slotLoading ? (
-                        <option value="" disabled>
-                          Loading…
-                        </option>
-                      ) : (
-                        slots.map((s) => (
-                          <option
-                            key={s.id}
-                            value={s.id}
-                            disabled={s.available <= 0}
-                          >
-                            {labelSlot(s)}
-                          </option>
-                        ))
+                {rows.map((r) => (
+                  <tr
+                    key={r.id}
+                    onClick={() =>
+                      window.open(`/admin/bookings/${r.id}`, "_self")
+                    }
+                    className={cx(
+                      "group cursor-pointer transition-colors even:bg-[#fcfbf9] hover:bg-[#fdfaf5]",
+                      r.status === "cancelled" && "opacity-60",
+                    )}
+                  >
+                    <Td
+                      className={cx(
+                        pad,
+                        "pl-6 font-mono text-xs font-semibold text-[#5a4a3f]",
                       )}
-                    </select>
-                  </label>
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="truncate" title={r.code || r.id}>
+                          {r.code || r.id}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copy(r.code || r.id, "Booking code copied");
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-[#e3ddd2] text-[#a09084] transition-all"
+                          title="Copy Code"
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
+                    </Td>
 
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      className="rounded-xl border px-3 py-2 text-sm"
-                      onClick={() => setShowReschedule(false)}
+                    <Td className={pad}>
+                      <span className="text-[#3f3127] font-medium">
+                        {fmtDate(r.startTime || r.date)}
+                      </span>
+                    </Td>
+
+                    <Td className={pad + " max-w-[240px] truncate"}>
+                      <div className="flex items-center gap-2 truncate">
+                        <span
+                          className="truncate font-medium text-[#3f3127]"
+                          title={safeExperienceName(r)}
+                        >
+                          {safeExperienceName(r)}
+                        </span>
+                        {isPrivateBooking(r) && (
+                          <span className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">
+                            Private
+                          </span>
+                        )}
+                      </div>
+                    </Td>
+
+                    <Td className={pad}>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-semibold text-[#3f3127]">
+                          {r.guestName}
+                        </span>
+                        <div className="flex items-center gap-2 text-xs text-[#7a6a5f]">
+                          {r.guestEmail && (
+                            <a
+                              href={`mailto:${r.guestEmail}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="hover:text-[#8b6f47] hover:underline truncate max-w-[120px]"
+                            >
+                              {r.guestEmail}
+                            </a>
+                          )}
+                          {r.guestPhone && (
+                            <>
+                              <span className="text-[#d8cfc3]">•</span>
+                              <a
+                                href={`tel:${r.guestPhone}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:text-[#8b6f47] hover:underline truncate"
+                              >
+                                {r.guestPhone}
+                              </a>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </Td>
+
+                    <Td className={pad + " text-center tabular-nums"}>
+                      {(() => {
+                        const a =
+                          typeof r.adults === "number" ? r.adults : null;
+                        const k = typeof r.kids === "number" ? r.kids : null;
+                        if (a !== null || k !== null) {
+                          return (
+                            <div className="inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded-md bg-[#fdfcfb] border border-[#e3ddd2] text-xs font-semibold text-[#3f3127]">
+                              <Users size={12} className="text-[#a09084]" />
+                              {a ?? 0}{" "}
+                              {k !== null ? (
+                                <span className="text-[#a09084]">+ {k}</span>
+                              ) : null}
+                            </div>
+                          );
+                        }
+                        const total =
+                          typeof r.numberOfPeople === "number"
+                            ? r.numberOfPeople
+                            : 0;
+                        return (
+                          <span className="font-medium text-[#3f3127]">
+                            {total}
+                          </span>
+                        );
+                      })()}
+                    </Td>
+
+                    <Td
+                      className={
+                        pad +
+                        " text-right tabular-nums font-semibold text-[#3f3127]"
+                      }
                     >
-                      Close
-                    </button>
-                    <button
-                      className="rounded-xl border bg-amber-600 px-3 py-2 text-sm text-white hover:bg-amber-700"
-                      onClick={submitReschedule}
-                    >
-                      Reschedule booking
-                    </button>
-                  </div>
-                </div>
-              </Modal>
-            )}
+                      {fmtMoney(rowTotal(r))}
+                    </Td>
+
+                    <Td className={pad}>
+                      <StatusBadge status={r.status} />
+                    </Td>
+
+                    <Td className={cx(pad, "pr-6 text-right")}>
+                      <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <IconButton
+                          onClick={() =>
+                            window.open(`/admin/bookings/${r.id}`, "_self")
+                          }
+                          title="View Booking"
+                        >
+                          <Eye size={16} />
+                        </IconButton>
+
+                        {r.status !== "cancelled" && !isPrivateBooking(r) && (
+                          <IconButton
+                            onClick={() => openReschedule(r)}
+                            title="Reschedule"
+                            tone="amber"
+                          >
+                            <CalendarClock size={16} />
+                          </IconButton>
+                        )}
+
+                        {r.status !== "cancelled" && (
+                          <IconButton
+                            onClick={() => openCancel(r)}
+                            title="Cancel Booking"
+                            tone="red"
+                          >
+                            <XCircleIcon size={16} />
+                          </IconButton>
+                        )}
+
+                        {r.status === "cancelled" && (
+                          <IconButton
+                            onClick={() => openDelete(r)}
+                            title="Permanently Delete"
+                            tone="red"
+                            className={
+                              deletingId === r.id
+                                ? "opacity-50 cursor-wait"
+                                : ""
+                            }
+                          >
+                            {deletingId === r.id ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={16} />
+                            )}
+                          </IconButton>
+                        )}
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Table Pagination Footer */}
+          <div className="flex flex-col gap-3 border-t border-[#e3ddd2] bg-[#fdfcfb] p-4 md:flex-row md:items-center md:justify-between">
+            <div className="text-xs font-medium uppercase tracking-wider text-[#a09084]">
+              Page <strong className="text-[#3f3127] mx-1">{page}</strong> of{" "}
+              {totalPages}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-4 py-2 rounded-xl border border-[#e3ddd2] bg-white text-xs font-semibold text-[#3f3127] shadow-sm hover:bg-[#fdfaf5] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                Previous
+              </button>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="px-4 py-2 rounded-xl border border-[#e3ddd2] bg-white text-xs font-semibold text-[#3f3127] shadow-sm hover:bg-[#fdfaf5] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* --- MODALS --- */}
+
+        {showCancel && (
+          <Modal onClose={() => setShowCancel(false)} title="Cancel Booking">
+            <div className="space-y-5">
+              {selected && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 leading-relaxed">
+                  Booking{" "}
+                  <span className="font-mono font-bold">
+                    {selected.code || selected.id}
+                  </span>{" "}
+                  for <span className="font-bold">{selected.guestName}</span> on{" "}
+                  {fmtDate(selected.startTime)} will be cancelled.
+                </div>
+              )}
+              <p className="text-sm text-[#7a6a5f]">
+                Are you sure you want to cancel? This action cannot be undone.
+              </p>
+              <label className="block text-sm">
+                <span className="text-[#3f3127] font-semibold mb-1.5 block">
+                  Reason (Optional)
+                </span>
+                <textarea
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  className="w-full rounded-xl border border-[#e3ddd2] p-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/30 shadow-sm"
+                  rows={3}
+                  placeholder="e.g. customer requested cancellation via email"
+                />
+              </label>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  className="rounded-full border border-[#e3ddd2] px-6 py-2.5 text-sm font-semibold hover:bg-[#fdfaf5] transition-colors"
+                  onClick={() => setShowCancel(false)}
+                >
+                  Keep Booking
+                </button>
+                <button
+                  className="rounded-full bg-red-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-red-700 shadow-md transition-colors"
+                  onClick={submitCancel}
+                >
+                  Yes, Cancel
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {showDelete && selected && (
+          <Modal onClose={() => setShowDelete(false)} title="Delete Booking">
+            <div className="space-y-5">
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 leading-relaxed">
+                This will permanently delete booking{" "}
+                <span className="font-mono font-bold">
+                  {selected.code || selected.id}
+                </span>{" "}
+                for{" "}
+                <span className="font-bold">{selected.guestName || "-"}</span>.
+                This action is irreversible.
+              </div>
+
+              {selected.status !== "cancelled" && (
+                <label className="flex items-center gap-3 p-3 border border-[#e3ddd2] rounded-xl cursor-pointer hover:bg-[#fdfaf5]">
+                  <input
+                    type="checkbox"
+                    checked={forceDelete}
+                    onChange={(e) => setForceDelete(e.target.checked)}
+                    className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                  />
+                  <span className="text-sm text-[#3f3127]">
+                    Force delete (Currently{" "}
+                    <strong>{labelStatus(selected.status)}</strong>)
+                  </span>
+                </label>
+              )}
+
+              {!!deleteError && (
+                <div className="rounded-xl border border-red-200 bg-white p-3 text-sm text-red-600 font-medium flex items-center gap-2">
+                  <AlertTriangle size={16} /> {deleteError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  className="rounded-full border border-[#e3ddd2] px-6 py-2.5 text-sm font-semibold hover:bg-[#fdfaf5] transition-colors"
+                  onClick={() => setShowDelete(false)}
+                  disabled={deleting}
+                >
+                  Close
+                </button>
+                <button
+                  className="inline-flex items-center gap-2 rounded-full bg-red-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-red-700 shadow-md transition-colors disabled:opacity-60"
+                  onClick={submitDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                  {deleting ? "Deleting…" : "Delete Forever"}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {showReschedule && (
+          <Modal
+            onClose={() => setShowReschedule(false)}
+            title="Reschedule Booking"
+          >
+            <div className="space-y-5">
+              {selected && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 leading-relaxed">
+                  Moving booking{" "}
+                  <span className="font-mono font-bold">
+                    {selected.code || selected.id}
+                  </span>{" "}
+                  for <span className="font-bold">{selected.guestName}</span>.
+                  <br />
+                  <span className="text-amber-700/80">
+                    Current: {fmtDate(selected.startTime)}
+                  </span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-5 p-4 bg-[#fdfcfb] border border-[#e3ddd2] rounded-xl">
+                <div className="sm:col-span-2">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
+                    Look From
+                  </label>
+                  <input
+                    type="date"
+                    value={slotFrom}
+                    onChange={(e) => setSlotFrom(e.target.value)}
+                    className="w-full rounded-lg border border-[#e3ddd2] p-2 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 outline-none"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
+                    Look To
+                  </label>
+                  <input
+                    type="date"
+                    value={slotTo}
+                    onChange={(e) => setSlotTo(e.target.value)}
+                    className="w-full rounded-lg border border-[#e3ddd2] p-2 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 outline-none"
+                  />
+                </div>
+                <div className="sm:col-span-1 flex items-end">
+                  <button
+                    onClick={() =>
+                      loadSlots(selected?.experienceId, slotFrom, slotTo)
+                    }
+                    className="w-full rounded-lg bg-white border border-[#e3ddd2] p-2 text-sm font-semibold hover:bg-[#fdfaf5] shadow-sm"
+                  >
+                    <SearchIcon size={18} className="mx-auto text-[#8b6f47]" />
+                  </button>
+                </div>
+              </div>
+
+              <label className="block">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
+                  Select New Slot
+                </span>
+                <select
+                  value={targetSlotId}
+                  onChange={(e) => setTargetSlotId(e.target.value)}
+                  className="w-full rounded-xl border border-[#e3ddd2] p-3 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 outline-none shadow-sm bg-white"
+                >
+                  <option value="">— Select Available Slot —</option>
+                  {slotLoading ? (
+                    <option value="" disabled>
+                      Searching calendar…
+                    </option>
+                  ) : (
+                    slots.map((s) => (
+                      <option
+                        key={s.id}
+                        value={s.id}
+                        disabled={s.available <= 0}
+                      >
+                        {labelSlot(s)}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  className="rounded-full border border-[#e3ddd2] px-6 py-2.5 text-sm font-semibold hover:bg-[#fdfaf5] transition-colors"
+                  onClick={() => setShowReschedule(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-full bg-amber-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 shadow-md transition-colors"
+                  onClick={submitReschedule}
+                >
+                  Confirm Reschedule
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
       </div>
     </div>
   );
 }
 
 /* ---------------------------- Subcomponents ---------------------------- */
+
+function StatPill({ label, value, tone, icon }) {
+  const tones = {
+    green: "bg-emerald-50 border-emerald-100 text-emerald-900",
+    amber: "bg-amber-50 border-amber-100 text-amber-900",
+    blue: "bg-sky-50 border-sky-100 text-sky-900",
+    default: "bg-white border-[#e3ddd2] text-[#3f3127]",
+  };
+  const iconColors = {
+    green: "text-emerald-500",
+    amber: "text-amber-500",
+    blue: "text-sky-500",
+    default: "text-[#8b6f47]",
+  };
+
+  return (
+    <div
+      className={cx(
+        "rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between",
+        tones[tone] || tones.default,
+      )}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-bold uppercase tracking-widest opacity-70">
+          {label}
+        </span>
+        <div className={iconColors[tone] || iconColors.default}>{icon}</div>
+      </div>
+      <p className="text-3xl font-serif">{String(value)}</p>
+    </div>
+  );
+}
+
 function Th({ children, className = "" }) {
   return (
     <th
       className={cx(
-        "px-3 py-2 text-xs font-semibold uppercase tracking-wide",
-        className
+        "px-4 py-3.5 text-[10px] font-bold uppercase tracking-wider text-[#a09084]",
+        className,
       )}
     >
       {children}
     </th>
   );
 }
+
 function Td({ children, className = "" }) {
-  return (
-    <td
-      className={cx(
-        "px-3 align-middle text-[13px] text-neutral-800",
-        className
-      )}
-    >
-      {children}
-    </td>
-  );
+  return <td className={cx("px-4 align-middle", className)}>{children}</td>;
 }
-function IconButton({ children, onClick, title, ariaLabel, tone }) {
-  const toneClass =
-    tone === "red"
-      ? "hover:bg-red-50"
-      : tone === "amber"
-      ? "hover:bg-amber-50"
-      : "hover:bg-neutral-50";
+
+function IconButton({ children, onClick, title, tone, className }) {
+  const tones = {
+    red: "text-red-500 hover:bg-red-50 border-transparent hover:border-red-200",
+    amber:
+      "text-amber-500 hover:bg-amber-50 border-transparent hover:border-amber-200",
+    default:
+      "text-[#7a6a5f] hover:bg-[#fdfaf5] border-transparent hover:border-[#e3ddd2]",
+  };
   return (
     <button
       onClick={(e) => {
@@ -1475,25 +1422,25 @@ function IconButton({ children, onClick, title, ariaLabel, tone }) {
         onClick?.(e);
       }}
       className={cx(
-        "inline-flex items-center rounded-lg border p-1.5",
-        toneClass
+        "p-2 rounded-xl border transition-all duration-200",
+        tones[tone] || tones.default,
+        className,
       )}
       title={title}
-      aria-label={ariaLabel}
     >
       {children}
     </button>
   );
 }
 
-function SkeletonRows({ rows = 8, columns = 9 }) {
+function SkeletonRows({ rows = 8, columns = 8 }) {
   return (
     <>
       {Array.from({ length: rows }).map((_, i) => (
-        <tr key={i} className="animate-pulse">
+        <tr key={i} className="animate-pulse border-b border-[#e3ddd2]/40">
           {Array.from({ length: columns }).map((__, j) => (
-            <td key={j} className="px-3 py-3">
-              <div className="h-3 w-full max-w-[220px] rounded bg-neutral-100" />
+            <td key={j} className="px-4 py-4">
+              <div className="h-4 w-full max-w-[140px] rounded-md bg-[#e3ddd2]/40" />
             </td>
           ))}
         </tr>
@@ -1502,6 +1449,89 @@ function SkeletonRows({ rows = 8, columns = 9 }) {
   );
 }
 
+function StatusBadge({ status }) {
+  const k = normalizeStatus(status);
+  const cls =
+    {
+      confirmed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      pending: "bg-amber-50 text-amber-700 border-amber-200",
+      checked_in: "bg-indigo-50 text-indigo-700 border-indigo-200",
+      no_show: "bg-orange-50 text-orange-700 border-orange-200",
+      cancelled: "bg-red-50 text-red-700 border-red-200",
+    }[k] || "bg-gray-50 text-gray-700 border-gray-200";
+
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+        cls,
+      )}
+    >
+      {labelStatus(k)}
+    </span>
+  );
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="w-full max-w-lg rounded-[2rem] bg-white shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between border-b border-[#e3ddd2] px-6 py-5 bg-[#fdfcfb]">
+          <h3 className="text-xl font-serif text-[#2a1f18]">{title}</h3>
+          <button
+            className="rounded-full p-2 hover:bg-[#e3ddd2]/50 text-[#7a6a5f] transition-colors"
+            onClick={onClose}
+          >
+            <XIcon className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="p-6 sm:p-8">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ToolbarButton({ icon: Icon, children, onClick, title }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="inline-flex items-center gap-2 rounded-xl border border-[#e3ddd2] bg-white px-3.5 py-2 text-sm font-semibold text-[#5a4a3f] shadow-sm hover:bg-[#fdfaf5] transition-colors"
+    >
+      <Icon className="h-4 w-4 text-[#8b6f47]" />{" "}
+      <span className="hidden sm:inline">{children}</span>
+    </button>
+  );
+}
+
+function Chip({ children, onClear }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#e3ddd2] bg-[#fdfcfb] px-3 py-1.5 text-xs text-[#5a4a3f] shadow-sm">
+      {children}
+      <button
+        onClick={onClear}
+        className="ml-1 rounded-md p-0.5 text-[#a09084] hover:bg-[#e3ddd2] hover:text-[#3f3127] transition-colors"
+      >
+        <XIcon className="h-3 w-3" />
+      </button>
+    </span>
+  );
+}
+
+function QuickRange({ label, value, onClick }) {
+  return (
+    <button
+      onClick={() => onClick(value)}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-[#e3ddd2] bg-white px-3 py-1.5 text-xs font-semibold text-[#5a4a3f] shadow-sm hover:bg-[#fdfcfb] hover:text-[#8b6f47] transition-colors"
+    >
+      <SlidersHorizontal className="h-3 w-3 opacity-60" />
+      {label}
+    </button>
+  );
+}
+
+/* ------------------------------ Utils ------------------------------ */
+
 function isNum(v) {
   return typeof v === "number" && Number.isFinite(v);
 }
@@ -1509,20 +1539,18 @@ function rowTotal(r) {
   return isNum(r.totalPaidAmount)
     ? r.totalPaidAmount
     : isNum(r.totalAmount)
-    ? r.totalAmount
-    : isNum(r.money?.totalPaidAmount)
-    ? r.money.totalPaidAmount
-    : isNum(r.money?.totalAmount)
-    ? r.money.totalAmount
-    : null;
+      ? r.totalAmount
+      : isNum(r.money?.totalPaidAmount)
+        ? r.money.totalPaidAmount
+        : isNum(r.money?.totalAmount)
+          ? r.money.totalAmount
+          : null;
 }
 
 function normalizeStatus(s) {
   const v = String(s || "")
     .toLowerCase()
     .trim();
-
-  // canonical 5-state model
   if (
     [
       "confirmed",
@@ -1551,8 +1579,6 @@ function normalizeStatus(s) {
     return "no_show";
   if (["cancelled", "canceled", "refunded", "void"].includes(v))
     return "cancelled";
-
-  // unknown stays as-is (shown neutrally)
   return v || "";
 }
 
@@ -1569,107 +1595,8 @@ function labelStatus(status) {
   );
 }
 
-function StatusBadge({ status }) {
-  const k = normalizeStatus(status);
-  const cls =
-    {
-      confirmed: "bg-sky-100 text-sky-800 border-sky-200",
-      pending: "bg-amber-100 text-amber-900 border-amber-200",
-      checked_in: "bg-green-100 text-green-800 border-green-200",
-      no_show: "bg-rose-100 text-rose-800 border-rose-200",
-      cancelled: "bg-red-100 text-red-800 border-red-200",
-    }[k] || "bg-neutral-100 text-neutral-700 border-neutral-200";
-
-  return (
-    <span
-      className={cx(
-        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs",
-        cls
-      )}
-    >
-      {labelStatus(k)}
-    </span>
-  );
-}
-
-function Modal({ title, children, onClose }) {
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-      <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-base font-semibold text-neutral-800">{title}</h3>
-          <button
-            className="rounded-lg p-1 hover:bg-neutral-100"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <XIcon className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="p-4">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function ToolbarButton({ icon: Icon, children, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-50"
-    >
-      <Icon className="h-4 w-4" /> {children}
-    </button>
-  );
-}
-
-function Chip({ children, onClear }) {
-  return (
-    <span className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs">
-      {children}
-      <button
-        onClick={onClear}
-        className="rounded p-0.5 text-neutral-500 hover:bg-neutral-100"
-        aria-label="Clear filter"
-      >
-        <XIcon className="h-3.5 w-3.5" />
-      </button>
-    </span>
-  );
-}
-
-function QuickRange({ label, value, onClick }) {
-  return (
-    <button
-      onClick={() => onClick(value)}
-      className="inline-flex items-center gap-1 rounded-full border bg-white px-3 py-1 text-xs hover:bg-neutral-50"
-    >
-      <SlidersHorizontal className="h-3.5 w-3.5" />
-      {label}
-    </button>
-  );
-}
-
-function StatPill({ label, value, tone }) {
-  const toneMap = {
-    green: "bg-green-50 text-green-900 border-green-100",
-    amber: "bg-amber-50 text-amber-900 border-amber-100",
-    red: "bg-red-50 text-red-900 border-red-100",
-    default: "bg-neutral-50 text-neutral-900 border-neutral-100",
-  };
-  const klass = tone ? toneMap[tone] : toneMap.default;
-  return (
-    <div className={cx("rounded-2xl border p-3", klass)}>
-      <p className="text-xs/5 text-neutral-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{String(value)}</p>
-    </div>
-  );
-}
-
-/* ------------------------------ Utils ------------------------------ */
 function today() {
-  const d = new Date();
-  return toDateInput(d);
+  return toDateInput(new Date());
 }
 function plusDays(days) {
   const d = new Date();

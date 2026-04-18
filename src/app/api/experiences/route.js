@@ -39,7 +39,7 @@ export async function GET(req) {
           "whatToBring",
           "whyYoullLove",
           "images",
-          "mapPin",
+          "meetupPoints", // Replaced mapPin with meetupPoints to match the new schema
           "guestReviews",
           "frequency",
           "visibility",
@@ -47,7 +47,8 @@ export async function GET(req) {
           "updatedAt",
           "priceAdult",
           "priceKid",
-        ].join(",")
+          "cancellationPolicy", // Added the new policy field
+        ].join(","),
       )
       .eq("visibility", true)
       .order("createdAt", { ascending: asc })

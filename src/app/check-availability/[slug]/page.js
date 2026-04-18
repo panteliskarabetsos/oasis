@@ -184,7 +184,7 @@ export default function CheckAvailabilityPage() {
 
         const slotsRes = await fetch(
           `/api/public/schedule?experienceId=${exp.id}`,
-          { cache: "no-store" }
+          { cache: "no-store" },
         );
         const slots = (await slotsRes.json()) || [];
         const now = new Date();
@@ -222,7 +222,7 @@ export default function CheckAvailabilityPage() {
   // Calendar helpers
   const availableDates = useMemo(
     () => availableSlots.map((s) => parseISO(s.date)),
-    [availableSlots]
+    [availableSlots],
   );
 
   const slotsOnSelectedDay = useMemo(() => {
@@ -234,7 +234,7 @@ export default function CheckAvailabilityPage() {
 
   const selectedSlot = useMemo(
     () => availableSlots.find((s) => s.id === selectedSlotId) || null,
-    [availableSlots, selectedSlotId]
+    [availableSlots, selectedSlotId],
   );
 
   // Hard cap per booking
@@ -246,7 +246,7 @@ export default function CheckAvailabilityPage() {
         0,
         selectedSlot.available ??
           Number(selectedSlot.totalSlots || 0) -
-            Number(selectedSlot.bookedSlots || 0)
+            Number(selectedSlot.bookedSlots || 0),
       )
     : 0;
 
@@ -325,7 +325,7 @@ export default function CheckAvailabilityPage() {
 
   const tz = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone,
-    []
+    [],
   );
 
   const priceLiveId = useId();
@@ -447,7 +447,7 @@ export default function CheckAvailabilityPage() {
                         <span className="font-semibold">
                           {format(
                             new Date(globalSettings.bookingsPausedUntil),
-                            "PPpp"
+                            "PPpp",
                           )}
                         </span>
                         .
@@ -664,7 +664,7 @@ export default function CheckAvailabilityPage() {
                           : Math.max(
                               0,
                               (slot.totalSlots ?? 0) -
-                                (slot.booked ?? slot.bookedSlots ?? 0)
+                                (slot.booked ?? slot.bookedSlots ?? 0),
                             );
                       const isSelected = selectedSlotId === slot.id;
                       const isDisabled = pausedNow || available <= 0;
@@ -690,8 +690,8 @@ export default function CheckAvailabilityPage() {
                             isDisabled
                               ? "bg-[#f1ede7] border-[#ded6c9] text-[#b3aa9c] cursor-not-allowed"
                               : isSelected
-                              ? "bg-[#f5efe4] border-[#8b6f47]"
-                              : "bg-white border-[#e8e5df] hover:shadow-md"
+                                ? "bg-[#f5efe4] border-[#8b6f47]"
+                                : "bg-white border-[#e8e5df] hover:shadow-md"
                           }`}
                           aria-label={`Start time ${time}${
                             available > 0
@@ -746,7 +746,7 @@ export default function CheckAvailabilityPage() {
                         Math.max(
                           0,
                           (selectedSlot.totalSlots ?? 0) -
-                            (selectedSlot.available ?? 0)
+                            (selectedSlot.available ?? 0),
                         )
                       }
                     />
@@ -935,8 +935,8 @@ function Step({ label, active, done }) {
           done
             ? "bg-[#8b6f47] text-white"
             : active
-            ? "bg-[#efe9df] text-[#5a4a3f] border border-[#e1d8c9]"
-            : "bg-[#f2ede6] text-[#8b6f47]"
+              ? "bg-[#efe9df] text-[#5a4a3f] border border-[#e1d8c9]"
+              : "bg-[#f2ede6] text-[#8b6f47]"
         }`}
         aria-hidden
       >
@@ -955,8 +955,8 @@ function CapacityBar({ total = 0, booked = 0 }) {
     usedPct >= 80
       ? "bg-rose-500"
       : usedPct >= 50
-      ? "bg-amber-500"
-      : "bg-emerald-600";
+        ? "bg-amber-500"
+        : "bg-emerald-600";
 
   return (
     <div className="mt-3">

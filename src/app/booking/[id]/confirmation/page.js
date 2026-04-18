@@ -1,3 +1,4 @@
+// src/app/booking/[id]/confirmation/page.js
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -14,6 +15,10 @@ import {
   RefreshCw,
   Mail,
   Users,
+  Compass,
+  ArrowLeft,
+  Ticket,
+  FileText,
 } from "lucide-react";
 import { parseISO, format, addMinutes } from "date-fns";
 
@@ -46,7 +51,6 @@ export default function BookingConfirmationPage() {
     id ? `BK-${String(id).padStart(6, "0")}` : "";
 
   async function tryFetchBookingCode(id) {
-    // Try common public endpoints; gracefully fallback to BK-000123
     const endpoints = [`/api/bookings/${id}`, `/api/bookings/${id}/public`];
     for (const url of endpoints) {
       try {
@@ -62,9 +66,7 @@ export default function BookingConfirmationPage() {
           b?.ref ||
           "";
         if (code) return String(code);
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
     return deriveFallbackCode(id);
   }
@@ -96,7 +98,6 @@ export default function BookingConfirmationPage() {
 
   // ---------- Effects: confirm & poll ----------
 
-  // First confirmation attempt (with payment identifiers)
   useEffect(() => {
     const pi = qs.get("payment_intent");
     const sid = qs.get("session_id");
@@ -115,9 +116,8 @@ export default function BookingConfirmationPage() {
           session_id: sid || undefined,
         });
         if (!alive) return;
-        if (data?.error) {
+        if (data?.error)
           throw new Error(data?.error || "Could not finalize booking");
-        }
 
         if (data?.converted && data?.bookingId) {
           setConfirmedBookingId(data.bookingId);
@@ -135,7 +135,6 @@ export default function BookingConfirmationPage() {
     };
   }, [draftId, qs]);
 
-  // Poll draft until converted / finalized
   useEffect(() => {
     let alive = true;
     const controller = new AbortController();
@@ -168,7 +167,7 @@ export default function BookingConfirmationPage() {
             const code = await tryFetchBookingCode(convertedId);
             if (alive && code) setBookingCode(code);
           }
-          return; // stop polling
+          return;
         }
 
         if (status === "paid" && !freeConfirmTriedRef.current) {
@@ -197,39 +196,29 @@ export default function BookingConfirmationPage() {
       controller.abort();
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, tries]);
 
-  // Extra confirm with session_id (Stripe)
   useEffect(() => {
     if (!sessionId || !Number.isFinite(draftId) || draftId <= 0) return;
 
     (async () => {
       try {
         const res = await fetch(
-          `/api/bookings/drafts/${draftId}/confirm?session_id=${encodeURIComponent(
-            sessionId
-          )}`,
-          { method: "POST" }
+          `/api/bookings/drafts/${draftId}/confirm?session_id=${encodeURIComponent(sessionId)}`,
+          { method: "POST" },
         );
         const j = await res.json().catch(() => ({}));
 
-        if (j?.bookingId && !confirmedBookingId) {
+        if (j?.bookingId && !confirmedBookingId)
           setConfirmedBookingId(j.bookingId);
-        }
-        if (j?.bookingCode) {
-          setBookingCode(String(j.bookingCode));
-        } else if (j?.bookingId && !bookingCode) {
+        if (j?.bookingCode) setBookingCode(String(j.bookingCode));
+        else if (j?.bookingId && !bookingCode)
           setBookingCode(deriveFallbackCode(j.bookingId));
-        }
         if (j?.status) setBookingDbStatus(String(j.status));
 
         setTries((t) => t + 1);
-      } catch {
-        // polling continues
-      }
+      } catch {}
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, draftId]);
 
   // ---------- Derived state ----------
@@ -278,11 +267,11 @@ export default function BookingConfirmationPage() {
   const apiTotalMaybeFinal = Number.isFinite(Number(draft?.totalAmountFinal))
     ? Number(draft.totalAmountFinal)
     : Number.isFinite(Number(draft?.totalAmount))
-    ? Number(draft.totalAmount)
-    : subtotal;
+      ? Number(draft.totalAmount)
+      : subtotal;
 
   const discountAmount = Number(
-    apiPricing?.discountAmount ?? Math.max(0, subtotal - apiTotalMaybeFinal)
+    apiPricing?.discountAmount ?? Math.max(0, subtotal - apiTotalMaybeFinal),
   );
   const discountLabel =
     apiPricing?.discountLabel ||
@@ -301,71 +290,67 @@ export default function BookingConfirmationPage() {
     return `€${(Number(n) || 0).toFixed(2)}`;
   }
 
-  // Text + tone for main hero
   const uiState = useMemo(() => {
     if (converted) {
       return {
         tone: "success",
-        title: "You’re all set! 🎉",
+        title: "You're all set! 🎉",
         subtitle:
-          "Your booking is confirmed. We’ve emailed you all the details. Save your code and date below.",
+          "Your booking is confirmed. We've emailed you the details. Keep your booking code handy.",
         chipLabel: "Confirmed",
       };
     }
     if (paid) {
       return {
         tone: "info",
-        title: "Payment received — finishing up",
+        title: "Payment received",
         subtitle:
-          "Your payment went through. We’re finalizing your booking and will confirm via email shortly.",
-        chipLabel: "Payment complete",
+          "Your payment went through. We're finalizing your booking and will confirm via email shortly.",
+        chipLabel: "Finalizing",
       };
     }
     if (processing) {
       return {
         tone: "pending",
-        title: "Hold on while we confirm your booking",
+        title: "Confirming your booking...",
         subtitle:
-          "We’re still waiting for a final confirmation from the payment provider. This page updates automatically.",
+          "Waiting for final confirmation from the payment provider. This page will update automatically.",
         chipLabel: "Processing",
       };
     }
     return {
       tone: "neutral",
-      title: "We’re checking your booking status",
+      title: "Checking booking status",
       subtitle:
-        "We couldn’t fully verify your payment yet. If you’ve been charged, we’ll email you as soon as it clears.",
-      chipLabel: status || "Unknown status",
+        "We couldn't fully verify your payment yet. If you've been charged, we'll email you as soon as it clears.",
+      chipLabel: status || "Unknown",
     };
   }, [converted, paid, processing, status]);
 
   function statusChip() {
     if (uiState.tone === "success") {
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 text-xs">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          {uiState.chipLabel}
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+          <CheckCircle2 size={12} /> {uiState.chipLabel}
         </span>
       );
     }
     if (uiState.tone === "info") {
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-3 py-1 text-xs">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
-          {uiState.chipLabel}
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+          <Loader2 size={12} className="animate-spin" /> {uiState.chipLabel}
         </span>
       );
     }
     if (uiState.tone === "pending") {
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1 text-xs">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          {uiState.chipLabel}
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+          <Loader2 size={12} className="animate-spin" /> {uiState.chipLabel}
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 text-neutral-700 border border-neutral-200 px-3 py-1 text-xs">
+      <span className="inline-flex items-center gap-1.5 rounded-md bg-neutral-100 text-neutral-700 border border-neutral-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
         {uiState.chipLabel}
       </span>
     );
@@ -373,23 +358,21 @@ export default function BookingConfirmationPage() {
 
   // ---------- Actions ----------
 
+  function manualRefresh() {
+    setTries((t) => t + 1);
+  }
+
   async function handlePrint() {
     if (typeof window === "undefined") return;
-
     const idToUse = bookingId || draftId;
     if (!idToUse) return;
 
     try {
       setPrinting(true);
-
       const res = await fetch(`/api/bookings/${idToUse}/invoice`, {
         method: "GET",
       });
-
-      if (!res.ok) {
-        console.error("Failed to fetch invoice PDF");
-        return;
-      }
+      if (!res.ok) return;
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -404,7 +387,6 @@ export default function BookingConfirmationPage() {
         window.location.href = url;
       }
     } catch (err) {
-      console.error("Error printing invoice:", err);
     } finally {
       setPrinting(false);
     }
@@ -423,7 +405,7 @@ export default function BookingConfirmationPage() {
     const start = when.start;
     const end = addMinutes(
       start,
-      Number.isFinite(durationMinutes) ? durationMinutes : 90
+      Number.isFinite(durationMinutes) ? durationMinutes : 90,
     );
 
     const toICS = (d) =>
@@ -431,12 +413,8 @@ export default function BookingConfirmationPage() {
     const summary = experience?.name || "Booked Experience";
     const location = experience?.location || "";
     const description = bookingCode
-      ? `Booking ${bookingCode}${
-          converted ? " (Confirmed)" : paid ? " (Paid)" : ""
-        }`
-      : `Booking #${bookingId || draftId}${
-          converted ? " (Confirmed)" : paid ? " (Paid)" : ""
-        }`;
+      ? `Booking ${bookingCode}${converted ? " (Confirmed)" : paid ? " (Paid)" : ""}`
+      : `Booking #${bookingId || draftId}${converted ? " (Confirmed)" : paid ? " (Paid)" : ""}`;
 
     const ics = [
       "BEGIN:VCALENDAR",
@@ -467,386 +445,319 @@ export default function BookingConfirmationPage() {
     URL.revokeObjectURL(url);
   }
 
-  function manualRefresh() {
-    setTries((t) => t + 1);
-  }
-
-  // ---------- UI ----------
-
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#f4f1ec] via-[#f8f4ee] to-[#f2ece4] print:bg-white">
-      <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pb-16 pt-24">
-        {/* Top hero */}
-        <section className="rounded-3xl border border-[#e3ddd2] bg-white/80 shadow-sm backdrop-blur-sm p-5 sm:p-7 lg:p-8 relative overflow-hidden">
-          <div className="pointer-events-none absolute -top-24 -right-24 h-48 w-48 rounded-full bg-[#efe4d3] opacity-70 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-28 -left-20 h-52 w-52 rounded-full bg-[#f4e8d8] opacity-70 blur-3xl" />
+    <main className="min-h-screen bg-[#fcf9f4] font-sans pb-32 sm:pb-16 selection:bg-[#8b6f47]/20 relative overflow-hidden">
+      {/* Ambient background decoration */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute top-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full bg-[#8b6f47]/5 blur-[120px]" />
+        <div className="absolute bottom-[-10%] left-[-5%] w-[50%] h-[50%] rounded-full bg-[#e3ddd2]/30 blur-[100px]" />
+      </div>
 
-          <div className="relative z-10 flex flex-col gap-6 sm:gap-7 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-2xl border border-emerald-100 bg-emerald-50 flex items-center justify-center">
-                {converted ? (
-                  <CheckCircle2 className="h-7 w-7 text-emerald-600" />
-                ) : (
-                  <Loader2 className="h-7 w-7 text-amber-600 animate-spin" />
-                )}
+      {/* Top Nav */}
+      <div className="bg-white border-b border-[#e5e0d8] sticky top-0 z-30 shadow-sm print:hidden">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-center relative">
+          {/* We only show back button if it's NOT confirmed, otherwise they are done */}
+          {!converted && (
+            <button
+              onClick={() => router.back()}
+              className="absolute left-4 sm:left-6 top-1/2 -translate-y-1/2 inline-flex items-center gap-2 text-[#5a4a3f] text-sm border border-[#e0dcd4] rounded-full px-4 py-2 hover:bg-[#f4f1ec] transition-all"
+            >
+              <ArrowLeft size={16} /> Back
+            </button>
+          )}
+          <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#a09084] mx-auto">
+            <Ticket size={16} className="text-[#8b6f47]" />{" "}
+            {converted ? "Booking Complete" : "Processing"}
+          </span>
+        </div>
+      </div>
+
+      <div className="relative z-10 mx-auto max-w-5xl px-4 sm:px-6 pt-10 sm:pt-16">
+        {/* Top Hero */}
+        <section className="text-center mb-10 sm:mb-14">
+          <div className="mx-auto h-20 w-20 sm:h-24 sm:w-24 rounded-full flex items-center justify-center mb-6 shadow-sm border-[3px] border-white relative">
+            <div className="absolute inset-0 rounded-full bg-white opacity-50 blur-md -z-10" />
+            {converted ? (
+              <div className="w-full h-full rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                <CheckCircle2 size={40} />
               </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.22em] text-[#9a8460] mb-1.5">
-                  Booking confirmation
-                </p>
-                <h1 className="text-2xl sm:text-3xl font-serif font-semibold text-[#3e332a]">
-                  {uiState.title}
-                </h1>
-                <p className="mt-2 text-sm sm:text-[15px] leading-relaxed text-[#6c5b4c] max-w-xl">
-                  {uiState.subtitle}
-                </p>
-
-                {((!converted && (processing || sessionId)) || error) && (
-                  <div
-                    className="mt-4 flex flex-col gap-3 rounded-2xl border border-[#efe3d1] bg-[#fdf7ef] px-3.5 py-3 text-xs text-[#6c5b4c]"
-                    role="status"
-                  >
-                    <div className="flex items-start gap-2">
-                      <Info size={14} className="mt-0.5 text-[#b17c2a]" />
-                      <p className="leading-relaxed">
-                        {error
-                          ? error
-                          : "If this takes longer than expected, check your email for confirmation. If you can’t find it, reach out and we’ll take a look."}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={manualRefresh}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-[#d2c4ac] bg-white px-3 py-1.5 text-[11px] font-medium text-[#4b3f34] hover:bg-[#faf4eb] transition"
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Refresh status
-                      </button>
-                      <a
-                        href="mailto:info@example.com?subject=Booking%20question"
-                        className="inline-flex items-center gap-1.5 rounded-full border border-transparent bg-[#f0e3cf] px-3 py-1.5 text-[11px] font-medium text-[#4b3f34] hover:bg-[#e8d7c0] transition"
-                      >
-                        <Mail className="h-3.5 w-3.5" />
-                        Contact support
-                      </a>
-                    </div>
-                  </div>
-                )}
+            ) : (
+              <div className="w-full h-full rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+                <Loader2 size={40} className="animate-spin" />
               </div>
-            </div>
+            )}
+          </div>
 
-            {/* Right side: reference + status */}
-            <div className="flex flex-col items-stretch gap-3 sm:max-w-xs lg:items-end">
-              <div className="flex justify-between items-center lg:justify-end gap-3">
-                <div className="hidden sm:block">{statusChip()}</div>
-                <div className="sm:hidden">{statusChip()}</div>
-              </div>
+          <h1 className="text-3xl sm:text-5xl font-serif text-[#3a2f28] mb-4">
+            {uiState.title}
+          </h1>
+          <p className="text-[#7a6a5f] max-w-lg mx-auto text-sm sm:text-base leading-relaxed">
+            {uiState.subtitle}
+          </p>
 
-              <div className="rounded-2xl border border-[#e3ddd2] bg-white/80 px-4 py-3.5 text-xs text-[#645649] shadow-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.18em] text-[#a18a65]">
-                      {converted ? "Booking code" : "Reference"}
-                    </div>
-                    <div className="mt-1 font-mono text-[13px] text-[#3f342b] break-all">
-                      {referenceToShow}
-                    </div>
+          {((!converted && (processing || sessionId)) || error) && (
+            <div className="mt-8 max-w-md mx-auto text-left rounded-2xl border border-amber-200 bg-amber-50/80 px-5 py-4 text-sm text-amber-900 shadow-sm backdrop-blur-sm">
+              <div className="flex items-start gap-3">
+                <Info size={20} className="shrink-0 mt-0.5 text-amber-600" />
+                <div>
+                  <p className="font-semibold mb-1">Status Update</p>
+                  <p className="text-xs leading-relaxed opacity-90 mb-3">
+                    {error
+                      ? error
+                      : "If this takes longer than expected, check your email for confirmation. If you can't find it, reach out and we'll take a look."}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={manualRefresh}
+                      className="text-[10px] font-bold uppercase tracking-wider bg-white border border-amber-200 px-3 py-1.5 rounded-md hover:bg-amber-100 transition-colors flex items-center gap-1.5"
+                    >
+                      <RefreshCw size={12} /> Refresh Page
+                    </button>
                   </div>
                 </div>
-                {when?.start && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[#7c6a59]">
-                    <span className="inline-flex items-center gap-1.5">
-                      <CalendarDays className="h-3.5 w-3.5 text-[#8b6f47]" />
-                      <span>{when.dateLabel}</span>
-                    </span>
-                    <span className="text-[#d2c5b5]">•</span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Clock className="h-3.5 w-3.5 text-[#8b6f47]" />
-                      <span>{when.timeLabel}</span>
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
-          </div>
+          )}
         </section>
 
-        {/* Main content */}
+        {/* Main Content */}
         {loading ? (
-          <div className="mt-8 rounded-2xl border border-[#e6dfd4] bg-white p-6 sm:p-7 shadow-sm flex items-center gap-3 text-[#5a4a3f]">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <div className="text-sm">
-              Loading your booking details…
-              <span className="block text-xs text-[#8a7c70] mt-0.5">
-                This usually only takes a moment.
-              </span>
-            </div>
+          <div className="flex flex-col items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-[#8b6f47] mb-4" />
+            <p className="text-[#7a6a5f] text-sm">Loading booking details...</p>
           </div>
         ) : !draft ? (
-          <div className="mt-8 rounded-2xl border border-[#e6dfd4] bg-white p-6 sm:p-7 shadow-sm text-[#5a4a3f]">
-            Booking not found.
+          <div className="text-center py-20 rounded-[2rem] border border-[#e0dcd4] bg-white shadow-sm">
+            <p className="text-[#7a6a5f] text-lg">Booking not found.</p>
           </div>
         ) : (
-          <div className="mt-8 grid grid-cols-1 lg:grid-cols-[minmax(0,2.1fr)_minmax(0,1fr)] gap-7 lg:gap-8">
-            {/* Left column */}
-            <div className="space-y-6">
-              {/* Experience */}
-              <section className="rounded-2xl border border-[#e6dfd4] bg-white p-6 sm:p-7 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <h2 className="text-[15px] sm:text-base font-semibold text-[#3f342b]">
-                      Your experience
-                    </h2>
-                    <p className="mt-1 text-xs text-[#8a7c70]">
-                      Save these details for check-in and arrival.
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
+            {/* Left: Digital Ticket (7 cols on Desktop) */}
+            <section className="lg:col-span-7 space-y-6">
+              <div className="rounded-[2rem] border border-[#e0dcd4] bg-white shadow-sm overflow-hidden flex flex-col h-full relative">
+                <div className="absolute top-0 left-0 w-1.5 h-full bg-[#8b6f47]" />
+
+                <div className="px-6 py-5 border-b border-[#e0dcd4] bg-[#fdfaf5] flex items-center justify-between pl-8">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-[#a09084] flex items-center gap-2">
+                    <FileText size={16} className="text-[#8b6f47]" /> Booking
+                    Details
+                  </h3>
+                  {statusChip()}
+                </div>
+
+                <div className="p-6 sm:p-8 pl-8">
+                  {/* Reference Code Prominent */}
+                  <div className="mb-8 pb-8 border-b border-[#e0dcd4] text-center sm:text-left">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-2">
+                      {converted ? "Booking Reference" : "Draft Reference"}
+                    </p>
+                    <p className="text-4xl font-mono text-[#3a2f28] tracking-tight bg-[#fdfaf5] border border-[#e0dcd4] inline-block px-4 py-2 rounded-xl shadow-inner select-all">
+                      {referenceToShow}
                     </p>
                   </div>
-                  <div className="sm:block hidden">{statusChip()}</div>
-                  <div className="sm:hidden block">{statusChip()}</div>
-                </div>
 
-                <div className="mt-4 border-t border-[#f0ebe3] pt-4 flex flex-col gap-3 text-sm text-[#4b3f34]">
-                  {experience?.name && (
-                    <div className="flex items-start gap-2">
-                      <div className="mt-0.5 h-7 w-7 rounded-xl bg-[#f5ede0] flex items-center justify-center">
-                        <Users className="h-4 w-4 text-[#8b6f47]" />
-                      </div>
+                  <h2 className="text-2xl font-serif text-[#3a2f28] leading-tight mb-6">
+                    {experience?.name}
+                  </h2>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-4 mb-8">
+                    {when && (
                       <div>
-                        <p className="text-[15px] font-medium">
-                          {experience.name}
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-1.5">
+                          Date & Time
                         </p>
-                        {experience?.shortDescription && (
-                          <p className="mt-1 text-xs text-[#8a7c70]">
-                            {experience.shortDescription}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {experience?.location && (
-                    <div className="flex items-start gap-2">
-                      <div className="mt-0.5 h-7 w-7 rounded-xl bg-[#f5ede0] flex items-center justify-center">
-                        <MapPin className="h-4 w-4 text-[#8b6f47]" />
-                      </div>
-                      <div className="text-sm">
-                        <p className="font-medium text-[#4b3f34]">
-                          Meeting point
-                        </p>
-                        <p className="text-sm text-[#6c5b4c]">
-                          {experience.location}
-                        </p>
-                        <a
-                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                            experience.location
-                          )}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-[#8b6f47] hover:text-[#745534]"
-                        >
-                          Open in Maps
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </div>
-                    </div>
-                  )}
-
-                  {when && (
-                    <div className="flex items-start gap-2">
-                      <div className="mt-0.5 h-7 w-7 rounded-xl bg-[#f5ede0] flex items-center justify-center">
-                        <CalendarDays className="h-4 w-4 text-[#8b6f47]" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-[#4b3f34]">
-                          Date & time
-                        </p>
-                        <p className="text-sm text-[#6c5b4c]">
+                        <p className="text-sm font-medium text-[#3a2f28] flex items-center gap-2">
+                          <CalendarDays size={16} className="text-[#8b6f47]" />{" "}
                           {when.dateLabel}
-                          <span className="text-[#c2b7a5] mx-1">•</span>
+                        </p>
+                        <p className="text-sm font-medium text-[#3a2f28] flex items-center gap-2 mt-1">
+                          <Clock size={16} className="text-[#8b6f47]" />{" "}
                           {when.timeLabel}
                         </p>
-                        <p className="mt-1 text-xs text-[#8a7c70]">
-                          We recommend arriving a little early so you can get
-                          settled in.
-                        </p>
                       </div>
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              {/* Price breakdown */}
-              <section className="rounded-2xl border border-[#e6dfd4] bg-white p-6 sm:p-7 shadow-sm">
-                <div className="flex items-center justify-between gap-2 text-xs text-[#8a7c70] mb-3">
-                  <span className="font-semibold uppercase tracking-[0.18em]">
-                    Booking summary
-                  </span>
-                  {discountAmount > 0 && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] text-emerald-700 border border-emerald-100">
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      Discount applied
-                    </span>
-                  )}
-                </div>
-
-                <div className="space-y-1.5 text-sm text-[#4b3f34]">
-                  {A > 0 && (
-                    <SummaryRow
-                      label={`Adults × ${A}`}
-                      unit={eur(unit.adult)}
-                      total={eur(lineAdult)}
-                    />
-                  )}
-                  {T > 0 && (
-                    <SummaryRow
-                      label={`Teens × ${T}`}
-                      unit={eur(unit.teen)}
-                      total={eur(lineTeen)}
-                    />
-                  )}
-                  {K > 0 && (
-                    <SummaryRow
-                      label={`Kids × ${K}`}
-                      unit={eur(unit.kid)}
-                      total={eur(lineKid)}
-                    />
-                  )}
-                </div>
-
-                <div className="mt-4 space-y-1.5 text-sm text-[#4b3f34]">
-                  <div className="flex items-center justify-between">
-                    <span className="opacity-80">Subtotal</span>
-                    <span className="font-medium">{eur(subtotal)}</span>
-                  </div>
-
-                  {discountAmount > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="opacity-80">{discountLabel}</span>
-                      <span className="font-medium">
-                        −{eur(discountAmount)}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="pt-3 mt-2 border-t border-dashed border-[#e0d7c8] flex items-center justify-between">
-                    <span className="text-sm text-[#4b3f34] font-medium">
-                      Total paid
-                    </span>
-                    <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
-                      {eur(finalTotal)}
-                    </span>
-                  </div>
-                </div>
-              </section>
-
-              {/* Attendees */}
-              {Array.isArray(draft?.attendees) &&
-                draft.attendees.length > 0 && (
-                  <section className="rounded-2xl border border-[#e6dfd4] bg-white p-6 sm:p-7 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <h2 className="text-[15px] sm:text-base font-semibold text-[#3f342b]">
-                        Attendees
-                      </h2>
-                      <p className="text-xs text-[#8a7c70]">
-                        {draft.attendees.length}{" "}
-                        {draft.attendees.length === 1 ? "guest" : "guests"}
+                    )}
+                    {experience?.location && (
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-1.5">
+                          Location
+                        </p>
+                        <p className="text-sm font-medium text-[#3a2f28] flex items-start gap-2">
+                          <MapPin
+                            size={16}
+                            className="text-[#8b6f47] shrink-0 mt-0.5"
+                          />
+                          <span>{experience.location}</span>
+                        </p>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=$$${encodeURIComponent(experience.location)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] font-bold uppercase tracking-wider text-[#8b6f47] hover:underline mt-2 inline-block pl-6"
+                        >
+                          View on Map{" "}
+                          <ExternalLink size={10} className="inline mb-0.5" />
+                        </a>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-1.5">
+                        Guests
+                      </p>
+                      <p className="text-sm font-medium text-[#3a2f28] flex items-center gap-2">
+                        <Users size={16} className="text-[#8b6f47]" />
+                        {A} Adults {K > 0 && `, ${K} Children`}
                       </p>
                     </div>
-                    <ul className="mt-4 space-y-2">
-                      {draft.attendees.map((a, i) => (
-                        <li
-                          key={i}
-                          className="flex items-center justify-between rounded-xl border border-[#f0ebe3] bg-[#fcfaf6] px-3.5 py-2.5 text-sm text-[#4b3f34]"
-                        >
-                          <div>
-                            <span className="font-medium">
-                              {a.firstName} {a.lastName}
-                            </span>
-                            {a.category && (
-                              <span className="ml-2 inline-block rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
-                                {labelForCategory(a.category)}
-                              </span>
-                            )}
-                          </div>
-                          {Number.isFinite(Number(a.age)) && (
-                            <span className="text-xs text-[#7a6a58]">
-                              {a.age} yrs
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
-            </div>
+                  </div>
 
-            {/* Right column: actions + status */}
-            <aside className="space-y-5 lg:space-y-6 lg:sticky lg:top-24 h-fit">
-              <section className="rounded-2xl border border-[#e6dfd4] bg-white p-6 shadow-sm">
-                <h3 className="text-sm font-semibold text-[#3f342b]">
-                  Next steps
+                  {Array.isArray(draft?.attendees) &&
+                    draft.attendees.length > 0 && (
+                      <div className="pt-6 border-t border-[#e0dcd4]">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-3">
+                          Guest List
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {draft.attendees.map((a, i) => (
+                            <div
+                              key={i}
+                              className="inline-flex items-center gap-2 bg-[#fdfcfb] border border-[#e0dcd4] px-3 py-1.5 rounded-lg text-xs font-medium text-[#5a4a3f]"
+                            >
+                              {a.firstName} {a.lastName}{" "}
+                              <span className="opacity-50">|</span>{" "}
+                              <span className="text-[#8b6f47]">
+                                {a.category === "kid" ? "Child" : "Adult"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  {/* Payment Summary */}
+                  <div className="mt-8 pt-6 border-t border-[#e0dcd4] border-dashed">
+                    <div className="flex items-center justify-between mb-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084]">
+                        Payment Summary
+                      </p>
+                      {discountAmount > 0 && (
+                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">
+                          Discount Applied
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 text-sm text-[#5a4a3f] mb-4">
+                      {A > 0 && (
+                        <div className="flex justify-between">
+                          <span>Adults × {A}</span>{" "}
+                          <span>{eur(lineAdult)}</span>
+                        </div>
+                      )}
+                      {K > 0 && (
+                        <div className="flex justify-between">
+                          <span>Children × {K}</span>{" "}
+                          <span>{eur(lineKid)}</span>
+                        </div>
+                      )}
+                      {discountAmount > 0 && (
+                        <div className="flex justify-between text-emerald-600 font-medium">
+                          <span>Discount</span>{" "}
+                          <span>-{eur(discountAmount)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-4 border-t border-[#e0dcd4]">
+                      <span className="font-bold text-[#3a2f28] uppercase tracking-wider text-xs">
+                        Total Paid
+                      </span>
+                      <span className="text-2xl font-serif text-[#8b6f47]">
+                        {eur(finalTotal)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Right: Actions (5 cols on Desktop) */}
+            <aside className="lg:col-span-5 space-y-6 lg:sticky lg:top-24 h-fit print:hidden">
+              <div className="rounded-[2rem] border border-[#e0dcd4] bg-white p-6 sm:p-8 shadow-sm">
+                <h3 className="text-lg font-serif text-[#3a2f28] mb-2">
+                  Next Steps
                 </h3>
-                <p className="mt-2 text-xs text-[#8a7c70] leading-relaxed">
-                  Keep your booking code handy and add the date to your
-                  calendar. You’ll also receive everything by email.
+                <p className="text-xs text-[#7a6a5f] leading-relaxed mb-6">
+                  You will receive an email shortly with these details. You can
+                  also save them directly to your calendar or print an invoice.
                 </p>
 
-                <div className="mt-4 flex flex-col gap-2.5">
+                <div className="flex flex-col gap-3">
                   {when?.start && (
                     <button
                       onClick={handleAddToCalendar}
-                      className="inline-flex items-center justify-center gap-2 rounded-full bg-[#8b6f47] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#7a5f3a] transition shadow-sm"
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#1A1A1A] px-4 py-3.5 text-xs font-bold uppercase tracking-widest text-white hover:bg-[#C8AA86] transition-colors shadow-md active:scale-95"
                     >
-                      <CalendarDays className="h-4 w-4" />
-                      Add to calendar
+                      <CalendarDays className="h-4 w-4" /> Add to Calendar
                     </button>
                   )}
 
                   <button
                     onClick={handlePrint}
                     disabled={printing || !bookingId}
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-[#d2c4ac] bg-white px-4 py-2.5 text-sm text-[#4b3f34] hover:bg-[#fbf6ee] transition disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#e0dcd4] bg-white px-4 py-3.5 text-xs font-bold uppercase tracking-widest text-[#3a2f28] hover:bg-[#fdfcfb] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                   >
                     {printing ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Generating invoice…
-                      </>
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <>
-                        <Printer className="h-4 w-4" />
-                        Print invoice
-                      </>
+                      <Printer className="h-4 w-4" />
                     )}
+                    Print Invoice
                   </button>
+
+                  <div className="h-px w-full bg-[#e0dcd4] my-3" />
 
                   <a
                     href="/experiences"
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-[#d2c4ac] bg-[#fcf8f1] px-4 py-2.5 text-sm text-[#4b3f34] hover:bg-[#f6eee3] transition"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#e0dcd4] bg-[#fdfaf5] px-4 py-3.5 text-xs font-bold uppercase tracking-widest text-[#8b6f47] hover:bg-[#f5f1ea] transition-colors shadow-sm active:scale-95"
                   >
-                    Browse more experiences
-                  </a>
-                  <a
-                    href="/"
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-transparent bg-[#f0e3cf] px-4 py-2.5 text-sm text-[#4b3f34] hover:bg-[#e6d4bd] transition"
-                  >
-                    Back to homepage
+                    <Compass className="h-4 w-4" /> Browse More Experiences
                   </a>
                 </div>
 
                 {sessionId && (
-                  <details className="mt-4 text-[11px] text-[#7a6a58] break-all">
-                    <summary className="cursor-pointer select-none">
-                      Payment session details
+                  <details className="mt-6 text-[10px] text-[#a09084] break-all">
+                    <summary className="cursor-pointer select-none hover:text-[#8b6f47] uppercase tracking-widest font-bold">
+                      Show Technical Details
                     </summary>
-                    <div className="mt-1 rounded-lg bg-[#f5efe4] px-2 py-1.5">
+                    <div className="mt-2 rounded-lg bg-[#fdfcfb] border border-[#e0dcd4] p-3 font-mono">
+                      Stripe Session ID:
+                      <br />
                       {sessionId}
                     </div>
                   </details>
                 )}
-              </section>
+              </div>
 
-              <HelpCard />
+              <div className="rounded-[2rem] border border-[#e0dcd4] bg-[#fdfcfb] p-6 shadow-sm flex items-start gap-4">
+                <div className="w-10 h-10 rounded-full bg-[#fdfaf5] border border-[#e0dcd4] flex items-center justify-center shrink-0">
+                  <Info className="h-5 w-5 text-[#8b6f47]" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-[#3a2f28] mb-1">
+                    Need help?
+                  </h4>
+                  <p className="text-xs text-[#7a6a5f] leading-relaxed mb-3">
+                    If anything looks off, send us a message with your booking
+                    reference code.
+                  </p>
+                  <a
+                    href="mailto:info@youroasis.gr?subject=Booking%20question"
+                    className="text-xs font-bold uppercase tracking-wider text-[#8b6f47] hover:underline flex items-center gap-1.5"
+                  >
+                    <Mail className="h-3 w-3" /> Contact Support
+                  </a>
+                </div>
+              </div>
             </aside>
           </div>
         )}
@@ -855,42 +766,8 @@ export default function BookingConfirmationPage() {
   );
 }
 
-// ---------- Small subcomponents ----------
-
-function SummaryRow({ label, unit, total }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span>
-        {label} <span className="text-xs text-[#8a7c70]">@ {unit}</span>
-      </span>
-      <span className="font-semibold">{total}</span>
-    </div>
-  );
-}
-
-function HelpCard() {
-  return (
-    <section className="rounded-2xl border border-[#e6dfd4] bg-white p-6 shadow-sm">
-      <h4 className="text-sm font-semibold text-[#3f342b]">Need help?</h4>
-      <p className="text-sm text-[#6c5b4c] mt-2 leading-relaxed">
-        If anything looks off or you’re unsure whether your booking went
-        through, send us a message with your booking code and we’ll check it for
-        you.
-      </p>
-      <a
-        href="mailto:info@youroasis.gr?subject=Booking%20question"
-        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-full border border-[#d2c4ac] bg-[#fcf8f1] px-4 py-2.5 text-sm text-[#4b3f34] hover:bg-[#f6eee3] transition"
-      >
-        <Mail className="h-4 w-4" />
-        Contact support
-      </a>
-    </section>
-  );
-}
-
 function labelForCategory(c) {
   if (c === "adult") return "Adult (18+)";
-  if (c === "kid") return "Kid (3–12)";
-  if (c === "teen") return "Teen";
+  if (c === "kid") return "Child (3–12)";
   return c;
 }

@@ -73,7 +73,7 @@ export async function GET() {
         "whyYoullLove",
         "images",
         "mapPin",
-        "meetupPoints", // <-- Added
+        "meetupPoints",
         "guestReviews",
         "frequency",
         "visibility",
@@ -81,6 +81,7 @@ export async function GET() {
         "updatedAt",
         "priceAdult",
         "priceKid",
+        "cancellationPolicy", // <-- Added
       ].join(","),
     )
     .order("createdAt", { ascending: false });
@@ -117,9 +118,10 @@ export async function POST(req) {
     whatsIncluded,
     whatToBring,
     whyYoullLove,
+    cancellationPolicy, // <-- Added
     images,
     mapPin,
-    meetupPoints, // <-- Added
+    meetupPoints,
     guestReviews,
     frequency,
     visibility,
@@ -150,9 +152,10 @@ export async function POST(req) {
     whatsIncluded: cleanStr(whatsIncluded),
     whatToBring: cleanStr(whatToBring),
     whyYoullLove: cleanStr(whyYoullLove),
+    cancellationPolicy: cleanStr(cancellationPolicy) || "strict", // <-- Default to strict
     images: toArray(images),
     mapPin: cleanStr(mapPin),
-    meetupPoints: Array.isArray(meetupPoints) ? meetupPoints : [], // <-- Safely saves array
+    meetupPoints: Array.isArray(meetupPoints) ? meetupPoints : [],
     guestReviews: Array.isArray(guestReviews) ? guestReviews : null,
     frequency: Array.isArray(frequency) ? frequency : [],
     visibility: typeof visibility === "boolean" ? visibility : true,
@@ -200,9 +203,10 @@ export async function PUT(req) {
     whatsIncluded,
     whatToBring,
     whyYoullLove,
+    cancellationPolicy, // <-- Added
     images,
     mapPin,
-    meetupPoints, // <-- Added
+    meetupPoints,
     guestReviews,
     frequency,
     visibility,
@@ -225,11 +229,12 @@ export async function PUT(req) {
     whatsIncluded: whatsIncluded ?? null,
     whatToBring: whatToBring ?? null,
     whyYoullLove: whyYoullLove ?? null,
+    cancellationPolicy: cancellationPolicy ?? "strict", // <-- Added
     images: Array.isArray(images) ? images : (images ?? null),
     mapPin: mapPin ?? null,
     meetupPoints: Array.isArray(meetupPoints)
       ? meetupPoints
-      : (meetupPoints ?? null), // <-- Added
+      : (meetupPoints ?? null),
     guestReviews: Array.isArray(guestReviews)
       ? guestReviews
       : (guestReviews ?? null),

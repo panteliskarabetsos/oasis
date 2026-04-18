@@ -28,6 +28,7 @@ export async function getExperienceBySlug(slug) {
       "whatsIncluded",
       "whatToBring",
       "whyYoullLove",
+      "cancellationPolicy",
       images,
       "mapPin",
       "meetupPoints", 
@@ -48,7 +49,6 @@ export async function getExperienceBySlug(slug) {
   if (!data && !error) return null;
 
   if (error) {
-    // Log with useful fields (the earlier {} log wasn’t helpful)
     console.error("[fetchExperiences] getExperienceBySlug error:", {
       message: error?.message,
       code: error?.code,
@@ -59,7 +59,6 @@ export async function getExperienceBySlug(slug) {
   }
 
   const priceAdult = numOr(data.priceAdult, 85);
-
   const priceKid = numOr(data.priceKid, priceAdult);
 
   return {
@@ -87,6 +86,7 @@ export async function getPublicExperiences() {
       duration,
       images,
       "meetupPoints",
+      "cancellationPolicy",
       frequency,
       visibility,
       "createdAt",
@@ -109,7 +109,6 @@ export async function getPublicExperiences() {
 
   return (data || []).map((row) => {
     const priceAdult = numOr(row.priceAdult, 85);
-
     const priceKid = numOr(row.priceKid, priceAdult);
     return {
       ...row,

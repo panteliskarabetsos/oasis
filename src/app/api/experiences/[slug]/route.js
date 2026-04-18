@@ -42,15 +42,16 @@ export async function GET(_req, ctx) {
         "whatToBring",
         "whyYoullLove",
         images,
-        "mapPin",
+        "meetupPoints",
         "guestReviews",
         frequency,
         visibility,
         "createdAt",
         "updatedAt",
         "priceAdult",
-        "priceKid"
-      `
+        "priceKid",
+        "cancellationPolicy"
+      `,
       )
       .eq("slug", slug)
       .eq("visibility", true)

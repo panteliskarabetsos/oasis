@@ -61,7 +61,7 @@ export async function GET(req, { params }) {
           "whatToBring",
           "whyYoullLove",
           "mapPin",
-          "meetupPoints", // <-- Added the new jsonb column here
+          "meetupPoints",
           "images",
           "guestReviews",
           "frequency",
@@ -70,6 +70,7 @@ export async function GET(req, { params }) {
           "updatedAt",
           "priceAdult",
           "priceKid",
+          "cancellationPolicy", // <-- Added the new policy field
         ].join(","),
       )
       .eq("id", id)

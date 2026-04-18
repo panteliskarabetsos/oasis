@@ -19,6 +19,7 @@ import {
   Star,
   Info,
   Eye,
+  CheckCircle2,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 
@@ -81,6 +82,7 @@ export default function AdminExperienceEditPage() {
   const [whyYoullLove, setWhyYoullLove] = useState("");
   const [visibility, setVisibility] = useState(true);
   const [frequency, setFrequency] = useState([]);
+  const [cancellationPolicy, setCancellationPolicy] = useState("strict");
   const [images, setImages] = useState([]);
 
   // Dynamic Arrays
@@ -149,6 +151,7 @@ export default function AdminExperienceEditPage() {
       setWhyYoullLove(obj.whyYoullLove || "");
       setVisibility(obj.visibility ?? true);
       setFrequency(obj.frequency || []);
+      setCancellationPolicy(obj.cancellationPolicy || "strict"); // Load saved policy
 
       // Normalize Images
       setImages(
@@ -256,6 +259,7 @@ export default function AdminExperienceEditPage() {
         whatsIncluded: whatsIncluded.trim() || null,
         whatToBring: whatToBring.trim() || null,
         whyYoullLove: whyYoullLove.trim() || null,
+        cancellationPolicy,
         images,
         meetupPoints: cleanedMeetupPoints,
         guestReviews: cleanedReviews,
@@ -533,6 +537,68 @@ export default function AdminExperienceEditPage() {
                   Make this experience public
                 </span>
               </label>
+            </Field>
+          </div>
+
+          {/* Section: Booking Policies */}
+          <div className="rounded-[2rem] border border-[#e6e0d8] bg-white p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="border-b border-[#e6e0d8] pb-4 mb-2">
+              <h2 className="font-serif text-2xl text-[#3a2f28]">
+                Booking Policies
+              </h2>
+            </div>
+
+            <Field
+              label="Cancellation Policy"
+              hint="Select the refund rules that apply to this specific experience."
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-2">
+                {[
+                  {
+                    id: "flexible",
+                    name: "Flexible",
+                    desc: "Full refund up to 48 hours before the experience starts.",
+                  },
+                  {
+                    id: "moderate",
+                    name: "Moderate",
+                    desc: "Full refund up to 7 days before, 50% refund up to 48 hours before.",
+                  },
+                  {
+                    id: "strict",
+                    name: "Strict (Oasis Bespoke)",
+                    desc: "100% refund up to 14 days, 50% refund 7-13 days, no refund under 7 days.",
+                  },
+                ].map((policy) => (
+                  <button
+                    key={policy.id}
+                    type="button"
+                    onClick={() => setCancellationPolicy(policy.id)}
+                    className={`p-4 rounded-xl border text-left transition-all relative overflow-hidden flex flex-col h-full ${
+                      cancellationPolicy === policy.id
+                        ? "bg-[#fcfbf9] border-[#8b6f47] ring-1 ring-[#8b6f47] shadow-sm"
+                        : "bg-white border-[#e6e0d8] hover:border-[#b8a99a] hover:bg-[#fcfbf9]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span
+                        className={`text-xs font-bold uppercase tracking-wider ${cancellationPolicy === policy.id ? "text-[#8b6f47]" : "text-[#5a4a3f]"}`}
+                      >
+                        {policy.name}
+                      </span>
+                      {cancellationPolicy === policy.id && (
+                        <CheckCircle2
+                          size={16}
+                          className="text-[#8b6f47] shrink-0"
+                        />
+                      )}
+                    </div>
+                    <p className="text-xs text-[#7a6a5f] leading-relaxed font-medium mt-auto">
+                      {policy.desc}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </Field>
           </div>
 

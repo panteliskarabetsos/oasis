@@ -19,10 +19,24 @@ import {
   CheckCircle2,
   Star,
   CreditCard,
-  ChevronDown,
   Edit3,
   ShieldCheck,
+  AlertCircle,
+  Leaf,
+  Wheat,
+  MilkOff,
+  NutOff,
+  Heart,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+
+const DIETARY_OPTIONS = [
+  { id: "Vegetarian", label: "Vegetarian", icon: Leaf },
+  { id: "Vegan", label: "Vegan", icon: Heart },
+  { id: "Gluten-Free", label: "Gluten-Free", icon: Wheat },
+  { id: "Dairy-Free", label: "Dairy-Free", icon: MilkOff },
+  { id: "Nut Allergy", label: "Nut Allergy", icon: NutOff },
+];
 
 export default function AttendeesPage() {
   const router = useRouter();
@@ -34,10 +48,13 @@ export default function AttendeesPage() {
   // Draft expiry
   const [expiresAt, setExpiresAt] = useState(initialExpiresAtFromQuery);
   const {
+    remainingMs,
     formatted: timeLeft,
     expired,
     progress: holdProgress,
   } = useDraftCountdown(expiresAt);
+  const isUrgent = remainingMs > 0 && remainingMs < 5 * 60 * 1000; // Less than 5 mins
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -60,16 +77,16 @@ export default function AttendeesPage() {
   // Attendees array
   const expectedTotal = useMemo(
     () => Number(counts.adults || 0) + Number(counts.kids || 0),
-    [counts]
+    [counts],
   );
   const [attendees, setAttendees] = useState([]);
 
   const completedCount = useMemo(
     () =>
       attendees.filter(
-        (a) => a.firstName?.trim() && a.lastName?.trim() && a.age !== ""
+        (a) => a.firstName?.trim() && a.lastName?.trim() && a.age !== "",
       ).length,
-    [attendees]
+    [attendees],
   );
   const progressPct = expectedTotal
     ? Math.round((completedCount / expectedTotal) * 100)
@@ -78,7 +95,7 @@ export default function AttendeesPage() {
   // Figure out the first adult
   const firstAdultIndex = useMemo(
     () => attendees.findIndex((a) => a.category === "adult"),
-    [attendees]
+    [attendees],
   );
   const firstAdultFullName = useMemo(() => {
     if (firstAdultIndex === -1) return "";
@@ -96,7 +113,8 @@ export default function AttendeesPage() {
   useEffect(() => {
     if (expired) {
       toast.error(
-        "Your reservation hold has expired. Please go back and select a new time."
+        "Your reservation hold has expired. Please go back and select a new time.",
+        { duration: 6000 },
       );
     }
   }, [expired]);
@@ -122,15 +140,10 @@ export default function AttendeesPage() {
           throw new Error(msg);
         }
         const data = await res.json();
-
-        // NEW: support either { draft, experience, slot } or legacy flat shape
         const d = data?.draft || data;
-        // Keep frontend timer in sync with server expiry
-        if (d?.expiresAt) {
-          setExpiresAt(d.expiresAt);
-        }
 
-        // If already paid/converted, bounce to confirmation
+        if (d?.expiresAt) setExpiresAt(d.expiresAt);
+
         const st = String(d?.status || "").toLowerCase();
         if (st === "paid" || st === "converted" || data?.bookingId) {
           router.replace(`/booking/${draftId}/confirmation`);
@@ -142,20 +155,17 @@ export default function AttendeesPage() {
           kids: Number(d?.counts?.kids || 0),
         });
 
-        // Prefer unitPrices helper; fall back to unitPriceAdult/UnitPriceKid
         const up = d?.unitPrices || {
           adult: Number(d?.unitPriceAdult || 0),
           kid: Number(
-            d?.unitPriceKid != null ? d.unitPriceKid : d?.unitPriceAdult || 0
+            d?.unitPriceKid != null ? d.unitPriceKid : d?.unitPriceAdult || 0,
           ),
         };
         setUnitPrices({
           adult: Number(up.adult || 0),
           kid: Number(up.kid || 0),
         });
-
         setTotalAmount(Number(d?.totalAmount || 0));
-
         setExperience(data?.experience || d?.experience || null);
         setSlot(data?.slot || d?.slot || null);
 
@@ -167,20 +177,28 @@ export default function AttendeesPage() {
           if (pc.name) setAutoPcFromFirstAdult(false);
         }
 
-        // Build attendee list to match expected total & categories
         const catList = makeCategoryList(
           Number(d?.counts?.adults || 0),
-          Number(d?.counts?.kids || 0)
+          Number(d?.counts?.kids || 0),
         );
-
         const existing = Array.isArray(d?.attendees) ? d.attendees : [];
-        const initial = catList.map((cat, i) => ({
-          firstName: existing[i]?.firstName || "",
-          lastName: existing[i]?.lastName || "",
-          age: existing[i]?.age ?? "",
-          allergies: existing[i]?.allergies || "",
-          category: cat,
-        }));
+
+        const initial = catList.map((cat, i) => {
+          const rawAllergies = existing[i]?.allergies || "";
+          const parsedDietary = DIETARY_OPTIONS.filter((opt) =>
+            rawAllergies.includes(opt.id),
+          ).map((o) => o.id);
+          const parsedNotes = rawAllergies.replace(/Dietary:.*?\|/g, "").trim();
+
+          return {
+            firstName: existing[i]?.firstName || "",
+            lastName: existing[i]?.lastName || "",
+            age: existing[i]?.age ?? "",
+            dietary: parsedDietary,
+            notes: parsedNotes,
+            category: cat,
+          };
+        });
 
         setAttendees(initial);
         setError("");
@@ -198,13 +216,9 @@ export default function AttendeesPage() {
     if (!slot?.date) return null;
     const d =
       typeof slot.date === "string" ? parseISO(slot.date) : new Date(slot.date);
-    return {
-      dateLabel: format(d, "PPP"),
-      timeLabel: format(d, "p"),
-    };
+    return { dateLabel: format(d, "PPP"), timeLabel: format(d, "p") };
   }, [slot]);
 
-  // Price breakdown
   const priceBreakdown = useMemo(() => {
     const A = Number(counts.adults || 0);
     const K = Number(counts.kids || 0);
@@ -226,24 +240,39 @@ export default function AttendeesPage() {
     };
   }, [counts, unitPrices]);
 
+  // FIXED: Immutable state update so React re-renders correctly
   function onChangeAttendee(idx, field, value) {
-    setAttendees((prev) => {
-      const next = prev.slice();
-      next[idx] = { ...next[idx], [field]: value };
-      return next;
-    });
+    setAttendees((prev) =>
+      prev.map((a, i) => (i === idx ? { ...a, [field]: value } : a)),
+    );
+  }
+
+  // FIXED: Immutable state update for dietary toggles
+  function toggleDietary(idx, optionId) {
+    setAttendees((prev) =>
+      prev.map((a, i) => {
+        if (i === idx) {
+          const currentDietary = a.dietary || [];
+          const updatedDietary = currentDietary.includes(optionId)
+            ? currentDietary.filter((id) => id !== optionId)
+            : [...currentDietary, optionId];
+          return { ...a, dietary: updatedDietary };
+        }
+        return a;
+      }),
+    );
   }
 
   async function handleSaveAndContinue() {
     const effectivePcName = autoPcFromFirstAdult
       ? firstAdultFullName || pcName
       : pcName;
-
     const issues = validate(attendees, counts, {
       name: effectivePcName,
       email: pcEmail,
       phone: pcPhone,
     });
+
     if (issues.length) {
       toast.error(issues[0]);
       return;
@@ -260,30 +289,36 @@ export default function AttendeesPage() {
             email: pcEmail.trim(),
             phone: pcPhone.trim(),
           },
-          attendees: attendees.map((a) => ({
-            firstName: a.firstName.trim(),
-            lastName: a.lastName.trim(),
-            age: Number(a.age),
-            allergies: (a.allergies || "").trim(),
-            category: a.category,
-          })),
+          attendees: attendees.map((a) => {
+            const dietaryStr =
+              a.dietary.length > 0 ? `Dietary: ${a.dietary.join(", ")}` : "";
+            const combinedAllergies = [dietaryStr, a.notes.trim()]
+              .filter(Boolean)
+              .join(" | ");
+
+            return {
+              firstName: a.firstName.trim(),
+              lastName: a.lastName.trim(),
+              age: Number(a.age),
+              allergies: combinedAllergies,
+              category: a.category,
+            };
+          }),
         }),
       });
 
-      if (!res.ok) {
-        const msg =
+      if (!res.ok)
+        throw new Error(
           (await res.json().catch(() => ({})))?.error ||
-          "Could not save attendees.";
-        throw new Error(msg);
-      }
+            "Could not save attendees.",
+        );
 
       const params = new URLSearchParams();
       if (expiresAt) params.set("expiresAt", expiresAt);
-
-      const qs = params.toString();
-      router.push(`/booking/${draftId}/payment${qs ? `?${qs}` : ""}`);
+      router.push(
+        `/booking/${draftId}/payment${params.toString() ? `?${params.toString()}` : ""}`,
+      );
     } catch (e) {
-      console.error(e);
       toast.error(e.message || "Something went wrong.");
     } finally {
       setSaving(false);
@@ -291,401 +326,304 @@ export default function AttendeesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_right,rgba(233,227,217,0.7),transparent_45%),linear-gradient(to_bottom,#f7f3ed,#f4f1ec)]">
-      {/* Top bar */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 sm:pt-10">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="min-h-screen bg-[#fcf9f4] font-sans pb-32 sm:pb-16">
+      {/* Top Nav */}
+      <div className="bg-white border-b border-[#e5e0d8] sticky top-0 z-30 shadow-sm">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => router.back()}
-              className="inline-flex items-center gap-2 text-[#725b3b] text-sm border border-[#8b6f47]/50 rounded-full px-4 py-2 bg-white/70 hover:bg-[#f4f1ec] hover:text-[#5a4a3f] transition-all shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4b89f] focus-visible:ring-offset-2"
+              className="inline-flex items-center gap-2 text-[#5a4a3f] text-sm border border-[#e0dcd4] rounded-full px-4 py-2 hover:bg-[#f4f1ec] transition-all"
             >
-              <ArrowLeft size={16} />
-              Back
+              <ArrowLeft size={16} /> Back
             </button>
-            <span className="hidden sm:inline-flex items-center gap-2 text-xs text-[#7a6a58] pl-2">
-              <Users size={14} className="opacity-80" />
-              Step 2 · Attendees
+            <span className="hidden sm:inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#a09084] pl-2 border-l border-[#e0dcd4]">
+              Step 2 of 3
             </span>
           </div>
-
           <Stepper current={2} />
         </div>
       </div>
 
-      {/* Header */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 mt-6">
-        {expiresAt && (
-          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4" />
-                {expired ? (
-                  <span>
-                    Your hold for this time slot has back and choose a new time.
-                  </span>
-                ) : (
-                  <span>
-                    We&apos;re holding your seats for{" "}
-                    <span className="font-mono font-semibold">{timeLeft}</span>.
-                    Please complete your booking before the timer runs out.
-                  </span>
-                )}
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-8">
+        {/* Urgency Banner */}
+        <AnimatePresence>
+          {expiresAt && !expired && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`mb-8 rounded-2xl border px-5 py-4 shadow-sm overflow-hidden relative ${
+                isUrgent
+                  ? "bg-red-50 border-red-200"
+                  : "bg-amber-50 border-amber-200"
+              }`}
+            >
+              <div className="absolute bottom-0 left-0 h-1 bg-black/5 w-full">
+                <div
+                  className={`h-full transition-[width] duration-1000 ease-linear ${isUrgent ? "bg-red-500" : "bg-amber-500"}`}
+                  style={{ width: `${holdProgress * 100}%` }}
+                />
               </div>
-
-              {!expired && (
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[11px] uppercase tracking-[0.18em] text-amber-800/80">
-                    Time left
-                  </span>
-                  <div className="h-1.5 w-28 overflow-hidden rounded-full bg-amber-100">
-                    <div
-                      className="h-full bg-amber-500 transition-[width] duration-1000 ease-linear"
-                      style={{ width: `${holdProgress * 100}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        <div className="relative overflow-hidden rounded-3xl border border-[#e5e0d8] bg-[#fcf9f4]/95 shadow-[0_16px_40px_rgba(90,74,63,0.10)]">
-          <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-[#e9e3d9] opacity-70 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-[#e1d6c5] opacity-60 blur-3xl" />
-          <div className="relative z-10 p-6 sm:p-8">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-full bg-[#efeae2] p-2 shadow-inner">
-                  <Users className="h-5 w-5 text-[#8b6f47]" />
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-[#b09f8a]">
-                    Guest details
-                  </p>
-                  <h1 className="mt-1 text-2xl sm:text-3xl font-serif font-semibold text-[#5a4a3f] tracking-tight">
-                    {experience?.name || "Your booking"}
-                  </h1>
-                  <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-[#6b5e53]">
-                    {experience?.location && (
-                      <span className="inline-flex items-center gap-1.5">
-                        <MapPin size={14} className="text-[#8b6f47]" />
-                        {experience.location}
-                      </span>
-                    )}
-                    {when && (
-                      <span className="inline-flex items-center gap-1.5">
-                        <CalendarDays size={14} className="text-[#8b6f47]" />
-                        {when.dateLabel}
-                        <span className="inline-flex items-center gap-1.5 ml-3">
-                          <Clock size={14} className="text-[#8b6f47]" />
-                          {when.timeLabel}
-                        </span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col items-end gap-3">
-                <div className="rounded-xl border border-[#e0dcd4] bg-white/80 px-4 py-2 text-sm text-[#5a4a3f] shadow-sm">
-                  Group:{" "}
-                  <span className="font-semibold">
-                    {counts.adults}A{counts.kids ? ` • ${counts.kids}K` : ""}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => router.back()}
-                  className="hidden sm:inline-flex items-center text-xs px-3 py-2 rounded-lg border border-[#e0dcd4] text-[#6b5e53] bg-white/80 hover:bg-white shadow-sm gap-1"
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative z-10">
+                <div
+                  className={`flex items-center gap-3 ${isUrgent ? "text-red-900" : "text-amber-900"}`}
                 >
-                  <Edit3 size={14} /> Edit group
-                </button>
+                  {isUrgent ? (
+                    <AlertCircle className="h-5 w-5" />
+                  ) : (
+                    <Clock className="h-5 w-5" />
+                  )}
+                  <span className="text-sm font-medium">
+                    {isUrgent
+                      ? "Hurry! Your hold is about to expire."
+                      : "We're holding your seats for this experience."}
+                  </span>
+                </div>
+                <div
+                  className={`text-xl font-mono font-bold tracking-tight ${isUrgent ? "text-red-600 animate-pulse" : "text-amber-700"}`}
+                >
+                  {timeLeft}
+                </div>
               </div>
-            </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-            {!loading && !!error && (
-              <div
-                className="mt-4 flex items-start gap-2 rounded-xl border border-[#f1d7d7] bg-[#fff6f6] px-3 py-2 text-xs text-[#7a4a4a] shadow-sm"
-                role="alert"
-                aria-live="polite"
-              >
-                <Info size={14} className="mt-0.5 text-[#b14545]" />
-                <p>{error}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Content */}
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 pb-28 sm:pb-16">
         {loading ? (
           <LoadingBlock />
         ) : (
-          <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-10">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 xl:gap-12">
             {/* Left: Attendee forms */}
-            <section className="lg:col-span-2 space-y-4">
-              <header className="flex items-center justify-between gap-3 pl-1">
+            <section className="lg:col-span-2 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div>
-                  <h2 className="text-sm sm:text-base font-semibold text-[#5a4a3f]">
-                    Guest information
-                  </h2>
-                  <p className="mt-0.5 text-[11px] text-[#7a6a58] max-w-md">
-                    We’ll only use this to keep everyone safe and to contact you
-                    about this booking.
+                  <h1 className="text-3xl font-serif text-[#3a2f28]">
+                    Guest Details
+                  </h1>
+                  <p className="mt-1 text-sm text-[#7a6a5f]">
+                    Let us know who's coming so we can prepare for your visit.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-[#6b5e53]">
-                  <span>
-                    Guests completed:{" "}
-                    <strong>
-                      {completedCount}/{expectedTotal}
-                    </strong>
-                  </span>
+                <div className="flex flex-col items-end">
+                  <div className="text-xs font-bold uppercase tracking-wider text-[#a09084] mb-1.5">
+                    Completed:{" "}
+                    <span className="text-[#8b6f47]">{completedCount}</span> /{" "}
+                    {expectedTotal}
+                  </div>
                   <Progress value={progressPct} />
                 </div>
-              </header>
+              </div>
 
-              {attendees.map((a, idx) => (
-                <details
-                  key={idx}
-                  open
-                  className="group rounded-3xl border border-[#e8e5df] bg-white/95 p-0 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5"
-                >
-                  <summary className="flex list-none items-center justify-between gap-3 cursor-pointer select-none px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 shrink-0 rounded-full bg-[#efeae2] text-[#8b6f47] grid place-items-center text-sm font-semibold shadow-inner">
-                        {idx + 1}
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-semibold text-[#5a4a3f] flex items-center gap-2">
-                          Guest {idx + 1}
-                          <span className="inline-block rounded-full border border-[#e0dcd4] bg-[#faf7f1] px-2 py-0.5 text-[11px] text-[#5a4a3f]">
+              {attendees.map((a, idx) => {
+                const isComplete =
+                  a.firstName?.trim() && a.lastName?.trim() && a.age !== "";
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-3xl border border-[#e0dcd4] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)]"
+                  >
+                    {/* Card Header */}
+                    <div
+                      className={`px-6 py-4 flex items-center justify-between border-b ${isComplete ? "bg-[#f4f8f4] border-[#d3e3d3]" : "bg-[#fdfaf5] border-[#e0dcd4]"}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-bold ${isComplete ? "bg-[#d3e3d3] text-[#4a7854]" : "bg-[#e9e3d9] text-[#8b6f47]"}`}
+                        >
+                          {idx + 1}
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-bold text-[#3a2f28] flex items-center gap-2">
+                            {a.firstName || a.lastName
+                              ? `${a.firstName} ${a.lastName}`
+                              : `Guest ${idx + 1}`}
+                            {idx === firstAdultIndex && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[#8b6f47] bg-white border border-[#e0dcd4] px-2 py-0.5 rounded-md shadow-sm">
+                                <Star className="h-3 w-3" /> Primary
+                              </span>
+                            )}
+                          </h3>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-[#a09084] mt-0.5">
                             {labelForCategory(a.category)}
-                          </span>
-                          {idx === firstAdultIndex && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#8b6f47] bg-[#efeae2] border border-[#decfb7] px-2 py-0.5 rounded-full">
-                              <Star className="h-3.5 w-3.5" /> Primary contact
-                            </span>
-                          )}
-                        </h3>
-                        <p className="text-[11px] text-[#7a6a58]">
-                          {a.firstName && a.lastName
-                            ? `${a.firstName} ${a.lastName}`
-                            : "Tap to fill guest details"}
-                        </p>
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2
-                        aria-hidden
-                        className={`h-5 w-5 ${
-                          a.firstName?.trim() &&
-                          a.lastName?.trim() &&
-                          a.age !== ""
-                            ? "text-[#8b6f47]"
-                            : "text-[#d9d3c7]"
-                        }`}
-                      />
-                      <ChevronDown className="h-5 w-5 text-[#7a6a58] transition-transform group-open:rotate-180" />
-                    </div>
-                  </summary>
-
-                  <div className="px-5 pb-5 pt-0">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Field label="First name">
-                        <input
-                          type="text"
-                          autoComplete="given-name"
-                          value={a.firstName}
-                          onChange={(e) =>
-                            onChangeAttendee(idx, "firstName", e.target.value)
-                          }
-                          className={inputCls}
-                        />
-                      </Field>
-                      <Field label="Last name">
-                        <input
-                          type="text"
-                          autoComplete="family-name"
-                          value={a.lastName}
-                          onChange={(e) =>
-                            onChangeAttendee(idx, "lastName", e.target.value)
-                          }
-                          className={inputCls}
-                        />
-                      </Field>
+                      {isComplete && (
+                        <CheckCircle2 className="h-6 w-6 text-[#4a7854]" />
+                      )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                      <Field
-                        label={
-                          <>
-                            Age{" "}
-                            <span className="text-[#7a6a58]">(required)</span>
-                          </>
-                        }
-                        hint={hintForCategory(a.category)}
-                      >
-                        <input
-                          type="number"
-                          min={0}
-                          inputMode="numeric"
-                          value={a.age}
-                          onChange={(e) =>
-                            onChangeAttendee(idx, "age", e.target.value)
-                          }
-                          className={inputCls}
-                        />
-                      </Field>
+                    {/* Card Body */}
+                    <div className="p-6 space-y-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                        <Field label="First Name">
+                          <input
+                            type="text"
+                            value={a.firstName}
+                            onChange={(e) =>
+                              onChangeAttendee(idx, "firstName", e.target.value)
+                            }
+                            className={inputCls}
+                            placeholder="e.g. Maria"
+                          />
+                        </Field>
+                        <Field label="Last Name">
+                          <input
+                            type="text"
+                            value={a.lastName}
+                            onChange={(e) =>
+                              onChangeAttendee(idx, "lastName", e.target.value)
+                            }
+                            className={inputCls}
+                            placeholder="e.g. Papadopoulos"
+                          />
+                        </Field>
+                      </div>
 
-                      <Field label="Allergies / notes (optional)">
-                        <input
-                          type="text"
-                          placeholder="e.g. nuts, gluten, vegan"
-                          value={a.allergies}
-                          onChange={(e) =>
-                            onChangeAttendee(idx, "allergies", e.target.value)
-                          }
-                          className={inputCls}
-                        />
-                      </Field>
+                      <div className="w-full sm:w-1/2">
+                        <Field label="Age" hint={hintForCategory(a.category)}>
+                          <input
+                            type="number"
+                            min={0}
+                            value={a.age}
+                            onChange={(e) =>
+                              onChangeAttendee(idx, "age", e.target.value)
+                            }
+                            className={inputCls}
+                            placeholder="Required for safety & groups"
+                          />
+                        </Field>
+                      </div>
+
+                      {/* Dietary & Special Needs Section */}
+                      <div className="pt-5 border-t border-[#e0dcd4]">
+                        <h4 className="text-sm font-bold text-[#3a2f28] mb-3 flex items-center gap-2">
+                          Dietary Preferences & Allergies
+                        </h4>
+
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {DIETARY_OPTIONS.map((opt) => {
+                            const Icon = opt.icon;
+                            const isSelected = a.dietary.includes(opt.id);
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => toggleDietary(idx, opt.id)}
+                                aria-pressed={isSelected}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border shadow-sm ${
+                                  isSelected
+                                    ? "bg-[#8b6f47] text-white border-[#8b6f47] scale-105"
+                                    : "bg-white text-[#7a6a5f] border-[#e0dcd4] hover:bg-[#fdfaf5] hover:border-[#8b6f47]"
+                                }`}
+                              >
+                                <Icon
+                                  size={12}
+                                  className={
+                                    isSelected ? "text-white" : "text-[#a09084]"
+                                  }
+                                />
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <Field label="Other Notes or Specific Allergies">
+                          <textarea
+                            value={a.notes}
+                            onChange={(e) =>
+                              onChangeAttendee(idx, "notes", e.target.value)
+                            }
+                            className={`${inputCls} resize-none`}
+                            rows={2}
+                            placeholder="Please specify any other requirements we should know about..."
+                          />
+                        </Field>
+                      </div>
                     </div>
                   </div>
-                </details>
-              ))}
-
-              {expectedTotal === 0 && (
-                <div className="rounded-2xl border border-[#e8e5df] bg-white p-6 shadow-sm text-[#5a4a3f]">
-                  <p className="mb-3">
-                    No attendees expected — go back and select your group first.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => router.back()}
-                    className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-lg border border-[#e0dcd4] text-[#6b5e53] hover:bg-[#faf7f2] shadow-sm"
-                  >
-                    <ArrowLeft size={16} /> Edit group
-                  </button>
-                </div>
-              )}
+                );
+              })}
             </section>
 
             {/* Right: summary + primary contact */}
-            <section className="space-y-6 lg:sticky lg:top-24">
-              <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-[#5a4a3f]">
-                  Booking summary
-                </h3>
+            <section className="space-y-6">
+              <div className="rounded-[2rem] border border-[#e0dcd4] bg-white p-6 sm:p-8 shadow-sm lg:sticky lg:top-24">
+                <div className="mb-6 pb-6 border-b border-[#e0dcd4]">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-[#a09084] mb-2">
+                    Booking Summary
+                  </h3>
+                  <h2 className="text-2xl font-serif text-[#3a2f28] leading-tight mb-3">
+                    {experience?.name}
+                  </h2>
 
-                <div className="mt-3 text-sm text-[#5a4a3f] space-y-1">
-                  {experience?.name && (
-                    <div className="font-medium">{experience.name}</div>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="space-y-2 text-sm font-medium text-[#7a6a5f]">
+                    {when && (
+                      <div className="flex items-center gap-2">
+                        <CalendarDays size={16} className="text-[#8b6f47]" />{" "}
+                        {when.dateLabel} at {when.timeLabel}
+                      </div>
+                    )}
                     {experience?.location && (
-                      <span className="inline-flex items-center gap-1.5">
-                        <MapPin size={14} className="text-[#8b6f47]" />
+                      <div className="flex items-center gap-2">
+                        <MapPin size={16} className="text-[#8b6f47]" />{" "}
                         {experience.location}
-                      </span>
+                      </div>
                     )}
                   </div>
-                  {when && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CalendarDays size={14} className="text-[#8b6f47]" />
-                      {when.dateLabel}
-                      <span className="inline-flex items-center gap-1.5 ml-3">
-                        <Clock size={14} className="text-[#8b6f47]" />
-                        {when.timeLabel}
-                      </span>
-                    </div>
-                  )}
                 </div>
 
-                {/* Price summary */}
-                <div className="mt-5 border border-[#e5e0d8] rounded-xl bg-[#faf7f2] px-6 py-4 shadow-inner">
-                  <div className="space-y-1 text-sm text-[#5a4a3f]">
-                    {priceBreakdown.lines.map((ln, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between"
-                      >
-                        <span>{ln.label}</span>
-                        <span className="font-semibold">{ln.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-3 border-t border-[#e5e0d8] pt-3 flex items-center justify-between">
-                    <span className="text-sm text-[#5a4a3f]">Total</span>
-                    <span className="text-2xl font-bold text-[#8b6f47] tracking-wide">
+                <div className="mb-6 space-y-2 text-sm text-[#5a4a3f]">
+                  {priceBreakdown.lines.map((ln, i) => (
+                    <div key={i} className="flex items-center justify-between">
+                      <span className="text-[#7a6a5f]">{ln.label}</span>
+                      <span className="font-semibold text-[#3a2f28]">
+                        {ln.value}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="pt-3 flex items-center justify-between">
+                    <span className="font-bold text-[#3a2f28] uppercase tracking-wider text-xs">
+                      Total Amount
+                    </span>
+                    <span className="text-2xl font-serif text-[#8b6f47]">
                       {priceBreakdown.total}
                     </span>
                   </div>
                 </div>
 
-                {/* Completion meter */}
-                <div className="mt-4">
-                  <div className="flex items-center justify-between text-xs text-[#6b5e53]">
-                    <span>Guest details completion</span>
-                    <span>{progressPct}%</span>
-                  </div>
-                  <div className="mt-1 h-1.5 rounded-full bg-[#e6e0d5] overflow-hidden">
-                    <div
-                      className="h-full bg-[#8b6f47] rounded-full transition-all"
-                      style={{ width: `${progressPct}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Primary Contact */}
-                <div className="mt-6">
-                  <h4 className="text-sm font-semibold text-[#5a4a3f] flex items-center gap-2">
-                    <Star className="w-4 h-4 text-[#8b6f47]" /> Primary contact
+                {/* Primary Contact Section */}
+                <div className="pt-6 border-t border-[#e0dcd4]">
+                  <h4 className="text-lg font-serif text-[#3a2f28] mb-1">
+                    Booking Contact
                   </h4>
-                  <p className="text-[11px] text-[#7a6a58] mb-3">
-                    We’ll send the confirmation to this email and use the phone
-                    for day-of updates.
+                  <p className="text-xs text-[#7a6a5f] mb-5">
+                    Your tickets and updates will be sent here.
                   </p>
 
-                  {/* Auto-bind toggle */}
-                  <div className="flex items-center justify-between rounded-lg border border-[#e5e0d8] bg-white px-3 py-2 mb-3">
-                    <div className="text-xs text-[#5a4a3f]">
-                      Use first adult as contact name
-                      {firstAdultFullName ? (
-                        <span className="ml-1 text-[#7a6a58]">
-                          — {firstAdultFullName}
-                        </span>
-                      ) : null}
+                  <div className="flex items-center justify-between rounded-xl border border-[#e0dcd4] bg-[#fdfaf5] px-4 py-3 mb-4">
+                    <div className="text-xs font-semibold text-[#5a4a3f]">
+                      Use Guest 1 as contact
                     </div>
                     <button
                       type="button"
                       onClick={() => setAutoPcFromFirstAdult((v) => !v)}
-                      aria-pressed={autoPcFromFirstAdult}
-                      aria-label="Toggle auto use of first adult as contact name"
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-all border ${
-                        autoPcFromFirstAdult
-                          ? "bg-[#8b6f47] border-[#7a5f3a]"
-                          : "bg-[#e9e3d9] border-[#d7d2c6]"
-                      }`}
+                      className={`relative inline-flex h-6 w-10 items-center rounded-full transition-colors ${autoPcFromFirstAdult ? "bg-[#8b6f47]" : "bg-gray-300"}`}
                     >
                       <span
-                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                          autoPcFromFirstAdult
-                            ? "translate-x-5"
-                            : "translate-x-1"
-                        }`}
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoPcFromFirstAdult ? "translate-x-5" : "translate-x-1"}`}
                       />
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3">
-                    <Field label="Full name">
+                  <div className="space-y-4 mb-6">
+                    <Field label="Full Name">
                       <div className="relative">
-                        <User className="w-4 h-4 text-[#8b6f47] absolute left-3 top-3.5 pointer-events-none" />
+                        <User className="w-4 h-4 text-[#a09084] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                         <input
                           type="text"
-                          autoComplete="name"
                           value={
                             autoPcFromFirstAdult
                               ? firstAdultFullName || pcName
@@ -693,38 +631,34 @@ export default function AttendeesPage() {
                           }
                           onChange={(e) => setPcName(e.target.value)}
                           disabled={autoPcFromFirstAdult}
-                          className={`${inputCls} pl-9 ${
-                            autoPcFromFirstAdult
-                              ? "opacity-75 cursor-not-allowed bg-[#faf7f2]"
-                              : ""
-                          }`}
+                          className={`${inputCls} pl-10 ${autoPcFromFirstAdult ? "opacity-70 bg-[#fdfaf5]" : ""}`}
+                          placeholder="e.g. Maria Papadopoulos"
                         />
                       </div>
                     </Field>
 
-                    <Field label="Email">
+                    <Field label="Email Address">
                       <div className="relative">
-                        <Mail className="w-4 h-4 text-[#8b6f47] absolute left-3 top-3.5 pointer-events-none" />
+                        <Mail className="w-4 h-4 text-[#a09084] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                         <input
                           type="email"
-                          autoComplete="email"
                           value={pcEmail}
                           onChange={(e) => setPcEmail(e.target.value)}
-                          className={`${inputCls} pl-9`}
+                          className={`${inputCls} pl-10`}
+                          placeholder="For your tickets"
                         />
                       </div>
                     </Field>
 
-                    <Field label="Phone (optional)">
+                    <Field label="Phone Number">
                       <div className="relative">
-                        <Phone className="w-4 h-4 text-[#8b6f47] absolute left-3 top-3.5 pointer-events-none" />
+                        <Phone className="w-4 h-4 text-[#a09084] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                         <input
                           type="tel"
-                          autoComplete="tel"
                           value={pcPhone}
                           onChange={(e) => setPcPhone(e.target.value)}
-                          placeholder="+30 ..."
-                          className={`${inputCls} pl-9`}
+                          placeholder="For day-of updates"
+                          className={`${inputCls} pl-10`}
                         />
                       </div>
                     </Field>
@@ -734,29 +668,23 @@ export default function AttendeesPage() {
                     type="button"
                     disabled={saving || expectedTotal === 0 || expired}
                     onClick={handleSaveAndContinue}
-                    className={`mt-6 w-full py-3 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#c4b89f] ${
-                      saving || expectedTotal === 0
-                        ? "bg-gray-400 cursor-not-allowed text-white"
-                        : "bg-gradient-to-r from-[#8b6f47] to-[#7a5f3a] hover:from-[#7a5f3a] hover:to-[#6b5232] text-white"
+                    className={`w-full py-4 rounded-xl font-bold text-sm uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 ${
+                      saving || expectedTotal === 0 || expired
+                        ? "bg-gray-300 text-white cursor-not-allowed shadow-none"
+                        : "bg-[#1A1A1A] hover:bg-[#C8AA86] text-white"
                     }`}
                   >
                     {saving ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Saving…
-                      </>
+                      <Loader2 className="w-5 h-5 animate-spin" />
                     ) : (
-                      <>
-                        <CreditCard className="w-5 h-5" />{" "}
-                        {expired ? "Hold expired" : "Continue to payment"}
-                      </>
+                      <CreditCard className="w-5 h-5" />
                     )}
+                    {expired ? "Hold Expired" : "Proceed to Payment"}
                   </button>
-
-                  <p className="mt-2 text-[11px] text-[#7a6a58] text-center flex items-center justify-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5" /> By continuing you
-                    agree to our booking terms.
-                  </p>
+                  <div className="mt-4 flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-widest font-bold text-[#a09084]">
+                    <ShieldCheck size={14} className="text-[#8b6f47]" /> Secure
+                    & Encrypted
+                  </div>
                 </div>
               </div>
             </section>
@@ -764,36 +692,30 @@ export default function AttendeesPage() {
         )}
       </main>
 
-      {/* Mobile bottom action bar */}
+      {/* Mobile Bottom Bar */}
       {!loading && (
-        <div className="lg:hidden fixed inset-x-0 bottom-0 border-t border-[#e5e0d8] bg-[#fcf9f4]/95 backdrop-blur supports-[backdrop-filter]:bg-[#fcf9f4]/80 px-4 py-3">
-          <div className="mx-auto max-w-6xl flex items-center justify-between gap-4">
-            <div className="text-xs text-[#6b5e53]">
-              <div className="font-medium text-[#5a4a3f]">Total</div>
-              <div className="text-base font-semibold text-[#8b6f47]">
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-xl border-t border-[#e0dcd4] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] pb-[env(safe-area-inset-bottom)]">
+          <div className="p-4 px-6 flex items-center justify-between gap-4 max-w-md mx-auto">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#8b7a6b]">
+                Total
+              </span>
+              <span className="font-serif text-2xl text-[#1A1A1A] leading-none mt-1">
                 {priceBreakdown.total}
-              </div>
+              </span>
             </div>
             <button
               type="button"
-              disabled={saving || expectedTotal === 0}
+              disabled={saving || expectedTotal === 0 || expired}
               onClick={handleSaveAndContinue}
-              className={`flex-1 py-3 rounded-xl font-semibold text-base transition-all flex items-center justify-center gap-2 shadow-md ${
-                saving || expectedTotal === 0
-                  ? "bg-gray-400 cursor-not-allowed text-white"
-                  : "bg-[#8b6f47] hover:bg-[#7a5f3a] text-white"
-              }`}
+              className="bg-[#1A1A1A] text-white px-8 py-4 rounded-full font-bold text-xs uppercase tracking-[0.15em] hover:bg-[#C8AA86] transition-colors shadow-lg disabled:bg-gray-300 w-full sm:w-auto active:scale-95"
             >
               {saving ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Saving…
-                </>
+                <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+              ) : expired ? (
+                "Expired"
               ) : (
-                <>
-                  <CreditCard className="w-5 h-5" />{" "}
-                  {expired ? "Hold expired" : "Pay"}
-                </>
+                "Pay Now"
               )}
             </button>
           </div>
@@ -807,43 +729,41 @@ export default function AttendeesPage() {
 
 function Stepper({ current = 2 }) {
   const steps = [
-    { id: 1, label: "Details", icon: Users },
-    { id: 2, label: "Attendees", icon: User },
-    { id: 3, label: "Payment", icon: CreditCard },
+    { id: 1, label: "Group" },
+    { id: 2, label: "Guests" },
+    { id: 3, label: "Pay" },
   ];
   return (
-    <div className="w-full sm:w-80">
-      <ol className="flex items-center justify-between text-[11px] text-[#6b5e53]">
-        {steps.map((s, i) => {
-          const Icon = s.icon;
-          const active = s.id <= current;
+    <div className="w-full sm:w-64">
+      <div className="flex items-center justify-between relative">
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-[2px] bg-[#e0dcd4] z-0" />
+        {steps.map((s) => {
+          const active = s.id === current;
+          const passed = s.id < current;
           return (
-            <li key={s.id} className="relative flex-1 flex items-center">
-              {i !== 0 && (
-                <div
-                  className={`h-1.5 w-full rounded-full mx-2 ${
-                    s.id <= current ? "bg-[#8b6f47]" : "bg-[#e6e0d5]"
-                  }`}
-                />
-              )}
+            <div
+              key={s.id}
+              className="relative z-10 flex flex-col items-center gap-1.5 bg-white px-2"
+            >
               <div
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm ${
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-colors ${
                   active
-                    ? "bg-[#8b6f47] border-[#7a5f3a] text-white"
-                    : "bg-white/80 border-[#e0dcd4]"
+                    ? "bg-[#8b6f47] text-white ring-4 ring-[#8b6f47]/20"
+                    : passed
+                      ? "bg-[#e9e3d9] text-[#8b6f47]"
+                      : "bg-white border-2 border-[#e0dcd4] text-[#a09084]"
                 }`}
-                aria-current={s.id === current ? "step" : undefined}
               >
-                <Icon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{s.label}</span>
-                <span className="sm:hidden">{s.id}</span>
+                {passed ? <CheckCircle2 size={12} /> : s.id}
               </div>
-            </li>
+              <span
+                className={`text-[9px] font-bold uppercase tracking-wider ${active ? "text-[#3a2f28]" : "text-[#a09084]"}`}
+              >
+                {s.label}
+              </span>
+            </div>
           );
         })}
-      </ol>
-      <div className="mt-1.5 text-[11px] text-[#6b5e53] text-right">
-        Step {current} of 3
       </div>
     </div>
   );
@@ -851,9 +771,9 @@ function Stepper({ current = 2 }) {
 
 function Progress({ value = 0 }) {
   return (
-    <div className="w-32 h-1.5 rounded-full bg-[#e6e0d5] overflow-hidden">
+    <div className="w-32 h-1.5 rounded-full bg-[#e9e3d9] overflow-hidden">
       <div
-        className="h-full bg-[#8b6f47] rounded-full transition-all"
+        className="h-full bg-[#4a7854] rounded-full transition-all duration-500"
         style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
       />
     </div>
@@ -862,20 +782,20 @@ function Progress({ value = 0 }) {
 
 function Field({ label, hint, children }) {
   return (
-    <div className="space-y-1">
-      {typeof label === "string" ? (
-        <label className="block text-xs text-[#5a4a3f]">{label}</label>
-      ) : (
-        <div className="block text-xs text-[#5a4a3f]">{label}</div>
-      )}
+    <div className="space-y-1.5">
+      <label className="block text-xs font-bold uppercase tracking-wider text-[#a09084] pl-1">
+        {label}
+      </label>
       {children}
-      {hint ? <p className="text-[11px] text-[#7a6a58]">{hint}</p> : null}
+      {hint && (
+        <p className="text-[10px] text-[#8b6f47] pl-1 font-medium">{hint}</p>
+      )}
     </div>
   );
 }
 
 const inputCls =
-  "w-full p-2.5 rounded-lg border border-[#d7d2c6] bg-white focus:outline-none focus:ring focus:ring-[#c4b89f] text-[#5a4a3f] placeholder:text-[#9b8f7e]";
+  "w-full p-3 rounded-xl border border-[#e0dcd4] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 text-[#3a2f28] placeholder:text-[#a09084] shadow-sm transition-all";
 
 function makeCategoryList(adults, kids) {
   const arr = [];
@@ -886,13 +806,13 @@ function makeCategoryList(adults, kids) {
 
 function labelForCategory(c) {
   if (c === "adult") return "Adult (16+)";
-  if (c === "kid") return "Kid (3–15)";
+  if (c === "kid") return "Child (3–15)";
   return c;
 }
 
 function hintForCategory(c) {
-  if (c === "adult") return "Adults must be 16 or older.";
-  if (c === "kid") return "Kids must be between 3 and 15 years old.";
+  if (c === "adult") return "Must be 16 or older.";
+  if (c === "kid") return "Must be between 3 and 15 years.";
   return "";
 }
 
@@ -919,76 +839,50 @@ function validate(attendees, counts, primaryContact) {
     const age = Number(a.age);
 
     if (!a.firstName?.trim() || !a.lastName?.trim()) {
-      issues.push(`Attendee ${idx}: name is required.`);
+      issues.push(`Guest ${idx}: Name is required.`);
       return;
     }
     if (!Number.isFinite(age)) {
-      issues.push(`Attendee ${idx}: age is required.`);
+      issues.push(`Guest ${idx}: Age is required for group balancing.`);
       return;
     }
     if (age < 0 || age > 100) {
-      issues.push(`Attendee ${idx}: age looks invalid.`);
+      issues.push(`Guest ${idx}: Age looks invalid.`);
       return;
     }
 
-    if (a.category === "adult") {
-      if (age < 16) issues.push(`Attendee ${idx}: adults must be 16+.`);
-    } else if (a.category === "kid") {
-      if (age < 3 || age > 15)
-        issues.push(`Attendee ${idx}: kids must be 3–15.`);
-    } else {
-      issues.push(`Attendee ${idx}: unknown category.`);
-    }
+    if (a.category === "adult" && age < 16)
+      issues.push(`Guest ${idx}: Adults must be 16+.`);
+    else if (a.category === "kid" && (age < 3 || age > 15))
+      issues.push(`Guest ${idx}: Children must be 3–15.`);
 
     if (age >= 18) hasEighteenPlus = true;
   });
 
-  if (!hasEighteenPlus) {
-    issues.push("At least one attendee must be 18+.");
-  }
-
+  if (!hasEighteenPlus) issues.push("At least one guest must be 18+.");
   if (!primaryContact.name?.trim())
-    issues.push("Primary contact: name is required.");
+    issues.push("Booking Contact: Name is required.");
   if (!isValidEmail(primaryContact.email))
-    issues.push("Primary contact: valid email is required.");
+    issues.push("Booking Contact: Valid email is required for tickets.");
 
   return issues;
 }
 
 function LoadingBlock() {
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
-      <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-10">
-        <div className="lg:col-span-2 space-y-6">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <div
-              key={i}
-              className="rounded-2xl border border-[#e8e5df] bg-white p-5 shadow-sm"
-            >
-              <div className="h-4 w-40 bg-[#eee7db] rounded mb-4" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="h-10 bg-[#f0ebe3] rounded" />
-                <div className="h-10 bg-[#f0ebe3] rounded" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                <div className="h-10 bg-[#f0ebe3] rounded" />
-                <div className="h-10 bg-[#f0ebe3] rounded" />
-              </div>
-            </div>
-          ))}
+    <div className="animate-pulse space-y-8 mt-8">
+      <div className="h-40 bg-[#e0dcd4]/30 rounded-3xl" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-4">
+          <div className="h-64 bg-[#e0dcd4]/30 rounded-3xl" />
+          <div className="h-64 bg-[#e0dcd4]/30 rounded-3xl" />
         </div>
-        <div className="rounded-2xl border border-[#e8e5df] bg-[#fcf9f4] p-6 shadow-sm">
-          <div className="h-4 w-40 bg-[#eee7db] rounded mb-4" />
-          <div className="h-8 bg-[#f0ebe3] rounded mb-2" />
-          <div className="h-8 bg-[#f0ebe3] rounded mb-2" />
-          <div className="h-8 bg-[#f0ebe3] rounded mb-2" />
-        </div>
+        <div className="h-96 bg-[#e0dcd4]/30 rounded-3xl" />
       </div>
     </div>
   );
 }
 
-// Simple countdown hook for draft expiry
 function useDraftCountdown(expiresAtIso) {
   const [remainingMs, setRemainingMs] = useState(() => {
     if (!expiresAtIso) return 0;
@@ -1012,17 +906,9 @@ function useDraftCountdown(expiresAtIso) {
     }
 
     const ts = Date.parse(expiresAtIso);
-    if (!Number.isFinite(ts)) {
-      setRemainingMs(0);
-      setInitialMs(0);
-      return;
-    }
+    if (!Number.isFinite(ts)) return;
 
-    const update = () => {
-      const diff = Math.max(0, ts - Date.now());
-      setRemainingMs(diff);
-    };
-
+    const update = () => setRemainingMs(Math.max(0, ts - Date.now()));
     setInitialMs(Math.max(0, ts - Date.now()));
     update();
 
@@ -1034,9 +920,7 @@ function useDraftCountdown(expiresAtIso) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
 
-  const formatted = `${String(minutes).padStart(2, "0")}:${String(
-    seconds
-  ).padStart(2, "0")}`;
+  const formatted = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   const expired = remainingMs <= 0;
   const progress =
     initialMs > 0 ? Math.max(0, Math.min(1, remainingMs / initialMs)) : 0;

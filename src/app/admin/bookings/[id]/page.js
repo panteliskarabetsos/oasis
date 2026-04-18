@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -16,6 +16,12 @@ import {
   Users,
   Loader2,
   DollarSign,
+  Info,
+  CalendarDays,
+  FileText,
+  Tag,
+  Banknote,
+  Clock,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
@@ -54,7 +60,7 @@ const minorToMajor = (minor, curr = "EUR") => {
 const fmtMoney = (n, currency = "EUR") => {
   if (n === null || n === undefined || Number.isNaN(Number(n))) return "-";
   return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(
-    Number(n)
+    Number(n),
   );
 };
 
@@ -91,7 +97,7 @@ function extractPromoFromRaw(raw, unitPrices, counts) {
         flat
           .filter(Boolean)
           .map((x) => String(x).trim())
-          .filter(Boolean)
+          .filter(Boolean),
       ),
     ];
     const code = codes.length ? codes.join(" + ") : null;
@@ -107,7 +113,7 @@ function extractPromoFromRaw(raw, unitPrices, counts) {
         if (type.includes("percent") || type === "percentage") {
           discountAmount = Math.max(
             0,
-            Math.round(subtotal * (val / 100) * 100) / 100
+            Math.round(subtotal * (val / 100) * 100) / 100,
           );
         } else if (type.includes("fixed") || type === "amount") {
           discountAmount = Math.max(0, val);
@@ -141,12 +147,11 @@ function extractPaymentMethodSummary(raw) {
   };
 
   const pi = unwrapPI(raw);
-
   const charges = Array.isArray(pi?.charges?.data)
     ? pi.charges.data
     : Array.isArray(raw?.charges?.data)
-    ? raw.charges.data
-    : [];
+      ? raw.charges.data
+      : [];
 
   const charge = charges[0] || null;
   const pmd =
@@ -154,12 +159,10 @@ function extractPaymentMethodSummary(raw) {
 
   if (!pmd) return empty;
 
-  // Stripe usually has: { type: 'card', card: { ... } }
   let type = pmd.type;
   if (!type) {
     if (pmd.card) type = "card";
     else {
-      // fallback: pick first key that looks like a type
       const keys = Object.keys(pmd).filter((k) => k !== "type");
       type = keys[0] || null;
     }
@@ -193,11 +196,7 @@ function extractPaymentMethodSummary(raw) {
     labelParts.push(type);
   }
 
-  return {
-    type,
-    label: labelParts.join(" · ") || null,
-    card,
-  };
+  return { type, label: labelParts.join(" · ") || null, card };
 }
 
 // Normalize API payload into a clean booking model
@@ -208,14 +207,12 @@ function normalizeBooking(raw) {
   const isPrivate = !scheduleSlotId;
 
   const startTime = raw.startTime ?? raw.date ?? raw.ScheduleSlot?.date ?? null;
-
   const experienceId =
     raw.experienceId ??
     raw.slot?.experienceId ??
     raw.Experience?.id ??
     raw.experience?.id ??
     null;
-
   const experienceName =
     raw.experienceName ??
     raw.customExperienceName ??
@@ -282,41 +279,32 @@ function normalizeBooking(raw) {
   return {
     id: raw.id,
     code: raw.code || (raw.id ? `B-${String(raw.id).padStart(6, "0")}` : null),
-
     status: raw.status || "confirmed",
     createdAt: raw.createdAt || raw.created_at || null,
     updatedAt: raw.updatedAt || raw.updated_at || null,
     notes: raw.notes ?? null,
     source: raw.source || null,
-
     isPrivate,
     scheduleSlotId,
-
     startTime,
     duration: raw.duration ?? null,
-
     experience: {
       id: experienceId,
       name: experienceName || (isPrivate ? "Private booking" : null),
       location: raw.experience?.location ?? null,
       isCustom: isPrivate || !experienceId,
     },
-
     guest,
     guestSnapshot: pc,
-
     counts,
     numberOfPeople: Number.isFinite(raw.numberOfPeople)
       ? raw.numberOfPeople
       : counts.total,
     attendees: Array.isArray(raw.attendees) ? raw.attendees : [],
-
     unitPrices,
     money,
     payments,
-
     promo,
-
     currency: raw.currency,
     unitPriceAdult: raw.unitPriceAdult,
     unitPriceKid: raw.unitPriceKid,
@@ -349,7 +337,6 @@ const normalizeStripeSummary = (raw, fallbackCurrency) => {
   };
 
   const pi = unwrapPI(raw);
-
   const baseCurrency = (
     pi?.currency ||
     raw?.currency ||
@@ -357,18 +344,17 @@ const normalizeStripeSummary = (raw, fallbackCurrency) => {
     fallbackCurrency ||
     "EUR"
   ).toUpperCase();
-
   const charges = Array.isArray(pi?.charges?.data)
     ? pi.charges.data
     : Array.isArray(raw?.charges?.data)
-    ? raw.charges.data
-    : [];
+      ? raw.charges.data
+      : [];
 
   let collectedCents = Number(pi?.amount_received) || 0;
   if (!collectedCents && charges.length) {
     collectedCents = charges.reduce(
       (sum, c) => sum + Number(c?.amount_captured ?? c?.amount ?? 0),
-      0
+      0,
     );
   }
 
@@ -382,8 +368,8 @@ const normalizeStripeSummary = (raw, fallbackCurrency) => {
       const rs = Array.isArray(c?.refunds?.data)
         ? c.refunds.data
         : Array.isArray(c?.refunds)
-        ? c.refunds
-        : [];
+          ? c.refunds
+          : [];
       if (rs.length) {
         refundObjs.push(...rs);
       } else if (Number(c?.amount_refunded) > 0) {
@@ -403,7 +389,7 @@ const normalizeStripeSummary = (raw, fallbackCurrency) => {
   if (!refundObjs.length && charges.length) {
     const sumRef = charges.reduce(
       (s, c) => s + Number(c?.amount_refunded || 0),
-      0
+      0,
     );
     if (sumRef > 0) {
       refundObjs.push({
@@ -420,7 +406,7 @@ const normalizeStripeSummary = (raw, fallbackCurrency) => {
 
   const refundedCents = refundObjs.reduce(
     (s, r) => s + Number(r?.amount || 0),
-    0
+    0,
   );
   const netCents = Math.max(0, collectedCents - refundedCents);
 
@@ -470,7 +456,7 @@ export default function ReservationDetailPage() {
       item?.payments?.stripePaymentIntentId ||
       item?.stripePaymentIntentId ||
       null,
-    [item]
+    [item],
   );
 
   // Modal state
@@ -484,7 +470,7 @@ export default function ReservationDetailPage() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotFrom, setSlotFrom] = useState(() => toDateInput(new Date()));
   const [slotTo, setSlotTo] = useState(() =>
-    toDateInput(plusDays(new Date(), 60))
+    toDateInput(plusDays(new Date(), 60)),
   );
   const [targetSlotId, setTargetSlotId] = useState("");
   const [rev, setRev] = useState(0);
@@ -505,11 +491,10 @@ export default function ReservationDetailPage() {
           cache: "no-store",
           credentials: "include",
         });
-        if (!res.ok) {
+        if (!res.ok)
           throw new Error(
-            (await res.json().catch(() => ({})))?.error || "Failed to load"
+            (await res.json().catch(() => ({})))?.error || "Failed to load",
           );
-        }
         const { item } = await res.json();
         setItem(normalizeBooking(item));
       } catch (e) {
@@ -520,14 +505,13 @@ export default function ReservationDetailPage() {
     })();
   }, [id]);
 
-  // Fetch Stripe PI when present, and when pricing editor saves (rev++)
+  // Fetch Stripe PI
   useEffect(() => {
     if (!piId) {
       setStripe(null);
       setStripeErr("");
       return;
     }
-
     let aborted = false;
     (async () => {
       try {
@@ -549,15 +533,14 @@ export default function ReservationDetailPage() {
         if (!aborted) setStripeLoading(false);
       }
     })();
-
     return () => {
       aborted = true;
     };
   }, [piId, rev]);
 
+  // Lock scroll when pricing modal is open
   useEffect(() => {
     if (!showPricing) return;
-
     const scrollY = window.scrollY;
     const original = {
       position: document.body.style.position,
@@ -566,11 +549,9 @@ export default function ReservationDetailPage() {
       overflow: document.documentElement.style.overflow,
       paddingRight: document.documentElement.style.paddingRight,
     };
-
     const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
-    if (scrollbarW > 0) {
+    if (scrollbarW > 0)
       document.documentElement.style.paddingRight = `${scrollbarW}px`;
-    }
 
     document.body.style.position = "fixed";
     document.body.style.top = `-${scrollY}px`;
@@ -595,11 +576,10 @@ export default function ReservationDetailPage() {
       credentials: "include",
       body: JSON.stringify({ reason: cancelReason }),
     });
-    if (!res.ok) {
+    if (!res.ok)
       throw new Error(
-        (await res.json().catch(() => ({})))?.error || "Cancellation failed"
+        (await res.json().catch(() => ({})))?.error || "Cancellation failed",
       );
-    }
     setItem((curr) => ({ ...curr, status: "cancelled" }));
     setShowCancel(false);
     toast.success("Reservation cancelled");
@@ -621,12 +601,11 @@ export default function ReservationDetailPage() {
         credentials: "include",
         cache: "no-store",
       });
-      if (!res.ok) {
+      if (!res.ok)
         throw new Error(
           (await res.json().catch(() => ({})))?.error ||
-            "Failed to load availability"
+            "Failed to load availability",
         );
-      }
       const payload = await res.json();
       setSlots(payload?.items || []);
     } catch (e) {
@@ -644,11 +623,10 @@ export default function ReservationDetailPage() {
       credentials: "include",
       body: JSON.stringify({ scheduleSlotId: Number(targetSlotId) }),
     });
-    if (!res.ok) {
+    if (!res.ok)
       throw new Error(
-        (await res.json().catch(() => ({})))?.error || "Reschedule failed"
+        (await res.json().catch(() => ({})))?.error || "Reschedule failed",
       );
-    }
     const payload = await res.json();
     setItem((curr) => ({
       ...curr,
@@ -664,7 +642,6 @@ export default function ReservationDetailPage() {
   const isPrivate = !!item?.isPrivate;
 
   const moneyCurrency = item?.money?.currency || "EUR";
-
   const paidTotal =
     typeof item?.money?.totalPaidAmount === "number"
       ? item.money.totalPaidAmount
@@ -676,7 +653,6 @@ export default function ReservationDetailPage() {
   const kids = Number(item?.counts?.kids ?? 0);
 
   const estimate = +(adults * unitPriceAdult + kids * unitPriceKid).toFixed(2);
-
   const promoCode = item?.promo?.code || null;
   const discountValue = Number(item?.promo?.discountAmount || 0);
   const grandTotal = Math.max(0, +(estimate - discountValue).toFixed(2));
@@ -698,7 +674,7 @@ export default function ReservationDetailPage() {
 
   const stripeSummary = useMemo(
     () => normalizeStripeSummary(stripe, item?.money?.currency || "EUR"),
-    [stripe, item?.money?.currency]
+    [stripe, item?.money?.currency],
   );
   const {
     currency: stripeCurrency,
@@ -707,10 +683,6 @@ export default function ReservationDetailPage() {
     netCents,
     refunds,
   } = stripeSummary;
-  // const paymentMethod = useMemo(
-  //   () => extractPaymentMethodSummary(stripe),
-  //   [stripe]
-  // );
 
   const hasPI = Boolean(item?.payments?.stripePaymentIntentId);
   const heroShowLoading = hasPI && stripeLoading;
@@ -718,24 +690,24 @@ export default function ReservationDetailPage() {
     hasPI && stripe ? minorToMajor(netCents, stripeCurrency) : paidTotal;
   const heroCurrency = hasPI && stripe ? stripeCurrency : moneyCurrency;
   const heroLabel = hasPI
-    ? "Net via Stripe (after refunds)"
+    ? "Net via Stripe"
     : typeof item?.money?.totalPaidAmount === "number"
-    ? "Total paid"
-    : "Total";
+      ? "Total paid"
+      : "Total";
   const paymentMethod = item?.payments?.paymentMethod || null;
   const paymentCard = paymentMethod?.card || null;
 
   const sourceBadge = item?.source ? (
     <span
       className={cx(
-        "ml-2 rounded-full border px-2 py-0.5 text-xs",
+        "ml-2 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
         item.source === "admin" &&
           "bg-purple-50 border-purple-200 text-purple-700",
         item.source === "web" && "bg-blue-50 border-blue-200 text-blue-700",
         item.source === "phone" &&
           "bg-amber-50 border-amber-200 text-amber-800",
         !["admin", "web", "phone"].includes(item.source) &&
-          "bg-neutral-100 border-neutral-200 text-neutral-600"
+          "bg-neutral-100 border-neutral-200 text-neutral-600",
       )}
     >
       {item.source}
@@ -744,83 +716,78 @@ export default function ReservationDetailPage() {
 
   /* ------------------------------ UI ------------------------------ */
   return (
-    <div className="pb-16 min-h-screen bg-gradient-to-b from-neutral-50 to-white">
-      {/* sticky header */}
-      <div className="rounded-b-3xl sticky top-0 z-40 border-b bg-white/75 backdrop-blur supports-[backdrop-filter]:bg-white/55 print:hidden">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-2 min-w-0">
+    <div className="pb-24 min-h-screen bg-[#fdfcfb] text-[#3f3127] selection:bg-[#8b6f47]/20">
+      {/* Sticky Header */}
+      <div className="sticky top-0 z-30 border-b border-[#e3ddd2] bg-white/90 backdrop-blur-md print:hidden">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-8">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <button
               onClick={() => router.push("/admin/bookings")}
-              className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400"
+              className="flex items-center justify-center w-10 h-10 rounded-full border border-[#e3ddd2] bg-[#fdfaf5] text-[#5a4a3f] hover:bg-[#f5f1ea] transition-colors shrink-0"
+              title="Back to Bookings"
             >
-              <ArrowLeft className="h-4 w-4" /> Back
+              <ArrowLeft size={18} />
             </button>
-            <div className="ml-1 truncate text-sm text-neutral-600">
-              {item?.code ? (
-                <span className="font-mono">{item.code}</span>
-              ) : (
-                <span className="text-neutral-400">#{id}</span>
-              )}
-              {sourceBadge}
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[#a09084]">
+                Booking Reference
+              </span>
+              <div className="flex items-center text-sm font-semibold text-[#3f3127] truncate">
+                {item?.code ? (
+                  <span className="font-mono tracking-tight">{item.code}</span>
+                ) : (
+                  <span className="text-neutral-400 font-mono">#{id}</span>
+                )}
+                {sourceBadge}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
             <IconButton
               onClick={() => {
-                const ok =
-                  typeof navigator !== "undefined" &&
-                  navigator.clipboard?.writeText;
-                if (ok) {
+                if (navigator?.clipboard?.writeText) {
                   navigator.clipboard.writeText(window.location.href);
                   toast.success("Link copied");
                 } else {
                   toast.error("Copy not supported by this browser");
                 }
               }}
-              title="Copy link"
-              ariaLabel="Copy link"
-            >
-              <Copy className="h-4 w-4" />
-            </IconButton>
+              title="Copy Link"
+              icon={Copy}
+            />
             <IconButton
               onClick={() => window.print()}
-              title="Print"
-              ariaLabel="Print"
-            >
-              <Printer className="h-4 w-4" />
-            </IconButton>
+              title="Print Details"
+              icon={Printer}
+            />
+            <div className="h-6 w-[1px] bg-[#e3ddd2] mx-1 hidden sm:block shrink-0" />
             <IconButton
               onClick={() => setShowReschedule(true)}
-              title="Reschedule"
-              ariaLabel="Reschedule reservation"
               disabled={isCancelled || isPrivate}
-              className="hover:bg-amber-50"
-            >
-              <CalendarClock className="h-4 w-4" />
-            </IconButton>
+              title="Reschedule"
+              icon={CalendarClock}
+              tone="amber"
+            />
             <IconButton
               onClick={() => setShowCancel(true)}
-              title="Cancel"
-              ariaLabel="Cancel reservation"
               disabled={isCancelled}
-              className="hover:bg-red-50"
-            >
-              <XCircle className="h-4 w-4" />
-            </IconButton>
+              title="Cancel Booking"
+              icon={XCircle}
+              tone="red"
+            />
             <IconButton
               onClick={() => setShowPricing(true)}
-              title="Edit pricing"
-              ariaLabel="Edit pricing"
               disabled={isCancelled}
-              className="hover:bg-emerald-50"
-            >
-              <DollarSign className="h-4 w-4" />
-            </IconButton>
+              title="Edit Pricing"
+              icon={DollarSign}
+              tone="emerald"
+            />
           </div>
         </div>
       </div>
 
-      {/* Pricing modal with framer */}
+      {/* Pricing Editor Modal */}
       <AnimatePresence>
         {showPricing && (
           <motion.div
@@ -828,33 +795,31 @@ export default function ReservationDetailPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 overflow-y-auto overscroll-contain"
+            className="fixed inset-0 z-[100] grid place-items-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto overscroll-contain"
             onClick={() => setShowPricing(false)}
           >
             <motion.div
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 12, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 500, damping: 40 }}
-              className="w-full max-w-2xl rounded-2xl border border-black/10 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-[#111] max-h-[85vh] overflow-y-auto"
+              initial={{ y: 20, scale: 0.95, opacity: 0 }}
+              animate={{ y: 0, scale: 1, opacity: 1 }}
+              exit={{ y: 20, scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-2xl rounded-[2rem] border border-[#e3ddd2] bg-white p-6 shadow-2xl max-h-[85vh] overflow-y-auto no-scrollbar"
               onClick={(e) => e.stopPropagation()}
               role="dialog"
               aria-modal="true"
-              aria-label="Edit pricing & payment"
             >
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold uppercase tracking-wide opacity-70">
-                  Pricing & payment
+              <div className="mb-6 flex items-center justify-between border-b border-[#e3ddd2] pb-4">
+                <h3 className="text-lg font-serif text-[#3f3127]">
+                  Pricing & Payment
                 </h3>
                 <button
                   type="button"
                   onClick={() => setShowPricing(false)}
-                  className="rounded-lg border border-black/10 px-3 py-1 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+                  className="rounded-full p-2 hover:bg-[#fdfaf5] text-[#7a6a5f] transition-colors"
                 >
-                  Close
+                  <XCircle size={20} />
                 </button>
               </div>
-
               <BookingPricingEditor
                 bookingId={id}
                 onClose={() => setShowPricing(false)}
@@ -865,111 +830,111 @@ export default function ReservationDetailPage() {
         )}
       </AnimatePresence>
 
-      <div className="mx-auto max-w-5xl px-4">
+      <div className="mx-auto max-w-6xl px-4 sm:px-8 py-8">
         {loading ? (
           <Skeleton />
         ) : error ? (
-          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-8 text-red-700">
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-red-700 text-center font-medium shadow-sm">
             {error}
           </div>
         ) : !item ? (
-          <div className="mt-6 rounded-2xl border p-8 text-neutral-600">
+          <div className="rounded-2xl border border-[#e3ddd2] bg-white p-12 text-center text-[#7a6a5f] shadow-sm">
             Reservation not found.
           </div>
         ) : (
-          <div className="mt-6 space-y-6">
-            {/* Hero */}
-            <div className="overflow-hidden rounded-3xl border bg-white shadow-sm">
-              <div className="relative">
-                <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-teal-400 via-amber-400 to-pink-400" />
-                <div className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-center">
-                  <div className="flex items-center gap-4 min-w-0">
-                    <div className="grid h-12 w-12 place-items-center rounded-2xl border bg-neutral-50 font-semibold text-neutral-700">
-                      {guestInitials || "?"}
+          <div className="space-y-6">
+            {/* Hero Profile Card */}
+            <div className="overflow-hidden rounded-[2rem] border border-[#e3ddd2] bg-white shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex flex-col md:flex-row justify-between gap-6 p-6 sm:p-8 md:items-center">
+                <div className="flex items-center gap-4 sm:gap-5 min-w-0 flex-1">
+                  <div className="flex h-14 w-14 sm:h-16 sm:w-16 shrink-0 items-center justify-center rounded-full border border-[#e3ddd2] bg-[#fdfaf5] text-lg sm:text-xl font-serif text-[#8b6f47] shadow-sm">
+                    {guestInitials || "?"}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-3 mb-1.5">
+                      <h1 className="truncate text-xl sm:text-2xl font-serif text-[#2a1f18]">
+                        {guestName || "No name provided"}
+                      </h1>
+                      <StatusBadge status={statusNorm} />
                     </div>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h1 className="truncate text-lg font-semibold text-neutral-900">
-                          {guestName || "No name"}
-                        </h1>
-                        <StatusBadge status={statusNorm} />
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-600">
-                        <Chip icon={<Users className="h-3.5 w-3.5" />}>
-                          {item.counts?.adults ?? 0}
-                          {typeof item.counts?.kids === "number"
-                            ? ` + ${item.counts.kids}`
-                            : ""}
-                          {typeof item.counts?.teens === "number"
-                            ? ` + ${item.counts.teens}`
-                            : ""}
-                        </Chip>
-                        <Dot />
-                        <Chip icon={<CalendarClock className="h-3.5 w-3.5" />}>
-                          {fmtDateShort(item.startTime)}
-                        </Chip>
-                        {item.experience?.name ? (
-                          <>
-                            <Dot />
-                            <Chip icon={<MapPin className="h-3.5 w-3.5" />}>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs sm:text-sm font-medium text-[#7a6a5f]">
+                      <span className="flex items-center gap-1.5">
+                        <Users size={14} className="text-[#a09084]" />
+                        {item.counts?.adults ?? 0}{" "}
+                        {typeof item.counts?.kids === "number"
+                          ? ` + ${item.counts.kids}`
+                          : ""}
+                      </span>
+                      <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
+                      <span className="flex items-center gap-1.5">
+                        <CalendarClock size={14} className="text-[#a09084]" />
+                        {fmtDateShort(item.startTime)}
+                      </span>
+                      {item.experience?.name && (
+                        <>
+                          <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
+                          <span className="flex items-center gap-1.5 min-w-0 truncate">
+                            <MapPin
+                              size={14}
+                              className="text-[#a09084] shrink-0"
+                            />
+                            <span className="truncate">
                               {item.experience?.name}
-                              {isPrivate && (
-                                <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                                  Private
-                                </span>
-                              )}
-                            </Chip>
-                          </>
-                        ) : null}
-                      </div>
+                            </span>
+                            {isPrivate && (
+                              <span className="ml-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 shrink-0">
+                                Private
+                              </span>
+                            )}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-semibold text-neutral-900">
-                      {heroShowLoading
-                        ? "…"
-                        : fmtMoney(heroValue, heroCurrency)}
-                    </div>
-                    <div className="text-xs text-neutral-500">{heroLabel}</div>
+                </div>
 
-                    {paymentMethod?.label && (
-                      <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-700">
-                        <CreditCard className="h-3 w-3" />
-                        {paymentMethod.label}
-                      </div>
-                    )}
-
-                    {stripeErr && (
-                      <div className="mt-1 text-[11px] text-red-500">
-                        {stripeErr}
-                      </div>
+                <div className="md:text-right bg-[#fdfcfb] md:bg-transparent p-4 md:p-0 rounded-2xl border border-[#e3ddd2] md:border-none shrink-0">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-1">
+                    {heroLabel}
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-serif text-[#2a1f18]">
+                    {heroShowLoading ? (
+                      <Loader2
+                        size={24}
+                        className="animate-spin text-[#8b6f47]"
+                      />
+                    ) : (
+                      fmtMoney(heroValue, heroCurrency)
                     )}
                   </div>
+                  {paymentMethod?.label && (
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#e3ddd2] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#5a4a3f] shadow-sm">
+                      <CreditCard size={12} className="text-[#8b6f47]" />
+                      {paymentMethod.label}
+                    </div>
+                  )}
+                  {stripeErr && (
+                    <div className="mt-2 text-[11px] font-medium text-red-500">
+                      {stripeErr}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Grid cards */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Card title="Reservation info">
+            {/* Bento Grid Cards */}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 items-start">
+              <Card title="Reservation Info" icon={<FileText size={16} />}>
                 <Row label="Date">{fmtDateLong(item.startTime)}</Row>
                 <Row label="Experience">
                   {item.experience?.name || "-"}
                   {isPrivate && (
-                    <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                    <span className="ml-2 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">
                       Private
                     </span>
                   )}
                 </Row>
-                <Row
-                  label={
-                    <span className="inline-flex items-center gap-1">
-                      <MapPin className="h-4 w-4" /> Location
-                    </span>
-                  }
-                >
-                  {item.experience?.location || "-"}
-                </Row>
+                <Row label="Location">{item.experience?.location || "-"}</Row>
                 <Row label="Duration">
                   {Number.isFinite(item.duration)
                     ? `${item.duration} min`
@@ -978,334 +943,341 @@ export default function ReservationDetailPage() {
                 <Row label="Code" mono>
                   <Copyable value={item.code} empty="-" />
                 </Row>
-                <Row label="Price / adult">
-                  {fmtMoney(priceAdult, currency)}
-                </Row>
-                <Row label="Price / kid">{fmtMoney(priceKid, currency)}</Row>
-                <Row label="Created">{fmtDateShort(item.createdAt)}</Row>
-                <Row label="Updated">{fmtDateShort(item.updatedAt)}</Row>
+                <Row label="Adult Price">{fmtMoney(priceAdult, currency)}</Row>
+                <Row label="Child Price">{fmtMoney(priceKid, currency)}</Row>
+                <Row label="Created On">{fmtDateShort(item.createdAt)}</Row>
+                <Row label="Last Updated">{fmtDateShort(item.updatedAt)}</Row>
                 <Row label="Source" mono>
                   {item.source || "-"}
                 </Row>
               </Card>
 
-              <Card title="Customer">
-                <Row
-                  label={
-                    <span className="inline-flex items-center gap-1">
-                      <User2 className="h-4 w-4" /> Name
-                    </span>
-                  }
-                >
-                  {guestName || "-"}
-                </Row>
-                <Row
-                  label={
-                    <span className="inline-flex items-center gap-1">
-                      <Mail className="h-4 w-4" /> Email
-                    </span>
-                  }
-                  mono
-                >
-                  {item.guest?.email ? (
-                    <a
-                      className="hover:underline"
-                      href={`mailto:${item.guest.email}`}
-                    >
-                      {item.guest.email}
-                    </a>
-                  ) : (
-                    "-"
-                  )}
-                </Row>
-                <Row
-                  label={
-                    <span className="inline-flex items-center gap-1">
-                      <Phone className="h-4 w-4" /> Phone
-                    </span>
-                  }
-                  mono
-                >
-                  {item.guest?.phone ? (
-                    <a
-                      className="hover:underline"
-                      href={`tel:${item.guest.phone}`}
-                    >
-                      {item.guest.phone}
-                    </a>
-                  ) : (
-                    "-"
-                  )}
-                </Row>
-                <Row label="Notes">{item.notes || "-"}</Row>
-              </Card>
+              <div className="space-y-6">
+                <Card title="Customer Details" icon={<User2 size={16} />}>
+                  <Row label="Full Name">{guestName || "-"}</Row>
+                  <Row label="Email Address" mono>
+                    {item.guest?.email ? (
+                      <a
+                        className="text-[#8b6f47] hover:underline break-all"
+                        href={`mailto:${item.guest.email}`}
+                      >
+                        {item.guest.email}
+                      </a>
+                    ) : (
+                      "-"
+                    )}
+                  </Row>
+                  <Row label="Phone Number" mono>
+                    {item.guest?.phone ? (
+                      <a
+                        className="text-[#8b6f47] hover:underline break-all"
+                        href={`tel:${item.guest.phone}`}
+                      >
+                        {item.guest.phone}
+                      </a>
+                    ) : (
+                      "-"
+                    )}
+                  </Row>
+                  <Row label="Internal Notes">
+                    {item.notes ? (
+                      <span className="italic text-[#7a6a5f]">
+                        {item.notes}
+                      </span>
+                    ) : (
+                      "-"
+                    )}
+                  </Row>
+                </Card>
 
-              <Card title="Payment">
-                <Row label="Payment status">
-                  <div className="flex flex-wrap items-center gap-2">
+                {Array.isArray(item?.attendees) &&
+                  item.attendees.length > 0 && (
+                    <Card title="Roster & Attendees" icon={<Users size={16} />}>
+                      <div className="divide-y divide-[#e3ddd2] border border-[#e3ddd2] rounded-xl overflow-hidden bg-[#fdfcfb]">
+                        {item.attendees.map((a, idx) => {
+                          const name =
+                            a?.name ||
+                            [a?.firstName, a?.lastName]
+                              .filter(Boolean)
+                              .join(" ") ||
+                            `Guest #${idx + 1}`;
+                          const type = a?.type || a?.category || "adult";
+                          const age =
+                            typeof a?.age === "number" && Number.isFinite(a.age)
+                              ? a.age
+                              : null;
+                          const notes =
+                            (typeof a?.notes === "string" && a.notes.trim()) ||
+                            (typeof a?.allergies === "string" &&
+                              a.allergies.trim()) ||
+                            (typeof a?.dietary === "string" &&
+                              a.dietary.trim()) ||
+                            null;
+
+                          return (
+                            <div
+                              key={idx}
+                              className="p-4 hover:bg-[#fdfaf5] transition-colors"
+                            >
+                              <div className="flex items-center justify-between gap-3 mb-1">
+                                <span className="font-semibold text-[#3f3127] truncate min-w-0">
+                                  {name}
+                                </span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {age !== null && (
+                                    <span className="rounded-md bg-white border border-[#e3ddd2] px-2 py-0.5 text-[10px] font-bold text-[#7a6a5f] shadow-sm">
+                                      {age} yrs
+                                    </span>
+                                  )}
+                                  <span className="rounded-md bg-white border border-[#e3ddd2] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#8b6f47] shadow-sm">
+                                    {type}
+                                  </span>
+                                </div>
+                              </div>
+                              {notes && (
+                                <div className="text-xs text-[#7a6a5f] bg-white border border-[#e3ddd2] rounded-lg p-2 mt-2">
+                                  <span className="font-semibold text-[#5a4a3f]">
+                                    Note:
+                                  </span>{" "}
+                                  {notes}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </Card>
+                  )}
+              </div>
+
+              <div className="lg:col-span-2">
+                <Card title="Payment Ledger" icon={<Banknote size={16} />}>
+                  <Row label="Status">
                     <StatusBadge status={statusNorm} />
-                  </div>
-                </Row>
-                <Row label="Payment method">
-                  {paymentMethod?.label
-                    ? paymentMethod.label
-                    : hasPI
-                    ? stripeLoading
-                      ? "…"
-                      : "Card"
-                    : "—"}
-                </Row>
+                  </Row>
+                  <Row label="Method">
+                    {paymentMethod?.label ? (
+                      paymentMethod.label
+                    ) : hasPI ? (
+                      stripeLoading ? (
+                        <Loader2
+                          size={14}
+                          className="animate-spin text-[#8b6f47]"
+                        />
+                      ) : (
+                        "Card"
+                      )
+                    ) : (
+                      "—"
+                    )}
+                  </Row>
 
-                {paymentCard && (
-                  <Row label="Card details">
-                    <div className="space-y-0.5 text-xs text-neutral-800">
-                      <div>
-                        {(paymentCard.brand || "Card").toUpperCase()}
-                        {paymentCard.last4 && (
-                          <span className="ml-2">•••• {paymentCard.last4}</span>
+                  {paymentCard && (
+                    <Row label="Card Details">
+                      <div className="space-y-1 text-sm font-medium text-[#3f3127]">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded border border-[#e3ddd2] bg-white text-[10px] uppercase tracking-wider shadow-sm">
+                            {paymentCard.brand || "Card"}
+                          </span>
+                          {paymentCard.last4 && (
+                            <span>•••• {paymentCard.last4}</span>
+                          )}
+                        </div>
+                        {(paymentCard.expMonth || paymentCard.expYear) && (
+                          <div className="text-xs text-[#7a6a5f] mt-1">
+                            Expires:{" "}
+                            {paymentCard.expMonth
+                              ? String(paymentCard.expMonth).padStart(2, "0")
+                              : "??"}
+                            /
+                            {paymentCard.expYear
+                              ? String(paymentCard.expYear).slice(-2)
+                              : "??"}
+                          </div>
+                        )}
+                        {paymentCard.funding && (
+                          <div className="text-xs text-[#7a6a5f] capitalize">
+                            Type: {paymentCard.funding}
+                          </div>
+                        )}
+                        {paymentCard.country && (
+                          <div className="text-xs text-[#7a6a5f]">
+                            Issuer: {paymentCard.country}
+                          </div>
                         )}
                       </div>
+                    </Row>
+                  )}
 
-                      {(paymentCard.expMonth || paymentCard.expYear) && (
-                        <div className="text-neutral-600">
-                          Expires{" "}
-                          {paymentCard.expMonth
-                            ? String(paymentCard.expMonth).padStart(2, "0")
-                            : "??"}
-                          /
-                          {paymentCard.expYear
-                            ? String(paymentCard.expYear).slice(-2)
-                            : "??"}
-                        </div>
-                      )}
+                  {promoCode && (
+                    <Row label="Promo Code" mono>
+                      <span className="text-[#8b6f47] font-bold bg-[#8b6f47]/10 px-2 py-1 rounded">
+                        {promoCode}
+                      </span>
+                    </Row>
+                  )}
+                  {discountValue > 0 && (
+                    <Row label="Discount Applied" mono>
+                      <span className="text-emerald-600 font-bold">
+                        −{fmtMoney(discountValue, moneyCurrency)}
+                      </span>
+                    </Row>
+                  )}
 
-                      {paymentCard.funding && (
-                        <div className="text-neutral-500 capitalize">
-                          {paymentCard.funding} card
-                        </div>
-                      )}
-
-                      {paymentCard.country && (
-                        <div className="text-neutral-500">
-                          Issuer country: {paymentCard.country}
-                        </div>
-                      )}
-                    </div>
-                  </Row>
-                )}
-
-                {promoCode ? (
-                  <Row label="Promo code" mono>
-                    {promoCode}
-                  </Row>
-                ) : null}
-                {discountValue > 0 ? (
-                  <Row label="Discount" mono>
-                    −{fmtMoney(discountValue, moneyCurrency)}
-                  </Row>
-                ) : null}
-
-                <Row
-                  label={
-                    <span className="inline-flex items-center gap-1">
-                      <CreditCard className="h-4 w-4" /> Stripe Session
-                    </span>
-                  }
-                  mono
-                >
-                  {item?.payments?.stripeSessionId ? (
-                    <div className="flex items-center gap-2">
-                      <Button
+                  <Row label="Stripe Session" mono>
+                    {item?.payments?.stripeSessionId ? (
+                      <button
                         onClick={() => setShowStripeSession(true)}
-                        className=""
+                        className="text-xs font-bold uppercase tracking-wider text-[#8b6f47] hover:underline break-all text-left"
                       >
-                        Show
-                      </Button>
-                    </div>
-                  ) : (
-                    "-"
-                  )}
-                </Row>
-
-                <Row
-                  label={
-                    <span className="inline-flex items-center gap-1">
-                      <CreditCard className="h-4 w-4" /> Payment Intent
-                    </span>
-                  }
-                  mono
-                >
-                  <Copyable
-                    value={item.payments?.stripePaymentIntentId}
-                    empty="-"
-                  />
-                </Row>
-
-                {hasPI ? (
-                  <>
-                    <Row label="Stripe collected" mono>
-                      {stripeLoading
-                        ? "…"
-                        : fmtMoney(
-                            minorToMajor(collectedCents, stripeCurrency),
-                            stripeCurrency
-                          )}
-                    </Row>
-                    <Row label="Stripe refunded" mono>
-                      {stripeLoading
-                        ? "…"
-                        : fmtMoney(
-                            minorToMajor(refundedCents, stripeCurrency),
-                            stripeCurrency
-                          )}
-                    </Row>
-                    <Row label="Stripe net (after refunds)" mono>
-                      {stripeLoading
-                        ? "…"
-                        : fmtMoney(
-                            minorToMajor(netCents, stripeCurrency),
-                            stripeCurrency
-                          )}
-                    </Row>
-
-                    {refunds.length > 0 && (
-                      <div className="mt-2 rounded-xl border bg-neutral-50/60 p-3">
-                        <div className="mb-1 text-xs font-semibold text-neutral-700">
-                          Refunds
-                        </div>
-                        <ul className="divide-y">
-                          {refunds.map((r) => (
-                            <li
-                              key={r.id}
-                              className="py-1.5 text-xs flex items-center justify-between gap-3"
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate text-neutral-600">
-                                  <code className="rounded bg-white px-1 py-0.5">
-                                    {r.id}
-                                  </code>
-                                  <span className="mx-1">•</span>
-                                  <span className="capitalize">
-                                    {r.status || "unknown"}
-                                  </span>
-                                  {r.reason ? (
-                                    <span className="opacity-70">
-                                      {" "}
-                                      — {r.reason}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="opacity-70">
-                                  {fmtTs(r.created)}
-                                </div>
-                              </div>
-                              <div className="font-semibold text-rose-700">
-                                -
-                                {fmtMoney(
-                                  minorToMajor(r.amount, r.currency),
-                                  r.currency
-                                )}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                        View Session ID
+                      </button>
+                    ) : (
+                      "-"
                     )}
-                  </>
-                ) : null}
+                  </Row>
 
-                <Row
-                  label={
-                    typeof item?.money?.totalPaidAmount === "number"
-                      ? "Total paid (editor)"
-                      : "Total (editor)"
-                  }
-                  mono
-                >
-                  {fmtMoney(paidTotal, moneyCurrency)}
-                  {balance < 0 && (
-                    <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                      Overpaid by{" "}
-                      <strong>
-                        {fmtMoney(Math.abs(balance), moneyCurrency)}
-                      </strong>
-                      . Consider issuing a refund or keeping it as credit.
+                  <Row label="Payment Intent" mono>
+                    <Copyable
+                      value={item.payments?.stripePaymentIntentId}
+                      empty="-"
+                    />
+                  </Row>
+
+                  {hasPI && (
+                    <div className="mt-4 pt-4 border-t border-[#e3ddd2] space-y-3">
+                      <Row label="Collected via Stripe" mono>
+                        {stripeLoading ? (
+                          "…"
+                        ) : (
+                          <span className="font-bold">
+                            {fmtMoney(
+                              minorToMajor(collectedCents, stripeCurrency),
+                              stripeCurrency,
+                            )}
+                          </span>
+                        )}
+                      </Row>
+                      <Row label="Refunded via Stripe" mono>
+                        {stripeLoading ? (
+                          "…"
+                        ) : (
+                          <span className="text-rose-600 font-bold">
+                            {fmtMoney(
+                              minorToMajor(refundedCents, stripeCurrency),
+                              stripeCurrency,
+                            )}
+                          </span>
+                        )}
+                      </Row>
+                      <Row label="Net Revenue" mono>
+                        {stripeLoading ? (
+                          "…"
+                        ) : (
+                          <span className="text-emerald-600 font-bold">
+                            {fmtMoney(
+                              minorToMajor(netCents, stripeCurrency),
+                              stripeCurrency,
+                            )}
+                          </span>
+                        )}
+                      </Row>
+
+                      {refunds.length > 0 && (
+                        <div className="mt-4 rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] overflow-hidden">
+                          <div className="px-4 py-2 bg-[#fdfaf5] border-b border-[#e3ddd2] text-[10px] font-bold uppercase tracking-wider text-[#a09084]">
+                            Refund History
+                          </div>
+                          <ul className="divide-y divide-[#e3ddd2]">
+                            {refunds.map((r) => (
+                              <li
+                                key={r.id}
+                                className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white transition-colors"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <code className="text-[10px] font-bold text-[#7a6a5f] bg-[#e3ddd2]/40 px-1.5 py-0.5 rounded truncate max-w-[150px]">
+                                      {r.id}
+                                    </code>
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">
+                                      {r.status || "Completed"}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-[#5a4a3f]">
+                                    {r.reason || "No reason provided"}
+                                  </div>
+                                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mt-2">
+                                    {fmtTs(r.created)}
+                                  </div>
+                                </div>
+                                <div className="font-serif text-lg text-rose-600 font-bold whitespace-nowrap self-start sm:self-auto">
+                                  -
+                                  {fmtMoney(
+                                    minorToMajor(r.amount, r.currency),
+                                    r.currency,
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
                   )}
-                </Row>
-              </Card>
 
-              {Array.isArray(item?.attendees) && item.attendees.length > 0 && (
-                <Card title="Attendees">
-                  <div className="divide-y rounded-xl border bg-neutral-50/60">
-                    {item.attendees.map((a, idx) => {
-                      const name =
-                        a?.name ||
-                        [a?.firstName, a?.lastName].filter(Boolean).join(" ") ||
-                        `#${idx + 1}`;
-                      const type = a?.type || a?.category || "adult";
-                      const age =
-                        typeof a?.age === "number" && Number.isFinite(a.age)
-                          ? a.age
-                          : null;
-
-                      const notes =
-                        (typeof a?.notes === "string" && a.notes.trim()) ||
-                        (typeof a?.allergies === "string" &&
-                          a.allergies.trim()) ||
-                        (typeof a?.dietary === "string" && a.dietary.trim()) ||
-                        (typeof a?.comment === "string" && a.comment.trim()) ||
-                        null;
-
-                      return (
-                        <div
-                          key={idx}
-                          className="px-3 py-2 hover:bg-neutral-100/60"
-                        >
-                          <div className="flex items-center justify-between gap-3 text-sm">
-                            <span className="truncate">{name}</span>
-                            <div className="flex items-center gap-2">
-                              {age !== null && (
-                                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
-                                  {age}
-                                </span>
-                              )}
-                              <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
-                                {type}
-                              </span>
-                            </div>
+                  <div className="mt-4 pt-4 border-t border-[#e3ddd2]">
+                    <Row
+                      label={
+                        typeof item?.money?.totalPaidAmount === "number"
+                          ? "Total Paid (System)"
+                          : "Total (System)"
+                      }
+                      mono
+                    >
+                      <span className="font-bold text-lg">
+                        {fmtMoney(paidTotal, moneyCurrency)}
+                      </span>
+                      {balance < 0 && (
+                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm flex items-start gap-3">
+                          <Info size={18} className="shrink-0 mt-0.5" />
+                          <div>
+                            <strong className="block mb-1">
+                              Overpaid by{" "}
+                              {fmtMoney(Math.abs(balance), moneyCurrency)}
+                            </strong>
+                            <span className="text-xs opacity-80">
+                              Consider issuing a refund or retaining as store
+                              credit.
+                            </span>
                           </div>
-
-                          {notes && (
-                            <div className="mt-1 text-xs text-neutral-600">
-                              Notes: {notes}
-                            </div>
-                          )}
                         </div>
-                      );
-                    })}
+                      )}
+                    </Row>
                   </div>
                 </Card>
-              )}
+              </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* --- MODALS --- */}
 
       {/* Stripe session modal */}
       {showStripeSession && (
         <Modal
           onClose={() => setShowStripeSession(false)}
           title="Stripe Session ID"
+          icon={<CreditCard size={20} className="text-[#8b6f47]" />}
         >
-          <div className="space-y-3">
+          <div className="space-y-4">
             <textarea
               readOnly
               value={item?.payments?.stripeSessionId || ""}
-              rows={8}
-              className="mt-1 w-full rounded-xl border p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
+              rows={4}
+              className="w-full rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] p-4 font-mono text-xs text-[#3f3127] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 shadow-inner"
             />
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex items-center justify-end gap-3">
               <Button
                 variant="ghost"
                 onClick={() => setShowStripeSession(false)}
@@ -1313,17 +1285,18 @@ export default function ReservationDetailPage() {
                 Close
               </Button>
               <Button
+                variant="primary"
                 onClick={() => {
                   const v = item?.payments?.stripeSessionId || "";
                   if (navigator?.clipboard?.writeText) {
                     navigator.clipboard.writeText(v);
-                    toast.success("Copied");
+                    toast.success("Session ID Copied");
                   } else {
                     toast.error("Copy not supported");
                   }
                 }}
               >
-                Copy
+                Copy ID
               </Button>
             </div>
           </div>
@@ -1332,27 +1305,33 @@ export default function ReservationDetailPage() {
 
       {/* Cancel modal */}
       {showCancel && (
-        <Modal onClose={() => setShowCancel(false)} title="Cancel reservation">
-          <div className="space-y-4">
-            <p className="text-sm text-neutral-600">
-              Are you sure you want to cancel this reservation?{" "}
+        <Modal
+          onClose={() => setShowCancel(false)}
+          title="Cancel Reservation"
+          icon={<XCircle size={20} className="text-red-500" />}
+        >
+          <div className="space-y-5">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 leading-relaxed">
+              You are about to cancel this booking.{" "}
               {isPrivate
-                ? "This will release the private time."
-                : "This will free up seats for this slot."}
-            </p>
+                ? "This will release the privately held time block."
+                : "This will immediately free up seats for this schedule slot."}
+            </div>
             <label className="block text-sm">
-              <span className="text-neutral-700">Reason (optional)</span>
+              <span className="text-[#3f3127] font-semibold mb-1.5 block">
+                Internal Note / Reason (Optional)
+              </span>
               <textarea
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
-                className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                className="w-full rounded-xl border border-[#e3ddd2] p-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/30 shadow-sm"
                 rows={3}
-                placeholder="Add an internal note for this cancellation…"
+                placeholder="e.g. Guest requested cancellation due to travel delay..."
               />
             </label>
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex items-center justify-end gap-3 pt-2">
               <Button variant="ghost" onClick={() => setShowCancel(false)}>
-                Close
+                Keep Booking
               </Button>
               <Button
                 variant="destructive"
@@ -1360,7 +1339,7 @@ export default function ReservationDetailPage() {
                   cancelBooking().catch((e) => toast.error(e.message))
                 }
               >
-                Cancel reservation
+                Yes, Cancel
               </Button>
             </div>
           </div>
@@ -1371,88 +1350,99 @@ export default function ReservationDetailPage() {
       {showReschedule && !isPrivate && (
         <Modal
           onClose={() => setShowReschedule(false)}
-          title="Reschedule reservation"
+          title="Reschedule Reservation"
+          icon={<CalendarClock size={20} className="text-amber-500" />}
         >
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div>
-                <label className="text-xs text-neutral-600">From</label>
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-5 p-4 bg-[#fdfcfb] border border-[#e3ddd2] rounded-xl">
+              <div className="sm:col-span-2">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
+                  Look From
+                </label>
                 <input
                   type="date"
                   value={slotFrom}
                   onChange={(e) => setSlotFrom(e.target.value)}
-                  className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
+                  className="w-full rounded-lg border border-[#e3ddd2] p-2 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 outline-none"
                 />
               </div>
-              <div>
-                <label className="text-xs text-neutral-600">To</label>
+              <div className="sm:col-span-2">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
+                  Look To
+                </label>
                 <input
                   type="date"
                   value={slotTo}
                   onChange={(e) => setSlotTo(e.target.value)}
-                  className="mt-1 w-full rounded-xl border p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
+                  className="w-full rounded-lg border border-[#e3ddd2] p-2 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 outline-none"
                 />
               </div>
-              <div className="flex items-end">
-                <Button
-                  className="w-full sm:w-auto"
+              <div className="sm:col-span-1 flex items-end">
+                <button
                   onClick={loadSlots}
                   disabled={slotsLoading}
+                  className="w-full rounded-lg bg-white border border-[#e3ddd2] p-2 text-sm font-semibold hover:bg-[#fdfaf5] shadow-sm flex justify-center items-center h-[38px]"
                 >
                   {slotsLoading ? (
-                    <span className="inline-flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-                    </span>
+                    <Loader2
+                      size={16}
+                      className="animate-spin text-[#8b6f47]"
+                    />
                   ) : (
-                    "Load availability"
+                    <SearchIcon size={16} className="text-[#8b6f47]" />
                   )}
-                </Button>
+                </button>
               </div>
             </div>
 
-            <div className="rounded-xl border bg-neutral-50/60">
-              <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
-                <div>
-                  <div className="text-xs text-neutral-500">Current slot</div>
-                  <div className="text-sm">{fmtDateShort(item?.startTime)}</div>
+            <div className="rounded-xl border border-[#e3ddd2] bg-white overflow-hidden shadow-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2">
+                <div className="p-4 border-b sm:border-b-0 sm:border-r border-[#e3ddd2] bg-[#fdfaf5]">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1">
+                    Current Slot
+                  </div>
+                  <div className="text-sm font-semibold text-[#3f3127]">
+                    {fmtDateShort(item?.startTime)}
+                  </div>
                 </div>
-                <div>
-                  <div className="text-xs text-neutral-500">New slot</div>
+                <div className="p-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1">
+                    New Target Slot
+                  </div>
                   <select
                     value={targetSlotId}
                     onChange={(e) => setTargetSlotId(e.target.value)}
-                    className="mt-1 w-full rounded-xl border bg-white p-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                    className="w-full rounded-lg border border-[#e3ddd2] bg-white p-2 text-sm focus:ring-2 focus:ring-amber-500/30 outline-none"
                   >
-                    <option value="">— Select —</option>
+                    <option value="">— Select Available Slot —</option>
                     {slots.length === 0 && !slotsLoading && (
                       <option value="" disabled>
-                        No availability loaded
+                        Search to load availability
                       </option>
                     )}
-                    {slotsLoading ? (
+                    {slotsLoading && (
                       <option value="" disabled>
-                        Loading…
+                        Searching calendar…
                       </option>
-                    ) : (
+                    )}
+                    {!slotsLoading &&
                       slots.map((s) => (
                         <option
                           key={s.id}
                           value={s.id}
                           disabled={(s.available ?? 0) <= 0}
                         >
-                          {fmtDateShort(s.date)} — {s.experienceName} •
-                          Available: {s.available}
+                          {fmtDateShort(s.date)} — Avail: {s.available}
                         </option>
-                      ))
-                    )}
+                      ))}
                   </select>
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex items-center justify-end gap-3 pt-2">
               <Button variant="ghost" onClick={() => setShowReschedule(false)}>
-                Close
+                Cancel
               </Button>
               <Button
                 variant="amber"
@@ -1461,7 +1451,7 @@ export default function ReservationDetailPage() {
                 }
                 disabled={!targetSlotId}
               >
-                Reschedule
+                Confirm Reschedule
               </Button>
             </div>
           </div>
@@ -1481,22 +1471,31 @@ export default function ReservationDetailPage() {
 }
 
 /* ---------------------------- Subcomponents ---------------------------- */
-function Card({ title, children }) {
+
+function Card({ title, icon, children }) {
   return (
-    <div className="rounded-3xl border bg-white shadow-sm hover:shadow-md transition-shadow">
-      <div className="border-b px-4 py-3 text-sm font-semibold text-neutral-800">
+    <div className="rounded-[1.5rem] border border-[#e3ddd2] bg-white shadow-sm overflow-hidden flex flex-col h-full">
+      <div className="border-b border-[#e3ddd2] bg-[#fcfbf9] px-6 py-4 flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-[#8b6f47]">
+        {icon && <span className="opacity-70">{icon}</span>}
         {title}
       </div>
-      <div className="space-y-2 p-4">{children}</div>
+      <div className="p-5 sm:p-6 flex flex-col flex-1">{children}</div>
     </div>
   );
 }
 
 function Row({ label, children, mono }) {
   return (
-    <div className="flex items-start justify-between gap-4 text-sm">
-      <div className="min-w-[160px] pt-0.5 text-neutral-500">{label}</div>
-      <div className={cx("flex-1 text-neutral-900", mono && "font-mono")}>
+    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 sm:gap-4 text-sm border-b border-[#e3ddd2]/50 py-3 first:pt-0 last:border-0 last:pb-0">
+      <div className="sm:min-w-[140px] shrink-0 text-[10px] font-bold uppercase tracking-wider text-[#a09084] pt-0.5">
+        {label}
+      </div>
+      <div
+        className={cx(
+          "flex-1 min-w-0 text-[#3f3127] font-medium sm:text-right break-words overflow-hidden",
+          mono && "font-mono tracking-tight",
+        )}
+      >
         {children}
       </div>
     </div>
@@ -1506,24 +1505,14 @@ function Row({ label, children, mono }) {
 function StatusBadge({ status }) {
   const s = String(status || "").toLowerCase();
   const map = {
-    paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    confirmed: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    completed: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    checked_in: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    pending: "bg-amber-100 text-amber-800 border-amber-200",
-    cancelled: "bg-red-100 text-red-800 border-red-200",
-    draft: "bg-neutral-100 text-neutral-700 border-neutral-200",
-    converted: "bg-sky-100 text-sky-800 border-sky-200",
-  };
-  const dotMap = {
-    paid: "bg-emerald-500",
-    confirmed: "bg-emerald-500",
-    completed: "bg-emerald-500",
-    checked_in: "bg-emerald-500",
-    pending: "bg-amber-500",
-    cancelled: "bg-red-500",
-    draft: "bg-neutral-400",
-    converted: "bg-sky-500",
+    paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    confirmed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    checked_in: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    pending: "bg-amber-50 text-amber-700 border-amber-200",
+    cancelled: "bg-red-50 text-red-700 border-red-200",
+    draft: "bg-gray-50 text-gray-700 border-gray-200",
+    converted: "bg-sky-50 text-sky-700 border-sky-200",
   };
   const labelMap = {
     paid: "Paid",
@@ -1535,42 +1524,42 @@ function StatusBadge({ status }) {
     draft: "Draft",
     converted: "Converted",
   };
-  const cls = map[s] || "bg-neutral-100 text-neutral-700 border-neutral-200";
-  const dot = dotMap[s] || "bg-neutral-400";
+  const cls = map[s] || "bg-gray-50 text-gray-700 border-gray-200";
   const label = labelMap[s] || status || "-";
   return (
     <span
       className={cx(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-        cls
+        "inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+        cls,
       )}
     >
-      <span className={cx("h-1.5 w-1.5 rounded-full", dot)} />
       {label}
     </span>
   );
 }
 
-function Modal({ title, children, onClose }) {
+function Modal({ title, icon, children, onClose }) {
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 print:hidden"
+      className="fixed inset-0 z-[100] grid place-items-center bg-black/60 backdrop-blur-sm p-4 print:hidden animate-in fade-in duration-200"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
-      <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-base font-semibold text-neutral-800">{title}</h3>
+      <div className="w-full max-w-xl overflow-hidden rounded-[2rem] bg-white shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between border-b border-[#e3ddd2] px-6 py-5 bg-[#fdfcfb]">
+          <h3 className="text-xl font-serif text-[#2a1f18] flex items-center gap-3">
+            {icon} {title}
+          </h3>
           <button
-            className="rounded-lg p-1 hover:bg-neutral-100"
+            className="rounded-full p-2 hover:bg-[#e3ddd2]/50 text-[#7a6a5f] transition-colors"
             onClick={onClose}
             aria-label="Close"
           >
-            ✕
+            <XCircle className="h-5 w-5" />
           </button>
         </div>
-        <div className="p-4">{children}</div>
+        <div className="p-6 sm:p-8">{children}</div>
       </div>
     </div>
   );
@@ -1578,24 +1567,29 @@ function Modal({ title, children, onClose }) {
 
 function Skeleton() {
   return (
-    <div className="mx-auto mt-6 max-w-5xl space-y-4">
-      <div className="h-24 animate-pulse rounded-3xl bg-neutral-100" />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
-        <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
-        <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
-        <div className="h-48 animate-pulse rounded-3xl bg-neutral-100" />
+    <div className="mx-auto mt-6 max-w-6xl space-y-6">
+      <div className="h-32 animate-pulse rounded-[2rem] bg-[#e3ddd2]/30 border border-[#e3ddd2]" />
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="h-80 animate-pulse rounded-[1.5rem] bg-[#e3ddd2]/30 border border-[#e3ddd2]" />
+        <div className="h-80 animate-pulse rounded-[1.5rem] bg-[#e3ddd2]/30 border border-[#e3ddd2]" />
       </div>
     </div>
   );
 }
 
-function IconButton({ children, className, title, ariaLabel, ...props }) {
+function IconButton({ children, className, title, ariaLabel, tone, ...props }) {
+  const tones = {
+    red: "text-red-500 hover:bg-red-50 hover:border-red-200",
+    amber: "text-amber-500 hover:bg-amber-50 hover:border-amber-200",
+    emerald: "text-emerald-600 hover:bg-emerald-50 hover:border-emerald-200",
+    default: "text-[#5a4a3f] hover:bg-[#fdfaf5] hover:border-[#e3ddd2]",
+  };
   return (
     <button
       className={cx(
-        "rounded-xl border p-2 text-sm hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 disabled:opacity-50",
-        className
+        "flex shrink-0 items-center justify-center w-10 h-10 rounded-full border border-transparent transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed",
+        tones[tone] || tones.default,
+        className,
       )}
       title={title}
       aria-label={ariaLabel || title}
@@ -1608,16 +1602,18 @@ function IconButton({ children, className, title, ariaLabel, ...props }) {
 
 function Button({ variant = "default", className, children, ...props }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50";
+    "inline-flex items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:opacity-50 shadow-sm";
   const variants = {
     default:
-      "border-neutral-200 bg-white hover:bg-neutral-50 focus-visible:ring-neutral-300",
+      "border border-[#e3ddd2] bg-white text-[#3f3127] hover:bg-[#fdfaf5] focus-visible:ring-[#8b6f47]/30",
+    primary:
+      "border border-transparent bg-[#1a1a1a] text-white hover:bg-[#333] shadow-md focus-visible:ring-[#1a1a1a]/50",
     ghost:
-      "border-transparent bg-transparent hover:bg-neutral-50 focus-visible:ring-neutral-300",
+      "border-transparent bg-transparent text-[#7a6a5f] hover:bg-[#e3ddd2]/50 shadow-none focus-visible:ring-[#8b6f47]/30",
     destructive:
-      "border-red-600 bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-300",
+      "border border-transparent bg-red-600 text-white hover:bg-red-700 shadow-md focus-visible:ring-red-500/50",
     amber:
-      "border-amber-600 bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-300",
+      "border border-transparent bg-amber-600 text-white hover:bg-amber-700 shadow-md focus-visible:ring-amber-500/50",
   };
   return (
     <button className={cx(base, variants[variant], className)} {...props}>
@@ -1626,39 +1622,23 @@ function Button({ variant = "default", className, children, ...props }) {
   );
 }
 
-function Chip({ children, icon }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700">
-      {icon}
-      {children}
-    </span>
-  );
-}
-
-function Dot() {
-  return (
-    <span className="mx-2 inline-block h-1 w-1 rounded-full bg-neutral-300 align-middle" />
-  );
-}
-
 function Copyable({ value, empty = "-" }) {
   if (!value) return <span>{empty}</span>;
   return (
-    <span className="group inline-flex max-w-full items-center gap-2">
+    <span className="group inline-flex max-w-full items-center gap-2 bg-neutral-50 px-2 py-0.5 rounded border border-[#e3ddd2]">
       <span className="truncate">{value}</span>
       <button
         type="button"
-        onClick={() => {
-          const ok =
-            typeof navigator !== "undefined" && navigator.clipboard?.writeText;
-          if (ok) {
+        onClick={(e) => {
+          e.preventDefault();
+          if (navigator?.clipboard?.writeText) {
             navigator.clipboard.writeText(String(value));
             toast.success("Copied!");
           } else {
             toast.error("Copy not supported");
           }
         }}
-        className="invisible rounded-lg border p-1 text-xs group-hover:visible hover:bg-neutral-50"
+        className="opacity-0 group-hover:opacity-100 rounded-md p-1 hover:bg-[#e3ddd2] text-[#7a6a5f] transition-all shrink-0"
         title="Copy"
         aria-label="Copy"
       >
