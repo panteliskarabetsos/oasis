@@ -77,6 +77,7 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url);
     const kind = (searchParams.get("kind") || "payment_intents").toLowerCase();
+    const status = (searchParams.get("status") || "any").toLowerCase();
     const starting_after = searchParams.get("starting_after") || undefined;
     const date_from = searchParams.get("date_from") || undefined;
     const date_to = searchParams.get("date_to") || undefined;
@@ -95,7 +96,7 @@ export async function GET(req) {
     async function enrichBookingsByPi(piIds) {
       if (!piIds.length) return;
       try {
-        // ONLY fetch from confirmed 'booking' table (No Drafts)
+        // Fetch from confirmed 'booking' table
         // Join with 'User' table to get real registered names
         const { data: bookings, error: bErr } = await adminSupa
           .from("booking")
@@ -147,15 +148,26 @@ export async function GET(req) {
         opt,
       );
 
-      // Locally filter to only return successful payments
-      const successfulIntents = res.data.filter(
-        (pi) => pi.status === "succeeded",
-      );
-
-      const piIds = successfulIntents.map((pi) => pi.id).filter(Boolean);
+      const piIds = res.data.map((pi) => pi.id).filter(Boolean);
       await enrichBookingsByPi(piIds);
 
-      const items = successfulIntents
+      const items = res.data
+        .filter((pi) => {
+          // Derive status to match dropdown filters
+          const chStatus = pi.latest_charge?.status || null;
+          const statusOut =
+            chStatus === "succeeded"
+              ? "succeeded"
+              : chStatus === "failed"
+                ? "failed"
+                : chStatus === "pending"
+                  ? "processing"
+                  : pi.status;
+
+          return status === "any"
+            ? true
+            : String(statusOut).toLowerCase() === status;
+        })
         .map((pi) => {
           const ch = asObj(pi.latest_charge);
           const pm = asObj(pi.payment_method);
@@ -182,6 +194,17 @@ export async function GET(req) {
           const method = ch?.payment_method_details?.type || pm?.type || "card";
           const cardObj = ch?.payment_method_details?.card || pm?.card || null;
 
+          // derive a UI status from the charge when present
+          const chStatus = ch?.status || null;
+          const statusOut =
+            chStatus === "succeeded"
+              ? "succeeded"
+              : chStatus === "failed"
+                ? "failed"
+                : chStatus === "pending"
+                  ? "processing"
+                  : pi.status;
+
           const amountReceivedOut =
             typeof pi.amount_received === "number" && pi.amount_received > 0
               ? pi.amount_received
@@ -196,7 +219,7 @@ export async function GET(req) {
             kind: "payment_intent",
             id: pi.id,
             created: pi.created,
-            status: "succeeded", // Hardcoded because we filtered it
+            status: statusOut,
             amount: pi.amount ?? null,
             amount_received: amountReceivedOut,
             currency: pi.currency,
@@ -224,7 +247,7 @@ export async function GET(req) {
                 status: r.status,
                 created: r.created,
               })) || [],
-            booking_id: enrichment?.booking_id || null, // Will be null if strictly a draft
+            booking_id: enrichment?.booking_id || null,
           };
         })
         .filter((it) =>
@@ -238,7 +261,6 @@ export async function GET(req) {
       return ok({
         items,
         has_more: res.has_more,
-        // MUST use original array for accurate Stripe pagination cursor
         next_cursor:
           res.has_more && res.data.length ? res.data.at(-1).id : null,
         source: "payment_intents",
@@ -261,11 +283,7 @@ export async function GET(req) {
         opt,
       );
 
-      const successfulCharges = res.data.filter(
-        (ch) => ch.status === "succeeded" || ch.status === "paid",
-      );
-
-      const piIds = successfulCharges
+      const piIds = res.data
         .map((c) =>
           typeof c.payment_intent === "string"
             ? c.payment_intent
@@ -274,7 +292,13 @@ export async function GET(req) {
         .filter(Boolean);
       await enrichBookingsByPi(piIds);
 
-      const items = successfulCharges
+      const items = res.data
+        .filter((ch) => {
+          const statusOut = ch.status === "pending" ? "processing" : ch.status;
+          return status === "any"
+            ? true
+            : String(statusOut).toLowerCase() === status;
+        })
         .map((ch) => {
           const customerObj = asObj(ch.customer);
           const pmDetails = asObj(ch.payment_method_details);
@@ -298,7 +322,7 @@ export async function GET(req) {
             kind: "charge",
             id: ch.id,
             created: ch.created,
-            status: "succeeded",
+            status: ch.status === "pending" ? "processing" : ch.status,
             amount: ch.amount ?? null,
             amount_received: ch.amount_captured ?? null,
             currency: ch.currency,
@@ -344,16 +368,15 @@ export async function GET(req) {
     }
 
     if (kind === "invoices") {
-      const res = await stripe.invoices.list(
-        {
-          limit,
-          status: "paid", // Stripe allows status filtering directly on invoices
-          ...(created ? { created } : {}),
-          ...(starting_after ? { starting_after } : {}),
-          expand: ["data.customer", "data.charge", "data.payment_intent"],
-        },
-        opt,
-      );
+      const listParams = {
+        limit,
+        ...(status !== "any" ? { status } : {}), // Pass status directly to stripe for invoices
+        ...(created ? { created } : {}),
+        ...(starting_after ? { starting_after } : {}),
+        expand: ["data.customer", "data.charge", "data.payment_intent"],
+      };
+
+      const res = await stripe.invoices.list(listParams, opt);
 
       const piIds = res.data
         .map((inv) =>
@@ -393,7 +416,14 @@ export async function GET(req) {
             kind: "invoice",
             id: inv.id,
             created: inv.created,
-            status: "succeeded",
+            status:
+              inv.status === "paid"
+                ? "succeeded"
+                : inv.status === "open"
+                  ? "requires_action"
+                  : inv.status === "void" || inv.status === "uncollectible"
+                    ? "canceled"
+                    : inv.status,
             amount: inv.total ?? inv.amount_due ?? null,
             amount_received: inv.amount_paid ?? null,
             currency: inv.currency,
@@ -408,7 +438,7 @@ export async function GET(req) {
             method: inv.collection_method || null,
             receipt_url: ch?.receipt_url || null,
             payment_intent_id: piId || null,
-            refunds: [], // Refunds are attached to charges, not directly to invoices
+            refunds: [],
             booking_id: enrichment?.booking_id || null,
           };
         })
