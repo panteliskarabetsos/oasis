@@ -1,6 +1,4 @@
-// =====================================
-// File: src/app/api/admin/payments/refund/route.js
-// =====================================
+// src/app/api/admin/payments/[id]/refund/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -12,7 +10,10 @@ import Stripe from "stripe";
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
-async function requireAdmin() {
+/* ------------------------------ RBAC Config ------------------------------ */
+const ALLOWED_REFUND_ROLES = ["superadmin", "finance", "admin", "manager"];
+
+async function verifyAccess() {
   const supa = await createSupabaseServer();
   if (!supa)
     return { error: true, response: bad("Server not configured", 500) };
@@ -38,10 +39,16 @@ async function requireAdmin() {
     user?.user_metadata?.role ||
     "user";
 
-  if (!["admin", "superadmin"].includes(role))
-    return { error: true, response: bad("Forbidden", 403) };
+  if (!ALLOWED_REFUND_ROLES.includes(role)) {
+    return {
+      error: true,
+      response: bad(
+        "Forbidden: You do not have permission to issue refunds",
+        403,
+      ),
+    };
+  }
 
-  // Return more context for auditing
   return {
     error: false,
     admin,
@@ -54,37 +61,38 @@ async function requireAdmin() {
 function assertStripe() {
   const key = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || "";
   if (!key) throw new Error("Stripe not configured");
-  const stripe = new Stripe(key, {
-    apiVersion: "2024-06-20",
-  });
-  return stripe;
+  return new Stripe(key, { apiVersion: "2024-06-20" });
 }
 
-// POST /api/admin/payments/refund
-export async function POST(req) {
-  const auth = await requireAdmin();
+// POST /api/admin/payments/[id]/refund
+export async function POST(req, context) {
+  const auth = await verifyAccess();
   if (auth.error) return auth.response;
 
-  const { admin, authUser, profile, role } = auth; // role just for response/debug, not stored in DB
+  const { admin, authUser, profile, role } = auth;
 
-  let body;
+  // Next 15: params can be async
+  const { id: routeId } = (await context.params) || {};
+
+  let body = {};
   try {
     body = await req.json();
   } catch {
-    return bad("Invalid JSON", 400);
+    // Body is optional (empty body = full refund)
   }
 
-  const payment_intent = String(body?.payment_intent || "").trim();
-  const charge = String(body?.charge || "").trim(); // optional fallback
+  // Support route param [id] OR body payload
+  const payment_intent = String(routeId || body?.payment_intent || "").trim();
+  const charge = String(body?.charge || "").trim();
 
-  // Normalise amount to a number (cents)
-  const rawAmount = body?.amount_cents;
+  // The frontend sends { amount: cents }, but we'll check amount_cents just in case
+  const rawAmount = body?.amount ?? body?.amount_cents;
   const amount_cents_raw =
     rawAmount === undefined || rawAmount === null
       ? undefined
       : Number(rawAmount);
 
-  const reason = body?.reason; // 'duplicate' | 'fraudulent' | 'requested_by_customer'
+  const reason = body?.reason || "requested_by_customer";
   const metadata =
     body?.metadata && typeof body.metadata === "object"
       ? body.metadata
@@ -101,56 +109,57 @@ export async function POST(req) {
       amount_cents_raw <= 0)
   ) {
     return bad(
-      "amount_cents must be a positive integer (in the smallest currency unit)",
-      422
+      "Amount must be a positive integer (in the smallest currency unit)",
+      422,
     );
   }
 
   try {
     const stripe = assertStripe();
 
-    // Retrieve the target – prefer payment_intent logic (it handles multiple charges)
     let currency,
       amount_received_cents = 0,
       refunded_so_far_cents = 0,
       piIdForRefund = null,
       chargeIdForRefund = null;
 
-    if (payment_intent) {
+    if (payment_intent.startsWith("pi_")) {
       const pi = await stripe.paymentIntents.retrieve(payment_intent);
       if (!pi) return bad("Payment Intent not found", 404);
 
       currency = (pi.currency || "").toUpperCase();
-      // amount_received is the amount actually collected
       amount_received_cents = Number(pi.amount_received || 0);
       piIdForRefund = pi.id;
 
-      // Sum refunds across the PI (paginate just in case)
+      // Sum existing refunds
       refunded_so_far_cents = await sumRefundsForPaymentIntent(stripe, pi.id);
 
       if (!amount_received_cents) {
         return bad("Nothing received on this Payment Intent to refund", 409);
       }
-    } else {
-      // charge fallback
-      const ch = await stripe.charges.retrieve(charge);
+    } else if (charge.startsWith("ch_") || payment_intent.startsWith("ch_")) {
+      const targetCharge = charge || payment_intent;
+      const ch = await stripe.charges.retrieve(targetCharge);
       if (!ch) return bad("Charge not found", 404);
 
       currency = (ch.currency || "").toUpperCase();
       amount_received_cents = Number(ch.amount_captured || ch.amount || 0);
       chargeIdForRefund = ch.id;
 
-      // Stripe’s charge has amount_refunded on it
       refunded_so_far_cents = Number(ch.amount_refunded || 0);
       if (!amount_received_cents) {
         return bad("Nothing captured on this Charge to refund", 409);
       }
+    } else {
+      return bad("Invalid Stripe ID format", 400);
     }
 
+    // Safety checks
     const refundable_cents = Math.max(
       0,
-      amount_received_cents - refunded_so_far_cents
+      amount_received_cents - refunded_so_far_cents,
     );
+
     if (refundable_cents <= 0) {
       return bad("Already fully refunded", 409);
     }
@@ -161,11 +170,11 @@ export async function POST(req) {
     if (amount_cents > refundable_cents) {
       return bad(
         `Amount exceeds refundable remainder (${refundable_cents} ${currency} cents)`,
-        422
+        422,
       );
     }
 
-    // Admin metadata for Stripe + DB (only keys that exist in DB or Stripe metadata)
+    // Admin metadata for Stripe tracking
     const adminMetadata = {
       performed_by_auth_user_id: authUser.id,
       performed_by_user_id: profile?.id ?? null,
@@ -177,7 +186,6 @@ export async function POST(req) {
       ...adminMetadata,
     };
 
-    // Create refund – prefer `payment_intent` param when available
     const createParams = {
       ...(piIdForRefund
         ? { payment_intent: piIdForRefund }
@@ -187,14 +195,13 @@ export async function POST(req) {
       ...(mergedMetadata ? { metadata: mergedMetadata } : {}),
     };
 
+    // Execute Refund
     const refund = await stripe.refunds.create(createParams);
 
     // --- Audit log in DB: payment_refund ---
     try {
       let bookingId = null;
       let invoiceId = null;
-
-      // Link by payment_intent when possible
       const lookupPiId = piIdForRefund || null;
 
       if (lookupPiId) {
@@ -225,8 +232,7 @@ export async function POST(req) {
       const { error: auditError } = await admin.from("payment_refund").insert({
         booking_id: bookingId,
         invoice_id: invoiceId,
-        // payment_id can be filled later if/when you wire it
-        stripe_payment_intent_id: lookupPiId || payment_intent || null,
+        stripe_payment_intent_id: lookupPiId || null,
         stripe_refund_id: refund.id,
         amount_cents: refund.amount,
         currency: currency || (refund.currency || "").toUpperCase(),
@@ -242,7 +248,6 @@ export async function POST(req) {
         console.error("Failed to record payment_refund audit row", auditError);
       }
     } catch (auditEx) {
-      // Don't break the API if audit logging fails – refund already exists in Stripe
       console.error("payment_refund audit logging failed", auditEx);
     }
 
@@ -261,7 +266,7 @@ export async function POST(req) {
           performed_by_auth_user_id: authUser.id,
           performed_by_user_id: profile?.id ?? null,
           performed_by_email: authUser.email ?? "",
-          role, // only in response, not stored in DB
+          role,
         },
       },
     });
@@ -269,7 +274,7 @@ export async function POST(req) {
     const msg = e?.raw?.message || e?.message || "Refund failed";
     const code =
       e?.statusCode && Number.isInteger(e.statusCode) ? e.statusCode : 500;
-    console.error("/api/admin/payments/refund POST error", e);
+    console.error("/api/admin/payments/[id]/refund POST error", e);
     return bad(msg, code);
   }
 }
@@ -283,8 +288,6 @@ async function sumRefundsForPaymentIntent(stripe, paymentIntentId) {
   let total = 0;
   let starting_after;
 
-  // walk through pages (unlikely to have many, but safe)
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const page = await stripe.refunds.list({
       payment_intent: paymentIntentId,

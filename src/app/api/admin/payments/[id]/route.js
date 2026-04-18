@@ -3,6 +3,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -17,6 +19,36 @@ const sum = (xs, f) =>
     ? xs.reduce((a, x) => a + (f ? f(x) : Number(x || 0)), 0)
     : 0;
 
+/* ------------------------------ RBAC Config ------------------------------ */
+const ALLOWED_PAYMENT_ROLES = ["superadmin", "finance", "admin", "manager"];
+
+async function verifyAccess() {
+  const supa = await createSupabaseServer();
+  const {
+    data: { user },
+    error,
+  } = await supa.auth.getUser();
+
+  if (error || !user)
+    return { authorized: false, res: bad("Unauthorized", 401) };
+
+  const adminSupa = createSupabaseAdmin();
+  const { data: dbUser } = await adminSupa
+    .from("User")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  const metaRole = user?.app_metadata?.role || user?.user_metadata?.role;
+  const finalRole = dbUser?.role || metaRole || "user";
+
+  if (!ALLOWED_PAYMENT_ROLES.includes(finalRole)) {
+    return { authorized: false, res: bad("Forbidden", 403) };
+  }
+
+  return { authorized: true, adminSupa };
+}
+
 /**
  * GET /api/admin/payments/[id]
  * Normalizes a Stripe PaymentIntent into a stable shape for the admin UI:
@@ -28,6 +60,11 @@ const sum = (xs, f) =>
  */
 export async function GET(_req, context) {
   try {
+    // 1. RBAC Verification
+    const access = await verifyAccess();
+    if (!access.authorized) return access.res;
+    const { adminSupa } = access;
+
     const key = process.env.STRIPE_SECRET_KEY;
     if (!key) return bad("Missing STRIPE_SECRET_KEY", 500);
 
@@ -78,7 +115,7 @@ export async function GET(_req, context) {
 
     // Compute robust received / captured
     const amountCapturedTotalCents = sum(charges, (c) =>
-      Number(c?.amount_captured ?? c?.amount ?? 0)
+      Number(c?.amount_captured ?? c?.amount ?? 0),
     );
 
     const amountReceivedCents =
@@ -93,7 +130,7 @@ export async function GET(_req, context) {
     const customerObj = asObj(pi.customer);
     const ch = asObj(pi.latest_charge);
 
-    const email =
+    let email =
       customerObj?.email ||
       ch?.billing_details?.email ||
       firstCharge?.billing_details?.email ||
@@ -101,7 +138,7 @@ export async function GET(_req, context) {
       pi?.receipt_email ||
       null;
 
-    const name =
+    let name =
       customerObj?.name ||
       ch?.billing_details?.name ||
       firstCharge?.billing_details?.name ||
@@ -128,47 +165,57 @@ export async function GET(_req, context) {
     let refundAuditRows = [];
 
     try {
-      const mod = await import("@/lib/supabase/admin").catch(() => null);
-      const createSupabaseAdmin = mod?.createSupabaseAdmin;
-      if (createSupabaseAdmin) {
-        const admin = createSupabaseAdmin();
+      // 1. Find Booking & Enrich User Data
+      // Prefer the final confirmed booking
+      const { data: b } = await adminSupa
+        .from("booking")
+        .select(
+          `
+          id, 
+          stripePaymentIntentId,
+          User ( name, surname, email )
+        `,
+        )
+        .eq("stripePaymentIntentId", pi.id)
+        .limit(1)
+        .maybeSingle();
 
-        // Try to find related booking id (best-effort; non-fatal)
-        const { data: b } = await admin
-          .from("Booking")
-          .select("id, stripePaymentIntentId")
+      if (b?.id) {
+        booking_id = b.id;
+        // Override Stripe details with real user details if available
+        if (b.User) {
+          name = `${b.User.name || ""} ${b.User.surname || ""}`.trim() || name;
+          email = b.User.email || email;
+        }
+      }
+
+      if (!booking_id) {
+        // Check Drafts just in case it hasn't converted yet
+        const { data: d } = await adminSupa
+          .from("BookingDraft")
+          .select("convertedBookingId, stripePaymentIntentId")
           .eq("stripePaymentIntentId", pi.id)
+          .not("convertedBookingId", "is", null)
           .limit(1)
           .maybeSingle();
-        if (b?.id) booking_id = b.id;
+        if (d?.convertedBookingId) booking_id = d.convertedBookingId;
+      }
 
-        if (!booking_id) {
-          const { data: d } = await admin
-            .from("BookingDraft")
-            .select("convertedBookingId, stripePaymentIntentId")
-            .eq("stripePaymentIntentId", pi.id)
-            .not("convertedBookingId", "is", null)
-            .limit(1)
-            .maybeSingle();
-          if (d?.convertedBookingId) booking_id = d.convertedBookingId;
-        }
+      // 2. Load refund audit rows from payment_refund
+      const { data: auditData, error: auditError } = await adminSupa
+        .from("payment_refund")
+        .select(
+          "stripe_refund_id, performed_by_email, performed_by_name, performed_by_auth_user_id, performed_by_user_id, created_at",
+        )
+        .eq("stripe_payment_intent_id", pi.id);
 
-        // Load refund audit rows from payment_refund
-        const { data: auditData, error: auditError } = await admin
-          .from("payment_refund")
-          .select(
-            "stripe_refund_id, performed_by_email, performed_by_name, performed_by_auth_user_id, performed_by_user_id, created_at"
-          )
-          .eq("stripe_payment_intent_id", pi.id);
-
-        if (auditError) {
-          console.error(
-            "[payment:detail] failed to load payment_refund audit rows",
-            auditError
-          );
-        } else if (auditData) {
-          refundAuditRows = auditData;
-        }
+      if (auditError) {
+        console.error(
+          "[payment:detail] failed to load payment_refund audit rows",
+          auditError,
+        );
+      } else if (auditData) {
+        refundAuditRows = auditData;
       }
     } catch (e) {
       // non-fatal
@@ -184,7 +231,7 @@ export async function GET(_req, context) {
 
     // Build index of audit rows by Stripe refund id
     const auditIndex = Object.fromEntries(
-      (refundAuditRows || []).map((r) => [r.stripe_refund_id, r])
+      (refundAuditRows || []).map((r) => [r.stripe_refund_id, r]),
     );
 
     // Map refunds into a clean, flat structure for the UI
@@ -201,7 +248,7 @@ export async function GET(_req, context) {
         reason: r.reason || meta.reason || null,
         charge: r.charge || null,
 
-        // NEW: admin info (DB first, then Stripe metadata as fallback)
+        // admin info (DB first, then Stripe metadata as fallback)
         performed_by_email:
           audit.performed_by_email || meta.performed_by_email || null,
         performed_by_name:
@@ -242,7 +289,7 @@ export async function GET(_req, context) {
       };
     });
 
-    // Item shape (backwards compatible fields + normalized aggregates)
+    // Item shape
     const item = {
       id: pi.id,
       created: pi.created,

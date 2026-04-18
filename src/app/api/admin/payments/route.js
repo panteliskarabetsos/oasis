@@ -3,23 +3,59 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
-const ok  = (d, s = 200) => NextResponse.json(d, { status: s });
+const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
+
+/* ------------------------------ RBAC Config ------------------------------ */
+const ALLOWED_PAYMENT_ROLES = ["superadmin", "finance", "admin", "manager"];
+
+async function verifyAccess() {
+  const supa = await createSupabaseServer();
+  const {
+    data: { user },
+    error,
+  } = await supa.auth.getUser();
+
+  if (error || !user)
+    return { authorized: false, res: bad("Unauthorized", 401) };
+
+  const adminSupa = createSupabaseAdmin();
+  const { data: dbUser } = await adminSupa
+    .from("User")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  const metaRole = user?.app_metadata?.role || user?.user_metadata?.role;
+  const finalRole = dbUser?.role || metaRole || "user";
+
+  if (!ALLOWED_PAYMENT_ROLES.includes(finalRole)) {
+    return { authorized: false, res: bad("Forbidden", 403) };
+  }
+
+  return { authorized: true, adminSupa };
+}
 
 // ----------------- tiny helpers -----------------
 const asObj = (x) => (x && typeof x === "object" ? x : null);
-const ilike = (s, q) => String(s || "").toLowerCase().includes(String(q || "").toLowerCase());
-
-// currency helpers (for minor/major conversion if you need later)
-const ZERO_DEC = new Set(["BIF","CLP","DJF","GNF","JPY","KMF","KRW","MGA","PYG","RWF","UGX","VND","VUV","XAF","XOF","XPF"]);
+const ilike = (s, q) =>
+  String(s || "")
+    .toLowerCase()
+    .includes(String(q || "").toLowerCase());
 
 // build unix range from YYYY-MM-DD
 function toUnixRange({ date_from, date_to }) {
   let created;
   if (date_from || date_to) {
-    const gte = date_from ? Math.floor(new Date(date_from + "T00:00:00Z").getTime() / 1000) : undefined;
-    const lte = date_to   ? Math.floor(new Date(date_to   + "T23:59:59Z").getTime() / 1000) : undefined;
+    const gte = date_from
+      ? Math.floor(new Date(date_from + "T00:00:00Z").getTime() / 1000)
+      : undefined;
+    const lte = date_to
+      ? Math.floor(new Date(date_to + "T23:59:59Z").getTime() / 1000)
+      : undefined;
     created = { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) };
   }
   return created;
@@ -28,6 +64,11 @@ function toUnixRange({ date_from, date_to }) {
 // --------------- main GET ----------------
 export async function GET(req) {
   try {
+    // 1. Check Permissions
+    const access = await verifyAccess();
+    if (!access.authorized) return access.res;
+    const { adminSupa } = access;
+
     const key = process.env.STRIPE_SECRET_KEY;
     if (!key) return bad("Missing STRIPE_SECRET_KEY", 500);
 
@@ -36,54 +77,56 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url);
     const kind = (searchParams.get("kind") || "payment_intents").toLowerCase();
-    const status = (searchParams.get("status") || "any").toLowerCase();
     const starting_after = searchParams.get("starting_after") || undefined;
     const date_from = searchParams.get("date_from") || undefined;
     const date_to = searchParams.get("date_to") || undefined;
     const q = searchParams.get("q") || "";
-    const limit = Math.min(Math.max(Number(searchParams.get("limit") || 50), 1), 100);
-    const stripe_account = searchParams.get("stripe_account") || undefined; // for Connect
+    const limit = Math.min(
+      Math.max(Number(searchParams.get("limit") || 50), 1),
+      100,
+    );
+    const stripe_account = searchParams.get("stripe_account") || undefined;
     const opt = stripe_account ? { stripeAccount: stripe_account } : undefined;
 
     const created = toUnixRange({ date_from, date_to });
 
-    // ---------- optional booking enrichment (PI->Booking.id)
-    const bookingByPiId = new Map();
+    // ---------- Enriched Booking Map ----------
+    const dbDataMap = new Map();
     async function enrichBookingsByPi(piIds) {
       if (!piIds.length) return;
       try {
-        const mod = await import("@/lib/supabase/admin").catch(() => null);
-        const createSupabaseAdmin = mod?.createSupabaseAdmin;
-        if (!createSupabaseAdmin) return;
-        const admin = createSupabaseAdmin();
-
-        const { data: bookings, error: bErr } = await admin
-          .from("Booking")
-          .select("id, stripePaymentIntentId")
+        // ONLY fetch from confirmed 'booking' table (No Drafts)
+        // Join with 'User' table to get real registered names
+        const { data: bookings, error: bErr } = await adminSupa
+          .from("booking")
+          .select(
+            `
+            id, 
+            stripePaymentIntentId,
+            User ( name, surname, email )
+          `,
+          )
           .in("stripePaymentIntentId", piIds);
 
         if (!bErr && Array.isArray(bookings)) {
           for (const b of bookings) {
-            if (b.stripePaymentIntentId) bookingByPiId.set(b.stripePaymentIntentId, b.id);
-          }
-        }
-
-        // Fill gaps from drafts that kept the PI then converted
-        const { data: drafts, error: dErr } = await admin
-          .from("BookingDraft")
-          .select("convertedBookingId, stripePaymentIntentId")
-          .in("stripePaymentIntentId", piIds)
-          .not("convertedBookingId", "is", null);
-
-        if (!dErr && Array.isArray(drafts)) {
-          for (const d of drafts) {
-            if (d.stripePaymentIntentId && d.convertedBookingId && !bookingByPiId.has(d.stripePaymentIntentId)) {
-              bookingByPiId.set(d.stripePaymentIntentId, d.convertedBookingId);
+            if (b.stripePaymentIntentId) {
+              const fullName = b.User
+                ? `${b.User.name || ""} ${b.User.surname || ""}`.trim()
+                : null;
+              dbDataMap.set(b.stripePaymentIntentId, {
+                booking_id: b.id,
+                dbName: fullName,
+                dbEmail: b.User?.email,
+              });
             }
           }
         }
       } catch (e) {
-        console.warn("[payments:list] booking enrichment failed:", e?.message || e);
+        console.warn(
+          "[payments:list] booking enrichment failed:",
+          e?.message || e,
+        );
       }
     }
 
@@ -99,101 +142,80 @@ export async function GET(req) {
             "data.latest_charge",
             "data.latest_charge.refunds",
             "data.payment_method",
-            "data.charges.data",
           ],
         },
-        opt
+        opt,
       );
 
-      const piIds = res.data.map((pi) => pi.id).filter(Boolean);
+      // Locally filter to only return successful payments
+      const successfulIntents = res.data.filter(
+        (pi) => pi.status === "succeeded",
+      );
+
+      const piIds = successfulIntents.map((pi) => pi.id).filter(Boolean);
       await enrichBookingsByPi(piIds);
 
-      const items = res.data
-        .filter((pi) => (status === "any" ? true : String(pi.status).toLowerCase() === status))
+      const items = successfulIntents
         .map((pi) => {
           const ch = asObj(pi.latest_charge);
           const pm = asObj(pi.payment_method);
-          const firstCharge = pi?.charges?.data?.[0] || null;
           const customerObj = asObj(pi.customer);
+          const enrichment = dbDataMap.get(pi.id);
 
-          const email =
+          const stripeEmail =
             customerObj?.email ||
             ch?.billing_details?.email ||
-            firstCharge?.billing_details?.email ||
-            pm?.billing_details?.email ||
-            null;
-
-          const name =
+            pm?.billing_details?.email;
+          const stripeName =
             customerObj?.name ||
             ch?.billing_details?.name ||
-            firstCharge?.billing_details?.name ||
-            pm?.billing_details?.name ||
-            null;
+            pm?.billing_details?.name;
 
-          const method =
-            ch?.payment_method_details?.type ||
-            pm?.type ||
-            (Array.isArray(pi.payment_method_types) ? pi.payment_method_types[0] : null) ||
-            "card";
+          // Priority: 1. Real DB Name -> 2. Stripe Name -> 3. Email Prefix -> 4. "Guest"
+          const finalName =
+            enrichment?.dbName ||
+            stripeName ||
+            stripeEmail?.split("@")[0] ||
+            "Guest";
+          const finalEmail = enrichment?.dbEmail || stripeEmail;
 
-          const cardObj =
-            ch?.payment_method_details?.card ||
-            firstCharge?.payment_method_details?.card ||
-            pm?.card ||
-            null;
+          const method = ch?.payment_method_details?.type || pm?.type || "card";
+          const cardObj = ch?.payment_method_details?.card || pm?.card || null;
 
-          const card_brand = cardObj?.brand || null;
-          const card_last4 = cardObj?.last4 || null;
-
-          let booking_id =
-            bookingByPiId.get(pi.id) ??
-            pi?.metadata?.booking_id ??
-            pi?.metadata?.bookingId ??
-            null;
-          if (booking_id != null && !Number.isNaN(Number(booking_id))) {
-            booking_id = Number(booking_id);
-          }
-
-   // derive a UI status from the charge when present
-          const chStatus = ch?.status || null; // "succeeded" | "pending" | "failed"
-          const statusOut =
-           chStatus === "succeeded"
-              ? "succeeded"
-              : chStatus === "failed"
-              ? "failed"
-              : chStatus === "pending"
-              ? "processing"
-              : pi.status; // fall back to PI status
-
-          // best-effort amount received (minor units)
           const amountReceivedOut =
-            (typeof pi.amount_received === "number" && pi.amount_received > 0)
+            typeof pi.amount_received === "number" && pi.amount_received > 0
               ? pi.amount_received
-              : (typeof ch?.amount_captured === "number" && ch.amount_captured > 0)
-              ? ch.amount_captured
-              : (typeof ch?.amount === "number" ? ch.amount : null);
+              : typeof ch?.amount_captured === "number" &&
+                  ch.amount_captured > 0
+                ? ch.amount_captured
+                : typeof ch?.amount === "number"
+                  ? ch.amount
+                  : null;
 
           return {
             kind: "payment_intent",
             id: pi.id,
             created: pi.created,
-            status: statusOut,
+            status: "succeeded", // Hardcoded because we filtered it
             amount: pi.amount ?? null,
             amount_received: amountReceivedOut,
             currency: pi.currency,
             customer: {
-              id: typeof pi.customer === "string" ? pi.customer : customerObj?.id ?? null,
-              email,
-              name,
+              id:
+                typeof pi.customer === "string"
+                  ? pi.customer
+                  : (customerObj?.id ?? null),
+              email: finalEmail,
+              name: finalName,
             },
             method,
-            card_brand,
-            card_last4,
-            latest_charge: typeof pi.latest_charge === "string" ? pi.latest_charge : ch?.id ?? null,
+            card_brand: cardObj?.brand || null,
+            card_last4: cardObj?.last4 || null,
+            latest_charge:
+              typeof pi.latest_charge === "string"
+                ? pi.latest_charge
+                : (ch?.id ?? null),
             receipt_url: ch?.receipt_url || null,
-            invoice_number: null,
-            hosted_invoice_url: null,
-            invoice_pdf: null,
             payment_intent_id: pi.id,
             refunds:
               ch?.refunds?.data?.map((r) => ({
@@ -202,7 +224,7 @@ export async function GET(req) {
                 status: r.status,
                 created: r.created,
               })) || [],
-            booking_id,
+            booking_id: enrichment?.booking_id || null, // Will be null if strictly a draft
           };
         })
         .filter((it) =>
@@ -210,13 +232,15 @@ export async function GET(req) {
             ? ilike(it.id, q) ||
               ilike(it.customer?.email, q) ||
               ilike(it.customer?.name, q)
-            : true
+            : true,
         );
 
       return ok({
         items,
         has_more: res.has_more,
-        next_cursor: res.has_more && res.data.length ? res.data.at(-1).id : null,
+        // MUST use original array for accurate Stripe pagination cursor
+        next_cursor:
+          res.has_more && res.data.length ? res.data.at(-1).id : null,
         source: "payment_intents",
       });
     }
@@ -227,55 +251,71 @@ export async function GET(req) {
           limit,
           ...(created ? { created } : {}),
           ...(starting_after ? { starting_after } : {}),
-          expand: ["data.customer", "data.refunds", "data.invoice", "data.payment_intent"],
+          expand: [
+            "data.customer",
+            "data.refunds",
+            "data.invoice",
+            "data.payment_intent",
+          ],
         },
-        opt
+        opt,
       );
 
-      // If you want booking enrichment here as well, enrich using PI from charge
-      const piIds = res.data.map((c) => (typeof c.payment_intent === "string" ? c.payment_intent : c.payment_intent?.id)).filter(Boolean);
+      const successfulCharges = res.data.filter(
+        (ch) => ch.status === "succeeded" || ch.status === "paid",
+      );
+
+      const piIds = successfulCharges
+        .map((c) =>
+          typeof c.payment_intent === "string"
+            ? c.payment_intent
+            : c.payment_intent?.id,
+        )
+        .filter(Boolean);
       await enrichBookingsByPi(piIds);
 
-      const items = res.data
-        .filter((ch) => (status === "any" ? true : String(ch.status).toLowerCase() === status))
+      const items = successfulCharges
         .map((ch) => {
           const customerObj = asObj(ch.customer);
           const pmDetails = asObj(ch.payment_method_details);
           const cardObj = pmDetails?.card || null;
           const pi = asObj(ch.payment_intent);
-          const inv = asObj(ch.invoice);
+          const piId =
+            typeof ch.payment_intent === "string" ? ch.payment_intent : pi?.id;
+          const enrichment = dbDataMap.get(piId);
 
-          let booking_id =
-            bookingByPiId.get(typeof ch.payment_intent === "string" ? ch.payment_intent : pi?.id) ??
-            ch?.metadata?.booking_id ??
-            ch?.metadata?.bookingId ??
-            inv?.metadata?.bookingId ??
-            pi?.metadata?.bookingId ??
-            null;
-          if (booking_id != null && !Number.isNaN(Number(booking_id))) booking_id = Number(booking_id);
+          const stripeEmail = customerObj?.email || ch.billing_details?.email;
+          const stripeName = customerObj?.name || ch.billing_details?.name;
+
+          const finalName =
+            enrichment?.dbName ||
+            stripeName ||
+            stripeEmail?.split("@")[0] ||
+            "Guest";
+          const finalEmail = enrichment?.dbEmail || stripeEmail;
 
           return {
             kind: "charge",
             id: ch.id,
             created: ch.created,
-           status: ch.status === "pending" ? "processing" : ch.status, // succeeded|processing|failed
+            status: "succeeded",
             amount: ch.amount ?? null,
             amount_received: ch.amount_captured ?? null,
             currency: ch.currency,
             customer: {
-              id: typeof ch.customer === "string" ? ch.customer : customerObj?.id ?? null,
-              email: customerObj?.email || ch.billing_details?.email || null,
-              name: customerObj?.name || ch.billing_details?.name || null,
+              id:
+                typeof ch.customer === "string"
+                  ? ch.customer
+                  : (customerObj?.id ?? null),
+              email: finalEmail,
+              name: finalName,
             },
             method: pmDetails?.type || (cardObj ? "card" : null),
             card_brand: cardObj?.brand || null,
             card_last4: cardObj?.last4 || null,
             latest_charge: ch.id,
             receipt_url: ch.receipt_url || null,
-            invoice_number: inv?.number || null,
-            hosted_invoice_url: inv?.hosted_invoice_url || null,
-            invoice_pdf: inv?.invoice_pdf || null,
-            payment_intent_id: typeof ch.payment_intent === "string" ? ch.payment_intent : pi?.id || null,
+            payment_intent_id: piId || null,
             refunds:
               ch?.refunds?.data?.map((r) => ({
                 id: r.id,
@@ -283,44 +323,46 @@ export async function GET(req) {
                 status: r.status,
                 created: r.created,
               })) || [],
-            booking_id,
+            booking_id: enrichment?.booking_id || null,
           };
         })
         .filter((it) =>
           q
             ? ilike(it.id, q) ||
               ilike(it.customer?.email, q) ||
-              ilike(it.customer?.name, q) ||
-              ilike(it.invoice_number, q)
-            : true
+              ilike(it.customer?.name, q)
+            : true,
         );
 
       return ok({
         items,
         has_more: res.has_more,
-        next_cursor: res.has_more && res.data.length ? res.data.at(-1).id : null,
+        next_cursor:
+          res.has_more && res.data.length ? res.data.at(-1).id : null,
         source: "charges",
       });
     }
 
-    // kind === "invoices"
-    {
-      // Stripe supports status filter on invoices.list
-      // status: draft|open|paid|uncollectible|void
-      const listParams = {
-        limit,
-        ...(created ? { created } : {}),
-        ...(starting_after ? { starting_after } : {}),
-        ...(status !== "any" ? { status } : {}),
-        expand: ["data.customer", "data.charge", "data.payment_intent"],
-      };
+    if (kind === "invoices") {
+      const res = await stripe.invoices.list(
+        {
+          limit,
+          status: "paid", // Stripe allows status filtering directly on invoices
+          ...(created ? { created } : {}),
+          ...(starting_after ? { starting_after } : {}),
+          expand: ["data.customer", "data.charge", "data.payment_intent"],
+        },
+        opt,
+      );
 
-      const res = await stripe.invoices.list(listParams, opt);
-
-      // Enrich booking from invoice.metadata.bookingId (set by your code) or PI mapping
       const piIds = res.data
-        .map((inv) => (typeof inv.payment_intent === "string" ? inv.payment_intent : inv.payment_intent?.id))
+        .map((inv) =>
+          typeof inv.payment_intent === "string"
+            ? inv.payment_intent
+            : inv.payment_intent?.id,
+        )
         .filter(Boolean);
+
       await enrichBookingsByPi(piIds);
 
       const items = res.data
@@ -328,63 +370,61 @@ export async function GET(req) {
           const customerObj = asObj(inv.customer);
           const ch = asObj(inv.charge);
           const pi = asObj(inv.payment_intent);
+          const piId =
+            typeof inv.payment_intent === "string"
+              ? inv.payment_intent
+              : pi?.id;
+          const enrichment = dbDataMap.get(piId);
 
-          const email = inv.customer_email || customerObj?.email || ch?.billing_details?.email || null;
-          const name  = customerObj?.name || ch?.billing_details?.name || null;
+          const stripeEmail =
+            inv.customer_email ||
+            customerObj?.email ||
+            ch?.billing_details?.email;
+          const stripeName = customerObj?.name || ch?.billing_details?.name;
 
-          let booking_id =
-            inv?.metadata?.bookingId ??
-            inv?.metadata?.booking_id ??
-            bookingByPiId.get(typeof inv.payment_intent === "string" ? inv.payment_intent : pi?.id) ??
-            null;
-          if (booking_id != null && !Number.isNaN(Number(booking_id))) booking_id = Number(booking_id);
+          const finalName =
+            enrichment?.dbName ||
+            stripeName ||
+            stripeEmail?.split("@")[0] ||
+            "Guest";
+          const finalEmail = enrichment?.dbEmail || stripeEmail;
 
           return {
             kind: "invoice",
             id: inv.id,
-            created: inv.created, // unix seconds
-             status:
-              inv.status === "paid"
-                ? "succeeded"
-                : inv.status === "open"
-                ? "requires_action"
-               : (inv.status === "void" || inv.status === "uncollectible")
-                ? "canceled"
-                : inv.status,
-            amount: inv.total ?? inv.amount_due ?? null, // amount in minor units
+            created: inv.created,
+            status: "succeeded",
+            amount: inv.total ?? inv.amount_due ?? null,
             amount_received: inv.amount_paid ?? null,
             currency: inv.currency,
             customer: {
-              id: typeof inv.customer === "string" ? inv.customer : customerObj?.id ?? null,
-              email,
-              name,
+              id:
+                typeof inv.customer === "string"
+                  ? inv.customer
+                  : (customerObj?.id ?? null),
+              email: finalEmail,
+              name: finalName,
             },
-            method: inv.collection_method || null, // send_invoice | charge_automatically
-            card_brand: null,
-            card_last4: null,
-            latest_charge: typeof inv.charge === "string" ? inv.charge : ch?.id || null,
+            method: inv.collection_method || null,
             receipt_url: ch?.receipt_url || null,
-            invoice_number: inv.number || null,
-            hosted_invoice_url: inv.hosted_invoice_url || null,
-            invoice_pdf: inv.invoice_pdf || null,
-            payment_intent_id: typeof inv.payment_intent === "string" ? inv.payment_intent : pi?.id || null,
-            refunds: [], // refunds live on charges; you can look those up separately if needed
-            booking_id,
+            payment_intent_id: piId || null,
+            refunds: [], // Refunds are attached to charges, not directly to invoices
+            booking_id: enrichment?.booking_id || null,
           };
         })
         .filter((it) =>
           q
             ? ilike(it.id, q) ||
-              ilike(it.invoice_number, q) ||
               ilike(it.customer?.email, q) ||
               ilike(it.customer?.name, q)
-            : true
+            : true,
         );
 
       return ok({
         items,
         has_more: res.has_more,
-        next_cursor: res.has_more && res.data.length ? res.data.at(-1).id : null,
+        next_cursor:
+          res.has_more && res.data.length ? res.data.at(-1).id : null,
         source: "invoices",
       });
     }
