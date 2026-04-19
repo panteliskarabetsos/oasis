@@ -380,7 +380,7 @@ export default async function Experiences({ searchParams }) {
             {/* Image Area (Left on desktop, Top on mobile) */}
             <div className="relative w-full md:w-5/12 h-64 md:h-auto overflow-hidden bg-[#f1ede7]">
               <Image
-                src="/bespoke-event.jpg"
+                src="/bespoke-event.jpeg"
                 alt="Private Bespoke Experience"
                 fill
                 className="object-cover transition-transform duration-700 ease-out group-hover:scale-105"
