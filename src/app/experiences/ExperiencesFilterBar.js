@@ -121,13 +121,12 @@ export default function ExperiencesFilterBar({
               value={from}
               min={today || undefined}
               onChange={(e) => setFrom(e.target.value)}
-              className={`w-full bg-transparent text-sm outline-none cursor-pointer appearance-none ${
+              onClick={(e) => e.target.showPicker && e.target.showPicker()}
+              className={`w-full bg-transparent text-sm outline-none cursor-pointer relative z-10 ${
                 from ? "text-[#3a2f28] font-medium" : "text-[#bbaea0]"
-              } 
-              /* Invisible overlay to make the entire container trigger the native date picker */
-              [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+              } [&::-webkit-calendar-picker-indicator]:opacity-0`}
             />
-            <Calendar className="absolute right-0 h-4 w-4 text-[#d3c2aa] group-focus-within:text-[#8b6f47] transition-colors pointer-events-none" />
+            <Calendar className="absolute right-0 h-4 w-4 text-[#d3c2aa] group-focus-within:text-[#8b6f47] transition-colors pointer-events-none z-0" />
           </div>
         </div>
 
@@ -142,12 +141,12 @@ export default function ExperiencesFilterBar({
               value={to}
               min={from || today || undefined}
               onChange={(e) => setTo(e.target.value)}
-              className={`w-full bg-transparent text-sm outline-none cursor-pointer appearance-none ${
+              onClick={(e) => e.target.showPicker && e.target.showPicker()}
+              className={`w-full bg-transparent text-sm outline-none cursor-pointer relative z-10 ${
                 to ? "text-[#3a2f28] font-medium" : "text-[#bbaea0]"
-              } 
-              [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+              } [&::-webkit-calendar-picker-indicator]:opacity-0`}
             />
-            <Calendar className="absolute right-0 h-4 w-4 text-[#d3c2aa] group-focus-within:text-[#8b6f47] transition-colors pointer-events-none" />
+            <Calendar className="absolute right-0 h-4 w-4 text-[#d3c2aa] group-focus-within:text-[#8b6f47] transition-colors pointer-events-none z-0" />
           </div>
           {dateError && (
             <span className="absolute -bottom-5 left-2 text-[10px] font-medium text-red-500">
