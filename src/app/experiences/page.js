@@ -319,7 +319,7 @@ export default async function Experiences({ searchParams }) {
               {/* Image Area */}
               <div className="relative h-64 w-full overflow-hidden bg-[#f1ede7]">
                 <Image
-                  src="/bespoke-event.jpg"
+                  src="/bespoke-event.jpeg"
                   alt="Bespoke and Private Events in Crete"
                   fill
                   className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
