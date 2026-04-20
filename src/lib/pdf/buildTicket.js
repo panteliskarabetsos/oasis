@@ -14,32 +14,33 @@ class TicketGenerator {
     this.args = args;
     this.brand = args.brand || {};
 
-    // Centralize Theme
+    // PREMIUM MINIMALIST THEME: Monochrome, high contrast
     this.theme = {
-      primary: this.brand.primary || "#8b6f47",
-      text: this.brand.text || "#2b2a28",
-      subtext: this.brand.subtext || "#6b665d",
-      border: this.brand.border || "#e2dcd0", // Slightly darker border for contrast
-      panel: this.brand.panel || "#f9f8f4",
-      headerText: this.brand.headerText || "#ffffff",
-      pageBg: this.brand.pageBg || "#f3eee5", // Darker backdrop to make the white ticket pop
+      primary: this.brand.primary || "#000000",
+      text: this.brand.text || "#111111",
+      subtext: this.brand.subtext || "#767676",
+      border: this.brand.border || "#eaeaea",
+      panel: this.brand.panel || "#f9f9f9",
+      headerText: this.brand.headerText || "#000000", // Changed to black for white header
+      pageBg: this.brand.pageBg || "#ffffff", // Pure white page
     };
 
     this.statusStyle = this.resolveStatusStyle(args.status);
-    this.headerH = args.headerH ?? 76;
-    this.inset = args.inset ?? 28;
-    this.qrSize = args.qrSize ?? 124; // Slightly larger for scannability
+    this.headerH = args.headerH ?? 100;
+    this.inset = args.inset ?? 40; // Increased inset for more breathing room
+    this.qrSize = args.qrSize ?? 120;
   }
 
   resolveStatusStyle(status) {
     const s = String(status || "").toUpperCase();
+    // High-end, muted status colors
     const styles = {
-      CONFIRMED: { bg: "#eaf6ef", fg: "#186a3b" },
-      PENDING: { bg: "#fff6e5", fg: "#8a5b00" },
-      CANCELLED: { bg: "#fdeaea", fg: "#9c1a1a" },
-      REFUNDED: { bg: "#eef3ff", fg: "#274690" },
+      CONFIRMED: { bg: "#f9f9f9", fg: "#111111", border: "#eaeaea" },
+      PENDING: { bg: "#ffffff", fg: "#767676", border: "#eaeaea" },
+      CANCELLED: { bg: "#ffffff", fg: "#000000", border: "#000000" },
+      REFUNDED: { bg: "#f9f9f9", fg: "#767676", border: "#eaeaea" },
     };
-    return styles[s] || { bg: "#ffffff", fg: this.theme.primary };
+    return styles[s] || { bg: "#000000", fg: "#ffffff", border: "#000000" };
   }
 
   async loadFonts() {
@@ -91,8 +92,8 @@ class TicketGenerator {
     const p = { x: 0, y: 0, w: this.doc.page.width, h: this.doc.page.height };
     const contentX = p.x + this.inset;
     const contentW = p.w - this.inset * 2;
-    const gap = 32; // Increased gap for breathing room
-    const stubW = 185;
+    const gap = 40;
+    const stubW = 160;
     const mainW = contentW - stubW - gap;
     const stubX = contentX + mainW + gap;
 
@@ -101,14 +102,14 @@ class TicketGenerator {
       rightEdge: p.x + p.w,
       contentX,
       contentW,
-      mainX: contentX + 24, // Inner padding inside the ticket
-      mainW: mainW - 24,
+      mainX: contentX + 30, // Inner padding inside the main border
+      mainW: mainW - 30,
       stubX,
-      stubW: stubW - 24,
+      stubW: stubW - 20,
       gap,
-      sepX: stubX - gap / 2, // Separator X coordinate (Perforation line)
-      footerReserve: 64,
-      contentTop: p.y + this.headerH + 32, // Push down slightly
+      sepX: stubX - gap / 2, // Divider line X
+      footerReserve: 60,
+      contentTop: p.y + this.headerH + 20,
     };
   }
 
@@ -117,25 +118,31 @@ class TicketGenerator {
   sectionTitle(txt, x, y) {
     this.doc
       .font("Body-Bold")
-      .fontSize(11) // Slightly smaller, tighter tracking look
+      .fontSize(10)
       .fillColor(this.theme.subtext)
-      .text(txt.toUpperCase(), x, y, { characterSpacing: 0.5 });
+      .text(txt.toUpperCase(), x, y, { characterSpacing: 1.5 });
     return this.doc.y;
   }
 
-  chip(txt, x, y, { bg, fg, bold = true }) {
+  chip(txt, x, y, { bg, fg, border, bold = true }) {
     const padX = 14,
       padY = 7,
       h = 26;
     const w = this.doc.widthOfString(txt) + padX * 2;
+    this.doc.save();
+
+    if (bg) {
+      this.doc.roundedRect(x, y, w, h, 2).fill(bg); // Sharp 2px radius
+    }
+    if (border) {
+      this.doc.roundedRect(x, y, w, h, 2).lineWidth(1).stroke(border);
+    }
+
     this.doc
-      .save()
-      .roundedRect(x, y, w, h, 999)
-      .fill(bg || this.theme.panel)
       .fillColor(fg || this.theme.primary)
       .font(bold ? "Body-Bold" : "Body")
-      .fontSize(11)
-      .text(txt, x + padX, y + padY - 3)
+      .fontSize(10)
+      .text(txt, x + padX, y + padY - 2, { characterSpacing: 0.5 })
       .restore();
     return { w, h };
   }
@@ -149,210 +156,159 @@ class TicketGenerator {
       .stroke();
   }
 
-  dottedSeparator(x, y1, y2) {
-    this.doc
-      .save()
-      .dash(3, { space: 4 })
-      .moveTo(x, y1)
-      .lineTo(x, y2)
-      .strokeColor(this.theme.border)
-      .lineWidth(1.5)
-      .stroke()
-      .undash()
-      .restore();
-  }
-
   /* ---------- DRAWING PHASES ---------- */
 
   drawBackgroundAndHeader() {
-    const { page, rightEdge, contentX } = this.layout;
+    const { page, rightEdge, contentX, contentW } = this.layout;
     const { args, theme } = this;
 
-    // 1. Base background
+    // 1. Base background (Pure White)
     this.doc
       .save()
       .rect(page.x, page.y, page.w, page.h)
       .fill(theme.pageBg)
       .restore();
 
-    // 2. Header block
+    // 2. Structural Hairline (Top Border of the actual ticket area)
+    const lineY = this.headerH;
     this.doc
       .save()
-      .rect(page.x, page.y, page.w, this.headerH)
-      .fill(theme.primary)
+      .moveTo(contentX, lineY)
+      .lineTo(rightEdge - this.inset, lineY)
+      .strokeColor(theme.border)
+      .lineWidth(0.75) // Ultra-fine line
+      .stroke()
       .restore();
 
-    // Subtle dark trim at the bottom of the header for depth
-    this.doc
-      .save()
-      .rect(page.x, page.y + this.headerH - 3, page.w, 3)
-      .fillOpacity(0.12)
-      .fill("#000000")
-      .restore();
-
-    // 3. Center "E-TICKET" Watermark/Label
-    this.doc
-      .save()
-      .font("Body-Bold")
-      .fontSize(10)
-      .fillColor(theme.headerText)
-      .opacity(0.5)
-      .text("E-TICKET", page.x, page.y + (this.headerH - 10) / 2 + 1, {
-        width: page.w,
-        align: "center",
-        characterSpacing: 6,
-      })
-      .restore();
-
-    // 4. Logo / Brand Name (Left)
-    const logoMaxH = 32;
-    const logoY = page.y + (this.headerH - logoMaxH) / 2;
+    // 3. Brand Identity (Left-Aligned)
+    const logoMaxH = 26;
+    const metaY = lineY - 22; // Alignment baseline for all header text
 
     try {
       if (args.logoUrl && fs.existsSync(args.logoUrl)) {
-        // Constrain height instead of width to keep header vertically balanced
-        this.doc.image(args.logoUrl, contentX, logoY, { height: logoMaxH });
+        this.doc.image(args.logoUrl, contentX, lineY - 38, {
+          height: logoMaxH,
+        });
       } else {
-        throw new Error("Logo file not found");
+        throw new Error();
       }
     } catch {
       this.doc
         .font("Body-Bold")
-        .fontSize(22)
-        .fillColor(theme.headerText)
-        .text(
-          args.brandName || "OASIS",
-          contentX,
-          page.y + (this.headerH - 22) / 2 - 2,
-        );
-    }
-
-    // 5. Booking Reference "Pill" (Right)
-    if (args.bookingRef) {
-      const refBoxW = 130;
-      const refBoxH = 44;
-      const refBoxX = rightEdge - this.inset - refBoxW;
-      const refBoxY = page.y + (this.headerH - refBoxH) / 2;
-
-      // Semi-transparent pill background
-      this.doc
-        .save()
-        .roundedRect(refBoxX, refBoxY, refBoxW, refBoxH, 8)
-        .fillOpacity(0.15)
-        .fill("#ffffff")
-        .restore();
-
-      // Pill border
-      this.doc
-        .save()
-        .roundedRect(refBoxX, refBoxY, refBoxW, refBoxH, 8)
-        .strokeOpacity(0.3)
-        .lineWidth(1)
-        .stroke("#ffffff")
-        .restore();
-
-      // Pill Labels
-      this.doc
-        .save()
-        .font("Body-Bold")
-        .fontSize(8)
-        .fillColor(theme.headerText)
-        .opacity(0.8)
-        .text("BOOKING REF", refBoxX, refBoxY + 8, {
-          width: refBoxW,
-          align: "center",
-          characterSpacing: 1,
-        })
-        .restore();
-
-      this.doc
-        .save()
-        .font("Body-Bold")
         .fontSize(14)
-        .fillColor(theme.headerText)
-        .text(args.bookingRef, refBoxX, refBoxY + 22, {
-          width: refBoxW,
-          align: "center",
+        .fillColor(theme.text)
+        .text((args.brandName || "OASIS").toUpperCase(), contentX, metaY - 4, {
+          characterSpacing: 2,
+        });
+    }
+
+    // 4. Document Label (Center-Aligned)
+    this.doc
+      .save()
+      .font("Body-Bold")
+      .fontSize(8)
+      .fillColor(theme.subtext)
+      .text("OFFICIAL E-TICKET", page.x, metaY, {
+        width: page.w,
+        align: "center",
+        characterSpacing: 4,
+      })
+      .restore();
+
+    // 5. Booking Reference (Right-Aligned)
+    if (args.bookingRef) {
+      const refText = args.bookingRef.toUpperCase();
+      const labelW = 100;
+      const refX = rightEdge - this.inset - labelW;
+
+      this.doc
+        .save()
+        .font("Body")
+        .fontSize(8)
+        .fillColor(theme.subtext)
+        .text("BOOKING REF", refX, metaY - 12, {
+          width: labelW,
+          align: "right",
           characterSpacing: 1,
+        })
+        .font("Body-Bold")
+        .fontSize(11)
+        .fillColor(theme.text)
+        .text(refText, refX, metaY, {
+          width: labelW,
+          align: "right",
+          characterSpacing: 0.5,
         })
         .restore();
     }
+
+    this.doc
+      .save()
+      .lineWidth(2)
+      .strokeColor(theme.primary)
+      .moveTo(contentX, lineY)
+      .lineTo(contentX + 20, lineY) // Tiny accent bar on the left
+      .stroke()
+      .restore();
   }
 
   drawTicketBody() {
     const { page, contentX, contentW, contentTop, sepX, footerReserve } =
       this.layout;
-    const rightCardH = page.h - contentTop - footerReserve - this.inset;
-    const ticketY = contentTop - 16;
-    const ticketH = rightCardH + 16;
-    const r = 14; // Radius of punch holes
+    const ticketH = page.h - contentTop - footerReserve;
 
-    // 1. Soft Drop Shadow
+    // Sleek, minimal main bounding box (sharp corners)
     this.doc
       .save()
-      .roundedRect(contentX + 2, ticketY + 4, contentW, ticketH, 16)
-      .fillOpacity(0.05)
-      .fill("#000000")
-      .restore();
-
-    // 2. Main White Ticket Container
-    this.doc
-      .save()
-      .roundedRect(contentX, ticketY, contentW, ticketH, 16)
-      .fill("#ffffff")
+      .rect(contentX, contentTop, contentW, ticketH)
       .strokeColor(this.theme.border)
       .lineWidth(1)
       .stroke()
       .restore();
 
-    // 3. Realistic Punch Hole Cutouts (Masking with Background Color + SVG arcs for border)
-    // Top Cutout
-    this.doc.save().circle(sepX, ticketY, r).fill(this.theme.pageBg).restore();
+    // Solid Vertical Divider instead of perforation
     this.doc
-      .path(`M ${sepX - r} ${ticketY} A ${r} ${r} 0 0 0 ${sepX + r} ${ticketY}`)
+      .moveTo(sepX, contentTop)
+      .lineTo(sepX, contentTop + ticketH)
       .strokeColor(this.theme.border)
       .lineWidth(1)
       .stroke();
-
-    // Bottom Cutout
-    this.doc
-      .save()
-      .circle(sepX, ticketY + ticketH, r)
-      .fill(this.theme.pageBg)
-      .restore();
-    this.doc
-      .path(
-        `M ${sepX - r} ${ticketY + ticketH} A ${r} ${r} 0 0 1 ${sepX + r} ${ticketY + ticketH}`,
-      )
-      .strokeColor(this.theme.border)
-      .lineWidth(1)
-      .stroke();
-
-    // 4. Perforation Line
-    this.dottedSeparator(sepX, ticketY + r + 8, ticketY + ticketH - r - 8);
   }
 
   drawMainContent() {
     const { mainX, mainW, contentTop } = this.layout;
     const { args, theme } = this;
-    let y = contentTop + 4;
+    let y = contentTop + 30;
+
+    // Reference ID above title
+    if (args.bookingRef) {
+      this.doc
+        .font("Body-Bold")
+        .fontSize(10)
+        .fillColor(theme.subtext)
+        .text(`REF: ${args.bookingRef}`, mainX, y, { characterSpacing: 1 });
+      y = this.doc.y + 8;
+    }
 
     this.doc
       .font("Body-Bold")
-      .fontSize(28)
+      .fontSize(24)
       .fillColor(theme.text)
-      .text(args.experienceName || "Reservation", mainX, y, { width: mainW });
-    y = this.doc.y + 6;
+      .text(args.experienceName || "Reservation", mainX, y, {
+        width: mainW,
+        lineGap: 2,
+      });
+    y = this.doc.y + 8;
 
     if (args.location) {
       this.doc
         .font("Body")
-        .fontSize(13)
+        .fontSize(12)
         .fillColor(theme.subtext)
         .text(args.location, mainX, y, { width: mainW });
-      y = this.doc.y + 16;
+      y = this.doc.y + 24;
     } else {
-      y += 12;
+      y += 16;
     }
 
     y = this.drawOrderSummary(y);
@@ -362,150 +318,102 @@ class TicketGenerator {
   drawOrderSummary(startY) {
     const { mainX, mainW } = this.layout;
     const { args, theme } = this;
-    const cardPad = 16;
-    const leftColW = 120;
-    const valX = mainX + cardPad + leftColW;
-    const valW = mainW - leftColW - cardPad * 2 - 4; // Max width for values
+    const rowPad = 14;
+
+    let sy = this.sectionTitle("Order Summary", mainX, startY) + 16;
 
     const whenStr = [
       args.dateLabel,
-      args.timeLabel ? `, ${args.timeLabel}` : "",
+      args.timeLabel ? ` at ${args.timeLabel}` : "",
     ]
       .filter(Boolean)
       .join("");
 
-    // 1. Define our rows dynamically
     const rows = [
       { label: "Experience", value: args.experienceName || "-" },
       { label: "Date", value: whenStr || "-" },
     ];
 
-    // Add Pickup Point if it was provided
     if (args.pickupPoint) {
       rows.push({ label: "Pickup", value: args.pickupPoint });
     }
 
-    // 2. Pre-calculate the heights of each row so we know exactly how tall the box needs to be
-    let rowsTotalHeight = 0;
-    const rowMetrics = rows.map((r) => {
-      this.doc.font("Body").fontSize(12);
-      // Determine height of text (minimum 24px per row for spacing)
-      const textHeight = this.doc.heightOfString(r.value, { width: valW });
-      const h = Math.max(24, textHeight + 8);
-      rowsTotalHeight += h;
-      return { ...r, h };
-    });
+    // Top border of summary
+    this.divider(mainX, mainX + mainW, sy);
+    sy += rowPad;
 
-    const sumH = 40 + rowsTotalHeight + 44;
-    // 3. Draw the background panel
-    this.doc
-      .save()
-      .roundedRect(mainX, startY, mainW, sumH, 12)
-      .fill(theme.panel)
-      .strokeColor(theme.border)
-      .lineWidth(1)
-      .stroke()
-      .restore();
-
-    // 4. Draw Title
-    let sy = startY + cardPad;
-    sy = this.sectionTitle("Order summary", mainX + cardPad, sy) + 12;
-
-    // 5. Draw dynamically measured rows
-    rowMetrics.forEach((r) => {
+    // Draw rows with Right-Aligned Values
+    rows.forEach((r) => {
       this.doc
-        .font("Body-Bold")
-        .fontSize(11.5)
+        .font("Body")
+        .fontSize(12)
         .fillColor(theme.subtext)
-        .text(r.label, mainX + cardPad, sy, { width: leftColW - 8 });
+        .text(r.label, mainX, sy, { width: mainW });
 
       this.doc
         .font("Body")
         .fontSize(12)
         .fillColor(theme.text)
-        .text(r.value, valX, sy, { width: valW });
+        .text(r.value, mainX, sy, { width: mainW, align: "right" });
 
-      sy += r.h;
+      sy +=
+        Math.max(this.doc.heightOfString(r.value, { width: mainW / 1.5 }), 16) +
+        rowPad;
+      this.divider(mainX, mainX + mainW, sy);
+      sy += rowPad;
     });
 
-    // 6. Draw Total Pill
-    const totalText = `Total  ${args.amountLabel || "-"}${args.currency ? ` (${args.currency})` : ""}`;
-    this.chip(
-      totalText,
-      mainX + mainW - cardPad - this.doc.widthOfString(totalText) - 36,
-      startY + sumH - 40,
-      { bg: "#ffffff", fg: theme.text },
-    );
+    // Draw Total Row
+    const totalLabel = "Total";
+    const totalValue = `${args.amountLabel || "-"}${args.currency ? ` (${args.currency})` : ""}`;
 
-    return startY + sumH + 24; // Return the new Y coordinate for the Attendees table
+    this.doc
+      .font("Body-Bold")
+      .fontSize(14)
+      .fillColor(theme.text)
+      .text(totalLabel, mainX, sy, { width: mainW });
+
+    this.doc
+      .font("Body-Bold")
+      .fontSize(14)
+      .fillColor(theme.text)
+      .text(totalValue, mainX, sy, { width: mainW, align: "right" });
+
+    return sy + 40;
   }
 
   drawAttendees(startY) {
     const { mainX, mainW } = this.layout;
     const { args, theme } = this;
-    const rowH = 24;
-    let aY = this.sectionTitle("Guest List", mainX, startY) + 8;
+    const rowH = 30; // Taller rows for breathability
+    let aY = this.sectionTitle("Attendees", mainX, startY) + 12;
 
-    this.doc
-      .save()
-      .roundedRect(mainX, aY, mainW, rowH, 8)
-      .fill(theme.panel)
-      .strokeColor(theme.border)
-      .lineWidth(1)
-      .stroke()
-      .restore();
-
-    this.doc
-      .font("Body-Bold")
-      .fontSize(11)
-      .fillColor(theme.subtext)
-      .text("No.", mainX + 16, aY + 6, { width: 40 });
-    this.doc
-      .font("Body-Bold")
-      .fontSize(11)
-      .fillColor(theme.subtext)
-      .text("Name", mainX + 70, aY + 6, { width: mainW - 90 });
-
-    let tY = aY + rowH;
     const attendees = args.attendees || [];
 
     if (!attendees.length) {
       this.doc
         .font("Body")
         .fontSize(12)
-        .fillColor(theme.text)
-        .text("No attendee names on file.", mainX + 16, tY + 8);
-      tY += rowH + 12;
+        .fillColor(theme.subtext)
+        .text("No attendee names on file.", mainX, aY);
     } else {
       attendees.forEach((a, i) => {
-        // Alternating row colors
-        if (i % 2 === 1)
-          this.doc
-            .save()
-            .rect(mainX, tY, mainW, rowH)
-            .fill(theme.panel)
-            .restore();
-
+        // No background striping, just a clean bottom border
         this.doc
           .font("Body")
           .fontSize(12)
           .fillColor(theme.subtext)
-          .text(String(i + 1).padStart(2, "0"), mainX + 16, tY + 6, {
-            width: 40,
-          });
+          .text(String(i + 1).padStart(2, "0"), mainX, aY + 8, { width: 30 });
+
         this.doc
           .font("Body")
           .fontSize(12)
           .fillColor(theme.text)
-          .text(a?.name || "Guest", mainX + 70, tY + 6, { width: mainW - 90 });
-        tY += rowH;
+          .text(a?.name || "Guest", mainX + 40, aY + 8, { width: mainW - 40 });
+
+        aY += rowH;
+        this.divider(mainX, mainX + mainW, aY);
       });
-      // Outer border for the table
-      this.doc
-        .roundedRect(mainX, aY, mainW, tY - aY, 8)
-        .strokeColor(theme.border)
-        .lineWidth(1)
-        .stroke();
     }
   }
 
@@ -513,73 +421,83 @@ class TicketGenerator {
     const { stubX, stubW, contentTop } = this.layout;
     const { args, theme } = this;
 
-    // Status at the top of the stub
+    let sY = contentTop + 30;
+
+    // Status Chip (Sharp, bordered)
     const statLabel = (args.status || "STATUS").toUpperCase();
-    const statW = this.doc.widthOfString(statLabel) + 24;
-    this.chip(statLabel, stubX + (stubW - statW) / 2, contentTop + 4, {
+    this.chip(statLabel, stubX, sY, {
       bg: this.statusStyle.bg,
       fg: this.statusStyle.fg,
+      border: this.statusStyle.border,
     });
 
-    let sY = contentTop + 54;
-    sY = this.sectionTitle("Check-in", stubX, sY) + 12;
+    sY += 50;
+    sY = this.sectionTitle("Check-in", stubX, sY) + 16;
 
     if (this.qrImgBuf) {
-      const qx = stubX + Math.round((stubW - this.qrSize) / 2);
-      this.doc.image(this.qrImgBuf, qx, sY, { width: this.qrSize });
+      // Sharper QR presentation
+      this.doc
+        .save()
+        .rect(stubX, sY, this.qrSize, this.qrSize)
+        .lineWidth(1)
+        .strokeColor(theme.border)
+        .stroke()
+        .restore();
+
+      this.doc.image(this.qrImgBuf, stubX, sY, { width: this.qrSize });
 
       this.doc
         .font("Body")
-        .fontSize(10.5)
+        .fontSize(10)
         .fillColor(theme.subtext)
-        .text("Scan at entrance", stubX, sY + this.qrSize + 12, {
-          width: stubW,
+        .text("Scan upon arrival", stubX, sY + this.qrSize + 12, {
+          width: this.qrSize,
           align: "center",
+          characterSpacing: 0.5,
         });
 
-      sY += this.qrSize + 48;
+      sY += this.qrSize + 50;
     }
 
-    sY = this.sectionTitle("Important info", stubX, sY) + 8;
+    sY = this.sectionTitle("Important info", stubX, sY) + 12;
     const infoLines = [
       "Arrive 10–15 mins early.",
-      "Bring a light jacket.",
+      "Bring a valid ID.",
       "Reply to email for changes.",
     ];
 
     this.doc.font("Body").fontSize(11).fillColor(theme.text);
     infoLines.forEach((line) => {
-      this.doc.circle(stubX + 4, this.doc.y + 6, 2).fill(theme.primary); // Custom bullet point
-      this.doc.text(line, stubX + 14, this.doc.y, {
-        width: stubW - 14,
-        lineGap: 4,
+      this.doc.text(`—  ${line}`, stubX, this.doc.y, {
+        width: stubW,
+        lineGap: 6,
       });
     });
   }
 
   drawFooter() {
-    const { page, rightEdge, contentW, contentTop, sepX } = this.layout;
+    const { page, contentW, contentTop } = this.layout;
     const { args, theme } = this;
 
-    const extraBits = [
-      args.supportEmail ? `Email: ${args.supportEmail}` : null,
-      args.supportPhone ? `Phone: ${args.supportPhone}` : null,
-    ].filter(Boolean);
+    const extraBits = [args.supportEmail, args.supportPhone].filter(Boolean);
 
-    const footerNote = args.footerNote || "Present this ticket at check-in.";
+    const footerNote =
+      args.footerNote || "Please present this ticket at check-in.";
     const noteLine = extraBits.length
-      ? `${footerNote}  •  ${extraBits.join("  •  ")}`
+      ? `${footerNote}   |   ${extraBits.join("   |   ")}`
       : footerNote;
 
     const footerOpts = { width: contentW, align: "center" };
-    const footerHeight = this.doc.heightOfString(noteLine, footerOpts);
-    const footerY = page.y + page.h - this.inset - footerHeight;
+    const footerY = page.h - this.inset + 10;
 
     this.doc
       .font("Body")
-      .fontSize(9.5)
+      .fontSize(9)
       .fillColor(theme.subtext)
-      .text(noteLine, page.x + this.inset, footerY, footerOpts);
+      .text(noteLine.toUpperCase(), page.x + this.inset, footerY, {
+        ...footerOpts,
+        characterSpacing: 1,
+      });
   }
 
   drawWatermark() {
@@ -588,29 +506,28 @@ class TicketGenerator {
     const finalWatermarkText = args.watermarkText || args.brandName || "OASIS";
     const hasLogoForWatermark = args.logoUrl && fs.existsSync(args.logoUrl);
 
+    // Make watermark extremely subtle for the clean look
     if (hasLogoForWatermark) {
-      const wmWidth = page.w * 0.6;
+      const wmWidth = page.w * 0.4;
       const wmX = (page.w - wmWidth) / 2;
       const wmY = page.h / 2 - wmWidth / 2;
       this.doc
         .save()
-        .opacity(0.04)
+        .opacity(0.02)
         .image(args.logoUrl, wmX, wmY, { width: wmWidth })
-        .opacity(1)
         .restore();
     } else if (finalWatermarkText) {
       this.doc
         .save()
-        .opacity(0.03)
-        .rotate(-18, { origin: [page.w / 2, page.h / 2] })
+        .opacity(0.02)
+        .rotate(-25, { origin: [page.w / 2, page.h / 2] })
         .font("Body-Bold")
-        .fontSize(130)
+        .fontSize(100)
         .fillColor(theme.text)
         .text(finalWatermarkText, page.w / 2 - 280, page.h / 2 - 50, {
           width: 560,
           align: "center",
         })
-        .opacity(1)
         .restore();
     }
   }
@@ -637,9 +554,9 @@ class TicketGenerator {
       this.doc.font("Body");
 
       this.drawBackgroundAndHeader();
-      this.drawTicketBody(); // Draws the single ticket container
-      this.drawMainContent(); // Populates the left side
-      this.drawRightRail(); // Populates the right side
+      this.drawTicketBody();
+      this.drawMainContent();
+      this.drawRightRail();
       this.drawFooter();
       this.drawWatermark();
 

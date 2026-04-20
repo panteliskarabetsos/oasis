@@ -39,7 +39,7 @@ export async function POST(req, ctx) {
       primary_contact, "unitPriceAdult", "unitPriceKid",
       "totalAmount", "stripeSessionId", "stripePaymentIntentId",
       "convertedBookingId", currency,
-      promoJson, "appliedPromoCode", "discountAmount"
+      promoJson, "appliedPromoCode", "discountAmount","selectedMeetupPoint"
     `,
     )
     .eq("id", draftId)
@@ -373,6 +373,7 @@ export async function POST(req, ctx) {
         appliedPromoCode: mergedPromo?.code ?? null,
         discountAmount: mergedDiscountAmount || 0,
         promoJson: mergedPromo ?? null,
+        selectedMeetupPoint: draft.selectedMeetupPoint ?? null,
       })
       .select("id")
       .single();
