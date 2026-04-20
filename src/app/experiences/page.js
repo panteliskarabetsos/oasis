@@ -67,8 +67,9 @@ export default async function Experiences({ searchParams }) {
 
   let filteredExperiences = publicExperiences || [];
   const hasValidDateRange = rawFrom && rawTo;
+  const filtersApplied = hasValidDateRange && !!partySize;
 
-  if (filteredExperiences.length > 0 && hasValidDateRange && partySize) {
+  if (filteredExperiences.length > 0 && filtersApplied) {
     const experienceIds = filteredExperiences.map((e) => e.id);
 
     // Interpret incoming date inputs as whole days (local) and convert to ISO.
@@ -102,7 +103,7 @@ export default async function Experiences({ searchParams }) {
     if (slotsError) {
       console.error("Error fetching schedule slots:", slotsError);
     } else if (slots) {
-      const availableExperienceIds = new Set();
+      const availableStats = new Map();
 
       for (const slot of slots) {
         const bookings = Array.isArray(slot.bookings) ? slot.bookings : [];
@@ -116,18 +117,29 @@ export default async function Experiences({ searchParams }) {
         const remaining = (slot.totalSlots || 0) - usedSeats;
 
         if (remaining >= partySize) {
-          availableExperienceIds.add(slot.experienceId);
+          // Track the maximum available seats in the selected date range to accurately reflect scarcity
+          const currentMax = availableStats.get(slot.experienceId) || 0;
+          availableStats.set(
+            slot.experienceId,
+            Math.max(currentMax, remaining),
+          );
         }
       }
 
-      filteredExperiences = filteredExperiences.filter((exp) =>
-        availableExperienceIds.has(exp.id),
-      );
+      filteredExperiences = filteredExperiences
+        .filter((exp) => {
+          // 💡 NEW LOGIC: Keep it if there are slots available OR if it's a private/0-price experience
+          const isPrivate = getFromPrice(exp) === null;
+          return availableStats.has(exp.id) || isPrivate;
+        })
+        .map((exp) => ({
+          ...exp,
+          scarcityCount: availableStats.get(exp.id) || 0, // Private ones will default to 0
+        }));
     }
   }
 
   const count = filteredExperiences?.length || 0;
-  const filtersApplied = hasValidDateRange && !!partySize;
 
   return (
     <main className="min-h-screen bg-[#f4f1ec] text-[#2f2f2f] pt-16 md:pt-24 pb-24 px-6 selection:bg-[#8b6f47] selection:text-white">
@@ -183,10 +195,24 @@ export default async function Experiences({ searchParams }) {
                 : [];
               const freqLabel = getFrequencyLabel(freqArray);
 
-              const shortDescription =
-                (exp.description || "").length > 130
-                  ? `${exp.description.slice(0, 130)}…`
-                  : exp.description || "";
+              // Improved Text Truncation to avoid cutting words in half
+              let shortDescription = exp.description || "";
+              if (shortDescription.length > 130) {
+                shortDescription = shortDescription.substring(0, 130);
+                const lastSpaceIndex = shortDescription.lastIndexOf(" ");
+                if (lastSpaceIndex > 0) {
+                  shortDescription =
+                    shortDescription.substring(0, lastSpaceIndex) + "…";
+                } else {
+                  shortDescription += "…";
+                }
+              }
+
+              // Determine if we should show the scarcity badge (4 or fewer spots left)
+              const isScarce =
+                filtersApplied &&
+                exp.scarcityCount > 0 &&
+                exp.scarcityCount <= 4;
 
               return (
                 <article
@@ -219,9 +245,13 @@ export default async function Experiences({ searchParams }) {
                           {exp.duration}
                         </span>
                       )}
-                      {fromPrice !== null && (
+                      {fromPrice !== null ? (
                         <span className="rounded-full bg-[#5a4a3f]/90 backdrop-blur-md text-xs font-medium text-white px-3 py-1.5 shadow-sm border border-white/10">
                           From {eur(fromPrice)}
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-[#5a4a3f]/90 backdrop-blur-md text-xs font-medium text-white px-3 py-1.5 shadow-sm border border-white/10">
+                          On Request
                         </span>
                       )}
                     </div>
@@ -256,6 +286,14 @@ export default async function Experiences({ searchParams }) {
                   {/* Body Area */}
                   <div className="p-7 flex flex-col flex-1">
                     <div className="flex-1 flex flex-col gap-3">
+                      {/* Scarcity Badge injected seamlessly above the title */}
+                      {isScarce && (
+                        <div className="inline-flex w-max items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-red-700 ring-1 ring-inset ring-red-600/20 mb-1">
+                          🔥 Only {exp.scarcityCount} spot
+                          {exp.scarcityCount !== 1 ? "s" : ""} left
+                        </div>
+                      )}
+
                       <h3 className="text-2xl font-serif text-[#3a2f28] leading-snug group-hover:text-[#8b6f47] transition-colors">
                         {exp.name}
                       </h3>
@@ -273,7 +311,9 @@ export default async function Experiences({ searchParams }) {
                           </p>
                         )}
                         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b7a6b]">
-                          Small groups • Slow-paced
+                          {fromPrice === null
+                            ? "Fully Customizable • Private Group"
+                            : "Small groups • Slow-paced"}
                         </p>
                       </div>
                     </div>
@@ -282,7 +322,7 @@ export default async function Experiences({ searchParams }) {
                     <div className="mt-8 flex flex-col gap-4">
                       {fromPrice === null ? (
                         <LinkWithLoader className="w-full" href="/contact">
-                          <button className="w-full bg-[#8b6f47] text-white px-6 py-3.5 rounded-full text-sm font-medium hover:bg-[#735b38] hover:shadow-md transition-all duration-300">
+                          <button className="w-full bg-[#1A1A1A] text-white px-6 py-3.5 rounded-full text-sm font-medium hover:bg-[#3a2f28] hover:shadow-lg transition-all duration-300">
                             Contact Us
                           </button>
                         </LinkWithLoader>
@@ -363,11 +403,21 @@ export default async function Experiences({ searchParams }) {
                   </div>
                 </div>
 
-                {/* Actions */}
+                {/* Actions - UPDATED HIERARCHY */}
                 <div className="mt-8 flex flex-col gap-4">
                   <LinkWithLoader className="w-full" href="/contact">
-                    <button className="w-full bg-transparent border-2 border-[#8b6f47] text-[#8b6f47] px-6 py-3 rounded-full text-sm font-medium hover:bg-[#8b6f47] hover:text-white transition-all duration-300">
+                    <button className="w-full bg-[#1A1A1A] text-white px-6 py-3.5 rounded-full text-sm font-medium hover:bg-[#3a2f28] hover:shadow-lg transition-all duration-300">
                       Inquire Now
+                    </button>
+                  </LinkWithLoader>
+
+                  {/* 🔗 LEARN MORE LINK ADDED HERE */}
+                  <LinkWithLoader className="w-full group/btn" href="/bespoke">
+                    <button className="w-full flex items-center justify-center gap-2 text-sm font-medium text-[#5a4a3f] hover:text-[#8b6f47] transition-colors">
+                      Learn more
+                      <span className="transition-transform duration-300 group-hover/btn:translate-x-1">
+                        →
+                      </span>
                     </button>
                   </LinkWithLoader>
                 </div>

@@ -40,7 +40,7 @@ export async function POST(req, ctx) {
       "totalAmount", "stripeSessionId", "stripePaymentIntentId",
       "convertedBookingId", currency,
       promoJson, "appliedPromoCode", "discountAmount"
-    `
+    `,
     )
     .eq("id", draftId)
     .maybeSingle();
@@ -84,7 +84,7 @@ export async function POST(req, ctx) {
           error: "Payment not found",
           redirectUrl: `${origin}/booking/${draftId}/payment?failed=1&reason=no_identifiers`,
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
   }
@@ -102,7 +102,18 @@ export async function POST(req, ctx) {
     const s = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["payment_intent", "customer_details"],
     });
+    if (
+      s.client_reference_id !== String(draftId) &&
+      s.metadata?.draft_id !== String(draftId)
+    ) {
+      console.error(
+        `[SECURITY] Session ${sessionId} does not belong to draft ${draftId}`,
+      );
+      return bad("Unauthorized payment session mismatch", 403);
+    }
+
     checkoutSession = s;
+
     const piObj =
       typeof s.payment_intent === "object" ? s.payment_intent : null;
     const piStatus = piObj?.status || "";
@@ -116,17 +127,17 @@ export async function POST(req, ctx) {
         s?.status === "expired"
           ? "expired"
           : s?.payment_status === "unpaid"
-          ? "unpaid"
-          : piStatus || "failed";
+            ? "unpaid"
+            : piStatus || "failed";
       return NextResponse.json(
         {
           error: "Payment failed",
           reason,
           redirectUrl: `${origin}/booking/${draftId}/payment?failed=1&reason=${encodeURIComponent(
-            reason
+            reason,
           )}`,
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
@@ -150,6 +161,12 @@ export async function POST(req, ctx) {
         : s.payment_intent?.id || stripePaymentIntentId;
   } else if (stripe && payment_intent) {
     const pi = await stripe.paymentIntents.retrieve(payment_intent);
+    if (pi.metadata?.draft_id !== String(draftId)) {
+      console.error(
+        `[SECURITY] PI ${payment_intent} does not belong to draft ${draftId}`,
+      );
+      return bad("Unauthorized payment intent mismatch", 403);
+    }
     intent = pi;
     if (["requires_payment_method", "canceled"].includes(pi.status)) {
       return NextResponse.json(
@@ -158,7 +175,7 @@ export async function POST(req, ctx) {
           reason: pi.status,
           redirectUrl: `${origin}/booking/${draftId}/payment?failed=1&reason=${pi.status}`,
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
     if (pi.status === "requires_action") {
@@ -167,10 +184,10 @@ export async function POST(req, ctx) {
           error: "Action required",
           reason: "requires_action",
           redirectUrl: `${origin}/booking/${draftId}/payment?action_required=1&pi=${encodeURIComponent(
-            pi.id
+            pi.id,
           )}`,
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
@@ -183,8 +200,8 @@ export async function POST(req, ctx) {
       typeof pi.amount_received === "number"
         ? pi.amount_received
         : typeof pi.amount === "number"
-        ? pi.amount
-        : 0;
+          ? pi.amount
+          : 0;
     currency = (pi.currency || currency).toLowerCase();
   }
 
@@ -251,7 +268,7 @@ export async function POST(req, ctx) {
       (giftMeta && giftMeta.discountCents) ??
         giftMeta?.giftcard?.applyAmountCents ??
         meta.giftcard_apply_cents ??
-        0
+        0,
     ) || 0;
   const giftCurrency = (
     giftMeta?.currency ||
@@ -320,7 +337,7 @@ export async function POST(req, ctx) {
   const ensuredUserId = await ensureDraftUserId(
     admin,
     draft,
-    checkoutSession || intent
+    checkoutSession || intent,
   );
 
   // Insert booking if missing (race-safe)
@@ -369,12 +386,12 @@ export async function POST(req, ctx) {
             .eq("stripePaymentIntentId", stripePaymentIntentId)
             .maybeSingle()
         : stripeSessionId
-        ? await admin
-            .from("booking")
-            .select("id")
-            .eq("stripeSessionId", stripeSessionId)
-            .maybeSingle()
-        : { data: null };
+          ? await admin
+              .from("booking")
+              .select("id")
+              .eq("stripeSessionId", stripeSessionId)
+              .maybeSingle()
+          : { data: null };
       bookingId = ref?.data?.id || null;
       if (!bookingId) {
         console.error("[confirm] insert Booking failed", ins.error);
@@ -398,8 +415,8 @@ export async function POST(req, ctx) {
     if (isFinalPaid && (giftCardId || giftCardCode)) {
       const fallbackFromPromo =
         String(mergedPromo?.source || "").toLowerCase() === "giftcard"
-          ? promoFromPI?.discountCents ??
-            Math.round(Number(mergedDiscountAmount || 0) * 100)
+          ? (promoFromPI?.discountCents ??
+            Math.round(Number(mergedDiscountAmount || 0) * 100))
           : 0;
 
       const expectedGiftCents =
@@ -436,15 +453,15 @@ export async function POST(req, ctx) {
 
           const giftTag = giftCardCode ? `GIFT:${giftCardCode}` : "GIFT";
           const appliedCodes = new Set(
-            [cur?.appliedPromoCode, mergedPromo?.code, giftTag].filter(Boolean)
+            [cur?.appliedPromoCode, mergedPromo?.code, giftTag].filter(Boolean),
           );
 
           const prevJson =
             cur?.promoJson && typeof cur.promoJson === "object"
               ? cur.promoJson
               : mergedPromo && typeof mergedPromo === "object"
-              ? mergedPromo
-              : {};
+                ? mergedPromo
+                : {};
 
           const promoJson = {
             ...prevJson,
@@ -567,7 +584,7 @@ export async function POST(req, ctx) {
 
         if (stamp.error && String(stamp.error.code) === "42703") {
           console.warn(
-            "[confirm] confirmationEmailSentAt column missing; skipping timestamp"
+            "[confirm] confirmationEmailSentAt column missing; skipping timestamp",
           );
         }
       }
@@ -643,8 +660,8 @@ function extractPaidAmountAndCurrency(session, draftTotal) {
     cents != null
       ? cents / 100
       : Number.isFinite(Number(draftTotal))
-      ? Number(draftTotal)
-      : null;
+        ? Number(draftTotal)
+        : null;
 
   const currency = (pi?.currency || session?.currency || "eur").toUpperCase();
 
@@ -782,7 +799,7 @@ async function ensureDraftUserId(admin, draft, session) {
       try {
         const { data: rpcId, error: rpcErr } = await admin.rpc(
           "create_user_minimal",
-          { p_email: contactEmail, p_name: name, p_role: "customer" }
+          { p_email: contactEmail, p_name: name, p_role: "customer" },
         );
         if (!rpcErr && rpcId) return rpcId;
       } catch {}
@@ -802,7 +819,7 @@ async function ensureDraftUserId(admin, draft, session) {
  */
 async function incrementPromoUsageOnce(
   admin,
-  { draftId, bookingId, promoCode, nowIso }
+  { draftId, bookingId, promoCode, nowIso },
 ) {
   const code = String(promoCode || "").trim();
   if (!code) return;
@@ -822,7 +839,7 @@ async function incrementPromoUsageOnce(
     admin
       .from(tbl)
       .select(
-        "id, code, active, startsAt, endsAt, maxRedemptions, redemptionCount"
+        "id, code, active, startsAt, endsAt, maxRedemptions, redemptionCount",
       )
       .ilike("code", code)
       .maybeSingle();
@@ -874,8 +891,8 @@ async function incrementPromoUsageOnce(
       reason: !active
         ? "inactive"
         : !withinWindow
-        ? "outside_window"
-        : "over_cap",
+          ? "outside_window"
+          : "over_cap",
       at: nowIso,
       bookingId,
     });
@@ -926,7 +943,7 @@ async function redeemPromoOnce(
     promoValue,
     customerEmail,
     stripePaymentIntentId,
-  }
+  },
 ) {
   // 0) Normalize code
   const code = String(promoCode).trim();
@@ -952,7 +969,7 @@ async function redeemPromoOnce(
             : null,
         ]
           .filter(Boolean)
-          .join(",")
+          .join(","),
       )
       .limit(1)
       .maybeSingle();
@@ -1095,7 +1112,7 @@ async function redeemPromoOnce(
     } catch (e) {
       console.warn(
         `[promo] update ${foundTable} counter failed`,
-        e?.message || e
+        e?.message || e,
       );
     }
   }
@@ -1136,22 +1153,22 @@ async function buildConfirmationEmailPayload(admin, ids, session) {
     }.</p>`,
     exp?.name
       ? `<p style="margin:0"><strong>Experience:</strong> ${escapeHtml(
-          exp.name
+          exp.name,
         )}</p>`
       : "",
     exp?.location
       ? `<p style="margin:0"><strong>Location:</strong> ${escapeHtml(
-          exp.location
+          exp.location,
         )}</p>`
       : "",
     when
       ? `<p style="margin:0"><strong>When:</strong> ${escapeHtml(
-          dateLabel
+          dateLabel,
         )} at ${escapeHtml(timeLabel)}</p>`
       : "",
     ids.bookingCode
       ? `<p style="margin:0 0 12px"><strong>Booking #</strong> ${escapeHtml(
-          ids.bookingCode
+          ids.bookingCode,
         )}</p>`
       : "",
     amountEur
@@ -1318,7 +1335,7 @@ async function redeemGiftCardOnce({
   if (ins?.error) {
     console.warn(
       "[giftcard] redemption insert failed:",
-      ins.error?.message || ins.error
+      ins.error?.message || ins.error,
     );
   }
 

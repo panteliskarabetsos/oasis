@@ -1,6 +1,3 @@
-// ================================
-// File: src/app/api/admin/reservations/[id]/route.js
-// ================================
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -51,7 +48,7 @@ export async function GET(req, ctx) {
   const supa = auth.admin;
 
   try {
-    const { id } = await ctx.params; // Next.js (app router) params are async
+    const { id } = await ctx.params;
     const rid = Number(Array.isArray(id) ? id[0] : id);
     if (!Number.isFinite(rid) || rid <= 0) return bad("Invalid id", 400);
 
@@ -62,7 +59,8 @@ export async function GET(req, ctx) {
         `*,
          ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)),
          Experience:Experience!Booking_experienceId_fkey(id, name, location),
-         User:User(id, email, name, surname, phone)`
+         User:User(id, email, name, surname, phone),
+         selectedMeetupPoint`,
       )
       .eq("id", rid)
       .maybeSingle();
@@ -74,10 +72,11 @@ export async function GET(req, ctx) {
       const exDirect = b?.Experience || null;
       const u = b?.User || {};
 
-      // jsonb fields (may come back as strings)
       const countsRaw = parseJSON(b?.counts, null) || {};
       const attendees = parseJSON(b?.attendees, []) || [];
       const pc = parseJSON(b?.primary_contact, null);
+      // 🔑 ADDED: Parse pickup point
+      const selectedMeetupPoint = parseJSON(b?.selectedMeetupPoint, null);
 
       const adults =
         (isNum(b?.adultsCount) && b.adultsCount) ||
@@ -112,21 +111,18 @@ export async function GET(req, ctx) {
       const experienceLocation =
         exFromSlot?.location ?? exDirect?.location ?? null;
 
-      // guest: prefer joined user, fall back to primary_contact snapshot
       const guestName =
         [u?.name, u?.surname].filter(Boolean).join(" ").trim() ||
         pc?.name ||
         [pc?.firstName, pc?.lastName].filter(Boolean).join(" ").trim() ||
         null;
 
-      // unit prices snapshot
       const unitPrices = {
         adult: isNum(b?.unitPriceAdult) ? b.unitPriceAdult : null,
         kid: isNum(b?.unitPriceKid) ? b.unitPriceKid : null,
         teen: isNum(b?.unitPriceTeen) ? b.unitPriceTeen : null,
       };
 
-      // Promo/discount
       const promoExtract = extractPromoFromRow(b, unitPrices, counts);
       const promoPayload = buildPromoPayload(promoExtract);
 
@@ -139,28 +135,23 @@ export async function GET(req, ctx) {
         updatedAt: b.updatedAt ?? null,
         notes: b.notes ?? null,
 
-        // People
         counts,
         attendees,
+        selectedMeetupPoint, // 🔑 ADDED: Include in returned object
 
-        // Prices snapshot
         unitPrices,
-
-        // Money (mirror totalPaidAmount into totalAmount for UI compatibility)
         money: {
           totalPaidAmount,
           totalAmount: totalPaidAmount,
           currency,
         },
 
-        // Stripe – we'll enrich this below
         payments: {
           stripeSessionId: b?.stripeSessionId ?? null,
           stripePaymentIntentId: b?.stripePaymentIntentId ?? null,
-          paymentMethod: null, // placeholder, filled from Stripe
+          paymentMethod: null,
         },
 
-        // Schedule / experience
         scheduleSlotId,
         startTime,
         duration: isNum(b?.duration) ? b.duration : null,
@@ -172,7 +163,6 @@ export async function GET(req, ctx) {
           images: exFromSlot?.images ?? exDirect?.images ?? null,
         },
 
-        // Guest (joined user) and snapshot saved on booking
         guest: {
           id: b?.userId ?? u?.id ?? null,
           name: guestName,
@@ -181,10 +171,8 @@ export async function GET(req, ctx) {
         },
         guestSnapshot: cleanEmpty(pc || null),
 
-        // Promo/discount normalized
         ...promoPayload,
 
-        // useful raw fallbacks if your UI references them
         currency: b?.currency ?? null,
         unitPriceAdult: isNum(b?.unitPriceAdult) ? b.unitPriceAdult : null,
         unitPriceKid: isNum(b?.unitPriceKid) ? b.unitPriceKid : null,
@@ -192,53 +180,27 @@ export async function GET(req, ctx) {
         customExperienceName: b?.customExperienceName ?? null,
       };
 
-      // --- NEW: fetch payment method / card details from Stripe (if PI exists) ---
-      // --- NEW: fetch card details via Charges API ---
+      // Stripe enrichment
       if (b?.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
         try {
           const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
             apiVersion: "2023-10-16",
           });
-
           const chargeList = await stripe.charges.list({
             payment_intent: b.stripePaymentIntentId,
             limit: 1,
           });
-
-          console.log(
-            "[reservations/:id GET] charges.list result",
-            JSON.stringify(
-              {
-                payment_intent: b.stripePaymentIntentId,
-                count: chargeList?.data?.length || 0,
-                firstChargeId: chargeList?.data?.[0]?.id || null,
-              },
-              null,
-              2
-            )
-          );
-
           const charge = chargeList?.data?.[0] || null;
           if (charge) {
             item.payments.paymentMethod =
               extractPaymentMethodSummaryFromCharge(charge);
-          } else {
-            console.log(
-              "[reservations/:id GET] no charges for PI",
-              b.stripePaymentIntentId
-            );
           }
         } catch (err) {
           console.error(
             "[reservations/:id GET] Stripe charges fetch error:",
-            err
+            err,
           );
         }
-      } else {
-        console.log("[reservations/:id GET] skipping Stripe enrichment", {
-          hasPI: !!b?.stripePaymentIntentId,
-          hasStripeKey: !!process.env.STRIPE_SECRET_KEY,
-        });
       }
 
       return ok({ item });
@@ -247,7 +209,9 @@ export async function GET(req, ctx) {
     // ---------- Otherwise, BookingDraft ----------
     const { data: d, error: dErr } = await supa
       .from("BookingDraft")
-      .select(`*, ScheduleSlot:ScheduleSlot(*, Experience:Experience(*))`)
+      .select(
+        `*, ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)), selectedMeetupPoint`,
+      ) // 🔑 ADDED: Fetch pickup point from draft
       .eq("id", rid)
       .maybeSingle();
     if (dErr) throw dErr;
@@ -258,6 +222,8 @@ export async function GET(req, ctx) {
     const cnt = parseJSON(d?.counts, {}) || {};
     const pc = parseJSON(d?.primary_contact, {}) || {};
     const attendees = parseJSON(d?.attendees, []) || [];
+    // 🔑 ADDED: Parse pickup point
+    const selectedMeetupPointDraft = parseJSON(d?.selectedMeetupPoint, null);
 
     const counts = {
       adults: pickFirstNumber(cnt, ["adults", "adult", "A", "people"]) || 0,
@@ -271,11 +237,8 @@ export async function GET(req, ctx) {
       teen: isNum(d?.unitPriceTeen) ? d.unitPriceTeen : null,
     };
 
-    // Promo/discount (draft)
     const promoExtractDraft = extractPromoFromRow(d, unitPrices, counts);
     const promoPayloadDraft = buildPromoPayload(promoExtractDraft);
-
-    // Clean notes (strip promo lines so UI doesn't duplicate)
     const notesClean = stripPromoFromNotes(d?.notes ?? null);
 
     const item = {
@@ -287,26 +250,21 @@ export async function GET(req, ctx) {
       updatedAt: d.updatedAt ?? null,
       notes: notesClean,
 
-      // People
       counts,
       attendees,
+      selectedMeetupPoint: selectedMeetupPointDraft, // 🔑 ADDED: Include in returned object
 
-      // Prices snapshot
       unitPrices,
-
-      // Money (draft uses totalAmount)
       money: {
         totalAmount: isNum(d?.totalAmount) ? d.totalAmount : null,
         currency: (d?.currency || "EUR").toString().toUpperCase(),
       },
 
-      // Stripe
       payments: {
         stripeSessionId: d?.stripeSessionId ?? null,
         stripePaymentIntentId: d?.stripePaymentIntentId ?? null,
       },
 
-      // Schedule / experience
       scheduleSlotId: d.scheduleSlotId ?? null,
       startTime: slot?.date ?? null,
       experience: {
@@ -317,7 +275,6 @@ export async function GET(req, ctx) {
         images: ex?.images ?? null,
       },
 
-      // Primary contact on the draft
       guest: {
         id: isNum(pc?.userId) ? Number(pc.userId) : null,
         name:
@@ -329,7 +286,6 @@ export async function GET(req, ctx) {
         phone: pc?.phone ?? null,
       },
 
-      // Promo/discount normalized
       ...promoPayloadDraft,
 
       convertedBookingId: d?.convertedBookingId ?? null,
@@ -366,13 +322,13 @@ export async function PATCH(req, ctx) {
 
   const unitPriceAdult = pickFirst(
     body.unitPriceAdult,
-    body?.unitPrices?.adult
+    body?.unitPrices?.adult,
   );
   const unitPriceKid = pickFirst(body.unitPriceKid, body?.unitPrices?.kid);
 
   const totalPaidAmount = pickFirst(
     body.totalPaidAmount,
-    body?.money?.totalPaidAmount
+    body?.money?.totalPaidAmount,
   );
   const totalAmount = pickFirst(body.totalAmount, body?.money?.totalAmount); // for drafts
   const currency = pickFirst(body.currency, body?.money?.currency);
@@ -409,7 +365,7 @@ export async function PATCH(req, ctx) {
       .update(patch)
       .eq("id", rid)
       .select(
-        "id, unitPriceAdult, unitPriceKid, totalPaidAmount, currency, status, updatedAt"
+        "id, unitPriceAdult, unitPriceKid, totalPaidAmount, currency, status, updatedAt",
       )
       .maybeSingle();
 
@@ -492,7 +448,7 @@ export async function DELETE(req, { params }) {
       if (!force && String(b.status).toLowerCase() !== "cancelled") {
         return bad(
           "Only cancelled bookings can be deleted. Cancel first or pass ?force=1.",
-          409
+          409,
         );
       }
 
@@ -814,7 +770,6 @@ function extractPaymentMethodSummaryFromCharge(charge) {
     };
   }
 
-  // For non-card methods you’ll still get a label (e.g. "ideal", "klarna")
   if (!type) {
     const keys = Object.keys(pmd).filter((k) => k !== "type");
     type = keys[0] || null;

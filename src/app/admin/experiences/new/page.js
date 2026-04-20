@@ -97,10 +97,17 @@ export default function NewExperiencePage() {
   }
 
   /* --- Dynamic Array Handlers --- */
+  /* --- Dynamic Array Handlers --- */
   const addMeetupPoint = () =>
     setMeetupPoints((prev) => [
       ...prev,
-      { id: Date.now().toString(), name: "", mapPin: "", instructions: "" },
+      {
+        id: Date.now().toString(),
+        name: "",
+        mapPin: "",
+        instructions: "",
+        time: "",
+      },
     ]);
   const updateMeetupPoint = (id, field, value) =>
     setMeetupPoints((prev) =>
@@ -601,9 +608,23 @@ export default function NewExperiencePage() {
                           placeholder="Rethymno Center"
                         />
                       </Field>
+
+                      {/* --- ADDED: Pickup Time Field --- */}
+                      <Field label="Pickup Time" hint="e.g. 08:30 AM">
+                        <input
+                          value={point.time || ""}
+                          onChange={(e) =>
+                            updateMeetupPoint(point.id, "time", e.target.value)
+                          }
+                          className={inputClass}
+                          placeholder="08:30 AM"
+                        />
+                      </Field>
+
                       <Field
-                        label="Google Map Address"
-                        hint="Must be exact for map embeds."
+                        label="Google Map Coordinates"
+                        hint="Must be exact lat, lng for the map."
+                        className="sm:col-span-2" // <-- Spans both columns now
                       >
                         <input
                           value={point.mapPin}
@@ -615,7 +636,7 @@ export default function NewExperiencePage() {
                             )
                           }
                           className={inputClass}
-                          placeholder="Arkadiou 10, Rethymno 741 00"
+                          placeholder="35.513980, 24.020404"
                         />
                       </Field>
                       <Field

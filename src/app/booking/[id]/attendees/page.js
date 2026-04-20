@@ -45,6 +45,9 @@ export default function AttendeesPage() {
   const searchParams = useSearchParams();
   const initialExpiresAtFromQuery = searchParams.get("expiresAt") || null;
 
+  // 🔑 SECURITY: Grab token from the URL
+  const token = searchParams.get("token") || "";
+
   // Draft expiry
   const [expiresAt, setExpiresAt] = useState(initialExpiresAtFromQuery);
   const {
@@ -130,9 +133,13 @@ export default function AttendeesPage() {
     (async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/bookings/drafts/${draftId}`, {
-          cache: "no-store",
-        });
+        // 🔑 SECURITY: Pass the token to the GET request
+        const res = await fetch(
+          `/api/bookings/drafts/${draftId}?token=${token}`,
+          {
+            cache: "no-store",
+          },
+        );
         if (!res.ok) {
           const msg =
             (await res.json().catch(() => ({})))?.error ||
@@ -210,7 +217,7 @@ export default function AttendeesPage() {
         setLoading(false);
       }
     })();
-  }, [draftId, router]);
+  }, [draftId, router, token]);
 
   const when = useMemo(() => {
     if (!slot?.date) return null;
@@ -240,14 +247,12 @@ export default function AttendeesPage() {
     };
   }, [counts, unitPrices]);
 
-  // FIXED: Immutable state update so React re-renders correctly
   function onChangeAttendee(idx, field, value) {
     setAttendees((prev) =>
       prev.map((a, i) => (i === idx ? { ...a, [field]: value } : a)),
     );
   }
 
-  // FIXED: Immutable state update for dietary toggles
   function toggleDietary(idx, optionId) {
     setAttendees((prev) =>
       prev.map((a, i) => {
@@ -280,32 +285,36 @@ export default function AttendeesPage() {
 
     try {
       setSaving(true);
-      const res = await fetch(`/api/bookings/drafts/${draftId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          primaryContact: {
-            name: (effectivePcName || "").trim(),
-            email: pcEmail.trim(),
-            phone: pcPhone.trim(),
-          },
-          attendees: attendees.map((a) => {
-            const dietaryStr =
-              a.dietary.length > 0 ? `Dietary: ${a.dietary.join(", ")}` : "";
-            const combinedAllergies = [dietaryStr, a.notes.trim()]
-              .filter(Boolean)
-              .join(" | ");
+      // 🔑 SECURITY: Pass the token to the PATCH request
+      const res = await fetch(
+        `/api/bookings/drafts/${draftId}?token=${token}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            primaryContact: {
+              name: (effectivePcName || "").trim(),
+              email: pcEmail.trim(),
+              phone: pcPhone.trim(),
+            },
+            attendees: attendees.map((a) => {
+              const dietaryStr =
+                a.dietary.length > 0 ? `Dietary: ${a.dietary.join(", ")}` : "";
+              const combinedAllergies = [dietaryStr, a.notes.trim()]
+                .filter(Boolean)
+                .join(" | ");
 
-            return {
-              firstName: a.firstName.trim(),
-              lastName: a.lastName.trim(),
-              age: Number(a.age),
-              allergies: combinedAllergies,
-              category: a.category,
-            };
+              return {
+                firstName: a.firstName.trim(),
+                lastName: a.lastName.trim(),
+                age: Number(a.age),
+                allergies: combinedAllergies,
+                category: a.category,
+              };
+            }),
           }),
-        }),
-      });
+        },
+      );
 
       if (!res.ok)
         throw new Error(
@@ -315,6 +324,8 @@ export default function AttendeesPage() {
 
       const params = new URLSearchParams();
       if (expiresAt) params.set("expiresAt", expiresAt);
+      if (token) params.set("token", token); // 🔑 Forward token to payment page
+
       router.push(
         `/booking/${draftId}/payment${params.toString() ? `?${params.toString()}` : ""}`,
       );

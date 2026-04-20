@@ -29,7 +29,22 @@ export async function GET(req) {
   ];
 
   try {
-    // 1) Load FUTURE, non-cancelled slots for the experience
+    // 1) Fetch the Meetup Points from the Experience table
+    const { data: expData, error: expErr } = await admin
+      .from("Experience")
+      .select("meetupPoints")
+      .eq("id", experienceId)
+      .single();
+
+    if (expErr) {
+      console.warn(
+        "[public/schedule] Could not fetch experience meetup points:",
+        expErr,
+      );
+    }
+    const meetupPoints = expData?.meetupPoints || [];
+
+    // 2) Load FUTURE, non-cancelled slots for the experience
     const nowIso = new Date().toISOString();
     const { data: slots, error: slotErr } = await admin
       .from("ScheduleSlot")
@@ -47,14 +62,14 @@ export async function GET(req) {
 
     const slotIds = slots.map((s) => s.id);
 
-    // 2) Bookings that OCCUPY seats (filtered by status)
+    // 3) Bookings that OCCUPY seats (filtered by status)
     const { data: bookings, error: bookErr } = await admin
       .from("booking")
       .select(
-        "scheduleSlotId, numberOfPeople, adultsCount, kidsCount, counts, status"
+        "scheduleSlotId, numberOfPeople, adultsCount, kidsCount, counts, status",
       )
       .in("scheduleSlotId", slotIds)
-      .in("status", COUNT_STATUSES); // <- the key fix
+      .in("status", COUNT_STATUSES);
 
     if (bookErr) {
       console.error("[public/schedule] bookings error:", bookErr);
@@ -77,11 +92,11 @@ export async function GET(req) {
 
       bookedMap.set(
         b.scheduleSlotId,
-        (bookedMap.get(b.scheduleSlotId) || 0) + (seats || 0)
+        (bookedMap.get(b.scheduleSlotId) || 0) + (seats || 0),
       );
     }
 
-    // 3) Active holds from BookingDraft (unexpired)
+    // 4) Active holds from BookingDraft (unexpired)
     const { data: drafts, error: draftErr } = await admin
       .from("BookingDraft")
       .select("scheduleSlotId, counts, expiresAt, status")
@@ -102,11 +117,11 @@ export async function GET(req) {
       const kids = Number(d?.counts?.kids ?? 0) || 0;
       holdsMap.set(
         d.scheduleSlotId,
-        (holdsMap.get(d.scheduleSlotId) || 0) + adults + kids
+        (holdsMap.get(d.scheduleSlotId) || 0) + adults + kids,
       );
     }
 
-    // 4) Build response per slot
+    // 5) Build response per slot
     const out = slots.map((s) => {
       const totalSlots = Number(s.totalSlots || 0);
       const booked = Number(bookedMap.get(s.id) || 0);
@@ -121,6 +136,7 @@ export async function GET(req) {
         holds, // temporary holds
         available, // what the UI should show
         isCancelled: false, // we filtered them out
+        meetupPoints, // <-- Attached the pickup points here!
         // backward-compat:
         bookedSlots: booked,
       };
