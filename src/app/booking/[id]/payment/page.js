@@ -78,6 +78,9 @@ export default function PaymentPage() {
   const qs = useSearchParams();
   const cancelled = qs?.get("cancelled") === "1";
 
+  // 🔑 SECURITY: Grab token from the URL
+  const token = qs?.get("token") || "";
+
   const draftId = Number(id);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -131,9 +134,9 @@ export default function PaymentPage() {
       try {
         setLoading(true);
 
-        // ✨ NEW: Extend the reservation by 10 minutes when they reach checkout
         try {
-          await fetch(`/api/bookings/drafts/${draftId}/extend`, {
+          // 🔑 SECURITY: Pass token to the extend route
+          await fetch(`/api/bookings/drafts/${draftId}/extend?token=${token}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ minutes: 10 }),
@@ -142,9 +145,13 @@ export default function PaymentPage() {
           console.warn("Could not extend booking hold:", extendErr);
         }
 
-        const res = await fetch(`/api/bookings/drafts/${draftId}`, {
-          cache: "no-store",
-        });
+        // 🔑 SECURITY: Pass token to the GET route
+        const res = await fetch(
+          `/api/bookings/drafts/${draftId}?token=${token}`,
+          {
+            cache: "no-store",
+          },
+        );
         if (!res.ok)
           throw new Error(
             (await res.json().catch(() => ({})))?.error ||
@@ -157,7 +164,6 @@ export default function PaymentPage() {
         } catch {}
         const d = data?.draft || data;
 
-        // This will now catch the updated (extended) expiresAt time
         if (d?.expiresAt) setExpiresAt(d.expiresAt);
 
         const st = String(d?.status || "").toLowerCase();
@@ -165,7 +171,9 @@ export default function PaymentPage() {
           const sid = d?.stripeSessionId
             ? `?session_id=${encodeURIComponent(d.stripeSessionId)}`
             : "";
-          router.replace(`/booking/${draftId}/confirmation${sid}`);
+          router.replace(
+            `/booking/${draftId}/confirmation${sid}&token=${token}`,
+          );
           return;
         }
 
@@ -196,7 +204,7 @@ export default function PaymentPage() {
         setLoading(false);
       }
     })();
-  }, [draftId, router]);
+  }, [draftId, router, token]);
 
   useEffect(() => {
     function onKey(e) {
@@ -286,14 +294,18 @@ export default function PaymentPage() {
       if (!Number.isFinite(draftId) || draftId <= 0) return;
       try {
         setClientSecret("");
-        const res = await fetch(`/api/bookings/drafts/${draftId}/checkout`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: "elements",
-            promoCode: promo?.code ?? null,
-          }),
-        });
+        // 🔑 SECURITY: Pass token to the checkout route
+        const res = await fetch(
+          `/api/bookings/drafts/${draftId}/checkout?token=${token}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: "elements",
+              promoCode: promo?.code ?? null,
+            }),
+          },
+        );
         const data = await res.json();
         if (!res.ok || !data?.clientSecret)
           throw new Error(data?.error || "Failed to initialize payment.");
@@ -306,7 +318,7 @@ export default function PaymentPage() {
         setError(e.message);
       }
     })();
-  }, [draftId, promo?.code]);
+  }, [draftId, promo?.code, token]);
 
   const when = useMemo(() => {
     if (!slot?.date) return null;
@@ -709,7 +721,26 @@ export default function PaymentPage() {
                   </p>
                 </div>
 
-                {!clientSecret ? (
+                {/* 🔒 SECURITY UI: Display a dead form only if a fatal API error occurred (not Stripe form errors) */}
+                {error ? (
+                  <div className="mt-6 flex flex-col gap-4">
+                    <div className="p-6 bg-[#fffafa] border border-[#f2dada] rounded-2xl flex flex-col items-center justify-center text-center gap-2 text-[#9a3b3b]">
+                      <AlertCircle size={24} className="opacity-80" />
+                      <span className="text-xs font-bold uppercase tracking-widest">
+                        Payment Disabled
+                      </span>
+                      <span className="text-xs opacity-80">
+                        Please resolve the error above or start a new booking.
+                      </span>
+                    </div>
+                    <button
+                      disabled
+                      className="w-full py-5 rounded-full font-bold text-[11px] sm:text-xs uppercase tracking-[0.2em] bg-[#e2d7c7] text-[#a7988a] cursor-not-allowed flex items-center justify-center gap-3 shadow-none"
+                    >
+                      <Lock size={14} /> Pay Now
+                    </button>
+                  </div>
+                ) : !clientSecret ? (
                   <div className="flex flex-col items-center justify-center py-12 bg-[#fcfbf9] border border-[#e2d7c7] rounded-[1.5rem] text-[#8b6f47]">
                     <Loader2 className="w-8 h-8 animate-spin mb-4" />
                     <span className="text-xs font-bold uppercase tracking-widest text-[#a7988a]">
@@ -749,91 +780,94 @@ export default function PaymentPage() {
                     <CheckoutForm
                       draftId={draftId}
                       amountLabel={amountLabel}
-                      onError={(msg) => setError(msg)}
                       expired={expired}
+                      token={token}
                     />
                   </Elements>
                 )}
 
                 {/* Promo Code Section */}
-                <div className="mt-8 pt-8 border-t border-[#e2d7c7]">
-                  <button
-                    type="button"
-                    onClick={() => setPromoOpen((v) => !v)}
-                    className="w-full flex items-center justify-between text-sm font-bold text-[#5a4a3f] hover:text-[#8b6f47] transition-colors group"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Tag className="h-4 w-4 text-[#8b6f47] group-hover:scale-110 transition-transform" />
-                      Add Promo Code
-                    </span>
-                    <span className="text-[10px] uppercase tracking-widest text-[#a7988a] font-bold">
-                      {promo
-                        ? `Applied: ${promo.code}`
-                        : promoOpen
-                          ? "Close"
-                          : "Add"}
-                    </span>
-                  </button>
+                {!error && (
+                  <div className="mt-8 pt-8 border-t border-[#e2d7c7]">
+                    <button
+                      type="button"
+                      onClick={() => setPromoOpen((v) => !v)}
+                      className="w-full flex items-center justify-between text-sm font-bold text-[#5a4a3f] hover:text-[#8b6f47] transition-colors group"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Tag className="h-4 w-4 text-[#8b6f47] group-hover:scale-110 transition-transform" />
+                        Add Promo Code
+                      </span>
+                      <span className="text-[10px] uppercase tracking-widest text-[#a7988a] font-bold">
+                        {promo
+                          ? `Applied: ${promo.code}`
+                          : promoOpen
+                            ? "Close"
+                            : "Add"}
+                      </span>
+                    </button>
 
-                  <AnimatePresence>
-                    {promoOpen && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="pt-5">
-                          <div className="flex items-center gap-2 bg-[#fcfbf9] p-1.5 rounded-2xl border border-[#e2d7c7] focus-within:border-[#8b6f47] focus-within:ring-1 focus-within:ring-[#8b6f47]/30 transition-all shadow-sm">
-                            <input
-                              value={promoInput}
-                              onChange={(e) =>
-                                setPromoInput(sanitizePromo(e.target.value))
-                              }
-                              placeholder="ENTER CODE"
-                              className="flex-1 bg-transparent px-4 py-2 text-sm text-[#3a2f28] placeholder:text-[#a7988a] uppercase tracking-widest font-bold outline-none"
-                            />
-                            <button
-                              onClick={applyPromo}
-                              disabled={promoLoading || !promoInput.trim()}
-                              className={`px-6 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
-                                promoLoading || !promoInput.trim()
-                                  ? "bg-[#e2d7c7] text-[#a7988a] cursor-not-allowed"
-                                  : "bg-[#1A1A1A] text-white hover:bg-[#8b6f47] shadow-md"
-                              }`}
-                            >
-                              {promoLoading ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" />
-                              ) : (
-                                "Apply"
-                              )}
-                            </button>
-                          </div>
-
-                          {promoError && (
-                            <p className="mt-3 text-[10px] font-bold text-[#b14545] uppercase tracking-wider pl-2 flex items-center gap-1.5">
-                              <AlertCircle size={12} /> {promoError}
-                            </p>
-                          )}
-
-                          {promo && (
-                            <div className="mt-4 flex items-center justify-between bg-[#eaf0ea] border border-[#d8e6d8] rounded-xl px-4 py-3">
-                              <span className="text-xs font-bold text-[#3e5c46] flex items-center gap-2">
-                                <CheckCircle2 size={16} /> {promo.code} applied
-                              </span>
+                    <AnimatePresence>
+                      {promoOpen && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="pt-5">
+                            <div className="flex items-center gap-2 bg-[#fcfbf9] p-1.5 rounded-2xl border border-[#e2d7c7] focus-within:border-[#8b6f47] focus-within:ring-1 focus-within:ring-[#8b6f47]/30 transition-all shadow-sm">
+                              <input
+                                value={promoInput}
+                                onChange={(e) =>
+                                  setPromoInput(sanitizePromo(e.target.value))
+                                }
+                                placeholder="ENTER CODE"
+                                className="flex-1 bg-transparent px-4 py-2 text-sm text-[#3a2f28] placeholder:text-[#a7988a] uppercase tracking-widest font-bold outline-none"
+                              />
                               <button
-                                onClick={removePromo}
-                                className="text-[10px] font-bold uppercase tracking-wider text-[#3e5c46] hover:underline opacity-80"
+                                onClick={applyPromo}
+                                disabled={promoLoading || !promoInput.trim()}
+                                className={`px-6 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
+                                  promoLoading || !promoInput.trim()
+                                    ? "bg-[#e2d7c7] text-[#a7988a] cursor-not-allowed"
+                                    : "bg-[#1A1A1A] text-white hover:bg-[#8b6f47] shadow-md"
+                                }`}
                               >
-                                Remove
+                                {promoLoading ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" />
+                                ) : (
+                                  "Apply"
+                                )}
                               </button>
                             </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+
+                            {promoError && (
+                              <p className="mt-3 text-[10px] font-bold text-[#b14545] uppercase tracking-wider pl-2 flex items-center gap-1.5">
+                                <AlertCircle size={12} /> {promoError}
+                              </p>
+                            )}
+
+                            {promo && (
+                              <div className="mt-4 flex items-center justify-between bg-[#eaf0ea] border border-[#d8e6d8] rounded-xl px-4 py-3">
+                                <span className="text-xs font-bold text-[#3e5c46] flex items-center gap-2">
+                                  <CheckCircle2 size={16} /> {promo.code}{" "}
+                                  applied
+                                </span>
+                                <button
+                                  onClick={removePromo}
+                                  className="text-[10px] font-bold uppercase tracking-wider text-[#3e5c46] hover:underline opacity-80"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
               </div>
 
               <TrustBadges />
@@ -980,35 +1014,38 @@ function Skeleton() {
   );
 }
 
-function CheckoutForm({ draftId, amountLabel, onError, expired }) {
+function CheckoutForm({ draftId, amountLabel, expired, token }) {
   const stripe = useStripe();
   const elements = useElements();
   const [email, setEmail] = useState("");
   const [processing, setProcessing] = useState(false);
   const [agreed, setAgreed] = useState(false);
+  const [formError, setFormError] = useState(""); // Track form-specific validation errors here
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!stripe || !elements || !agreed) return;
 
     setProcessing(true);
+    setFormError(""); // Clear any previous errors
+
     const { error: submitErr } = await elements.submit();
     if (submitErr) {
       setProcessing(false);
-      onError?.(submitErr.message);
+      setFormError(submitErr.message); // Set local error, don't bubble up
       return;
     }
 
     const { error } = await stripe.confirmPayment({
       elements,
       confirmParams: {
-        return_url: `${window.location.origin}/booking/${draftId}/confirmation`,
+        return_url: `${window.location.origin}/booking/${draftId}/confirmation?token=${token}`,
         receipt_email: email,
       },
     });
 
     if (error) {
-      onError?.(error.message);
+      setFormError(error.message); // Set local error, don't bubble up
       setProcessing(false);
     }
   }
@@ -1021,6 +1058,13 @@ function CheckoutForm({ draftId, amountLabel, onError, expired }) {
         />
         <PaymentElement />
       </div>
+
+      {formError && (
+        <div className="p-4 bg-[#fffafa] border border-[#f2dada] rounded-xl text-[#9a3b3b] text-xs font-medium flex items-start gap-2 shadow-sm">
+          <AlertCircle size={16} className="shrink-0 mt-0.5" />
+          <span>{formError}</span>
+        </div>
+      )}
 
       {/* POLICY AGREEMENT CHECKBOX */}
       <div className="pt-6 border-t border-[#e2d7c7]">

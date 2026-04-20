@@ -8,10 +8,18 @@ import { createSupabaseAdmin } from "../../../../../lib/supabase/admin";
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
-export async function GET(_req, ctx) {
+export async function GET(req, ctx) {
   const { id } = await ctx.params;
   const draftId = Number(id);
   if (!Number.isFinite(draftId) || draftId <= 0) return bad("Invalid id");
+
+  // 🔒 SECURITY: Extract and validate the client token
+  const url = new URL(req.url);
+  const token = (url.searchParams.get("token") || "").trim();
+
+  if (!token) {
+    return bad("Unauthorized: Missing access token", 401);
+  }
 
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
@@ -37,12 +45,13 @@ export async function GET(_req, ctx) {
       "convertedBookingId",
       "stripeSessionId",
       "stripePaymentIntentId"
-    `
+    `,
     )
     .eq("id", draftId)
+    .eq("clientToken", token) // 🔒 SECURITY: Enforce token match
     .maybeSingle();
 
-  if (dErr || !draft) return bad("Draft not found", 404);
+  if (dErr || !draft) return bad("Draft not found or unauthorized", 404);
 
   // Experience (minimal fields for UI)
   const { data: exp, error: eErr } = await admin
@@ -60,7 +69,7 @@ export async function GET(_req, ctx) {
     .maybeSingle();
   if (sErr) console.error("[drafts/:id] slot fetch error", sErr);
 
-  // If converted, load minimal Booking for UI (ID, paid amount, currency, status)
+  // If converted, load minimal Booking for UI
   let booking = null;
   if (draft.convertedBookingId) {
     const { data: bData, error: bErr } = await admin
@@ -72,7 +81,7 @@ export async function GET(_req, ctx) {
         "numberOfPeople",
         "totalPaidAmount",
         currency
-      `
+      `,
       )
       .eq("id", draft.convertedBookingId)
       .maybeSingle();
@@ -89,12 +98,9 @@ export async function GET(_req, ctx) {
       ? "converted"
       : draft.status;
 
-  // Shape response
   return ok({
-    bookingId: draft.convertedBookingId ?? null, // convenience
-    booking, // minimal booking info when converted
-
-    // expose a "draft" object so pages using data.draft || data keep working
+    bookingId: draft.convertedBookingId ?? null,
+    booking,
     draft: {
       id: draft.id,
       experienceId: draft.experienceId,
@@ -112,15 +118,11 @@ export async function GET(_req, ctx) {
       convertedBookingId: draft.convertedBookingId ?? null,
       stripeSessionId: draft.stripeSessionId ?? null,
       stripePaymentIntentId: draft.stripePaymentIntentId ?? null,
-
-      // (optional convenience) legacy helper
       unitPrices: {
         adult: draft.unitPriceAdult,
         kid: draft.unitPriceKid ?? draft.unitPriceAdult,
       },
     },
-
-    // related entities for your page
     experience: exp || null,
     slot: slot || null,
   });
@@ -130,6 +132,14 @@ export async function PATCH(req, ctx) {
   const { id } = await ctx.params;
   const draftId = Number(id);
   if (!Number.isFinite(draftId) || draftId <= 0) return bad("Invalid id");
+
+  // 🔒 SECURITY: Extract and validate the client token
+  const url = new URL(req.url);
+  const token = (url.searchParams.get("token") || "").trim();
+
+  if (!token) {
+    return bad("Unauthorized: Missing access token", 401);
+  }
 
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
@@ -146,9 +156,10 @@ export async function PATCH(req, ctx) {
         counts,
         status,
         "convertedBookingId"
-      `
+      `,
     )
     .eq("id", draftId)
+    .eq("clientToken", token) // 🔒 SECURITY: Enforce token match
     .maybeSingle();
 
   if (dErr) {
@@ -156,12 +167,11 @@ export async function PATCH(req, ctx) {
     return bad("Could not load draft", 500);
   }
 
-  if (!draft) return bad("Draft not found", 404);
+  if (!draft) return bad("Draft not found or unauthorized", 404);
 
   const status = String(draft.status || "").toLowerCase();
   const nonEditableStatuses = ["converted", "paid", "cancelled", "expired"];
 
-  // Block only when the draft is truly locked / finalized
   if (draft.convertedBookingId || nonEditableStatuses.includes(status)) {
     return bad("Draft not editable", 400);
   }
@@ -194,7 +204,8 @@ export async function PATCH(req, ctx) {
       primary_contact: primaryContact,
       updatedAt: new Date().toISOString(),
     })
-    .eq("id", draftId);
+    .eq("id", draftId)
+    .eq("clientToken", token); // 🔒 SECURITY: Extra layer of safety
 
   if (upErr) {
     console.error("[drafts/:id] patch error:", upErr);

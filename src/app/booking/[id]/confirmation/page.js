@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import {
   CalendarDays,
   Clock,
@@ -25,8 +25,11 @@ import { parseISO, format, addMinutes } from "date-fns";
 export default function BookingConfirmationPage() {
   const { id } = useParams();
   const qs = useSearchParams();
+  const router = useRouter();
 
   const sessionId = qs?.get("session_id"); // from Stripe success redirect
+  // 🔑 SECURITY: Grab token from the URL
+  const token = qs?.get("token") || "";
   const draftId = Number(id);
 
   const [loading, setLoading] = useState(true);
@@ -51,7 +54,15 @@ export default function BookingConfirmationPage() {
     id ? `BK-${String(id).padStart(6, "0")}` : "";
 
   async function tryFetchBookingCode(id) {
-    const endpoints = [`/api/bookings/${id}`, `/api/bookings/${id}/public`];
+    const pi = qs?.get("payment_intent") || "";
+    const sid = qs?.get("session_id") || "";
+    const query = `?payment_intent=${pi}&session_id=${sid}`;
+
+    const endpoints = [
+      `/api/bookings/${id}${query}`,
+      `/api/bookings/${id}/public${query}`,
+    ];
+
     for (const url of endpoints) {
       try {
         const res = await fetch(url, { cache: "no-store" });
@@ -99,8 +110,8 @@ export default function BookingConfirmationPage() {
   // ---------- Effects: confirm & poll ----------
 
   useEffect(() => {
-    const pi = qs.get("payment_intent");
-    const sid = qs.get("session_id");
+    const pi = qs?.get("payment_intent");
+    const sid = qs?.get("session_id");
 
     if (!Number.isFinite(draftId) || draftId <= 0) return;
     if (!pi && !sid) return;
@@ -142,10 +153,14 @@ export default function BookingConfirmationPage() {
     async function load() {
       try {
         setLoading(true);
-        const res = await fetch(`/api/bookings/drafts/${draftId}`, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
+        // 🔑 SECURITY: Pass the token to the draft fetch
+        const res = await fetch(
+          `/api/bookings/drafts/${draftId}?token=${token}`,
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        );
         const j = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(j?.error || "Could not load booking");
         if (!alive) return;
@@ -196,7 +211,7 @@ export default function BookingConfirmationPage() {
       controller.abort();
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-  }, [draftId, tries]);
+  }, [draftId, tries, token]); // Added token to dependencies
 
   useEffect(() => {
     if (!sessionId || !Number.isFinite(draftId) || draftId <= 0) return;
@@ -273,11 +288,6 @@ export default function BookingConfirmationPage() {
   const discountAmount = Number(
     apiPricing?.discountAmount ?? Math.max(0, subtotal - apiTotalMaybeFinal),
   );
-  const discountLabel =
-    apiPricing?.discountLabel ||
-    (draft?.appliedPromoCode
-      ? `Promo code ${draft.appliedPromoCode}`
-      : "Discount");
 
   const finalTotal = Number(apiPricing?.total ?? subtotal - discountAmount);
   const durationMinutes = Number(draft?.durationMinutes || 90);
@@ -367,18 +377,20 @@ export default function BookingConfirmationPage() {
     const idToUse = bookingId || draftId;
     if (!idToUse) return;
 
+    const printWindow = window.open("", "_blank");
+
     try {
       setPrinting(true);
       const res = await fetch(`/api/bookings/${idToUse}/invoice`, {
         method: "GET",
       });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error("Fetch failed");
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
 
-      const printWindow = window.open(url);
       if (printWindow) {
+        printWindow.location.href = url;
         printWindow.addEventListener("load", () => {
           printWindow.focus();
           printWindow.print();
@@ -387,6 +399,7 @@ export default function BookingConfirmationPage() {
         window.location.href = url;
       }
     } catch (err) {
+      if (printWindow) printWindow.close();
     } finally {
       setPrinting(false);
     }
@@ -456,7 +469,6 @@ export default function BookingConfirmationPage() {
       {/* Top Nav */}
       <div className="bg-white border-b border-[#e5e0d8] sticky top-0 z-30 shadow-sm print:hidden">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-center relative">
-          {/* We only show back button if it's NOT confirmed, otherwise they are done */}
           {!converted && (
             <button
               onClick={() => router.back()}
@@ -589,7 +601,7 @@ export default function BookingConfirmationPage() {
                           <span>{experience.location}</span>
                         </p>
                         <a
-                          href={`https://www.google.com/maps/search/?api=1&query=$$${encodeURIComponent(experience.location)}`}
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(experience.location)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[11px] font-bold uppercase tracking-wider text-[#8b6f47] hover:underline mt-2 inline-block pl-6"
@@ -764,10 +776,4 @@ export default function BookingConfirmationPage() {
       </div>
     </main>
   );
-}
-
-function labelForCategory(c) {
-  if (c === "adult") return "Adult (18+)";
-  if (c === "kid") return "Child (3–12)";
-  return c;
 }

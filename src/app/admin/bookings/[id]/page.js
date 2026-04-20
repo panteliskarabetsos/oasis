@@ -22,6 +22,7 @@ import {
   Tag,
   Banknote,
   Clock,
+  SearchIcon,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
@@ -294,6 +295,7 @@ function normalizeBooking(raw) {
       location: raw.experience?.location ?? null,
       isCustom: isPrivate || !experienceId,
     },
+    selectedMeetupPoint: raw.selectedMeetupPoint || null,
     guest,
     guestSnapshot: pc,
     counts,
@@ -870,6 +872,15 @@ export default function ReservationDetailPage() {
                         <CalendarClock size={14} className="text-[#a09084]" />
                         {fmtDateShort(item.startTime)}
                       </span>
+                      {item.selectedMeetupPoint && (
+                        <>
+                          <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
+                          <span className="flex items-center gap-1.5 text-emerald-700">
+                            <MapPin size={14} />
+                            {item.selectedMeetupPoint.name || "Pickup Set"}
+                          </span>
+                        </>
+                      )}
                       {item.experience?.name && (
                         <>
                           <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
@@ -935,6 +946,9 @@ export default function ReservationDetailPage() {
                   )}
                 </Row>
                 <Row label="Location">{item.experience?.location || "-"}</Row>
+                <Row label="Meetup Point">
+                  {item.selectedMeetupPoint || "-"}
+                </Row>
                 <Row label="Duration">
                   {Number.isFinite(item.duration)
                     ? `${item.duration} min`
@@ -1577,13 +1591,22 @@ function Skeleton() {
   );
 }
 
-function IconButton({ children, className, title, ariaLabel, tone, ...props }) {
+function IconButton({
+  icon: Icon,
+  children,
+  className,
+  title,
+  ariaLabel,
+  tone,
+  ...props
+}) {
   const tones = {
     red: "text-red-500 hover:bg-red-50 hover:border-red-200",
     amber: "text-amber-500 hover:bg-amber-50 hover:border-amber-200",
     emerald: "text-emerald-600 hover:bg-emerald-50 hover:border-emerald-200",
     default: "text-[#5a4a3f] hover:bg-[#fdfaf5] hover:border-[#e3ddd2]",
   };
+
   return (
     <button
       className={cx(
@@ -1595,6 +1618,10 @@ function IconButton({ children, className, title, ariaLabel, tone, ...props }) {
       aria-label={ariaLabel || title}
       {...props}
     >
+      {/* 1. Render the icon prop if it exists */}
+      {Icon && <Icon size={20} strokeWidth={2} />}
+
+      {/* 2. Render children if they exist (for flexibility) */}
       {children}
     </button>
   );

@@ -204,7 +204,13 @@ export default function AdminExperienceEditPage() {
   const addMeetupPoint = () =>
     setMeetupPoints((prev) => [
       ...prev,
-      { id: Date.now().toString(), name: "", mapPin: "", instructions: "" },
+      {
+        id: Date.now().toString(),
+        name: "",
+        mapPin: "",
+        instructions: "",
+        time: "",
+      },
     ]);
   const updateMeetupPoint = (id, field, value) =>
     setMeetupPoints((prev) =>
@@ -239,9 +245,12 @@ export default function AdminExperienceEditPage() {
     publish ? setPublishing(true) : setSaving(true);
 
     try {
-      const cleanedMeetupPoints = meetupPoints.filter(
-        (p) => p.name.trim() || p.mapPin.trim(),
-      );
+      const cleanedMeetupPoints = meetupPoints
+        .filter((p) => p.name.trim() || p.mapPin.trim())
+        .map((p) => ({
+          ...p,
+          time: p.time?.trim() || "",
+        }));
       const cleanedReviews = reviews
         .filter((r) => r.comment.trim())
         .map(({ name, comment }) => ({
@@ -728,7 +737,23 @@ export default function AdminExperienceEditPage() {
                           placeholder="Rethymno Center"
                         />
                       </Field>
-                      <Field label="Google Map Address">
+
+                      {/* --- ADDED: Pickup Time Field --- */}
+                      <Field label="Pickup Time">
+                        <input
+                          value={point.time || ""}
+                          onChange={(e) =>
+                            updateMeetupPoint(point.id, "time", e.target.value)
+                          }
+                          className={inputClass}
+                          placeholder="08:30 AM"
+                        />
+                      </Field>
+
+                      <Field
+                        label="Google Map Address"
+                        className="sm:col-span-2" // <-- Spans both columns now
+                      >
                         <input
                           value={point.mapPin}
                           onChange={(e) =>
@@ -739,7 +764,7 @@ export default function AdminExperienceEditPage() {
                             )
                           }
                           className={inputClass}
-                          placeholder="Arkadiou 10, Rethymno"
+                          placeholder="35.513980, 24.020404"
                         />
                       </Field>
                       <Field

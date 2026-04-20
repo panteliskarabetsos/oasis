@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "../../../../lib/supabase/admin";
+import { randomUUID } from "crypto";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -30,7 +31,10 @@ export async function POST(req) {
   const A = toInt(counts.adults, 0);
   const K = toInt(counts.kids, 0);
   const requestedGroup = A + K;
-  const clientToken = (body?.clientToken || "").trim() || null;
+
+  // 🔒 SECURITY: Use provided token to reuse draft, or generate a new secure one
+  const providedToken = (body?.clientToken || "").trim() || null;
+  const clientToken = providedToken || randomUUID();
 
   // ---- Time anchors (shared) ----
   const nowMs = Date.now();
@@ -114,11 +118,12 @@ export async function POST(req) {
     }, 0);
 
   // 5) Optional: clientToken reuse (capacity-safe)
-  if (clientToken) {
+  // Only attempt reuse if the frontend explicitly provided a token
+  if (providedToken) {
     const { data: existing } = await admin
       .from("BookingDraft")
       .select("id, counts, expiresAt, status, scheduleSlotId")
-      .eq("clientToken", clientToken)
+      .eq("clientToken", providedToken)
       .eq("status", "draft")
       .maybeSingle();
 
@@ -140,13 +145,13 @@ export async function POST(req) {
       if (requestedGroup > remaining) {
         return bad(
           `Only ${Math.max(remaining, 0)} spots left for this time`,
-          400
+          400,
         );
       }
 
       // Update counts/slot and bump expiry
       const newExpiry = new Date(
-        nowMs + HOLD_MINUTES * 60 * 1000
+        nowMs + HOLD_MINUTES * 60 * 1000,
       ).toISOString();
 
       const { error: upErr } = await admin
@@ -163,7 +168,9 @@ export async function POST(req) {
         console.error("[drafts] reuse update error", upErr);
         return bad("Could not update draft", 500);
       }
-      return ok({ id: existing.id, expiresAt: newExpiry });
+
+      // 🔑 Return the reused token to the frontend
+      return ok({ id: existing.id, expiresAt: newExpiry, token: clientToken });
     }
   }
 
@@ -194,7 +201,7 @@ export async function POST(req) {
     totalAmount,
     expiresAt,
     updatedAt: new Date(nowMs).toISOString(),
-    ...(clientToken ? { clientToken } : {}),
+    clientToken, // 🔒 ALWAYS save the token to the database
   };
 
   let inserted;
@@ -220,6 +227,7 @@ export async function POST(req) {
           id: existing.id,
           reused: true,
           expiresAt: existing.expiresAt || null,
+          token: clientToken, // 🔑 Return token here too
         });
       }
     }
@@ -227,10 +235,12 @@ export async function POST(req) {
     return bad("Could not create draft", 500);
   }
 
+  // 🔑 Return the newly generated token back to the frontend
   return ok({
     id: inserted.id,
     expiresAt,
     remaining: remaining - requestedGroup,
+    token: clientToken,
   });
 }
 
