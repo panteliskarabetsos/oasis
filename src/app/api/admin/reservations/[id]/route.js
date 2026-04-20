@@ -60,7 +60,7 @@ export async function GET(req, ctx) {
          ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)),
          Experience:Experience!Booking_experienceId_fkey(id, name, location),
          User:User(id, email, name, surname, phone),
-         selectedMeetupPoint`,
+         selected_meetup_point`,
       )
       .eq("id", rid)
       .maybeSingle();
@@ -76,7 +76,7 @@ export async function GET(req, ctx) {
       const attendees = parseJSON(b?.attendees, []) || [];
       const pc = parseJSON(b?.primary_contact, null);
       // 🔑 ADDED: Parse pickup point
-      const selectedMeetupPoint = parseJSON(b?.selectedMeetupPoint, null);
+      const selected_meetup_point = parseJSON(b?.selected_meetup_point, null);
 
       const adults =
         (isNum(b?.adultsCount) && b.adultsCount) ||
@@ -137,7 +137,7 @@ export async function GET(req, ctx) {
 
         counts,
         attendees,
-        selectedMeetupPoint, // 🔑 ADDED: Include in returned object
+        selected_meetup_point, // 🔑 ADDED: Include in returned object
 
         unitPrices,
         money: {
@@ -210,7 +210,7 @@ export async function GET(req, ctx) {
     const { data: d, error: dErr } = await supa
       .from("BookingDraft")
       .select(
-        `*, ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)), selectedMeetupPoint`,
+        `*, ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)), selected_meetup_point`,
       ) // 🔑 ADDED: Fetch pickup point from draft
       .eq("id", rid)
       .maybeSingle();
@@ -223,7 +223,7 @@ export async function GET(req, ctx) {
     const pc = parseJSON(d?.primary_contact, {}) || {};
     const attendees = parseJSON(d?.attendees, []) || [];
     // 🔑 ADDED: Parse pickup point
-    const selectedMeetupPointDraft = parseJSON(d?.selectedMeetupPoint, null);
+    const selectedMeetupPointDraft = parseJSON(d?.selected_meetup_point, null);
 
     const counts = {
       adults: pickFirstNumber(cnt, ["adults", "adult", "A", "people"]) || 0,
@@ -252,8 +252,7 @@ export async function GET(req, ctx) {
 
       counts,
       attendees,
-      selectedMeetupPoint: selectedMeetupPointDraft, // 🔑 ADDED: Include in returned object
-
+      selected_meetup_point: selected_meetup_point,
       unitPrices,
       money: {
         totalAmount: isNum(d?.totalAmount) ? d.totalAmount : null,

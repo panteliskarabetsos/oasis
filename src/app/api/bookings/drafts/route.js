@@ -9,7 +9,7 @@ import { randomUUID } from "crypto";
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
-const HOLD_MINUTES = 10;
+const HOLD_MINUTES = 15;
 
 // Count these booking statuses towards capacity (align with availability API)
 const COUNT_STATUSES = new Set([
@@ -28,7 +28,7 @@ export async function POST(req) {
   const experienceId = Number(body?.experienceId);
   const scheduleSlotId = Number(body?.scheduleSlotId);
   const counts = body?.counts || {};
-  const selectedMeetupPoint = body?.selectedMeetupPoint || null;
+  const selected_meetup_point = body?.selected_meetup_point;
   const A = toInt(counts.adults, 0);
   const K = toInt(counts.kids, 0);
   const requestedGroup = A + K;
@@ -159,7 +159,7 @@ export async function POST(req) {
         .from("BookingDraft")
         .update({
           counts: { adults: A, kids: K },
-          selectedMeetupPoint,
+          selected_meetup_point,
           scheduleSlotId,
           expiresAt: newExpiry,
           updatedAt: new Date(nowMs).toISOString(),
@@ -204,7 +204,7 @@ export async function POST(req) {
     expiresAt,
     updatedAt: new Date(nowMs).toISOString(),
     clientToken,
-    selectedMeetupPoint,
+    selected_meetup_point,
   };
 
   let inserted;

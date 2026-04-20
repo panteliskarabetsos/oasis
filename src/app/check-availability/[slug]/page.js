@@ -72,7 +72,7 @@ export default function CheckAvailabilityPage() {
   // Group split & Meetup
   const [adults, setAdults] = useState(1);
   const [kids, setKids] = useState(0);
-  const [selectedMeetupPoint, setSelectedMeetupPoint] = useState(null);
+  const [selected_meetup_point, setselected_meetup_point] = useState(null);
 
   // Map Modal State
   const [mapModalOpen, setMapModalOpen] = useState(false);
@@ -288,12 +288,12 @@ export default function CheckAvailabilityPage() {
     totalPeople >= 1 &&
     totalPeople <= bookingCap &&
     !pausedNow &&
-    (!needsMeetup || !!selectedMeetupPoint);
+    (!needsMeetup || !!selected_meetup_point);
   async function handleContinue() {
     if (!canContinue) {
-      if (needsMeetup && !selectedMeetupPoint) {
+      if (needsMeetup && !selected_meetup_point) {
         toast.error("Please select a pickup point.");
-        setTempMeetupPoint(selectedMeetupPoint);
+        setTempMeetupPoint(selected_meetup_point);
         setMapModalOpen(true);
       } else {
         toast.error("Select a time and valid group size.");
@@ -306,7 +306,7 @@ export default function CheckAvailabilityPage() {
         experienceId: experience.id,
         scheduleSlotId: selectedSlotId,
         counts: { adults, kids },
-        selectedMeetupPoint: selectedMeetupPoint,
+        selected_meetup_point: selected_meetup_point,
       };
 
       const res = await fetch("/api/bookings/drafts", {
@@ -358,12 +358,12 @@ export default function CheckAvailabilityPage() {
   const priceLiveId = useId();
 
   const openMapModal = () => {
-    setTempMeetupPoint(selectedMeetupPoint);
+    setTempMeetupPoint(selected_meetup_point);
     setMapModalOpen(true);
   };
 
   const confirmMapSelection = () => {
-    setSelectedMeetupPoint(tempMeetupPoint);
+    setselected_meetup_point(tempMeetupPoint);
     setMapModalOpen(false);
   };
 
@@ -827,14 +827,14 @@ export default function CheckAvailabilityPage() {
                         onClick={openMapModal}
                         className="w-full flex items-center justify-between p-4 rounded-xl border border-[#e2d7c7] bg-white text-left hover:border-[#8b6f47] focus:outline-none focus:ring-2 focus:ring-[#8b6f47] transition-all shadow-sm"
                       >
-                        {selectedMeetupPoint ? (
+                        {selected_meetup_point ? (
                           <div className="pr-4">
                             <p className="font-bold text-[#3a2f28] text-sm truncate">
-                              {selectedMeetupPoint.name}
+                              {selected_meetup_point.name}
                             </p>
-                            {selectedMeetupPoint.time && (
+                            {selected_meetup_point.time && (
                               <p className="text-xs text-[#7c6d62] mt-0.5">
-                                Pickup scheduled at {selectedMeetupPoint.time}
+                                Pickup scheduled at {selected_meetup_point.time}
                               </p>
                             )}
                           </div>
@@ -903,7 +903,7 @@ export default function CheckAvailabilityPage() {
                       "Select a Time to Continue"
                     ) : totalPeople <= 0 ? (
                       "Add Guests"
-                    ) : needsMeetup && !selectedMeetupPoint ? (
+                    ) : needsMeetup && !selected_meetup_point ? (
                       "Select Pickup Point"
                     ) : (
                       "Continue to Details"
@@ -941,7 +941,7 @@ export default function CheckAvailabilityPage() {
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : !selectedSlotId ? (
                 "Select Time"
-              ) : needsMeetup && !selectedMeetupPoint ? (
+              ) : needsMeetup && !selected_meetup_point ? (
                 "Select Pickup"
               ) : (
                 "Continue"
