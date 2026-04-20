@@ -6,718 +6,649 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/**
- * Booking confirmation — FULL-BLEED (edge-to-edge)
- */
-export default async function buildTicketPdfBuffer(args = {}) {
-  const {
-    brand = {},
-    logoUrl,
-    brandName = "Oasis",
-    experienceName,
-    location,
-    dateLabel,
-    timeLabel,
-    attendees = [],
-    amountLabel,
-    currency = "EUR",
-    bookingRef = "",
-    receiptUrl,
-    qrValue,
-    status = "CONFIRMED",
-    qrSize = 118,
-    fontDir,
-    mapUrl,
-    footerNote = "Present this ticket at check-in. For changes or questions, contact us.",
-    watermarkText,
-    supportEmail,
-    supportPhone,
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-    // layout knobs
-    inset = 28,
-    headerH: headerHInput,
-  } = args;
+class TicketGenerator {
+  constructor(args) {
+    this.args = args;
+    this.brand = args.brand || {};
 
-  const headerH = headerHInput ?? 76;
-  const finalWatermarkText = watermarkText || brandName || "OASIS";
+    // Centralize Theme
+    this.theme = {
+      primary: this.brand.primary || "#8b6f47",
+      text: this.brand.text || "#2b2a28",
+      subtext: this.brand.subtext || "#6b665d",
+      border: this.brand.border || "#e2dcd0", // Slightly darker border for contrast
+      panel: this.brand.panel || "#f9f8f4",
+      headerText: this.brand.headerText || "#ffffff",
+      pageBg: this.brand.pageBg || "#f3eee5", // Darker backdrop to make the white ticket pop
+    };
 
-  const {
-    primary = "#8b6f47",
-    text = "#2b2a28",
-    subtext = "#6b665d",
-    border = "#efeae1",
-    panel = "#fcfbf8",
-    headerText = "#ffffff",
-    pageBg = "#fffcf7",
-  } = brand || {};
-
-  /* ---------- FONT RESOLUTION ---------- */
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-
-  const candidates = [
-    fontDir,
-    path.join(process.cwd(), "public", "fonts"),
-    path.join(__dirname, "..", "..", "..", "public", "fonts"),
-  ].filter(Boolean);
-
-  const base =
-    candidates.find(
-      (p) =>
-        p &&
-        fs.existsSync(path.join(p, "Inter-Regular.ttf")) &&
-        fs.existsSync(path.join(p, "Inter-Bold.ttf"))
-    ) || null;
-
-  if (!base) {
-    throw new Error(
-      `[ticket] Inter font files not found.\nChecked:\n${candidates.join(
-        "\n"
-      )}\nAdd Inter-Regular.ttf and Inter-Bold.ttf to public/fonts (or pass { fontDir }).`
-    );
+    this.statusStyle = this.resolveStatusStyle(args.status);
+    this.headerH = args.headerH ?? 76;
+    this.inset = args.inset ?? 28;
+    this.qrSize = args.qrSize ?? 124; // Slightly larger for scannability
   }
 
-  const regularBuf = fs.readFileSync(path.join(base, "Inter-Regular.ttf"));
-  const boldBuf = fs.readFileSync(path.join(base, "Inter-Bold.ttf"));
-
-  /* ---------- QR PRECOMPUTE ---------- */
-  let qrImgBuf = null;
-  try {
-    const dataUrl = await QRCode.toDataURL(
-      qrValue || String(bookingRef || "booking"),
-      { margin: 0, scale: 8 }
-    );
-    qrImgBuf = Buffer.from(dataUrl.split(",")[1], "base64");
-  } catch {
-    // non-fatal
-  }
-
-  /* ---------- CREATE DOCUMENT ---------- */
-  const doc = new PDFDocument({
-    size: "A4",
-    margin: 0,
-    font: regularBuf, // forces Inter, avoids Helvetica.afm lookup
-  });
-
-  try {
-    doc.info = doc.info || {};
-    doc.info.Title = "Booking Confirmation";
-    doc.info.Author = String(brand?.name || brandName || "");
-    doc.info.Subject = "Reservation Ticket";
-  } catch {}
-
-  const chunks = [];
-  return await new Promise((resolve, reject) => {
-    doc.on("data", (c) => chunks.push(c));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
-    /* ---------- FONTS ---------- */
-    doc.registerFont("Body", regularBuf);
-    doc.registerFont("Body-Bold", boldBuf);
-    doc.font("Body");
-
-    /* ---------- GEOMETRY ---------- */
-    const page = { x: 0, y: 0, w: doc.page.width, h: doc.page.height };
-    const rightEdge = page.x + page.w;
-
-    const contentX = page.x + inset;
-    const contentW = page.w - inset * 2;
-    const gap = 20;
-    const stubW = 185; // slightly narrower right rail
-
-    const mainX = contentX;
-    const mainW = contentW - stubW - gap;
-    const stubX = mainX + mainW + gap;
-
-    const footerReserve = 64;
-    const contentTop = page.y + headerH + 18;
-
-    /* ---------- HELPERS ---------- */
-    function divider(x1, x2, y) {
-      doc.moveTo(x1, y).lineTo(x2, y).strokeColor(border).lineWidth(1).stroke();
-    }
-
-    function dottedSeparator(x, y1, y2) {
-      doc
-        .save()
-        .dash(2, { space: 3 })
-        .moveTo(x, y1)
-        .lineTo(x, y2)
-        .strokeColor(border)
-        .lineWidth(1)
-        .stroke()
-        .undash()
-        .restore();
-    }
-
-    function chip(txt, x, y, { bg = panel, fg = primary, bold = true } = {}) {
-      const padX = 13;
-      const padY = 7;
-      const h = 26;
-      const w = doc.widthOfString(txt) + padX * 2;
-
-      doc
-        .save()
-        .roundedRect(x, y, w, h, 999)
-        .fill(bg)
-        .fillColor(fg)
-        .font(bold ? "Body-Bold" : "Body")
-        .fontSize(11)
-        .text(txt, x + padX, y + padY - 3)
-        .restore();
-      return { w, h };
-    }
-
-    function pillLink(x, y, textLabel, url) {
-      const padX = 12;
-      const padY = 6;
-      const h = 24;
-      const w = doc.widthOfString(textLabel) + padX * 2;
-
-      doc
-        .save()
-        .roundedRect(x, y, w, h, 999)
-        .fill(panel)
-        .strokeColor(border)
-        .lineWidth(1)
-        .stroke()
-        .fillColor(primary)
-        .font("Body-Bold")
-        .fontSize(11)
-        .text(textLabel, x + padX, y + padY - 2)
-        .restore();
-
-      if (url) doc.link(x, y, w, h, url);
-      return { w, h };
-    }
-
-    function infoChip(label, value, x, y, widthMax = mainW) {
-      const padX = 10;
-      const padY = 6;
-      const str = `${label}: ${value}`;
-      const h = 22;
-      const w = Math.min(
-        doc.widthOfString(str) + padX * 2,
-        widthMax - (x - mainX)
-      );
-
-      doc
-        .save()
-        .roundedRect(x, y, w, h, 999)
-        .fill("#ffffff")
-        .strokeColor(border)
-        .lineWidth(1)
-        .stroke()
-        .fillColor(subtext)
-        .font("Body")
-        .fontSize(10)
-        .text(str, x + padX, y + padY - 2, { width: w - padX * 2 })
-        .restore();
-
-      return { w, h };
-    }
-
-    function measureChip(label, value, widthMax = mainW) {
-      const padX = 10;
-      const str = `${label}: ${value}`;
-      const h = 22;
-      const w = Math.min(doc.widthOfString(str) + padX * 2, widthMax);
-      return { w, h };
-    }
-
-    function sectionTitle(txt, x, y) {
-      doc
-        .font("Body-Bold")
-        .fontSize(12.5)
-        .fillColor(subtext)
-        .text(txt.toUpperCase(), x, y);
-      return doc.y;
-    }
-
-    const STATUS = String(status || "").toUpperCase();
-    const statusStyle = {
+  resolveStatusStyle(status) {
+    const s = String(status || "").toUpperCase();
+    const styles = {
       CONFIRMED: { bg: "#eaf6ef", fg: "#186a3b" },
       PENDING: { bg: "#fff6e5", fg: "#8a5b00" },
       CANCELLED: { bg: "#fdeaea", fg: "#9c1a1a" },
       REFUNDED: { bg: "#eef3ff", fg: "#274690" },
-    }[STATUS] || { bg: "#ffffff", fg: primary };
+    };
+    return styles[s] || { bg: "#ffffff", fg: this.theme.primary };
+  }
 
-    const whenStr = [dateLabel, timeLabel ? `, ${timeLabel}` : ""]
-      .filter(Boolean)
-      .join("");
+  async loadFonts() {
+    const candidates = [
+      this.args.fontDir,
+      path.join(process.cwd(), "public", "fonts"),
+      path.join(__dirname, "..", "..", "..", "public", "fonts"),
+    ].filter(Boolean);
 
-    const mapHref =
-      mapUrl ||
-      (location
-        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-            location
-          )}`
-        : "");
+    const fontRegular = "Jost-Regular.ttf";
+    const fontBold = "Jost-Bold.ttf";
 
-    /* ---------- BACKGROUND & HEADER ---------- */
-    doc.save().rect(page.x, page.y, page.w, page.h).fill(pageBg).restore();
-    doc
+    const base = candidates.find(
+      (p) =>
+        p &&
+        fs.existsSync(path.join(p, fontRegular)) &&
+        fs.existsSync(path.join(p, fontBold)),
+    );
+
+    if (!base) {
+      throw new Error(
+        `[ticket] Premium font files not found.\nChecked:\n${candidates.join("\n")}\nPlease add ${fontRegular} and ${fontBold} to your fonts folder.`,
+      );
+    }
+
+    return {
+      regular: fs.readFileSync(path.join(base, fontRegular)),
+      bold: fs.readFileSync(path.join(base, fontBold)),
+    };
+  }
+
+  async precomputeQR() {
+    try {
+      const dataUrl = await QRCode.toDataURL(
+        this.args.qrValue || String(this.args.bookingRef || "booking"),
+        {
+          margin: 0,
+          scale: 8,
+          color: { dark: this.theme.text, light: "#ffffff" },
+        },
+      );
+      return Buffer.from(dataUrl.split(",")[1], "base64");
+    } catch {
+      return null;
+    }
+  }
+
+  setupLayout() {
+    const p = { x: 0, y: 0, w: this.doc.page.width, h: this.doc.page.height };
+    const contentX = p.x + this.inset;
+    const contentW = p.w - this.inset * 2;
+    const gap = 32; // Increased gap for breathing room
+    const stubW = 185;
+    const mainW = contentW - stubW - gap;
+    const stubX = contentX + mainW + gap;
+
+    this.layout = {
+      page: p,
+      rightEdge: p.x + p.w,
+      contentX,
+      contentW,
+      mainX: contentX + 24, // Inner padding inside the ticket
+      mainW: mainW - 24,
+      stubX,
+      stubW: stubW - 24,
+      gap,
+      sepX: stubX - gap / 2, // Separator X coordinate (Perforation line)
+      footerReserve: 64,
+      contentTop: p.y + this.headerH + 32, // Push down slightly
+    };
+  }
+
+  /* ---------- DRAWING HELPERS ---------- */
+
+  sectionTitle(txt, x, y) {
+    this.doc
+      .font("Body-Bold")
+      .fontSize(11) // Slightly smaller, tighter tracking look
+      .fillColor(this.theme.subtext)
+      .text(txt.toUpperCase(), x, y, { characterSpacing: 0.5 });
+    return this.doc.y;
+  }
+
+  chip(txt, x, y, { bg, fg, bold = true }) {
+    const padX = 14,
+      padY = 7,
+      h = 26;
+    const w = this.doc.widthOfString(txt) + padX * 2;
+    this.doc
       .save()
-      .rect(page.x, page.y, page.w, headerH + 8)
-      .fill(primary)
+      .roundedRect(x, y, w, h, 999)
+      .fill(bg || this.theme.panel)
+      .fillColor(fg || this.theme.primary)
+      .font(bold ? "Body-Bold" : "Body")
+      .fontSize(11)
+      .text(txt, x + padX, y + padY - 3)
+      .restore();
+    return { w, h };
+  }
+
+  divider(x1, x2, y) {
+    this.doc
+      .moveTo(x1, y)
+      .lineTo(x2, y)
+      .strokeColor(this.theme.border)
+      .lineWidth(1)
+      .stroke();
+  }
+
+  dottedSeparator(x, y1, y2) {
+    this.doc
+      .save()
+      .dash(3, { space: 4 })
+      .moveTo(x, y1)
+      .lineTo(x, y2)
+      .strokeColor(this.theme.border)
+      .lineWidth(1.5)
+      .stroke()
+      .undash()
+      .restore();
+  }
+
+  /* ---------- DRAWING PHASES ---------- */
+
+  drawBackgroundAndHeader() {
+    const { page, rightEdge, contentX } = this.layout;
+    const { args, theme } = this;
+
+    // 1. Base background
+    this.doc
+      .save()
+      .rect(page.x, page.y, page.w, page.h)
+      .fill(theme.pageBg)
       .restore();
 
-    const headerInnerY = page.y + Math.max(14, (headerH - 40) / 2);
+    // 2. Header block
+    this.doc
+      .save()
+      .rect(page.x, page.y, page.w, this.headerH)
+      .fill(theme.primary)
+      .restore();
+
+    // Subtle dark trim at the bottom of the header for depth
+    this.doc
+      .save()
+      .rect(page.x, page.y + this.headerH - 3, page.w, 3)
+      .fillOpacity(0.12)
+      .fill("#000000")
+      .restore();
+
+    // 3. Center "E-TICKET" Watermark/Label
+    this.doc
+      .save()
+      .font("Body-Bold")
+      .fontSize(10)
+      .fillColor(theme.headerText)
+      .opacity(0.5)
+      .text("E-TICKET", page.x, page.y + (this.headerH - 10) / 2 + 1, {
+        width: page.w,
+        align: "center",
+        characterSpacing: 6,
+      })
+      .restore();
+
+    // 4. Logo / Brand Name (Left)
+    const logoMaxH = 32;
+    const logoY = page.y + (this.headerH - logoMaxH) / 2;
 
     try {
-      if (logoUrl && fs.existsSync(logoUrl)) {
-        doc.image(logoUrl, contentX, headerInnerY - 8, { width: 88 });
+      if (args.logoUrl && fs.existsSync(args.logoUrl)) {
+        // Constrain height instead of width to keep header vertically balanced
+        this.doc.image(args.logoUrl, contentX, logoY, { height: logoMaxH });
       } else {
         throw new Error("Logo file not found");
       }
     } catch {
-      doc
+      this.doc
         .font("Body-Bold")
-        .fontSize(18)
-        .fillColor(headerText)
-        .text(brandName || "", contentX, headerInnerY - 2);
-    }
-
-    if (bookingRef) {
-      doc
-        .font("Body")
-        .fontSize(10.5)
-        .fillColor(headerText)
-        .text("Booking reference", rightEdge - inset - 180, page.y + 12, {
-          width: 160,
-          align: "right",
-        });
-      doc
-        .font("Body-Bold")
-        .fontSize(12)
-        .fillColor(headerText)
-        .text(`Ref: ${bookingRef}`, rightEdge - inset - 180, doc.y + 2, {
-          width: 160,
-          align: "right",
-        });
-    }
-
-    const statLabel = STATUS || "STATUS";
-    const statW = doc.widthOfString(statLabel) + 24;
-    chip(statLabel, rightEdge - inset - statW, page.y + headerH - 26, {
-      bg: statusStyle.bg,
-      fg: statusStyle.fg,
-    });
-
-    /* ---------- RIGHT RAIL CARD ---------- */
-    const rightCardH = page.h - contentTop - footerReserve - inset;
-    const sepX = stubX - gap / 2;
-
-    doc
-      .save()
-      .roundedRect(stubX - 6, contentTop - 6, stubW + 12, rightCardH, 14)
-      .fill("#ffffff")
-      .strokeColor(border)
-      .lineWidth(1)
-      .stroke()
-      .restore();
-
-    /* ---------- LEFT MAIN ---------- */
-    let y = contentTop;
-
-    doc
-      .font("Body-Bold")
-      .fontSize(27)
-      .fillColor(text)
-      .text(experienceName || "Reservation", mainX, y, {
-        width: mainW - 12,
-      });
-    y = doc.y + 4;
-
-    if (location) {
-      doc
-        .font("Body")
-        .fontSize(12)
-        .fillColor(subtext)
-        .text(location, mainX, y, { width: mainW - 12 });
-      y = doc.y + 12;
-    } else {
-      y += 6;
-    }
-
-    // --- Adaptive When/Where layout ---
-    const hasWhen = Boolean(whenStr);
-    const hasWhere = Boolean(location);
-
-    if (hasWhen || hasWhere) {
-      const whenSize = hasWhen
-        ? measureChip("When", whenStr || "-", mainW)
-        : { w: 0, h: 0 };
-      const whereSize = hasWhere
-        ? measureChip("Where", location || "-", mainW)
-        : { w: 0, h: 0 };
-
-      const gutter = hasWhen && hasWhere ? 8 : 0;
-      const canInline =
-        hasWhen && hasWhere && whenSize.w + gutter + whereSize.w <= mainW;
-
-      let chipY = y;
-
-      if (hasWhen) {
-        infoChip("When", whenStr || "-", mainX, chipY, mainW);
-      }
-
-      let whereLinkRect = null;
-
-      if (hasWhere) {
-        if (canInline && hasWhen) {
-          const whereX = mainX + whenSize.w + gutter;
-          const { w, h } = infoChip(
-            "Where",
-            location || "-",
-            whereX,
-            chipY,
-            mainW
-          );
-          whereLinkRect = { x: whereX, y: chipY, w, h };
-          chipY += whenSize.h;
-        } else {
-          // stacked underneath
-          chipY += (hasWhen ? whenSize.h : 0) + 6;
-          const { w, h } = infoChip(
-            "Where",
-            location || "-",
-            mainX,
-            chipY,
-            mainW
-          );
-          whereLinkRect = { x: mainX, y: chipY, w, h };
-          chipY += h;
-        }
-      } else {
-        chipY += whenSize.h;
-      }
-
-      if (whereLinkRect && mapHref) {
-        doc.link(
-          whereLinkRect.x,
-          whereLinkRect.y,
-          whereLinkRect.w,
-          whereLinkRect.h,
-          mapHref
+        .fontSize(22)
+        .fillColor(theme.headerText)
+        .text(
+          args.brandName || "OASIS",
+          contentX,
+          page.y + (this.headerH - 22) / 2 - 2,
         );
-      }
-
-      y = chipY + 10;
     }
 
-    if (mapHref) {
-      const btn = pillLink(mainX, y, "Open in Maps", mapHref);
-      y += btn.h + 14;
-    } else {
-      y += 6;
-    }
+    // 5. Booking Reference "Pill" (Right)
+    if (args.bookingRef) {
+      const refBoxW = 130;
+      const refBoxH = 44;
+      const refBoxX = rightEdge - this.inset - refBoxW;
+      const refBoxY = page.y + (this.headerH - refBoxH) / 2;
 
-    /* ----- ORDER SUMMARY CARD ----- */
-    const cardPad = 16;
-    const sumW = mainW;
-    const sumH = 120;
-
-    doc
-      .save()
-      .roundedRect(mainX, y, sumW, sumH, 16)
-      .fill(panel)
-      .strokeColor(border)
-      .lineWidth(1)
-      .stroke()
-      .restore();
-
-    let sy = y + cardPad;
-
-    sy = sectionTitle("Order summary", mainX + cardPad, sy) + 4;
-
-    const leftColW = 150;
-    const valX = mainX + cardPad + leftColW;
-
-    function summaryRow(label, value, emphasize = false) {
-      doc
-        .font("Body-Bold")
-        .fontSize(11)
-        .fillColor(subtext)
-        .text(label, mainX + cardPad, sy, { width: leftColW - 8 });
-
-      doc
-        .font(emphasize ? "Body-Bold" : "Body")
-        .fontSize(emphasize ? 13 : 12)
-        .fillColor(text)
-        .text(value || "-", valX, sy, {
-          width: sumW - (valX - mainX) - cardPad - 4,
-        });
-
-      sy = doc.y + 6;
-    }
-
-    summaryRow("Experience", experienceName || "-");
-    summaryRow("Date", whenStr || "-");
-
-    if (receiptUrl) {
-      doc
-        .font("Body-Bold")
-        .fontSize(11)
-        .fillColor(subtext)
-        .text("Receipt", mainX + cardPad, sy);
-      const linkY = sy;
-      doc
-        .font("Body")
-        .fontSize(12)
-        .fillColor(primary)
-        .text("Open receipt →", valX, linkY, {
-          link: receiptUrl,
-          underline: true,
-          width: sumW - (valX - mainX) - cardPad - 4,
-        })
-        .fillColor(text);
-      sy = doc.y + 6;
-    }
-
-    // --- Total pill with label ---
-    const totalText = `Total  ${amountLabel || "-"}${
-      currency ? ` (${currency})` : ""
-    }`;
-    const totalPadX = 18;
-    const totalH = 28;
-    const totalW = doc.widthOfString(totalText) + totalPadX * 2;
-    const totalX = mainX + sumW - cardPad - totalW;
-    const totalY = sy + 2;
-
-    doc
-      .save()
-      .roundedRect(totalX, totalY - 4, totalW, totalH, 999)
-      .fill("#ffffff")
-      .strokeColor(border)
-      .lineWidth(1)
-      .stroke()
-      .fillColor(text)
-      .font("Body-Bold")
-      .fontSize(12)
-      .text(totalText, totalX + totalPadX, totalY - 1)
-      .restore();
-
-    y = y + sumH + 16;
-
-    /* ----- ATTENDEES ----- */
-    let aY = y;
-    aY = sectionTitle("Attendees", mainX, aY) + 6;
-
-    const tableX = mainX;
-    const tableW = mainW;
-    const rowH = 21;
-    const headerHRow = rowH;
-
-    doc
-      .save()
-      .roundedRect(tableX, aY, tableW, headerHRow, 10)
-      .fill(panel)
-      .strokeColor(border)
-      .lineWidth(1)
-      .stroke()
-      .restore();
-
-    doc
-      .font("Body-Bold")
-      .fontSize(11)
-      .fillColor(subtext)
-      .text("No.", tableX + 14, aY + 4, { width: 40 });
-
-    doc
-      .font("Body-Bold")
-      .fontSize(11)
-      .fillColor(subtext)
-      .text("Name", tableX + 70, aY + 4, { width: tableW - 90 });
-
-    let tY = aY + headerHRow + 2;
-
-    if (!attendees.length) {
-      doc
-        .font("Body")
-        .fontSize(12)
-        .fillColor(text)
-        .text("No attendee names on file.", tableX + 14, tY + 5);
-      tY += rowH + 8;
-    } else {
-      attendees.forEach((a, i) => {
-        if (i % 2 === 1) {
-          doc.save().rect(tableX, tY, tableW, rowH).fill(panel).restore();
-        }
-
-        doc
-          .font("Body")
-          .fontSize(12)
-          .fillColor(subtext)
-          .text(String(i + 1).padStart(2, "0"), tableX + 18, tY + 4, {
-            width: 40,
-          });
-        doc
-          .font("Body")
-          .fontSize(12)
-          .fillColor(text)
-          .text(a?.name || "Guest", tableX + 70, tY + 4, {
-            width: tableW - 90,
-          });
-
-        tY += rowH;
-      });
-
-      doc
-        .roundedRect(tableX, aY, tableW, tY - aY, 10)
-        .strokeColor(border)
-        .lineWidth(1)
-        .stroke();
-    }
-
-    /* ---------- RIGHT: QR & FACTS ---------- */
-    let sY = contentTop;
-
-    // extra gap after CHECK-IN label
-    sY = sectionTitle("Check-in", stubX, sY) + 16;
-
-    if (qrImgBuf) {
-      const qx = stubX + Math.round((stubW - qrSize) / 2);
-
-      doc
+      // Semi-transparent pill background
+      this.doc
         .save()
-        .roundedRect(stubX, sY - 12, stubW, qrSize + 48, 14)
+        .roundedRect(refBoxX, refBoxY, refBoxW, refBoxH, 8)
+        .fillOpacity(0.15)
         .fill("#ffffff")
-        .strokeColor(border)
+        .restore();
+
+      // Pill border
+      this.doc
+        .save()
+        .roundedRect(refBoxX, refBoxY, refBoxW, refBoxH, 8)
+        .strokeOpacity(0.3)
         .lineWidth(1)
-        .stroke()
-        .image(qrImgBuf, qx, sY, { width: qrSize })
-        .font("Body")
-        .fontSize(10)
-        .fillColor(subtext)
-        .text("Show this QR at check-in", stubX, sY + qrSize + 12, {
-          width: stubW,
+        .stroke("#ffffff")
+        .restore();
+
+      // Pill Labels
+      this.doc
+        .save()
+        .font("Body-Bold")
+        .fontSize(8)
+        .fillColor(theme.headerText)
+        .opacity(0.8)
+        .text("BOOKING REF", refBoxX, refBoxY + 8, {
+          width: refBoxW,
           align: "center",
+          characterSpacing: 1,
         })
         .restore();
 
-      sY += qrSize + 60;
-    }
-
-    if (bookingRef) {
-      sY = sectionTitle("Reference", stubX, sY) + 2;
-      doc
+      this.doc
+        .save()
         .font("Body-Bold")
+        .fontSize(14)
+        .fillColor(theme.headerText)
+        .text(args.bookingRef, refBoxX, refBoxY + 22, {
+          width: refBoxW,
+          align: "center",
+          characterSpacing: 1,
+        })
+        .restore();
+    }
+  }
+
+  drawTicketBody() {
+    const { page, contentX, contentW, contentTop, sepX, footerReserve } =
+      this.layout;
+    const rightCardH = page.h - contentTop - footerReserve - this.inset;
+    const ticketY = contentTop - 16;
+    const ticketH = rightCardH + 16;
+    const r = 14; // Radius of punch holes
+
+    // 1. Soft Drop Shadow
+    this.doc
+      .save()
+      .roundedRect(contentX + 2, ticketY + 4, contentW, ticketH, 16)
+      .fillOpacity(0.05)
+      .fill("#000000")
+      .restore();
+
+    // 2. Main White Ticket Container
+    this.doc
+      .save()
+      .roundedRect(contentX, ticketY, contentW, ticketH, 16)
+      .fill("#ffffff")
+      .strokeColor(this.theme.border)
+      .lineWidth(1)
+      .stroke()
+      .restore();
+
+    // 3. Realistic Punch Hole Cutouts (Masking with Background Color + SVG arcs for border)
+    // Top Cutout
+    this.doc.save().circle(sepX, ticketY, r).fill(this.theme.pageBg).restore();
+    this.doc
+      .path(`M ${sepX - r} ${ticketY} A ${r} ${r} 0 0 0 ${sepX + r} ${ticketY}`)
+      .strokeColor(this.theme.border)
+      .lineWidth(1)
+      .stroke();
+
+    // Bottom Cutout
+    this.doc
+      .save()
+      .circle(sepX, ticketY + ticketH, r)
+      .fill(this.theme.pageBg)
+      .restore();
+    this.doc
+      .path(
+        `M ${sepX - r} ${ticketY + ticketH} A ${r} ${r} 0 0 1 ${sepX + r} ${ticketY + ticketH}`,
+      )
+      .strokeColor(this.theme.border)
+      .lineWidth(1)
+      .stroke();
+
+    // 4. Perforation Line
+    this.dottedSeparator(sepX, ticketY + r + 8, ticketY + ticketH - r - 8);
+  }
+
+  drawMainContent() {
+    const { mainX, mainW, contentTop } = this.layout;
+    const { args, theme } = this;
+    let y = contentTop + 4;
+
+    this.doc
+      .font("Body-Bold")
+      .fontSize(28)
+      .fillColor(theme.text)
+      .text(args.experienceName || "Reservation", mainX, y, { width: mainW });
+    y = this.doc.y + 6;
+
+    if (args.location) {
+      this.doc
+        .font("Body")
         .fontSize(13)
-        .fillColor(text)
-        .text(bookingRef, stubX, sY, { width: stubW });
-      sY = doc.y + 12;
+        .fillColor(theme.subtext)
+        .text(args.location, mainX, y, { width: mainW });
+      y = this.doc.y + 16;
+    } else {
+      y += 12;
     }
 
-    // no extra When/Where on the right – we already show them on the left
+    y = this.drawOrderSummary(y);
+    this.drawAttendees(y);
+  }
 
-    sY = sectionTitle("Important info", stubX, sY) + 4;
-    const infoLines = [
-      "Please arrive 10–15 minutes before your start time.",
-      "Wear comfortable clothing and bring a light jacket.",
-      "If you need to change or cancel, reply to your confirmation email.",
+  drawOrderSummary(startY) {
+    const { mainX, mainW } = this.layout;
+    const { args, theme } = this;
+    const cardPad = 16;
+    const leftColW = 120;
+    const valX = mainX + cardPad + leftColW;
+    const valW = mainW - leftColW - cardPad * 2 - 4; // Max width for values
+
+    const whenStr = [
+      args.dateLabel,
+      args.timeLabel ? `, ${args.timeLabel}` : "",
+    ]
+      .filter(Boolean)
+      .join("");
+
+    // 1. Define our rows dynamically
+    const rows = [
+      { label: "Experience", value: args.experienceName || "-" },
+      { label: "Date", value: whenStr || "-" },
     ];
 
-    doc.font("Body").fontSize(10.5).fillColor(subtext);
-    infoLines.forEach((line) => {
-      doc.text(`• ${line}`, stubX, doc.y + 2, {
-        width: stubW,
-        lineGap: 1.8,
-      });
+    // Add Pickup Point if it was provided
+    if (args.pickupPoint) {
+      rows.push({ label: "Pickup", value: args.pickupPoint });
+    }
+
+    // 2. Pre-calculate the heights of each row so we know exactly how tall the box needs to be
+    let rowsTotalHeight = 0;
+    const rowMetrics = rows.map((r) => {
+      this.doc.font("Body").fontSize(12);
+      // Determine height of text (minimum 24px per row for spacing)
+      const textHeight = this.doc.heightOfString(r.value, { width: valW });
+      const h = Math.max(24, textHeight + 8);
+      rowsTotalHeight += h;
+      return { ...r, h };
     });
 
-    /* ---------- FOOTER ---------- */
+    const sumH = 40 + rowsTotalHeight + 44;
+    // 3. Draw the background panel
+    this.doc
+      .save()
+      .roundedRect(mainX, startY, mainW, sumH, 12)
+      .fill(theme.panel)
+      .strokeColor(theme.border)
+      .lineWidth(1)
+      .stroke()
+      .restore();
+
+    // 4. Draw Title
+    let sy = startY + cardPad;
+    sy = this.sectionTitle("Order summary", mainX + cardPad, sy) + 12;
+
+    // 5. Draw dynamically measured rows
+    rowMetrics.forEach((r) => {
+      this.doc
+        .font("Body-Bold")
+        .fontSize(11.5)
+        .fillColor(theme.subtext)
+        .text(r.label, mainX + cardPad, sy, { width: leftColW - 8 });
+
+      this.doc
+        .font("Body")
+        .fontSize(12)
+        .fillColor(theme.text)
+        .text(r.value, valX, sy, { width: valW });
+
+      sy += r.h;
+    });
+
+    // 6. Draw Total Pill
+    const totalText = `Total  ${args.amountLabel || "-"}${args.currency ? ` (${args.currency})` : ""}`;
+    this.chip(
+      totalText,
+      mainX + mainW - cardPad - this.doc.widthOfString(totalText) - 36,
+      startY + sumH - 40,
+      { bg: "#ffffff", fg: theme.text },
+    );
+
+    return startY + sumH + 24; // Return the new Y coordinate for the Attendees table
+  }
+
+  drawAttendees(startY) {
+    const { mainX, mainW } = this.layout;
+    const { args, theme } = this;
+    const rowH = 24;
+    let aY = this.sectionTitle("Guest List", mainX, startY) + 8;
+
+    this.doc
+      .save()
+      .roundedRect(mainX, aY, mainW, rowH, 8)
+      .fill(theme.panel)
+      .strokeColor(theme.border)
+      .lineWidth(1)
+      .stroke()
+      .restore();
+
+    this.doc
+      .font("Body-Bold")
+      .fontSize(11)
+      .fillColor(theme.subtext)
+      .text("No.", mainX + 16, aY + 6, { width: 40 });
+    this.doc
+      .font("Body-Bold")
+      .fontSize(11)
+      .fillColor(theme.subtext)
+      .text("Name", mainX + 70, aY + 6, { width: mainW - 90 });
+
+    let tY = aY + rowH;
+    const attendees = args.attendees || [];
+
+    if (!attendees.length) {
+      this.doc
+        .font("Body")
+        .fontSize(12)
+        .fillColor(theme.text)
+        .text("No attendee names on file.", mainX + 16, tY + 8);
+      tY += rowH + 12;
+    } else {
+      attendees.forEach((a, i) => {
+        // Alternating row colors
+        if (i % 2 === 1)
+          this.doc
+            .save()
+            .rect(mainX, tY, mainW, rowH)
+            .fill(theme.panel)
+            .restore();
+
+        this.doc
+          .font("Body")
+          .fontSize(12)
+          .fillColor(theme.subtext)
+          .text(String(i + 1).padStart(2, "0"), mainX + 16, tY + 6, {
+            width: 40,
+          });
+        this.doc
+          .font("Body")
+          .fontSize(12)
+          .fillColor(theme.text)
+          .text(a?.name || "Guest", mainX + 70, tY + 6, { width: mainW - 90 });
+        tY += rowH;
+      });
+      // Outer border for the table
+      this.doc
+        .roundedRect(mainX, aY, mainW, tY - aY, 8)
+        .strokeColor(theme.border)
+        .lineWidth(1)
+        .stroke();
+    }
+  }
+
+  drawRightRail() {
+    const { stubX, stubW, contentTop } = this.layout;
+    const { args, theme } = this;
+
+    // Status at the top of the stub
+    const statLabel = (args.status || "STATUS").toUpperCase();
+    const statW = this.doc.widthOfString(statLabel) + 24;
+    this.chip(statLabel, stubX + (stubW - statW) / 2, contentTop + 4, {
+      bg: this.statusStyle.bg,
+      fg: this.statusStyle.fg,
+    });
+
+    let sY = contentTop + 54;
+    sY = this.sectionTitle("Check-in", stubX, sY) + 12;
+
+    if (this.qrImgBuf) {
+      const qx = stubX + Math.round((stubW - this.qrSize) / 2);
+      this.doc.image(this.qrImgBuf, qx, sY, { width: this.qrSize });
+
+      this.doc
+        .font("Body")
+        .fontSize(10.5)
+        .fillColor(theme.subtext)
+        .text("Scan at entrance", stubX, sY + this.qrSize + 12, {
+          width: stubW,
+          align: "center",
+        });
+
+      sY += this.qrSize + 48;
+    }
+
+    sY = this.sectionTitle("Important info", stubX, sY) + 8;
+    const infoLines = [
+      "Arrive 10–15 mins early.",
+      "Bring a light jacket.",
+      "Reply to email for changes.",
+    ];
+
+    this.doc.font("Body").fontSize(11).fillColor(theme.text);
+    infoLines.forEach((line) => {
+      this.doc.circle(stubX + 4, this.doc.y + 6, 2).fill(theme.primary); // Custom bullet point
+      this.doc.text(line, stubX + 14, this.doc.y, {
+        width: stubW - 14,
+        lineGap: 4,
+      });
+    });
+  }
+
+  drawFooter() {
+    const { page, rightEdge, contentW, contentTop, sepX } = this.layout;
+    const { args, theme } = this;
+
     const extraBits = [
-      supportEmail ? `Email: ${supportEmail}` : null,
-      supportPhone ? `Phone: ${supportPhone}` : null,
+      args.supportEmail ? `Email: ${args.supportEmail}` : null,
+      args.supportPhone ? `Phone: ${args.supportPhone}` : null,
     ].filter(Boolean);
 
+    const footerNote = args.footerNote || "Present this ticket at check-in.";
     const noteLine = extraBits.length
       ? `${footerNote}  •  ${extraBits.join("  •  ")}`
       : footerNote;
 
-    const footerOpts = { width: contentW - 80, align: "left" };
-    const footerHeight = doc.heightOfString(noteLine, footerOpts);
-    const footerY = page.y + page.h - inset - footerHeight;
+    const footerOpts = { width: contentW, align: "center" };
+    const footerHeight = this.doc.heightOfString(noteLine, footerOpts);
+    const footerY = page.y + page.h - this.inset - footerHeight;
 
-    dottedSeparator(sepX, contentTop, footerY - 16);
-    divider(page.x + inset, rightEdge - inset, footerY - 8);
-
-    doc
+    this.doc
       .font("Body")
-      .fontSize(9)
-      .fillColor(subtext)
-      .text(noteLine, page.x + inset, footerY, footerOpts);
+      .fontSize(9.5)
+      .fillColor(theme.subtext)
+      .text(noteLine, page.x + this.inset, footerY, footerOpts);
+  }
 
-    if (supportEmail) {
-      const prefixWidth = doc.widthOfString(`${footerNote}  •  `);
-      const emailX = page.x + inset + prefixWidth;
-      const emailLabel = `Email: ${supportEmail}`;
-      doc.link(
-        emailX,
-        footerY,
-        doc.widthOfString(emailLabel),
-        10,
-        `mailto:${supportEmail}`
-      );
-    }
-
-    if (supportPhone) {
-      const basePrefix = `${footerNote}  •  `;
-      const emailPart = supportEmail ? `Email: ${supportEmail}  •  ` : "";
-      const phoneX = page.x + inset + doc.widthOfString(basePrefix + emailPart);
-      const phoneLabel = `Phone: ${supportPhone}`;
-      doc.link(
-        phoneX,
-        footerY,
-        doc.widthOfString(phoneLabel),
-        10,
-        `tel:${supportPhone}`
-      );
-    }
-
-    const pageNo = (doc.page && doc.page.number) || 1;
-    doc
-      .font("Body")
-      .fontSize(9)
-      .fillColor(subtext)
-      .text(`Page ${pageNo}`, rightEdge - inset - 60, footerY);
-
-    /* ---------- WATERMARK ---------- */
-    const hasLogoForWatermark = logoUrl && fs.existsSync(logoUrl);
+  drawWatermark() {
+    const { page } = this.layout;
+    const { args, theme } = this;
+    const finalWatermarkText = args.watermarkText || args.brandName || "OASIS";
+    const hasLogoForWatermark = args.logoUrl && fs.existsSync(args.logoUrl);
 
     if (hasLogoForWatermark) {
-      // Big, soft logo in the center of the page
-      const wmWidth = page.w * 0.7; // 70% of page width
+      const wmWidth = page.w * 0.6;
       const wmX = (page.w - wmWidth) / 2;
-      const wmY = page.h / 2 - wmWidth / 2; // roughly centered vertically
-
-      doc
+      const wmY = page.h / 2 - wmWidth / 2;
+      this.doc
         .save()
-        .opacity(0.035)
-        .image(logoUrl, wmX, wmY, { width: wmWidth })
+        .opacity(0.04)
+        .image(args.logoUrl, wmX, wmY, { width: wmWidth })
         .opacity(1)
         .restore();
     } else if (finalWatermarkText) {
-      // Fallback to text watermark if logo is missing
-      doc
+      this.doc
         .save()
         .opacity(0.03)
-        .rotate(-18, { origin: [doc.page.width / 2, doc.page.height / 2] })
+        .rotate(-18, { origin: [page.w / 2, page.h / 2] })
         .font("Body-Bold")
         .fontSize(130)
-        .fillColor(text)
-        .text(
-          finalWatermarkText,
-          doc.page.width / 2 - 280,
-          doc.page.height / 2 - 50,
-          { width: 560, align: "center" }
-        )
+        .fillColor(theme.text)
+        .text(finalWatermarkText, page.w / 2 - 280, page.h / 2 - 50, {
+          width: 560,
+          align: "center",
+        })
         .opacity(1)
         .restore();
     }
+  }
 
-    doc.end();
-  });
+  async generate() {
+    const fonts = await this.loadFonts();
+    this.qrImgBuf = await this.precomputeQR();
+
+    this.doc = new PDFDocument({ size: "A4", margin: 0, font: fonts.regular });
+    this.setupLayout();
+
+    this.doc.info.Title = "Booking Confirmation";
+    this.doc.info.Author = String(this.args.brandName || "");
+    this.doc.info.Subject = "Reservation Ticket";
+
+    const chunks = [];
+    return new Promise((resolve, reject) => {
+      this.doc.on("data", (c) => chunks.push(c));
+      this.doc.on("end", () => resolve(Buffer.concat(chunks)));
+      this.doc.on("error", reject);
+
+      this.doc.registerFont("Body", fonts.regular);
+      this.doc.registerFont("Body-Bold", fonts.bold);
+      this.doc.font("Body");
+
+      this.drawBackgroundAndHeader();
+      this.drawTicketBody(); // Draws the single ticket container
+      this.drawMainContent(); // Populates the left side
+      this.drawRightRail(); // Populates the right side
+      this.drawFooter();
+      this.drawWatermark();
+
+      this.doc.end();
+    });
+  }
+}
+
+export default async function buildTicketPdfBuffer(args = {}) {
+  const generator = new TicketGenerator(args);
+  return await generator.generate();
 }
