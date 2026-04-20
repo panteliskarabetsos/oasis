@@ -127,8 +127,8 @@ export async function POST(req, ctx) {
       id, experienceId, scheduleSlotId, counts, status, expiresAt,
       primary_contact, "unitPriceAdult", "unitPriceKid",
       "totalAmount", "stripeSessionId", "appliedPromoCode",
-      "stripePaymentIntentId", "currency"
-    `
+      "stripePaymentIntentId", "currency",selected_meetup_point
+    `,
     )
     .eq("id", draftId)
     .maybeSingle();
@@ -218,7 +218,7 @@ export async function POST(req, ctx) {
   let newExpiresAt = draft.expiresAt;
   if (!hasExpiry || draft.status === "draft") {
     newExpiresAt = new Date(
-      Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000
+      Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000,
     ).toISOString();
 
     await admin
@@ -252,7 +252,7 @@ export async function POST(req, ctx) {
   const toCents = (v) => Math.round(Number(v || 0) * 100);
   const subtotalCents = base.reduce(
     (s, it) => s + toCents(it.unit) * it.qty,
-    0
+    0,
   );
 
   // 6) Promo
@@ -262,9 +262,9 @@ export async function POST(req, ctx) {
     const origin = computeOrigin(req);
     const valRes = await fetch(
       `${origin}/api/promotions/validate?code=${encodeURIComponent(
-        promoCode
+        promoCode,
       )}&draftId=${draftId}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     );
     if (!valRes.ok) {
       const msg =
@@ -278,7 +278,7 @@ export async function POST(req, ctx) {
     } else {
       const fixedCents = Math.max(
         Math.round(Number(promo.discountValue || 0) * 100),
-        0
+        0,
       );
       discountCents = Math.min(fixedCents, subtotalCents);
     }
@@ -303,7 +303,7 @@ export async function POST(req, ctx) {
     await safeExpireSession(stripe, draft.stripeSessionId);
     await safeCancelPI(stripe, draft.stripePaymentIntentId);
     const newExpiresAt = new Date(
-      Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000
+      Date.now() + REFRESH_MINUTES_ON_CHECKOUT * 60 * 1000,
     ).toISOString();
     await admin
       .from("BookingDraft")
@@ -354,7 +354,7 @@ export async function POST(req, ctx) {
     if (draft.stripePaymentIntentId) {
       try {
         const existing = await stripe.paymentIntents.retrieve(
-          draft.stripePaymentIntentId
+          draft.stripePaymentIntentId,
         );
         if (
           existing?.status === "succeeded" ||
@@ -366,7 +366,7 @@ export async function POST(req, ctx) {
               error: "Already confirmed",
               redirectUrl: `${origin}/booking/${draftId}/confirmation`,
             },
-            { status: 409 }
+            { status: 409 },
           );
         }
       } catch {}
@@ -409,7 +409,7 @@ export async function POST(req, ctx) {
         pi = await updatePIKeepMode(
           stripe,
           draft.stripePaymentIntentId,
-          baseParams
+          baseParams,
         );
       } else {
         // create new, prefer APM then fallback to card-only
@@ -470,7 +470,7 @@ export async function POST(req, ctx) {
   if (draft.status === "checkout" && draft.stripeSessionId) {
     try {
       const existing = await stripe.checkout.sessions.retrieve(
-        draft.stripeSessionId
+        draft.stripeSessionId,
       );
       const storedTotalCents = Math.round(Number(draft.totalAmount || 0) * 100);
       const storedPromoCode = draft.appliedPromoCode ?? null;
@@ -493,7 +493,7 @@ export async function POST(req, ctx) {
     } catch (e) {
       console.warn(
         "[checkout] failed to inspect/expire prior session:",
-        e?.message
+        e?.message,
       );
     }
   }
@@ -550,7 +550,7 @@ export async function POST(req, ctx) {
         },
         payment_method_collection: "if_required",
       },
-      { idempotencyKey: idemKey }
+      { idempotencyKey: idemKey },
     );
   } catch (e) {
     console.error("[checkout] stripe error", e?.message);
@@ -595,13 +595,13 @@ export async function POST(req, ctx) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-      { onConflict: "stripeSessionId" }
+      { onConflict: "stripeSessionId" },
     );
     if (red.error) {
       console.warn(
         "[checkout] failed to record promo redemption:",
         red.error.code,
-        red.error.message
+        red.error.message,
       );
     }
   }

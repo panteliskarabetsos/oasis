@@ -39,7 +39,7 @@ export async function POST(req, ctx) {
       primary_contact, "unitPriceAdult", "unitPriceKid",
       "totalAmount", "stripeSessionId", "stripePaymentIntentId",
       "convertedBookingId", currency,
-      promoJson, "appliedPromoCode", "discountAmount","selectedMeetupPoint"
+      promoJson, "appliedPromoCode", "discountAmount", selected_meetup_point
     `,
     )
     .eq("id", draftId)
@@ -373,7 +373,7 @@ export async function POST(req, ctx) {
         appliedPromoCode: mergedPromo?.code ?? null,
         discountAmount: mergedDiscountAmount || 0,
         promoJson: mergedPromo ?? null,
-        selectedMeetupPoint: draft.selectedMeetupPoint ?? null,
+        selected_meetup_point: draft.selected_meetup_point ?? null,
       })
       .select("id")
       .single();
@@ -478,6 +478,8 @@ export async function POST(req, ctx) {
           await admin
             .from("booking")
             .update({
+              selected_meetup_point: draft.selected_meetup_point ?? null,
+              attendees: draft.attendees,
               discountAmount: newDiscountAmount,
               appliedPromoCode: Array.from(appliedCodes).join(" + "),
               promoJson,
@@ -490,7 +492,6 @@ export async function POST(req, ctx) {
     console.warn("[confirm] gift card redeem/persist failed:", e?.message || e);
   }
 
-  // Flip draft → converted and link booking
   const upd2 = await admin
     .from("BookingDraft")
     .update({

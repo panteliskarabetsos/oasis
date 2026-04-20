@@ -103,7 +103,7 @@ export async function GET(req, ctx) {
     booking,
     draft: {
       id: draft.id,
-      selectedMeetupPoint: draft.selectedMeetupPoint,
+      selected_meetup_point: draft.selected_meetup_point,
       experienceId: draft.experienceId,
       scheduleSlotId: draft.scheduleSlotId,
       counts: draft.counts,
@@ -134,7 +134,6 @@ export async function PATCH(req, ctx) {
   const draftId = Number(id);
   if (!Number.isFinite(draftId) || draftId <= 0) return bad("Invalid id");
 
-  // 🔒 SECURITY: Extract and validate the client token
   const url = new URL(req.url);
   const token = (url.searchParams.get("token") || "").trim();
 
@@ -148,7 +147,7 @@ export async function PATCH(req, ctx) {
   const body = await req.json().catch(() => ({}));
   const primaryContact = body?.primaryContact || null;
   const attendees = Array.isArray(body?.attendees) ? body.attendees : [];
-  const selectedMeetupPoint = body?.selectedMeetupPoint || null;
+  const selected_meetup_point = body?.selected_meetup_point;
   // Fetch counts + status to validate and decide editability
   const { data: draft, error: dErr } = await admin
     .from("BookingDraft")
@@ -157,7 +156,7 @@ export async function PATCH(req, ctx) {
         counts,
         status,
         "convertedBookingId",
-        "selectedMeetupPoint"
+        "selected_meetup_point"
       `,
     )
     .eq("id", draftId)
@@ -204,7 +203,7 @@ export async function PATCH(req, ctx) {
     .update({
       attendees,
       primary_contact: primaryContact,
-      selectedMeetupPoint,
+      selected_meetup_point,
       updatedAt: new Date().toISOString(),
     })
     .eq("id", draftId)

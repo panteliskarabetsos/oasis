@@ -295,7 +295,7 @@ function normalizeBooking(raw) {
       location: raw.experience?.location ?? null,
       isCustom: isPrivate || !experienceId,
     },
-    selectedMeetupPoint: raw.selectedMeetupPoint || null,
+    selected_meetup_point: raw.selected_meetup_point || null,
     guest,
     guestSnapshot: pc,
     counts,
@@ -872,12 +872,12 @@ export default function ReservationDetailPage() {
                         <CalendarClock size={14} className="text-[#a09084]" />
                         {fmtDateShort(item.startTime)}
                       </span>
-                      {item.selectedMeetupPoint && (
+                      {item.selected_meetup_point && (
                         <>
                           <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
                           <span className="flex items-center gap-1.5 text-emerald-700">
                             <MapPin size={14} />
-                            {item.selectedMeetupPoint.name || "Pickup Set"}
+                            {item.selected_meetup_point.name || "Pickup Set"}
                           </span>
                         </>
                       )}
@@ -947,7 +947,7 @@ export default function ReservationDetailPage() {
                 </Row>
                 <Row label="Location">{item.experience?.location || "-"}</Row>
                 <Row label="Meetup Point">
-                  {item.selectedMeetupPoint || "-"}
+                  {item.selected_meetup_point?.name || "-"}
                 </Row>
                 <Row label="Duration">
                   {Number.isFinite(item.duration)
