@@ -48,7 +48,7 @@ export async function GET(req, ctx) {
     `,
     )
     .eq("id", draftId)
-    .eq("clientToken", token) // 🔒 SECURITY: Enforce token match
+    .eq("clientToken", token)
     .maybeSingle();
 
   if (dErr || !draft) return bad("Draft not found or unauthorized", 404);
@@ -103,6 +103,7 @@ export async function GET(req, ctx) {
     booking,
     draft: {
       id: draft.id,
+      selectedMeetupPoint: draft.selectedMeetupPoint,
       experienceId: draft.experienceId,
       scheduleSlotId: draft.scheduleSlotId,
       counts: draft.counts,
@@ -147,7 +148,7 @@ export async function PATCH(req, ctx) {
   const body = await req.json().catch(() => ({}));
   const primaryContact = body?.primaryContact || null;
   const attendees = Array.isArray(body?.attendees) ? body.attendees : [];
-
+  const selectedMeetupPoint = body?.selectedMeetupPoint || null;
   // Fetch counts + status to validate and decide editability
   const { data: draft, error: dErr } = await admin
     .from("BookingDraft")
@@ -155,11 +156,12 @@ export async function PATCH(req, ctx) {
       `
         counts,
         status,
-        "convertedBookingId"
+        "convertedBookingId",
+        "selectedMeetupPoint"
       `,
     )
     .eq("id", draftId)
-    .eq("clientToken", token) // 🔒 SECURITY: Enforce token match
+    .eq("clientToken", token)
     .maybeSingle();
 
   if (dErr) {
@@ -202,6 +204,7 @@ export async function PATCH(req, ctx) {
     .update({
       attendees,
       primary_contact: primaryContact,
+      selectedMeetupPoint,
       updatedAt: new Date().toISOString(),
     })
     .eq("id", draftId)

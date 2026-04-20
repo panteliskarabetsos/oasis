@@ -28,6 +28,7 @@ export async function POST(req) {
   const experienceId = Number(body?.experienceId);
   const scheduleSlotId = Number(body?.scheduleSlotId);
   const counts = body?.counts || {};
+  const selectedMeetupPoint = body?.selectedMeetupPoint || null;
   const A = toInt(counts.adults, 0);
   const K = toInt(counts.kids, 0);
   const requestedGroup = A + K;
@@ -158,6 +159,7 @@ export async function POST(req) {
         .from("BookingDraft")
         .update({
           counts: { adults: A, kids: K },
+          selectedMeetupPoint,
           scheduleSlotId,
           expiresAt: newExpiry,
           updatedAt: new Date(nowMs).toISOString(),
@@ -201,7 +203,8 @@ export async function POST(req) {
     totalAmount,
     expiresAt,
     updatedAt: new Date(nowMs).toISOString(),
-    clientToken, // 🔒 ALWAYS save the token to the database
+    clientToken,
+    selectedMeetupPoint,
   };
 
   let inserted;
