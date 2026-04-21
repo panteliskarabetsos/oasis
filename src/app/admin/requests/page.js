@@ -18,20 +18,34 @@ import {
   Filter,
   Ticket,
   Users,
+  ShieldAlert,
+  CreditCard,
 } from "lucide-react";
+
+const getPolicyDescription = (policy) => {
+  const p = policy?.toLowerCase() || "moderate";
+  if (p.includes("flexible")) {
+    return "Full refund up to 48 hours before the experience starts.";
+  }
+  if (p.includes("strict")) {
+    return "100% refund up to 14 days, 50% refund 7-13 days, no refund under 7 days.";
+  }
+  return "Full refund up to 7 days before, 50% refund up to 48 hours before.";
+};
 
 export default function AdminRequestsPage() {
   const [requests, setRequests] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("all");
 
-  // Modal State
   const [activeModal, setActiveModal] = useState(null);
   const [modalAction, setModalAction] = useState(null);
   const [adminNotes, setAdminNotes] = useState("");
+  const [refundOption, setRefundOption] = useState("full");
+  const [recommendedRefund, setRecommendedRefund] = useState(null); // Keep track to label it for admins
+  const [hoursBeforeEvent, setHoursBeforeEvent] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const fetchRequests = async () => {
@@ -66,6 +80,41 @@ export default function AdminRequestsPage() {
     setActiveModal(request);
     setModalAction(action);
     setAdminNotes("");
+
+    // Calculate default refund recommendation if it's a cancellation approval
+    if (action === "approve" && request.type === "cancel") {
+      let defaultRefund = "none";
+      let diffHours = 0;
+
+      if (request.eventDate && request.createdAt) {
+        const eventTime = new Date(request.eventDate).getTime();
+        const requestTime = new Date(request.createdAt).getTime();
+        diffHours = (eventTime - requestTime) / (1000 * 60 * 60);
+
+        const policy = (request.cancellationPolicy || "moderate").toLowerCase();
+
+        if (policy.includes("flexible")) {
+          defaultRefund = diffHours >= 48 ? "full" : "none";
+        } else if (policy.includes("strict")) {
+          if (diffHours >= 14 * 24) defaultRefund = "full";
+          else if (diffHours >= 7 * 24) defaultRefund = "partial";
+          else defaultRefund = "none";
+        } else {
+          // Moderate
+          if (diffHours >= 7 * 24) defaultRefund = "full";
+          else if (diffHours >= 48) defaultRefund = "partial";
+          else defaultRefund = "none";
+        }
+      }
+
+      setHoursBeforeEvent(Math.max(0, diffHours));
+      setRecommendedRefund(defaultRefund);
+      setRefundOption(defaultRefund);
+    } else {
+      setRefundOption("full");
+      setRecommendedRefund(null);
+      setHoursBeforeEvent(null);
+    }
   };
 
   const closeModal = () => {
@@ -77,13 +126,19 @@ export default function AdminRequestsPage() {
   const handleProcessRequest = async () => {
     setIsProcessing(true);
     try {
+      const payload = {
+        action: modalAction,
+        adminNotes: adminNotes,
+      };
+
+      if (modalAction === "approve" && activeModal.type === "cancel") {
+        payload.refundOption = refundOption;
+      }
+
       const res = await fetch(`/api/admin/requests/${activeModal.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: modalAction,
-          adminNotes: adminNotes,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -104,7 +159,6 @@ export default function AdminRequestsPage() {
   return (
     <div className="min-h-screen bg-[#fdfcfb] p-6 md:p-12 font-sans selection:bg-[#8b6f47]/20 relative">
       <div className="max-w-5xl mx-auto relative z-10">
-        {/* Header Section */}
         <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <h1 className="text-4xl font-serif font-bold text-stone-900 tracking-tight">
@@ -124,7 +178,6 @@ export default function AdminRequestsPage() {
           </button>
         </header>
 
-        {/* Filters & Search ToolBar */}
         <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-sm flex flex-col sm:flex-row gap-4 mb-8">
           <div className="relative flex-1">
             <Search
@@ -153,7 +206,6 @@ export default function AdminRequestsPage() {
           </div>
         </div>
 
-        {/* Main Content Area */}
         {isLoading ? (
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
@@ -196,17 +248,6 @@ export default function AdminRequestsPage() {
                 ? "No requests match your current search or filters."
                 : "There are no pending guest requests at the moment. Time for a coffee break!"}
             </p>
-            {(searchQuery || filterType !== "all") && (
-              <button
-                onClick={() => {
-                  setSearchQuery("");
-                  setFilterType("all");
-                }}
-                className="mt-6 text-sm font-semibold text-[#8b6f47] hover:underline"
-              >
-                Clear Filters
-              </button>
-            )}
           </motion.div>
         ) : (
           <div className="space-y-5">
@@ -229,7 +270,6 @@ export default function AdminRequestsPage() {
                     }}
                     className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row gap-6 items-start justify-between group"
                   >
-                    {/* Left: Info */}
                     <div className="flex-1 space-y-4 w-full">
                       <div className="flex items-center gap-3">
                         <span
@@ -262,12 +302,7 @@ export default function AdminRequestsPage() {
                           <span className="text-stone-300">•</span>
                           <span className="flex items-center gap-1 text-stone-700">
                             <Users size={14} className="text-stone-400" />
-                            Party of {req.totalGuests} ({req.adults} Adult
-                            {req.adults > 1 ? "s" : ""}
-                            {req.kids > 0
-                              ? `, ${req.kids} Child${req.kids > 1 ? "ren" : ""}`
-                              : ""}
-                            )
+                            Party of {req.totalGuests}
                           </span>
                         </div>
                       </div>
@@ -288,6 +323,28 @@ export default function AdminRequestsPage() {
                           </div>
                         </div>
 
+                        {req.type === "cancel" && (
+                          <div className="flex items-start gap-2.5 mt-4 pt-4 border-t border-stone-200">
+                            <ShieldAlert
+                              size={16}
+                              className="text-[#8b6f47] shrink-0 mt-0.5"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-semibold text-stone-800 block">
+                                  Cancellation Policy:
+                                </span>
+                                <span className="text-stone-800 capitalize bg-[#8b6f47]/10 px-2 py-0.5 rounded-md font-bold text-[10px] tracking-widest">
+                                  {req.cancellationPolicy || "Moderate"}
+                                </span>
+                              </div>
+                              <span className="text-stone-500 text-xs">
+                                {getPolicyDescription(req.cancellationPolicy)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
                         {req.type === "reschedule" && req.newDate && (
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4 pt-4 border-t border-stone-200">
                             <div className="flex items-start gap-2.5">
@@ -307,8 +364,6 @@ export default function AdminRequestsPage() {
                                 </span>
                               </div>
                             </div>
-
-                            {/* Capacity Badge */}
                             {req.availableSlots !== null && (
                               <div className="sm:text-right border-l-2 border-stone-200 pl-4 sm:border-l-0 sm:pl-0">
                                 <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
@@ -333,7 +388,6 @@ export default function AdminRequestsPage() {
                       </div>
                     </div>
 
-                    {/* Right: Actions */}
                     <div className="w-full lg:w-48 flex flex-row lg:flex-col gap-3 shrink-0 pt-2 lg:pt-0">
                       <button
                         onClick={() => openModal(req, "approve")}
@@ -356,7 +410,6 @@ export default function AdminRequestsPage() {
         )}
       </div>
 
-      {/* Confirmation Modal */}
       <AnimatePresence>
         {activeModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -402,7 +455,111 @@ export default function AdminRequestsPage() {
                     : "This will keep the booking as-is and mark the request as rejected."}
                 </p>
 
-                {/* Overbooking Warning */}
+                {modalAction === "approve" && activeModal.type === "cancel" && (
+                  <div className="mb-6 bg-stone-50 border border-stone-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <CreditCard size={18} className="text-[#8b6f47]" />
+                        <h4 className="font-bold text-stone-900 text-sm">
+                          Money Refund Action
+                        </h4>
+                      </div>
+                      <strong className="capitalize text-[10px] uppercase tracking-widest text-stone-800 bg-white px-2 py-0.5 rounded shadow-sm border border-stone-200">
+                        {activeModal.cancellationPolicy || "Moderate"}
+                      </strong>
+                    </div>
+
+                    <p className="text-xs text-stone-500 mb-4 italic">
+                      Requested{" "}
+                      <strong>
+                        {hoursBeforeEvent
+                          ? Math.floor(hoursBeforeEvent / 24)
+                          : 0}{" "}
+                        days,{" "}
+                        {hoursBeforeEvent
+                          ? Math.floor(hoursBeforeEvent % 24)
+                          : 0}{" "}
+                        hours
+                      </strong>{" "}
+                      before event start.
+                    </p>
+
+                    <div className="space-y-4">
+                      <label className="flex items-start gap-3 cursor-pointer group">
+                        <div className="relative flex items-center justify-center mt-0.5">
+                          <input
+                            type="radio"
+                            name="refundOption"
+                            value="full"
+                            checked={refundOption === "full"}
+                            onChange={(e) => setRefundOption(e.target.value)}
+                            className="peer appearance-none w-5 h-5 border-2 border-stone-300 rounded-full checked:border-[#8b6f47] transition-all"
+                          />
+                          <div className="absolute w-2.5 h-2.5 rounded-full bg-[#8b6f47] opacity-0 peer-checked:opacity-100 transition-all" />
+                        </div>
+                        <div>
+                          <span className="text-sm font-medium text-stone-800 group-hover:text-stone-900 flex items-center gap-2">
+                            Issue Full Refund (100%)
+                            {recommendedRefund === "full" && (
+                              <span className="bg-emerald-100 text-emerald-700 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-sm">
+                                Recommended
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-3 cursor-pointer group">
+                        <div className="relative flex items-center justify-center mt-0.5">
+                          <input
+                            type="radio"
+                            name="refundOption"
+                            value="partial"
+                            checked={refundOption === "partial"}
+                            onChange={(e) => setRefundOption(e.target.value)}
+                            className="peer appearance-none w-5 h-5 border-2 border-stone-300 rounded-full checked:border-[#8b6f47] transition-all"
+                          />
+                          <div className="absolute w-2.5 h-2.5 rounded-full bg-[#8b6f47] opacity-0 peer-checked:opacity-100 transition-all" />
+                        </div>
+                        <div>
+                          <span className="text-sm font-medium text-stone-800 group-hover:text-stone-900 flex items-center gap-2">
+                            Issue Partial Refund (50%)
+                            {recommendedRefund === "partial" && (
+                              <span className="bg-emerald-100 text-emerald-700 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-sm">
+                                Recommended
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-3 cursor-pointer group">
+                        <div className="relative flex items-center justify-center mt-0.5">
+                          <input
+                            type="radio"
+                            name="refundOption"
+                            value="none"
+                            checked={refundOption === "none"}
+                            onChange={(e) => setRefundOption(e.target.value)}
+                            className="peer appearance-none w-5 h-5 border-2 border-stone-300 rounded-full checked:border-[#8b6f47] transition-all"
+                          />
+                          <div className="absolute w-2.5 h-2.5 rounded-full bg-[#8b6f47] opacity-0 peer-checked:opacity-100 transition-all" />
+                        </div>
+                        <div>
+                          <span className="text-sm font-medium text-stone-800 group-hover:text-stone-900 flex items-center gap-2">
+                            No Refund (0%)
+                            {recommendedRefund === "none" && (
+                              <span className="bg-emerald-100 text-emerald-700 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-sm">
+                                Recommended
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
                 {modalAction === "approve" &&
                   activeModal.type === "reschedule" &&
                   activeModal.availableSlots !== null &&

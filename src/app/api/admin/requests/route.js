@@ -33,8 +33,11 @@ export async function GET(req) {
           adultsCount,
           kidsCount,
           counts,
+          selected_meetup_point,
+          startTime,
+          ScheduleSlot ( date ),
           User ( name, surname, email ),
-          Experience ( name )
+          Experience ( name, cancellationPolicy )
         ),
         requested_slot:requested_slot_id (
           date,
@@ -47,7 +50,6 @@ export async function GET(req) {
 
     if (error) throw error;
 
-    // Collect requested slot IDs to calculate availability for reschedules
     const requestedSlotIds = [
       ...new Set(requests.map((r) => r.requested_slot_id).filter(Boolean)),
     ];
@@ -94,7 +96,6 @@ export async function GET(req) {
       }
     }
 
-    // Format the response for the frontend
     const formattedRequests = requests.map((req) => {
       const b = req.booking;
       const contactLastName =
@@ -104,7 +105,6 @@ export async function GET(req) {
       const guestName =
         `${contactFirstName} ${contactLastName}`.trim() || "Unknown Guest";
 
-      // Calculate Party Size & Ages
       const nDirect = Number(b?.numberOfPeople);
       const nAdults = Number(b?.adultsCount);
       const nKids = Number(b?.kidsCount);
@@ -125,16 +125,22 @@ export async function GET(req) {
         totalGuests = adults + kids;
       } else if (Number.isFinite(nDirect) && nDirect > 0) {
         totalGuests = nDirect;
-        adults = nDirect; // Fallback assumption
+        adults = nDirect;
       }
 
-      // Calculate Available Capacity for the newly requested slot
       let availableSlots = null;
       if (req.requested_slot_id && req.requested_slot?.totalSlots) {
         const total = req.requested_slot.totalSlots;
         const booked = slotAvailability[req.requested_slot_id] || 0;
         availableSlots = Math.max(0, total - booked);
       }
+
+      // Determine original booking start date
+      const bookingDateObj = b?.startTime
+        ? new Date(b.startTime)
+        : b?.ScheduleSlot?.date
+          ? new Date(b.ScheduleSlot.date)
+          : null;
 
       return {
         id: req.id,
@@ -143,9 +149,12 @@ export async function GET(req) {
         type: req.type,
         status: req.status,
         reason: req.reason,
-        createdAt: req.created_at,
+        createdAt: req.created_at, // When the request was made
+        eventDate: bookingDateObj ? bookingDateObj.toISOString() : null, // When the event starts
         guestName,
         experienceName: b?.Experience?.name || "Unknown Experience",
+        cancellationPolicy: b?.Experience?.cancellationPolicy || "moderate",
+        meetupPoint: b?.selected_meetup_point || null,
         currentBookingStatus: b?.status,
         newDate: req.requested_slot?.date || null,
         totalGuests: totalGuests || 1,
