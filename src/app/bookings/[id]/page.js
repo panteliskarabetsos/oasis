@@ -31,6 +31,7 @@ import {
   Share2,
   Printer,
   Navigation,
+  Settings,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 import QRCode from "qrcode";
@@ -126,11 +127,11 @@ export default function BookingDetailsPage({ params }) {
   const people = useMemo(() => (booking ? peopleOf(booking) : 0), [booking]);
   const durationMin = useMemo(
     () => getDurationMinutes(booking, exp),
-    [booking, exp]
+    [booking, exp],
   );
   const status = useMemo(
     () => statusFlags(dateObj, durationMin),
-    [dateObj, durationMin]
+    [dateObj, durationMin],
   );
 
   // Links
@@ -140,7 +141,7 @@ export default function BookingDetailsPage({ params }) {
     const endUtc = toCalStamp(addMinutes(dateObj, durationMin));
     const text = encodeURIComponent(exp?.name || "Reservation");
     const details = encodeURIComponent(
-      `Ref: ${getPublicBookingRef(booking)}\n${booking?.notes || ""}`
+      `Ref: ${getPublicBookingRef(booking)}\n${booking?.notes || ""}`,
     );
     const location = encodeURIComponent(exp?.location || "");
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startUtc}/${endUtc}&details=${details}&location=${location}`;
@@ -148,7 +149,7 @@ export default function BookingDetailsPage({ params }) {
 
   const mapHref = useMemo(
     () => (exp?.location ? toMapHref(exp.location) : "#"),
-    [exp]
+    [exp],
   );
 
   // QR Logic
@@ -215,7 +216,7 @@ export default function BookingDetailsPage({ params }) {
         ) : (
           <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
             {/* Header Section */}
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 mb-10">
+            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 mb-10">
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <StatusBadge status={status} />
@@ -242,7 +243,13 @@ export default function BookingDetailsPage({ params }) {
               </div>
 
               {/* Desktop Actions */}
-              <div className="hidden md:flex flex-wrap items-center justify-end gap-3 max-w-sm">
+              <div className="hidden lg:flex flex-wrap items-center justify-end gap-3 max-w-lg shrink-0">
+                <Link
+                  href="/manage-booking"
+                  className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2.5 text-[#5a4a3f] font-medium shadow-sm hover:bg-[#faf9f6] transition-all active:scale-95"
+                >
+                  <Settings className="w-4 h-4" /> Manage
+                </Link>
                 <button
                   onClick={() => shareBooking(booking, exp, dateObj)}
                   className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2.5 text-[#5a4a3f] font-medium shadow-sm hover:bg-[#faf9f6] transition-all active:scale-95"
@@ -310,7 +317,7 @@ export default function BookingDetailsPage({ params }) {
                             booking?.total ??
                             booking?.price ??
                             0,
-                          booking?.currency
+                          booking?.currency,
                         )}
                       </span>
                     </div>
@@ -318,19 +325,26 @@ export default function BookingDetailsPage({ params }) {
                 </div>
 
                 {/* Additional Info / Reschedule */}
-                <div className="bg-[#f4f1ec] rounded-xl p-6 border border-[#e8e2d9] flex items-start gap-4">
-                  <div className="p-2 bg-white rounded-full shadow-sm">
-                    <AlertCircle className="w-5 h-5 text-[#8b6f47]" />
+                <div className="bg-[#f4f1ec] rounded-xl p-6 border border-[#e8e2d9] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className="p-2 bg-white rounded-full shadow-sm shrink-0">
+                      <Settings className="w-5 h-5 text-[#8b6f47]" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-[#5a4a3f]">
+                        Manage your booking
+                      </h4>
+                      <p className="text-sm text-[#7c6f60] mt-1 leading-relaxed">
+                        Need to reschedule, cancel, or change your meetup point?
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-semibold text-[#5a4a3f]">
-                      Need to reschedule?
-                    </h4>
-                    <p className="text-sm text-[#7c6f60] mt-1 leading-relaxed">
-                      Changes can be made up to 24 hours before your slot.
-                      Please contact support referencing your booking ID.
-                    </p>
-                  </div>
+                  <Link
+                    href="/manage-booking"
+                    className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-white border border-[#e8e2d9] text-[#5a4a3f] px-5 py-2.5 font-medium shadow-sm hover:bg-[#faf9f6] transition-all w-full sm:w-auto"
+                  >
+                    Manage Booking
+                  </Link>
                 </div>
               </div>
 
@@ -391,7 +405,7 @@ export default function BookingDetailsPage({ params }) {
   );
 }
 
-/*  COMPONENT: TICKET CARD  */
+/* COMPONENT: TICKET CARD  */
 
 function TicketCard({
   booking,
@@ -433,8 +447,8 @@ function TicketCard({
               status.upcoming
                 ? "border-emerald-500/50 text-emerald-300"
                 : status.ongoing
-                ? "border-amber-500/50 text-amber-300"
-                : "border-white/20 text-white/40 bg-white/5" // Expired style
+                  ? "border-amber-500/50 text-amber-300"
+                  : "border-white/20 text-white/40 bg-white/5" // Expired style
             }`}
           >
             {status.upcoming ? "Valid" : status.ongoing ? "Active" : "Expired"}
@@ -549,6 +563,14 @@ function MobileActionBar({ onDownload, onDirections, onShare }) {
   return (
     <div className="md:hidden fixed bottom-6 left-6 right-6 z-50">
       <div className="bg-[#3d2f26]/90 backdrop-blur-lg text-white rounded-2xl p-1.5 shadow-2xl flex items-center justify-between border border-[#554335]">
+        <Link
+          href="/manage-booking"
+          className="flex-1 flex flex-col items-center py-2 gap-1 rounded-xl active:bg-white/10"
+        >
+          <Settings className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Manage</span>
+        </Link>
+        <div className="w-[1px] h-8 bg-white/10" />
         <button
           onClick={onDownload}
           className="flex-1 flex flex-col items-center py-2 gap-1 rounded-xl active:bg-white/10"
@@ -763,7 +785,7 @@ function getQrValue(b) {
 
 function toMapHref(loc) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-    loc
+    loc,
   )}`;
 }
 
@@ -775,7 +797,7 @@ function openQrInNewTab(url) {
   const w = window.open("");
   if (w)
     w.document.write(
-      `<img src="${url}" style="width:100%; height:100%; object-fit:contain;">`
+      `<img src="${url}" style="width:100%; height:100%; object-fit:contain;">`,
     );
 }
 

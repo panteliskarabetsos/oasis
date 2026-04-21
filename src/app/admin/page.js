@@ -16,6 +16,7 @@ import {
   Compass,
   CalendarDays,
   CalendarRange,
+  CalendarPlus,
   Users,
   Clock,
   ShieldCheck,
@@ -58,7 +59,8 @@ const PERMISSIONS = {
   experiences: "Experiences",
   bookings: "Bookings",
   guests: "Guests & CRM",
-  planner: "Planner", // Renamed from Schedule
+  planner: "Planner",
+  schedule: "Schedule", // Added for opening new slots
   admins: "Admins",
   payments: "Payments",
   invoices: "Invoices",
@@ -99,6 +101,7 @@ const ADMIN_ROLES = [
       "bookings",
       "guests",
       "planner",
+      "schedule",
       "checkins",
       "pos",
       "waitlist",
@@ -148,7 +151,7 @@ const ADMIN_ROLES = [
     color: "text-teal-700",
     bg: "bg-teal-50",
     border: "border-teal-200",
-    permissions: ["planner", "checkins"],
+    permissions: ["planner", "schedule", "checkins"],
   },
 ];
 
@@ -223,11 +226,11 @@ export default function AdminDashboardPage() {
       {
         key: "schedule",
         cat: "ops",
-        icon: <CalendarRange size={20} />,
-        title: "schedule",
-        desc: "see programming",
+        icon: <CalendarPlus size={20} />,
+        title: "Schedule",
+        desc: "Open slots for new bookings",
         onClick: () => go("/admin/schedule"),
-        keywords: ["slots", "calendar", "schedule", "planner"],
+        keywords: ["slots", "open", "create", "schedule"],
       },
       {
         key: "planner",
