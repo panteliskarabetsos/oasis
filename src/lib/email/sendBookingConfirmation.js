@@ -238,10 +238,10 @@ export default async function sendBookingConfirmation(opts = {}) {
 
   /* ------------------------ Ticket PDF attachment -------------------- */
 
-  if (opts.attachTicketPdf !== false) {
-    const appOrigin =
-      opts.appOrigin || process.env.APP_ORIGIN || "https://youroasis.gr";
+  const appOrigin =
+    opts.appOrigin || process.env.APP_ORIGIN || "https://youroasis.gr";
 
+  if (opts.attachTicketPdf !== false) {
     const defaultQrUrl =
       opts.checkinUrl ||
       `${appOrigin}/bookings/${encodeURIComponent(
@@ -295,6 +295,9 @@ export default async function sendBookingConfirmation(opts = {}) {
 
   /* --------------------- HTML + text email bodies -------------------- */
 
+  // Construct the direct link to the manage booking portal
+  const manageUrl = `${appOrigin}/manage-booking`;
+
   const html = renderConfirmationHtml({
     brand,
     logoUrl,
@@ -313,8 +316,8 @@ export default async function sendBookingConfirmation(opts = {}) {
     subtotalLabel,
     receiptUrl,
     hasInvoicePdf,
-    calendarUrl: null,
-    manageUrl: null,
+    calendarUrl: null, // If you add an add-to-calendar web link later, pass it here
+    manageUrl, // Passed down to renderer!
   });
 
   const text = renderTextFallback({
@@ -332,6 +335,7 @@ export default async function sendBookingConfirmation(opts = {}) {
     subtotalLabel,
     receiptUrl,
     hasInvoicePdf,
+    manageUrl, // Passed down to text renderer!
   });
 
   /* ------------------------------ send ------------------------------- */
@@ -728,6 +732,7 @@ function renderTextFallback({
   discountLabel,
   subtotalLabel,
   receiptUrl,
+  manageUrl,
   hasInvoicePdf,
 }) {
   const lines = [
@@ -743,6 +748,7 @@ function renderTextFallback({
     discountLabel ? `Discount: ${discountLabel}` : "",
     amountLabel ? `Total: ${amountLabel}` : "",
     bookingRef ? `Reference: ${bookingRef}` : "",
+    manageUrl ? `Manage your booking here: ${manageUrl}` : "",
     receiptUrl ? `Receipt: ${receiptUrl}` : "",
     attendees?.length
       ? `Attendees: ${attendees.map((a) => a.name).join(", ")}`
