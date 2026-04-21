@@ -103,6 +103,7 @@ export default async function sendBookingConfirmation(opts = {}) {
   // Safely extract the pickup point from the JSONB object
   let pickupPoint = null;
   const rawPickup =
+    draft?.selected_meetup_point || // <-- Added the exact DB column name
     draft?.selectedMeetupPoint ||
     draft?.pickupPoint ||
     session?.metadata?.pickupPoint;
@@ -110,10 +111,13 @@ export default async function sendBookingConfirmation(opts = {}) {
   if (typeof rawPickup === "string") {
     pickupPoint = rawPickup;
   } else if (rawPickup && typeof rawPickup === "object") {
-    // Assuming the JSONB schema might contain { name, address, time }
-    pickupPoint = [rawPickup.name, rawPickup.address, rawPickup.time]
-      .filter(Boolean)
-      .join(" - ");
+    // Formats the JSON object nicely: "Designated Gate at 17:15"
+    pickupPoint = [rawPickup.name, rawPickup.time].filter(Boolean).join(" at ");
+
+    // If it happens to have an address instead of time
+    if (!rawPickup.time && rawPickup.address) {
+      pickupPoint += ` - ${rawPickup.address}`;
+    }
   }
 
   /* -------------------------- money / promo -------------------------- */
