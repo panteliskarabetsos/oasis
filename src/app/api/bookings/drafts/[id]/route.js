@@ -207,7 +207,7 @@ export async function PATCH(req, ctx) {
       updatedAt: new Date().toISOString(),
     })
     .eq("id", draftId)
-    .eq("clientToken", token); // 🔒 SECURITY: Extra layer of safety
+    .eq("clientToken", token); 
 
   if (upErr) {
     console.error("[drafts/:id] patch error:", upErr);

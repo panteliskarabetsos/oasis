@@ -20,8 +20,23 @@ import {
   Navigation,
   User,
   Lock,
+  ShieldAlert,
+  CreditCard,
 } from "lucide-react";
 import Link from "next/link";
+
+// Helper to translate policy types into readable rules
+const getPolicyDescription = (policy) => {
+  const p = policy?.toLowerCase() || "moderate";
+  if (p.includes("flexible")) {
+    return "Full refund up to 48 hours before the experience starts.";
+  }
+  if (p.includes("strict")) {
+    return "100% refund up to 14 days, 50% refund 7-13 days, no refund under 7 days.";
+  }
+  // Default to Moderate
+  return "Full refund up to 7 days before, 50% refund up to 48 hours before.";
+};
 
 export default function ManageBookingPage() {
   const [step, setStep] = useState("search");
@@ -46,8 +61,11 @@ export default function ManageBookingPage() {
   const [selectedSlotId, setSelectedSlotId] = useState(null);
   const [selectedMeetupPoint, setSelectedMeetupPoint] = useState(null);
 
-  // Calculate if the meetup point can be changed (>= 10 hours before start)
+  // ---------- Time & Policy Calculations ----------
   let isMeetupChangeable = false;
+  let hoursUntilEvent = 0;
+  let refundStatus = "none"; // 'full' | 'partial' | 'none'
+
   if (booking && booking.date && booking.time && booking.time !== "TBD") {
     // Format "17:30" to "17:30:00" for valid parsing across browsers
     const timeStr =
@@ -55,9 +73,26 @@ export default function ManageBookingPage() {
     const eventDateTime = new Date(`${booking.date}T${timeStr}`);
 
     if (!isNaN(eventDateTime.getTime())) {
-      const hoursUntilEvent =
+      hoursUntilEvent =
         (eventDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
       isMeetupChangeable = hoursUntilEvent >= 10;
+
+      // Determine refund eligibility based on actual policies
+      const policy = (booking.cancellationPolicy || "moderate").toLowerCase();
+
+      if (policy.includes("flexible")) {
+        if (hoursUntilEvent >= 48) refundStatus = "full";
+        else refundStatus = "none";
+      } else if (policy.includes("strict")) {
+        if (hoursUntilEvent >= 14 * 24) refundStatus = "full";
+        else if (hoursUntilEvent >= 7 * 24) refundStatus = "partial";
+        else refundStatus = "none";
+      } else {
+        // Moderate (Default)
+        if (hoursUntilEvent >= 7 * 24) refundStatus = "full";
+        else if (hoursUntilEvent >= 48) refundStatus = "partial";
+        else refundStatus = "none";
+      }
     }
   }
 
@@ -105,12 +140,13 @@ export default function ManageBookingPage() {
           totalAmount: 160.0,
           location: "Estate Winery, North Block",
           meetupPoint: { name: "Main Entrance Gate", time: "17:15" },
+          cancellationPolicy: "moderate", // Mock policy
           attendees: [
             { firstName: "John", lastName: lastName },
             { firstName: "Jane", lastName: lastName },
             { firstName: "Timmy", lastName: lastName, isKid: true },
           ],
-          hasRescheduled: false, // Flag to track if they've already used their 1 reschedule
+          hasRescheduled: false,
         });
         setStep("details");
       } else {
@@ -342,7 +378,7 @@ export default function ManageBookingPage() {
                           type="text"
                           value={reference}
                           onChange={(e) => setReference(e.target.value)}
-                          placeholder="e.g. BKG-12345"
+                          placeholder="e.g. BK-000123"
                           className="w-full pl-10 pr-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] transition-all"
                           required
                         />
@@ -744,12 +780,91 @@ export default function ManageBookingPage() {
                   {activeModal === "meetup" && "Change Meetup Point"}
                 </h3>
 
+                {/* Cancel View with Policy Rules */}
                 {activeModal === "cancel" && (
-                  <p className="text-sm text-stone-500 mb-6">
-                    Please tell us why you need to cancel. Note that
-                    cancellations are subject to our refund policy.
-                  </p>
+                  <div className="mb-6">
+                    <p className="text-sm text-stone-500 mb-4">
+                      Review the cancellation policy for this experience before
+                      proceeding.
+                    </p>
+
+                    <div className="bg-stone-50 border border-stone-200 rounded-xl p-5 mb-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <ShieldAlert size={18} className="text-[#8b6f47]" />
+                          <h4 className="font-bold text-stone-900 text-sm">
+                            Cancellation Policy
+                          </h4>
+                        </div>
+                        <span className="text-[10px] uppercase tracking-widest font-bold bg-white border border-stone-200 px-2 py-0.5 rounded text-stone-600 shadow-sm">
+                          {booking.cancellationPolicy || "Moderate"}
+                        </span>
+                      </div>
+
+                      <p className="text-sm text-stone-600 mb-4">
+                        {getPolicyDescription(booking.cancellationPolicy)}
+                      </p>
+
+                      {/* Dynamic Refund Eligibility Box */}
+                      <div
+                        className={`p-3 rounded-lg flex items-start gap-2 border ${
+                          refundStatus === "full"
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                            : refundStatus === "partial"
+                              ? "bg-amber-50 border-amber-200 text-amber-800"
+                              : "bg-red-50 border-red-200 text-red-800"
+                        }`}
+                      >
+                        <CreditCard size={16} className="shrink-0 mt-0.5" />
+                        <div className="text-sm">
+                          {refundStatus === "full" ? (
+                            <>
+                              <strong className="block mb-0.5">
+                                Eligible for Full Refund
+                              </strong>
+                              Based on the{" "}
+                              {booking.cancellationPolicy || "Moderate"} policy
+                              and the current time, you are eligible for a 100%
+                              refund.
+                            </>
+                          ) : refundStatus === "partial" ? (
+                            <>
+                              <strong className="block mb-0.5">
+                                Eligible for Partial Refund (50%)
+                              </strong>
+                              Based on the{" "}
+                              {booking.cancellationPolicy || "Moderate"} policy,
+                              cancellations made at this time are eligible for a
+                              50% refund.
+                            </>
+                          ) : (
+                            <>
+                              <strong className="block mb-0.5">
+                                Past Refund Window
+                              </strong>
+                              Based on the{" "}
+                              {booking.cancellationPolicy || "Moderate"} policy,
+                              cancellations made this close to the event time
+                              are not eligible for a refund.
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <label className="block text-sm font-semibold text-stone-700 mb-1.5">
+                      Reason for cancellation
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={actionReason}
+                      onChange={(e) => setActionReason(e.target.value)}
+                      placeholder="Please tell us why you need to cancel..."
+                      className="w-full p-3 bg-white border border-stone-200 rounded-xl text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] resize-none"
+                    />
+                  </div>
                 )}
+
                 {activeModal === "reschedule" && (
                   <p className="text-sm text-stone-500 mb-6">
                     Select a new date and time that fits your party of{" "}
@@ -862,28 +977,18 @@ export default function ManageBookingPage() {
                         )}
                       </div>
                     )}
-                  </div>
-                )}
 
-                {(activeModal === "cancel" || activeModal === "reschedule") && (
-                  <>
-                    <label className="block text-sm font-semibold text-stone-700 mb-1.5">
-                      {activeModal === "cancel"
-                        ? "Reason for cancellation"
-                        : "Additional Notes (Optional)"}
+                    <label className="block text-sm font-semibold text-stone-700 mb-1.5 mt-6">
+                      Additional Notes (Optional)
                     </label>
                     <textarea
-                      rows={3}
+                      rows={2}
                       value={actionReason}
                       onChange={(e) => setActionReason(e.target.value)}
-                      placeholder={
-                        activeModal === "cancel"
-                          ? "Please tell us why..."
-                          : "Any special requests?"
-                      }
-                      className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] resize-none"
+                      placeholder="Any special requests?"
+                      className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] resize-none"
                     />
-                  </>
+                  </div>
                 )}
               </div>
 
@@ -900,7 +1005,8 @@ export default function ManageBookingPage() {
                   disabled={
                     actionLoading ||
                     (activeModal === "reschedule" && !selectedSlotId) ||
-                    (activeModal === "meetup" && !selectedMeetupPoint)
+                    (activeModal === "meetup" && !selectedMeetupPoint) ||
+                    (activeModal === "cancel" && !actionReason.trim())
                   }
                   className={`flex-1 px-4 py-2.5 rounded-xl font-semibold text-white flex justify-center items-center gap-2 transition disabled:opacity-50 ${activeModal === "cancel" ? "bg-red-600 hover:bg-red-700" : "bg-[#1a1a1a] hover:bg-[#333]"}`}
                 >

@@ -50,7 +50,7 @@ export async function GET(req) {
         primary_contact,
         selected_meetup_point,
         attendees,
-        Experience ( name, location ),
+        Experience ( name, location, cancellationPolicy ),
         User ( name, surname, email ),
         ScheduleSlot ( date )
       `,
@@ -152,6 +152,7 @@ export async function GET(req) {
         : 0.0,
       location: booking.Experience?.location || "Main Location",
       meetupPoint: booking.selected_meetup_point || null,
+      cancellationPolicy: booking.Experience?.cancellationPolicy || "moderate",
       attendees: booking.attendees || [],
       updateRequested,
       hasRescheduled,

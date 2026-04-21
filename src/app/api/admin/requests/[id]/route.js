@@ -1,11 +1,11 @@
-// src/app/api/admin/requests/route.js
+// src/app/api/admin/requests/[id]/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
-export async function GET(req) {
+export async function PATCH(req, { params }) {
   const admin = createSupabaseAdmin();
   if (!admin)
     return NextResponse.json(
@@ -14,154 +14,97 @@ export async function GET(req) {
     );
 
   try {
-    const { data: requests, error } = await admin
+    // Next.js 15 requires awaiting params
+    const resolvedParams = await params;
+    const requestId = resolvedParams.id;
+
+    const { action, adminNotes } = await req.json(); // action = 'approve' or 'reject'
+
+    if (!["approve", "reject"].includes(action)) {
+      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    }
+
+    // 1. Fetch the request details
+    const { data: request, error: fetchError } = await admin
       .from("booking_request")
-      .select(
-        `
-        id,
-        type,
-        status,
-        reason,
-        created_at,
-        requested_slot_id,
-        booking_id,
-        booking:booking_id (
-          id,
-          status,
-          primary_contact,
-          numberOfPeople,
-          adultsCount,
-          kidsCount,
-          counts,
-          selected_meetup_point,
-          User ( name, surname, email ),
-          Experience ( name )
-        ),
-        requested_slot:requested_slot_id (
-          date,
-          totalSlots
-        )
-      `,
-      )
-      .eq("status", "pending")
-      .order("created_at", { ascending: false });
+      .select("*")
+      .eq("id", requestId)
+      .single();
 
-    if (error) throw error;
+    if (fetchError || !request)
+      return NextResponse.json({ error: "Request not found" }, { status: 404 });
 
-    // Collect requested slot IDs to calculate availability for reschedules
-    const requestedSlotIds = [
-      ...new Set(requests.map((r) => r.requested_slot_id).filter(Boolean)),
-    ];
-    const slotAvailability = {};
+    if (request.status !== "pending")
+      return NextResponse.json(
+        { error: "Request already processed" },
+        { status: 400 },
+      );
 
-    if (requestedSlotIds.length > 0) {
-      const COUNT_STATUSES = [
-        "paid",
-        "confirmed",
-        "completed",
-        "checked_in",
-        "approved",
-      ];
-      const { data: slotBookings } = await admin
-        .from("booking")
-        .select(
-          "scheduleSlotId, numberOfPeople, adultsCount, kidsCount, counts",
-        )
-        .in("scheduleSlotId", requestedSlotIds)
-        .in("status", COUNT_STATUSES);
+    const newStatus = action === "approve" ? "approved" : "rejected";
 
-      const bookedMap = new Map();
-      for (const b of slotBookings || []) {
-        const nDirect = Number(b?.numberOfPeople);
-        const nAdults = Number(b?.adultsCount);
-        const nKids = Number(b?.kidsCount);
-        const cAdults = Number(b?.counts?.adults ?? 0);
-        const cKids = Number(b?.counts?.kids ?? 0);
+    // 2. If approved, apply the changes to the booking table
+    if (action === "approve") {
+      let bookingUpdatePayload = {};
 
-        let seats = 0;
-        if (Number.isFinite(nDirect) && nDirect > 0) seats = nDirect;
-        else if (Number.isFinite(nAdults) || Number.isFinite(nKids))
-          seats = (nAdults || 0) + (nKids || 0);
-        else seats = (cAdults || 0) + (cKids || 0);
+      if (request.type === "cancel") {
+        bookingUpdatePayload = { status: "cancelled" };
+      } else if (request.type === "reschedule" && request.requested_slot_id) {
+        // We must fetch the actual date/time of the newly requested slot
+        // so we can overwrite the hardcoded 'startTime' on the booking table.
+        const { data: newSlot, error: slotError } = await admin
+          .from("ScheduleSlot")
+          .select("date")
+          .eq("id", request.requested_slot_id)
+          .single();
 
-        bookedMap.set(
-          b.scheduleSlotId,
-          (bookedMap.get(b.scheduleSlotId) || 0) + seats,
-        );
+        if (slotError || !newSlot) {
+          console.error("Failed to fetch new slot date:", slotError);
+          return NextResponse.json(
+            { error: "Failed to locate the requested time slot" },
+            { status: 500 },
+          );
+        }
+
+        bookingUpdatePayload = {
+          scheduleSlotId: request.requested_slot_id,
+          startTime: newSlot.date, // Overwrite the old time with the new slot's time!
+        };
       }
 
-      for (const slotId of requestedSlotIds) {
-        slotAvailability[slotId] = bookedMap.get(slotId) || 0;
+      // Apply changes to booking
+      if (Object.keys(bookingUpdatePayload).length > 0) {
+        const { error: bookingUpdateError } = await admin
+          .from("booking")
+          .update(bookingUpdatePayload)
+          .eq("id", request.booking_id);
+
+        if (bookingUpdateError) {
+          console.error("Failed to update booking:", bookingUpdateError);
+          return NextResponse.json(
+            { error: "Failed to apply changes to booking" },
+            { status: 500 },
+          );
+        }
       }
     }
 
-    // Format the response for the frontend
-    const formattedRequests = requests.map((req) => {
-      const b = req.booking;
-      const contactLastName =
-        b?.primary_contact?.lastName || b?.User?.surname || "";
-      const contactFirstName =
-        b?.primary_contact?.firstName || b?.User?.name || "";
-      const guestName =
-        `${contactFirstName} ${contactLastName}`.trim() || "Unknown Guest";
+    // 3. Update the request record itself
+    const { error: requestUpdateError } = await admin
+      .from("booking_request")
+      .update({
+        status: newStatus,
+        admin_notes: adminNotes || null,
+        resolved_at: new Date().toISOString(),
+      })
+      .eq("id", requestId);
 
-      // Calculate Party Size & Ages
-      const nDirect = Number(b?.numberOfPeople);
-      const nAdults = Number(b?.adultsCount);
-      const nKids = Number(b?.kidsCount);
-      const cAdults = Number(b?.counts?.adults ?? 0);
-      const cKids = Number(b?.counts?.kids ?? 0);
+    if (requestUpdateError) throw requestUpdateError;
 
-      let totalGuests = 0;
-      let adults = 0;
-      let kids = 0;
-
-      if (Number.isFinite(nAdults) && Number.isFinite(nKids)) {
-        adults = nAdults;
-        kids = nKids;
-        totalGuests = adults + kids;
-      } else if (Number.isFinite(cAdults) && Number.isFinite(cKids)) {
-        adults = cAdults;
-        kids = cKids;
-        totalGuests = adults + kids;
-      } else if (Number.isFinite(nDirect) && nDirect > 0) {
-        totalGuests = nDirect;
-        adults = nDirect; // Fallback assumption
-      }
-
-      // Calculate Available Capacity for the newly requested slot
-      let availableSlots = null;
-      if (req.requested_slot_id && req.requested_slot?.totalSlots) {
-        const total = req.requested_slot.totalSlots;
-        const booked = slotAvailability[req.requested_slot_id] || 0;
-        availableSlots = Math.max(0, total - booked);
-      }
-
-      return {
-        id: req.id,
-        bookingId: req.booking_id,
-        reference: `BK-${String(req.booking_id).padStart(6, "0")}`,
-        type: req.type,
-        status: req.status,
-        reason: req.reason,
-        createdAt: req.created_at,
-        guestName,
-        experienceName: b?.Experience?.name || "Unknown Experience",
-        meetupPoint: b?.selected_meetup_point || null, // Added Meetup Point!
-        currentBookingStatus: b?.status,
-        newDate: req.requested_slot?.date || null,
-        totalGuests: totalGuests || 1,
-        adults: adults || 1,
-        kids: kids || 0,
-        availableSlots,
-      };
-    });
-
-    return NextResponse.json(formattedRequests);
+    return NextResponse.json({ success: true, status: newStatus });
   } catch (error) {
-    console.error("[admin-requests-get] error:", error);
+    console.error("[admin-requests-patch] error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch requests" },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
