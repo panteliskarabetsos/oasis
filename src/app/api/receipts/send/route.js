@@ -1,35 +1,50 @@
 // src/app/api/receipts/send/route.js
 import { NextResponse } from "next/server";
-import { renderToStaticMarkup } from "react-dom/server";
-import ReceiptEmail from "@/components/emails/ReceiptEmail";
+import generateReceiptEmailHtml from "@/lib/email/ReceiptEmail";
+import buildReceiptPdfBuffer from "@/lib/pdf/buildReceipt";
 
 export async function POST(req) {
   try {
-    const { receipt, email } = await req.json();
+    const body = await req.json();
 
-    // 1. Convert the React Component into a raw HTML string
-    const htmlString = renderToStaticMarkup(<ReceiptEmail receipt={receipt} />);
+    // Defensive check: extract receipt and email
+    const receipt = body?.receipt;
+    const email = body?.email;
 
-    // 2. Send the email using your preferred provider (Resend, SendGrid, NodeMailer, etc.)
-    // Example using a generic fetch to an email provider:
-    /*
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json"
+    if (!receipt) {
+      console.error("Payload received:", body);
+      return NextResponse.json(
+        { error: "Receipt data is missing in request body" },
+        { status: 400 },
+      );
+    }
+
+    if (!email) {
+      return NextResponse.json(
+        { error: "Recipient email is missing" },
+        { status: 400 },
+      );
+    }
+
+    const receiptNumber = String(receipt.id || "0").padStart(6, "0");
+
+    // 1. Generate HTML (Passes the receipt object here)
+    const htmlString = generateReceiptEmailHtml(receipt);
+
+    // 2. Generate PDF
+    const pdfBuffer = await buildReceiptPdfBuffer({
+      receipt,
+      store: {
+        name: "Olive & Oak",
+        address: "123 Artisan Lane\nChania, Crete 73100",
+        taxId: "EL123456789",
       },
-      body: JSON.stringify({
-        from: "receipts@yourstore.com",
-        to: email,
-        subject: `Your Receipt #${String(receipt.id).padStart(6, "0")}`,
-        html: htmlString // <-- Pass the compiled HTML here!
-      })
     });
-    */
 
+    // ... rest of your Resend fetch code
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    console.error("Email API Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

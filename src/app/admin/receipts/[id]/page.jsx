@@ -258,7 +258,7 @@ export default async function ReceiptPage({ params }) {
         <PrintButton receiptId={receipt.id} />
         <div className="flex gap-3">
           {/* Passed the receipt ID in case you need it in the Email component later */}
-          <EmailButton receiptId={receipt.id} />
+          <EmailButton receipt={receipt} />
 
           <Link
             href="/admin/pos"
