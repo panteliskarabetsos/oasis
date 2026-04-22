@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { format } from "date-fns";
+import { format, formatDistanceToNow, isPast } from "date-fns";
 import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -15,11 +15,12 @@ import {
   Loader2,
   RefreshCw,
   Search,
-  Filter,
   Ticket,
   Users,
   ShieldAlert,
   CreditCard,
+  Copy,
+  ArrowUpDown,
 } from "lucide-react";
 
 const getPolicyDescription = (policy) => {
@@ -37,14 +38,17 @@ export default function AdminRequestsPage() {
   const [requests, setRequests] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Search, Filter & Sort State
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("all");
+  const [sortBy, setSortBy] = useState("requested_desc");
 
+  // Modal State
   const [activeModal, setActiveModal] = useState(null);
   const [modalAction, setModalAction] = useState(null);
   const [adminNotes, setAdminNotes] = useState("");
   const [refundOption, setRefundOption] = useState("full");
-  const [recommendedRefund, setRecommendedRefund] = useState(null); // Keep track to label it for admins
+  const [recommendedRefund, setRecommendedRefund] = useState(null);
   const [hoursBeforeEvent, setHoursBeforeEvent] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -66,15 +70,40 @@ export default function AdminRequestsPage() {
     fetchRequests();
   }, []);
 
-  const filteredRequests = useMemo(() => {
-    return requests.filter((req) => {
+  const filteredAndSortedRequests = useMemo(() => {
+    let result = requests.filter((req) => {
       const matchesSearch =
         req.guestName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         req.reference.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = filterType === "all" || req.type === filterType;
       return matchesSearch && matchesType;
     });
-  }, [requests, searchQuery, filterType]);
+
+    result.sort((a, b) => {
+      if (sortBy === "requested_desc")
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      if (sortBy === "requested_asc")
+        return new Date(a.createdAt) - new Date(b.createdAt);
+
+      const dateA = a.eventDate
+        ? new Date(a.eventDate).getTime()
+        : 9999999999999;
+      const dateB = b.eventDate
+        ? new Date(b.eventDate).getTime()
+        : 9999999999999;
+
+      if (sortBy === "event_asc") return dateA - dateB; // Closest events first
+      if (sortBy === "event_desc") return dateB - dateA; // Furthest events first
+      return 0;
+    });
+
+    return result;
+  }, [requests, searchQuery, filterType, sortBy]);
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    toast.success("Reference copied!");
+  };
 
   const openModal = (request, action) => {
     setActiveModal(request);
@@ -178,7 +207,8 @@ export default function AdminRequestsPage() {
           </button>
         </header>
 
-        <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-sm flex flex-col sm:flex-row gap-4 mb-8">
+        {/* Toolbar: Search, Filters, Sort */}
+        <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-sm mb-8 space-y-4 md:space-y-0 md:flex md:items-center md:gap-4">
           <div className="relative flex-1">
             <Search
               className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400"
@@ -192,17 +222,44 @@ export default function AdminRequestsPage() {
               className="w-full pl-10 pr-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] transition-all"
             />
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Filter className="text-stone-400 ml-1" size={18} />
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="pl-3 pr-8 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] appearance-none cursor-pointer"
-            >
-              <option value="all">All Requests</option>
-              <option value="cancel">Cancellations</option>
-              <option value="reschedule">Reschedules</option>
-            </select>
+
+          <div className="flex flex-col sm:flex-row items-center gap-4 shrink-0">
+            <div className="flex items-center bg-stone-100 p-1 rounded-xl border border-stone-200/50 w-full sm:w-auto">
+              {[
+                { id: "all", label: "All" },
+                { id: "cancel", label: "Cancellations" },
+                { id: "reschedule", label: "Reschedules" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setFilterType(tab.id)}
+                  className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-semibold rounded-lg transition-all ${
+                    filterType === tab.id
+                      ? "bg-white text-stone-900 shadow-sm"
+                      : "text-stone-500 hover:text-stone-700"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto relative">
+              <ArrowUpDown
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400"
+                size={16}
+              />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="w-full sm:w-auto pl-9 pr-8 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] appearance-none cursor-pointer"
+              >
+                <option value="requested_desc">Newest Requests</option>
+                <option value="requested_asc">Oldest Requests</option>
+                <option value="event_asc">Closest Event Date</option>
+                <option value="event_desc">Furthest Event Date</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -231,7 +288,7 @@ export default function AdminRequestsPage() {
               </div>
             ))}
           </div>
-        ) : filteredRequests.length === 0 ? (
+        ) : filteredAndSortedRequests.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -248,14 +305,43 @@ export default function AdminRequestsPage() {
                 ? "No requests match your current search or filters."
                 : "There are no pending guest requests at the moment. Time for a coffee break!"}
             </p>
+            {(searchQuery || filterType !== "all") && (
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setFilterType("all");
+                }}
+                className="mt-6 text-sm font-semibold text-[#8b6f47] hover:underline"
+              >
+                Clear Filters
+              </button>
+            )}
           </motion.div>
         ) : (
           <div className="space-y-5">
             <AnimatePresence>
-              {filteredRequests.map((req) => {
+              {filteredAndSortedRequests.map((req) => {
                 const hasEnoughCapacity =
                   req.availableSlots !== null &&
                   req.availableSlots >= req.totalGuests;
+
+                let urgencyText = "";
+                let urgencyColor = "text-stone-400";
+                if (req.eventDate) {
+                  const evDate = new Date(req.eventDate);
+                  if (isPast(evDate)) {
+                    urgencyText = "Event passed";
+                    urgencyColor = "text-red-500 font-bold";
+                  } else {
+                    urgencyText = `Starts in ${formatDistanceToNow(evDate)}`;
+                    const hoursLeft =
+                      (evDate.getTime() - Date.now()) / (1000 * 60 * 60);
+                    if (hoursLeft <= 48)
+                      urgencyColor = "text-red-500 font-bold";
+                    else if (hoursLeft <= 168)
+                      urgencyColor = "text-amber-500 font-semibold";
+                  }
+                }
 
                 return (
                   <motion.div
@@ -271,22 +357,31 @@ export default function AdminRequestsPage() {
                     className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row gap-6 items-start justify-between group"
                   >
                     <div className="flex-1 space-y-4 w-full">
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            req.type === "cancel"
-                              ? "bg-red-50 text-red-600 border border-red-100"
-                              : "bg-blue-50 text-blue-600 border border-blue-100"
-                          }`}
-                        >
-                          {req.type === "cancel"
-                            ? "Cancellation"
-                            : "Reschedule"}
-                        </span>
-                        <span className="text-xs font-semibold text-stone-400 flex items-center gap-1.5 uppercase tracking-wide">
-                          <Clock size={12} /> Requested{" "}
-                          {format(new Date(req.createdAt), "MMM d, h:mm a")}
-                        </span>
+                      <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              req.type === "cancel"
+                                ? "bg-red-50 text-red-600 border border-red-100"
+                                : "bg-blue-50 text-blue-600 border border-blue-100"
+                            }`}
+                          >
+                            {req.type === "cancel"
+                              ? "Cancellation"
+                              : "Reschedule"}
+                          </span>
+                          <span className="text-xs font-semibold text-stone-400 flex items-center gap-1.5 uppercase tracking-wide">
+                            <Clock size={12} /> Req.{" "}
+                            {format(new Date(req.createdAt), "MMM d, HH:mm")}
+                          </span>
+                        </div>
+                        {urgencyText && (
+                          <span
+                            className={`text-xs uppercase tracking-wide flex items-center gap-1.5 ${urgencyColor}`}
+                          >
+                            {urgencyText}
+                          </span>
+                        )}
                       </div>
 
                       <div>
@@ -294,8 +389,16 @@ export default function AdminRequestsPage() {
                           {req.guestName}
                         </h3>
                         <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-stone-600">
-                          <span className="flex items-center gap-1 bg-stone-100 px-2 py-0.5 rounded text-stone-700 font-mono text-xs">
-                            <Ticket size={12} /> {req.reference}
+                          <span className="flex items-center gap-1 bg-stone-100 pl-2 pr-1 py-0.5 rounded text-stone-700 font-mono text-xs border border-stone-200/50">
+                            <Ticket size={12} className="text-stone-400" />{" "}
+                            {req.reference}
+                            <button
+                              onClick={() => copyToClipboard(req.reference)}
+                              className="p-1 hover:bg-stone-200 rounded transition ml-1"
+                              title="Copy Reference"
+                            >
+                              <Copy size={12} className="text-stone-500" />
+                            </button>
                           </span>
                           <span className="text-stone-300">•</span>
                           <span>{req.experienceName}</span>
@@ -359,11 +462,12 @@ export default function AdminRequestsPage() {
                                 <span className="text-[#8b6f47] font-bold bg-[#8b6f47]/10 px-2 py-0.5 rounded-md">
                                   {format(
                                     new Date(req.newDate),
-                                    "EEEE, MMMM d, yyyy @ h:mm a",
+                                    "EEEE, MMMM d, yyyy @ HH:mm",
                                   )}
                                 </span>
                               </div>
                             </div>
+
                             {req.availableSlots !== null && (
                               <div className="sm:text-right border-l-2 border-stone-200 pl-4 sm:border-l-0 sm:pl-0">
                                 <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
@@ -469,7 +573,7 @@ export default function AdminRequestsPage() {
                       </strong>
                     </div>
 
-                    <p className="text-xs text-stone-500 mb-4 italic">
+                    <p className="text-xs text-stone-500 mb-4 italic pb-3 border-b border-stone-200">
                       Requested{" "}
                       <strong>
                         {hoursBeforeEvent

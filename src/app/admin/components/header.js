@@ -15,6 +15,7 @@ import {
   ExternalLink,
   LogOut,
   Sparkles,
+  Bell,
 } from "lucide-react";
 import AdminMobileMenu from "./mobile-menu";
 
@@ -74,7 +75,7 @@ function buildPageIndicator(activePath, activeSection) {
   if (!rest) return activeSection.label;
   const isActive =
     typeof activePath === "string" &&
-    (activePath === href || activePath.startsWith(href + "/"));
+    (activePath === base || activePath.startsWith(base + "/"));
 
   const parts = rest
     .split("/")
@@ -84,7 +85,7 @@ function buildPageIndicator(activePath, activeSection) {
   return [activeSection.label, ...parts].join(" / ");
 }
 
-export default function AdminHeader({
+export default async function AdminHeader({
   displayName = "Admin",
   activePath = "",
 }) {
@@ -92,6 +93,17 @@ export default function AdminHeader({
   const initial = (trimmed && [...trimmed][0]?.toUpperCase()) || "•";
   const active = getActiveSection(activePath);
   const indicator = buildPageIndicator(activePath, active);
+
+  // 1. Check for pending guest requests directly on the server
+  const supa = await createSupabaseServer();
+  const { count, error } = await supa
+    .from("booking_request")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "pending");
+
+  const pendingRequestsCount = count || 0;
+  const hasPendingRequests = pendingRequestsCount > 0;
+
   return (
     <>
       {/* Skip link */}
@@ -140,7 +152,7 @@ export default function AdminHeader({
                     Oasis Admin
                   </p>
 
-                  {/* Active section chip (great for mobile where nav is hidden) */}
+                  {/* Active section chip (mobile) */}
                   {active ? (
                     <span className="md:hidden inline-flex items-center gap-1 rounded-full border border-[#e7e0d6] bg-white/70 px-2.5 py-1 text-[11px] text-[#5a4a3f] shadow-sm dark:border-white/10 dark:bg-neutral-800/60 dark:text-neutral-100">
                       <active.icon
@@ -175,14 +187,97 @@ export default function AdminHeader({
             </nav>
 
             {/* Right cluster */}
-            <div className="flex items-center gap-2">
-              {/* Create dropdown (safe even if only 1 option exists now) */}
+            <div className="flex items-center gap-2.5">
+              {/* Notification Bell Popover */}
+              <div className="relative">
+                <details className="group relative">
+                  <summary
+                    className="list-none relative flex h-10 w-10 cursor-pointer select-none items-center justify-center rounded-full border border-[#e8e2d9] bg-white/60 text-[#5a4a3f] shadow-sm hover:bg-[#efeae3] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/50 dark:border-white/10 dark:bg-neutral-800/60 dark:text-neutral-100 dark:hover:bg-neutral-800"
+                    aria-label={`View requests ${hasPendingRequests ? `(${pendingRequestsCount} pending)` : ""}`}
+                  >
+                    <Bell
+                      size={18}
+                      className={`transition-colors ${hasPendingRequests ? "text-red-500 fill-red-50" : "opacity-70"}`}
+                    />
+                    {hasPendingRequests && (
+                      <span className="absolute right-[9px] top-[9px] flex h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full border-[1.5px] border-white bg-red-500 dark:border-neutral-900"></span>
+                      </span>
+                    )}
+                  </summary>
+
+                  {/* Notification Dropdown Panel */}
+                  <div
+                    role="menu"
+                    className="absolute right-0 mt-2 w-[320px] overflow-hidden rounded-2xl border border-[#e8e2d9] bg-white shadow-xl ring-1 ring-black/5 dark:bg-neutral-900 dark:border-white/10 dark:ring-white/5 z-[60]"
+                  >
+                    <div className="px-4 py-3 border-b border-[#e9e4dc] dark:border-white/10 flex justify-between items-center bg-[#fdfcfb] dark:bg-neutral-800/50">
+                      <p className="text-sm font-semibold text-[#5a4a3f] dark:text-neutral-100">
+                        Notifications
+                      </p>
+                      {hasPendingRequests && (
+                        <span className="bg-red-50 border border-red-200 text-red-600 text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full">
+                          {pendingRequestsCount} New
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="p-2">
+                      {hasPendingRequests ? (
+                        <div className="px-4 py-4 rounded-xl bg-amber-50/50 border border-amber-100 dark:border-neutral-700 dark:bg-neutral-800/50 transition">
+                          <div className="flex items-start gap-3">
+                            <span className="relative flex h-3 w-3 mt-1 shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                            </span>
+                            <div>
+                              <p className="text-sm font-medium text-[#5a4a3f] dark:text-neutral-200 mb-1 leading-snug">
+                                You have <strong>{pendingRequestsCount}</strong>{" "}
+                                pending guest request
+                                {pendingRequestsCount > 1 ? "s" : ""} waiting
+                                for your review.
+                              </p>
+                              <p className="text-xs text-[#8b6f47] dark:text-amber-400">
+                                Cancellations & Reschedules
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="px-3 py-8 text-center text-sm text-[#a79a8f] flex flex-col items-center">
+                          <div className="bg-[#f7f4ef] dark:bg-neutral-800 p-3 rounded-full mb-3">
+                            <Bell size={24} className="opacity-40" />
+                          </div>
+                          <p className="font-medium text-[#5a4a3f] dark:text-neutral-300">
+                            You're all caught up!
+                          </p>
+                          <p className="text-xs mt-1">
+                            No pending requests at the moment.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-2 border-t border-[#e9e4dc] bg-[#fdfcfb] dark:border-white/10 dark:bg-neutral-900/50">
+                      <Link
+                        href="/admin/requests"
+                        className="flex justify-center items-center gap-1.5 w-full rounded-xl py-2.5 text-xs font-bold uppercase tracking-widest text-white bg-[#1a1a1a] hover:bg-[#333] transition shadow-sm dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+                      >
+                        Open Requests Dashboard <ExternalLink size={14} />
+                      </Link>
+                    </div>
+                  </div>
+                </details>
+              </div>
+
+              {/* Create dropdown (Desktop Only) */}
               <div className="hidden sm:block">
                 <details className="relative group">
                   <summary
                     className={[
                       "list-none inline-flex cursor-pointer select-none items-center gap-2",
-                      "rounded-full bg-[#8b6f47] px-3.5 py-2 text-sm text-white shadow-sm",
+                      "rounded-full bg-[#8b6f47] px-4 py-2 text-sm text-white shadow-sm font-medium",
                       "hover:bg-[#7a5f3a] transition motion-reduce:transition-none",
                       "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/60",
                       "dark:bg-amber-600 dark:hover:bg-amber-700",
@@ -261,13 +356,13 @@ export default function AdminHeader({
                 </details>
               </div>
 
-              {/* User menu (desktop only) */}
+              {/* User menu (Desktop only) */}
               <div className="hidden md:block">
                 <details className="relative group">
                   <summary
                     className={[
                       "list-none inline-flex cursor-pointer select-none items-center gap-2",
-                      "rounded-full border border-[#e8e2d9] bg-white/60 px-2.5 py-1.5 text-xs text-[#5a4a3f] shadow-sm",
+                      "rounded-full border border-[#e8e2d9] bg-white/60 px-3 py-1.5 text-xs font-medium text-[#5a4a3f] shadow-sm",
                       "hover:bg-[#efeae3] transition motion-reduce:transition-none",
                       "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/50",
                       "dark:border-white/10 dark:bg-neutral-800/60 dark:text-neutral-100 dark:hover:bg-neutral-800",
@@ -276,7 +371,7 @@ export default function AdminHeader({
                     aria-haspopup="menu"
                   >
                     <span
-                      className="inline-grid h-7 w-7 place-items-center rounded-full bg-[#e8dfcf] text-[11px] font-semibold dark:bg-neutral-700"
+                      className="inline-grid h-7 w-7 place-items-center rounded-full bg-[#e8dfcf] text-[11px] font-bold dark:bg-neutral-700"
                       aria-hidden
                     >
                       {initial}
@@ -297,11 +392,11 @@ export default function AdminHeader({
                     role="menu"
                     className="absolute right-0 mt-2 w-[260px] overflow-hidden rounded-2xl border border-[#e8e2d9] bg-white shadow-xl ring-1 ring-black/5 dark:bg-neutral-900 dark:border-white/10 dark:ring-white/5"
                   >
-                    <div className="px-3 py-2.5">
+                    <div className="px-4 py-3">
                       <p className="truncate text-sm font-semibold text-[#5a4a3f] dark:text-neutral-100">
                         {trimmed || "Admin"}
                       </p>
-                      <p className="text-[11px] text-[#7a6a5f] dark:text-neutral-300">
+                      <p className="text-[11px] text-[#7a6a5f] mt-0.5 dark:text-neutral-300">
                         Administrator
                       </p>
                     </div>
@@ -313,7 +408,7 @@ export default function AdminHeader({
                         <Link
                           href="/"
                           role="menuitem"
-                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#f7f4ef] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-neutral-100 dark:hover:bg-neutral-800"
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm font-medium text-[#5a4a3f] hover:bg-[#f7f4ef] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-neutral-100 dark:hover:bg-neutral-800"
                         >
                           <span className="inline-flex items-center gap-2">
                             <ExternalLink
@@ -323,7 +418,7 @@ export default function AdminHeader({
                             />
                             Back to site
                           </span>
-                          <span aria-hidden className="opacity-70">
+                          <span aria-hidden className="opacity-50">
                             ↗
                           </span>
                         </Link>
@@ -334,7 +429,7 @@ export default function AdminHeader({
                           <button
                             type="submit"
                             role="menuitem"
-                            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-[#8b3f3f] hover:bg-[#fff4e8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-red-300 dark:hover:bg-red-950/20"
+                            className="flex w-full mt-1 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#8b3f3f] hover:bg-[#fff4e8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/40 dark:text-red-300 dark:hover:bg-red-950/20"
                           >
                             <LogOut
                               size={16}
@@ -385,7 +480,7 @@ function NavLink({ href, label, icon: Icon, activePath = "" }) {
         "transition motion-reduce:transition-none",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8b6f47]/45",
         // active: stronger background + border + tiny bottom indicator
-        "data-[active]:bg-[#efeae3] data-[active]:border-[#d6cbbf] data-[active]:shadow-sm",
+        "data-[active]:bg-[#efeae3] data-[active]:border-[#d6cbbf] data-[active]:shadow-sm data-[active]:font-semibold",
         "dark:data-[active]:bg-neutral-800 dark:data-[active]:border-white/15",
       ].join(" ")}
       title={label}
@@ -393,13 +488,13 @@ function NavLink({ href, label, icon: Icon, activePath = "" }) {
       {Icon ? (
         <Icon
           size={16}
-          className={`opacity-80 ${isActive ? "text-white opacity-95" : ""}`}
+          className={`opacity-80 ${isActive ? "text-[#8b6f47] dark:text-amber-300 opacity-100" : ""}`}
           aria-hidden
           focusable="false"
         />
       ) : null}
 
-      <span className="font-medium">{label}</span>
+      <span>{label}</span>
 
       {/* subtle active indicator */}
       {isActive ? (
