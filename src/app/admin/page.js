@@ -47,6 +47,7 @@ import {
   Megaphone,
   Headset,
   UserCheck,
+  Inbox, // <-- Added Inbox icon for the requests tile
 } from "lucide-react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
@@ -58,9 +59,10 @@ export const dynamic = "force-dynamic";
 const PERMISSIONS = {
   experiences: "Experiences",
   bookings: "Bookings",
+  requests: "Guest Requests", // <-- NEW: Added requests permission
   guests: "Guests & CRM",
   planner: "Planner",
-  schedule: "Schedule", // Added for opening new slots
+  schedule: "Schedule",
   admins: "Admins",
   payments: "Payments",
   invoices: "Invoices",
@@ -99,6 +101,7 @@ const ADMIN_ROLES = [
     permissions: [
       "experiences",
       "bookings",
+      "requests", // <-- Granted to Managers
       "guests",
       "planner",
       "schedule",
@@ -142,7 +145,13 @@ const ADMIN_ROLES = [
     color: "text-amber-700",
     bg: "bg-amber-50",
     border: "border-amber-200",
-    permissions: ["bookings", "guests", "checkins", "waitlist"],
+    permissions: [
+      "bookings",
+      "requests", // <-- Granted to Support
+      "guests",
+      "checkins",
+      "waitlist",
+    ],
   },
   {
     id: "partner",
@@ -213,6 +222,15 @@ export default function AdminDashboardPage() {
         desc: "Reservations list",
         onClick: () => go("/admin/bookings"),
         keywords: ["booking", "calendar"],
+      },
+      {
+        key: "requests", // <-- NEW: Action Tile for Requests
+        cat: "ops",
+        icon: <Inbox size={20} />,
+        title: "Guest Requests",
+        desc: "Cancellations & Reschedules",
+        onClick: () => go("/admin/requests"),
+        keywords: ["request", "cancel", "reschedule", "refund", "meetup"],
       },
       {
         key: "guests",
