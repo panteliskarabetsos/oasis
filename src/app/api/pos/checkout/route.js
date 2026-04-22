@@ -83,7 +83,6 @@ function isDiscountActive(dc, currency, experienceId) {
 
 async function incrementDiscountRedemption(id) {
   if (!id) return;
-  // Non-atomic bump (good enough unless you need strict accounting)
   const { data, error } = await supabase
     .from("DiscountCode")
     .select("redemptionCount")
@@ -127,8 +126,9 @@ export async function POST(req) {
     const body = await req.json();
 
     // Basic payload
+    const transactionType = body?.transactionType || "experience"; // "experience", "items", "addons"
     const experienceId = body?.experienceId ?? null;
-    const counts = body?.counts || null; // {adults, kids}
+    const counts = body?.counts || null;
     const adults = Number(counts?.adults || 0);
     const kids = Number(counts?.kids || 0);
     const items = Array.isArray(body?.items) ? body.items : [];
@@ -136,20 +136,20 @@ export async function POST(req) {
     const promoCode = (body?.promoCode || "").trim() || null;
     const giftCode = (body?.giftCode || "").trim() || null;
     const customer = body?.customer || null;
-    const startTime = body?.startTime || null; // ISO from client
+    const startTime = body?.startTime || null;
     const clientCurrency = toCurrency(body?.currency || "eur");
-    const method = body?.payment?.method || "cash"; // 'cash', 'terminal', 'card', 'comp'
+    const method = body?.payment?.method || "cash";
     const reference = (body?.payment?.reference || "").trim() || null;
 
     /* -------------------------------
        Server-side pricing
     -------------------------------- */
-    // Experience pricing from DB (authoritative)
     let unitPriceAdult = 0;
     let unitPriceKid = 0;
     let durationMinutes = body?.duration ?? null;
 
-    if (experienceId) {
+    // Only strictly validate and fetch Experience pricing if this is a booking
+    if (experienceId && transactionType === "experience") {
       const exp = await fetchExperience(experienceId);
       if (!exp) {
         return NextResponse.json(
@@ -165,7 +165,6 @@ export async function POST(req) {
       }
     }
 
-    // Items subtotal
     const itemsSubtotal = items.reduce(
       (sum, it) =>
         sum +
@@ -174,9 +173,10 @@ export async function POST(req) {
       0,
     );
 
-    const expSubtotal = experienceId
-      ? adults * unitPriceAdult + kids * unitPriceKid
-      : 0;
+    const expSubtotal =
+      experienceId && transactionType === "experience"
+        ? adults * unitPriceAdult + kids * unitPriceKid
+        : 0;
 
     const subtotal = Math.max(
       0,
@@ -259,7 +259,6 @@ export async function POST(req) {
     let bookingStatus = "confirmed";
 
     if (method === "card") {
-      // 1. Web Stripe Card Flow
       const piId = body.stripePaymentIntentId;
       if (!piId) {
         return NextResponse.json(
@@ -269,14 +268,22 @@ export async function POST(req) {
       }
 
       // Dedupe check
+      const tableToCheck =
+        transactionType === "items" || transactionType === "addons"
+          ? "Receipt"
+          : "booking";
       const { data: existing, error: exErr } = await supabase
-        .from("booking")
+        .from(tableToCheck)
         .select("id")
         .eq("stripePaymentIntentId", piId)
         .maybeSingle();
 
       if (!exErr && existing?.id) {
-        return NextResponse.json({ bookingId: existing.id });
+        return NextResponse.json(
+          tableToCheck === "Receipt"
+            ? { receiptId: existing.id }
+            : { bookingId: existing.id },
+        );
       }
 
       let pi = await stripe.paymentIntents.retrieve(piId, {
@@ -313,27 +320,18 @@ export async function POST(req) {
 
       bookingStatus = pi.status === "succeeded" ? "confirmed" : "pending";
     } else if (method === "comp") {
-      // 2. Complimentary Flow
       totalPaidAmount = 0;
       paymentNote = "Complimentary";
     } else {
-      // 3. Offline flows: "cash", "terminal", "revolut", etc.
-      // Format string (e.g. "terminal" -> "Terminal") for cleaner DB notes
       const methodLabel = method.charAt(0).toUpperCase() + method.slice(1);
       const giftPart = gift?.redeem_cents
         ? ` • gift: €${(gift.redeem_cents / 100).toFixed(2)}`
         : "";
 
       paymentNote = `Paid by ${methodLabel}${reference ? ` • ref: ${reference}` : ""}${giftPart}`;
-      totalPaidAmount = fromCents(netBeforeGiftC); // full net is assumed collected out-of-band
+      totalPaidAmount = fromCents(netBeforeGiftC);
       bookingStatus = "confirmed";
     }
-
-    /* -------------------------------
-       Build insert payload
-    -------------------------------- */
-    const numberOfPeople =
-      experienceId && adults + kids > 0 ? adults + kids : 1;
 
     const itemsForJson = items
       .filter((l) => Number(l.quantity || l.qty || 0) > 0)
@@ -345,56 +343,6 @@ export async function POST(req) {
         quantity: Number(l.quantity || l.qty || 0),
       }));
 
-    const promoJson = {
-      currency,
-      breakdown: {
-        expSubtotal: fromCents(eur(expSubtotal * 100)),
-        itemsSubtotal: fromCents(eur(itemsSubtotal * 100)),
-        subtotal: fromCents(subtotal),
-        manualDiscount: fromCents(manualDiscountC),
-        promoDiscount: fromCents(promoDiscountC),
-        discountTotal: fromCents(discountTotalC),
-        netBeforeGift: fromCents(netBeforeGiftC),
-        giftApplied: method === "card" ? 0 : fromCents(gift?.redeem_cents || 0),
-        netAfterGift:
-          method === "card"
-            ? fromCents(netBeforeGiftC)
-            : fromCents(netAfterGiftC),
-        totalPaidAmount,
-      },
-      payment: {
-        method,
-        reference,
-        stripePaymentIntentId,
-        status: bookingStatus,
-      },
-      promo:
-        promo &&
-        (promo.type === "percent"
-          ? {
-              id: promo.id,
-              code: promo.code,
-              type: "percent",
-              value: promo.value,
-            }
-          : {
-              id: promo.id,
-              code: promo.code,
-              type: "amount",
-              value: promo.value,
-              currency: promo.currency || currency,
-            }),
-      gift: gift &&
-        method !== "card" && {
-          id: gift.id,
-          code: gift.code,
-          redeem_cents: gift.redeem_cents,
-          currency: gift.currency,
-        },
-      items: itemsForJson,
-      createdAt: nowIso(),
-    };
-
     const notesPieces = [
       itemizeNote(itemsForJson),
       paymentNote || null,
@@ -402,38 +350,128 @@ export async function POST(req) {
     ].filter(Boolean);
     const notes = notesPieces.length ? notesPieces.join("\n\n") : null;
 
-    const insertPayload = {
-      experienceId: experienceId ?? null,
-      startTime: startTime ?? null,
-      counts: counts ?? null,
-      adultsCount: experienceId ? adults : null,
-      kidsCount: experienceId ? kids : null,
-      numberOfPeople,
-      unitPriceAdult: experienceId ? unitPriceAdult : null,
-      unitPriceKid: experienceId ? unitPriceKid : null,
-      totalPaidAmount,
-      currency,
-      stripePaymentIntentId,
-      primary_contact: customer ?? null,
-      appliedPromoCode: promoCode ?? null,
-      discountAmount: fromCents(discountTotalC),
-      promoJson,
-      notes,
-      status: bookingStatus,
-      duration: durationMinutes ?? null,
-    };
+    let responseId = null;
 
-    const { data: created, error: insertErr } = await supabase
-      .from("booking")
-      .insert(insertPayload)
-      .select("id")
-      .single();
+    /* -----------------------------------------------------------
+       DATABASE INSERTS (Experience vs Items/Addons)
+    ----------------------------------------------------------- */
+    if (transactionType === "items" || transactionType === "addons") {
+      // 1. Create a Receipt
+      const receiptPayload = {
+        items: itemsForJson, // Supabase JSONB
+        totalPaidAmount,
+        currency,
+        discountAmount: fromCents(discountTotalC),
+        paymentMethod: method,
+        paymentReference: reference || stripePaymentIntentId || null,
+        notes,
+        stripePaymentIntentId,
+        customerName: customer?.name || null,
+        customerEmail: customer?.email || null,
+        transactionType: transactionType,
+        relatedBookingRef: body.relatedBookingRef || null,
+      };
 
-    if (insertErr) {
-      return NextResponse.json({ error: insertErr.message }, { status: 400 });
+      const { data: createdReceipt, error: receiptErr } = await supabase
+        .from("Receipt")
+        .insert(receiptPayload)
+        .select("id")
+        .single();
+
+      if (receiptErr) {
+        throw new Error(`Receipt Insert Failed: ${receiptErr.message}`);
+      }
+
+      responseId = { receiptId: createdReceipt.id };
+    } else {
+      // 2. Create a Booking
+      const numberOfPeople =
+        experienceId && adults + kids > 0 ? adults + kids : 1;
+
+      const promoJson = {
+        currency,
+        breakdown: {
+          expSubtotal: fromCents(eur(expSubtotal * 100)),
+          itemsSubtotal: fromCents(eur(itemsSubtotal * 100)),
+          subtotal: fromCents(subtotal),
+          manualDiscount: fromCents(manualDiscountC),
+          promoDiscount: fromCents(promoDiscountC),
+          discountTotal: fromCents(discountTotalC),
+          netBeforeGift: fromCents(netBeforeGiftC),
+          giftApplied:
+            method === "card" ? 0 : fromCents(gift?.redeem_cents || 0),
+          netAfterGift:
+            method === "card"
+              ? fromCents(netBeforeGiftC)
+              : fromCents(netAfterGiftC),
+          totalPaidAmount,
+        },
+        payment: {
+          method,
+          reference,
+          stripePaymentIntentId,
+          status: bookingStatus,
+        },
+        promo:
+          promo &&
+          (promo.type === "percent"
+            ? {
+                id: promo.id,
+                code: promo.code,
+                type: "percent",
+                value: promo.value,
+              }
+            : {
+                id: promo.id,
+                code: promo.code,
+                type: "amount",
+                value: promo.value,
+                currency: promo.currency || currency,
+              }),
+        gift: gift &&
+          method !== "card" && {
+            id: gift.id,
+            code: gift.code,
+            redeem_cents: gift.redeem_cents,
+            currency: gift.currency,
+          },
+        items: itemsForJson,
+        createdAt: nowIso(),
+      };
+
+      const insertPayload = {
+        experienceId: experienceId ?? null,
+        startTime: startTime ?? null,
+        counts: counts ?? null,
+        adultsCount: experienceId ? adults : null,
+        kidsCount: experienceId ? kids : null,
+        numberOfPeople,
+        unitPriceAdult: experienceId ? unitPriceAdult : null,
+        unitPriceKid: experienceId ? unitPriceKid : null,
+        totalPaidAmount,
+        currency,
+        stripePaymentIntentId,
+        primary_contact: customer ?? null,
+        appliedPromoCode: promoCode ?? null,
+        discountAmount: fromCents(discountTotalC),
+        promoJson,
+        notes,
+        status: bookingStatus,
+        duration: durationMinutes ?? null,
+      };
+
+      const { data: created, error: insertErr } = await supabase
+        .from("booking")
+        .insert(insertPayload)
+        .select("id")
+        .single();
+
+      if (insertErr) {
+        return NextResponse.json({ error: insertErr.message }, { status: 400 });
+      }
+
+      responseId = { bookingId: created.id };
     }
-
-    const bookingId = created.id;
 
     /* -------------------------------
        Side-effects: promo & gift logs
@@ -465,14 +503,14 @@ export async function POST(req) {
 
       await supabase.from("GiftCardRedemption").insert({
         gift_card_id: gift.id,
-        booking_id: bookingId,
+        booking_id: responseId.bookingId || null, // null if it was a receipt transaction
         amount_cents: gift.redeem_cents,
         currency,
         notes: `Redeemed during POS checkout (${method}${reference ? `, ref: ${reference}` : ""})`,
       });
     }
 
-    return NextResponse.json({ bookingId });
+    return NextResponse.json(responseId);
   } catch (e) {
     return NextResponse.json(
       { error: e.message || "Checkout error" },

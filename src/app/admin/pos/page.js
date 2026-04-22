@@ -17,20 +17,11 @@ import {
   Trash2,
   CreditCard,
   Banknote,
-  Printer,
   CheckCircle2,
   AlertTriangle,
-  CalendarClock,
-  User,
-  Mail,
-  Phone,
-  Tag,
-  Check,
   ShoppingBag,
   Package2,
-  RotateCcw,
   Info,
-  Keyboard,
   X,
   SmartphoneNfc,
 } from "lucide-react";
@@ -96,9 +87,6 @@ function validatePhone(v) {
   return /[0-9+\-()\s]{6,}/.test(v);
 }
 
-/* --------------------------------------------------------------------
-   Stripe singleton
-   -------------------------------------------------------------------- */
 const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
 );
@@ -109,10 +97,10 @@ const stripePromise = loadStripe(
 export default function POSPage() {
   const router = useRouter();
 
-  // Modes
+  // Modes & Types
   const [mode, setMode] = useState("experiences");
-  const [scanMode, setScanMode] = useState(true); // Default true for POS
-  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [txType, setTxType] = useState("experience"); // 'experience' | 'items' | 'addons'
+  const [scanMode, setScanMode] = useState(true);
 
   // Data
   const [experiences, setExperiences] = useState([]);
@@ -126,10 +114,8 @@ export default function POSPage() {
   const searchRef = useRef(null);
   const [selectedExperience, setSelectedExperience] = useState(null);
 
-  // Item cart
+  // Cart
   const [cartItems, setCartItems] = useState({});
-
-  // Experience counts
   const [adults, setAdults] = useState(1);
   const [kids, setKids] = useState(0);
 
@@ -142,7 +128,7 @@ export default function POSPage() {
   const [startTime, setStartTime] = useState(() =>
     toLocalDatetimeInputValue(addMinutes(new Date(), 10)),
   );
-  const minStartTime = toLocalDatetimeInputValue(new Date());
+  const [bookingRef, setBookingRef] = useState(""); // Used if txType === 'addons'
 
   // Customer
   const [custName, setCustName] = useState("");
@@ -150,7 +136,7 @@ export default function POSPage() {
   const [custPhone, setCustPhone] = useState("");
 
   // Payment
-  const [method, setMethod] = useState("terminal"); // 'cash' | 'card' | 'terminal' | 'comp'
+  const [method, setMethod] = useState("terminal");
   const [reference, setReference] = useState("");
   const [cardOpen, setCardOpen] = useState(false);
   const [piClientSecret, setPiClientSecret] = useState(null);
@@ -229,7 +215,6 @@ export default function POSPage() {
     return () => clearTimeout(t);
   }, [queryRaw]);
 
-  // Trap rapid keyboard input (typical of barcode scanners)
   useEffect(() => {
     let barcodeBuffer = "";
     let timeout;
@@ -239,7 +224,6 @@ export default function POSPage() {
       if (e.key.length !== 1 && e.key !== "Enter") return;
 
       if (e.key === "Enter" && barcodeBuffer.length > 3) {
-        // Assume it's a barcode scan if multiple chars were typed super fast
         const matchedItem = items.find(
           (i) => i.sku === barcodeBuffer || i.name.includes(barcodeBuffer),
         );
@@ -260,7 +244,7 @@ export default function POSPage() {
         clearTimeout(timeout);
         timeout = setTimeout(() => {
           barcodeBuffer = "";
-        }, 50); // Scanners fire very fast (<50ms between strokes)
+        }, 50);
       }
     }
     window.addEventListener("keydown", handleGlobalKeyDown);
@@ -317,26 +301,30 @@ export default function POSPage() {
   }, [cartItems, selectedExperience, adults, kids]);
 
   const canSubmit = useMemo(() => {
-    const startValid =
-      !selectedExperience || (startTime && isValidDateInput(startTime));
-    return (
-      !submitting &&
-      hasAnyCart &&
-      startValid &&
-      validateEmail(custEmail) &&
-      validatePhone(custPhone)
-    );
+    const emailOk = validateEmail(custEmail);
+    const phoneOk = validatePhone(custPhone);
+
+    if (txType === "experience") {
+      const startValid =
+        !!selectedExperience && startTime && isValidDateInput(startTime);
+      return !submitting && hasAnyCart && startValid && emailOk && phoneOk;
+    } else {
+      // items or addons flow (doesn't require a selected experience)
+      return !submitting && itemLines.length > 0 && emailOk && phoneOk;
+    }
   }, [
+    txType,
     hasAnyCart,
     selectedExperience,
     startTime,
     submitting,
     custEmail,
     custPhone,
+    itemLines,
   ]);
 
   /* ====================================================================
-     Handlers
+     Handlers (Cart & Manual Pricing)
      ==================================================================== */
   const addItem = useCallback((it) => {
     setCartItems((prev) => {
@@ -351,6 +339,36 @@ export default function POSPage() {
           qty: (cur?.qty || 0) + 1,
         },
       };
+    });
+  }, []);
+
+  const addCustomItem = useCallback(() => {
+    const id = `custom-${Date.now()}`;
+    setCartItems((prev) => ({
+      ...prev,
+      [id]: {
+        id,
+        name: "Custom Charge",
+        sku: null,
+        price: "",
+        qty: 1,
+      },
+    }));
+  }, []);
+
+  const setItemPriceRaw = useCallback((it, val) => {
+    setCartItems((prev) => {
+      const cur = prev[it.id];
+      if (!cur) return prev;
+      return { ...prev, [it.id]: { ...cur, price: val } };
+    });
+  }, []);
+
+  const setItemName = useCallback((it, newName) => {
+    setCartItems((prev) => {
+      const cur = prev[it.id];
+      if (!cur) return prev;
+      return { ...prev, [it.id]: { ...cur, name: newName } };
     });
   }, []);
 
@@ -383,6 +401,9 @@ export default function POSPage() {
     setUndoData(null);
   }, [undoData]);
 
+  /* ====================================================================
+     Checkout
+     ==================================================================== */
   async function openCardCharge() {
     if (!hasAnyCart)
       return setServerMsg({ type: "error", text: "Cart is empty." });
@@ -412,11 +433,8 @@ export default function POSPage() {
   async function openTerminalCharge() {
     if (!hasAnyCart)
       return setServerMsg({ type: "error", text: "Cart is empty." });
-
     try {
       setSubmitting(true);
-
-      // 1. Send the amount to the physical Revolut Terminal
       const res = await fetch("/api/pos/revolut/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -429,8 +447,6 @@ export default function POSPage() {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to push to terminal");
-
-      // 2. Open the waiting modal
       setTerminalIntentId(data.intentId);
     } catch (e) {
       setServerMsg({
@@ -456,12 +472,18 @@ export default function POSPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Checkout failed");
 
-      setServerMsg({
-        type: "success",
-        text: `Booking created (#${data.bookingId}).`,
-      });
-      clearCart();
-      router.push(`/admin/bookings/${data.bookingId}`);
+      if (txType === "items") {
+        setServerMsg({ type: "success", text: `Receipt generated.` });
+        clearCart();
+        // Route to receipts page if you have one, else fallback to a generic success page
+        router.push(
+          `/admin/receipts/${data.receiptId || data.bookingId || ""}`,
+        );
+      } else {
+        setServerMsg({ type: "success", text: `Booking recorded.` });
+        clearCart();
+        router.push(`/admin/bookings/${data.bookingId}`);
+      }
     } catch (e) {
       setServerMsg({ type: "error", text: e.message || "Checkout error" });
     } finally {
@@ -471,6 +493,8 @@ export default function POSPage() {
 
   function createPayload(overrideRef = null) {
     return {
+      transactionType: txType, // "experience" | "items" | "addons"
+      relatedBookingRef: txType === "addons" ? bookingRef.trim() : null,
       experienceId: selectedExperience?.id ?? null,
       startTime: selectedExperience ? new Date(startTime).toISOString() : null,
       counts: selectedExperience ? { adults, kids } : null,
@@ -494,13 +518,14 @@ export default function POSPage() {
       },
       currency: "eur",
       clientGross: gross,
+      stripePaymentIntentId: method === "card" ? piId : null,
     };
   }
 
   function onConfirmClick() {
-    if (method === "card") return openCardCharge(); // Stripe Web Flow
-    if (method === "terminal") return openTerminalCharge(); // Revolut Hardware Flow
-    return handleCheckout(); // Cash/Comp Flow
+    if (method === "card") return openCardCharge();
+    if (method === "terminal") return openTerminalCharge();
+    return handleCheckout();
   }
 
   /* ====================================================================
@@ -532,6 +557,12 @@ export default function POSPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={addCustomItem}
+              className="hidden sm:flex px-4 py-2 text-sm font-medium text-[#4c4138] bg-white border border-[#d8cfc3] hover:bg-[#f0e7d9] rounded-xl transition items-center gap-2"
+            >
+              <Plus className="h-4 w-4" /> Custom Charge
+            </button>
             <button
               onClick={() => {
                 if (hasAnyCart) clearCart();
@@ -576,6 +607,7 @@ export default function POSPage() {
                   selected={selectedExperience}
                   onSelect={(x) => {
                     setSelectedExperience(x);
+                    setTxType("experience"); // Auto switch mode to experience
                     setAdults((v) => (v === 0 ? 1 : v));
                   }}
                 />
@@ -593,14 +625,57 @@ export default function POSPage() {
           {/* Right: Cart Panel */}
           <aside className="w-full lg:w-[420px] xl:w-[480px] shrink-0 flex flex-col bg-white border border-[#e0dcd4] shadow-xl rounded-2xl overflow-hidden">
             <div className="p-4 border-b border-[#e0dcd4] bg-[#faf7f2]">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
+              <h2 className="text-lg font-semibold flex items-center gap-2 mb-3">
                 <ShoppingBag className="h-5 w-5 text-[#8b6f47]" /> Current Order
               </h2>
+
+              {/* Transaction Type Selector */}
+              <div className="flex bg-[#e0dcd4]/50 border border-[#d8cfc3] rounded-lg p-1">
+                <button
+                  onClick={() => setTxType("experience")}
+                  className={clsx(
+                    "flex-1 py-1.5 text-xs font-semibold rounded-md transition-all",
+                    txType === "experience"
+                      ? "bg-white text-[#4c4138] shadow-sm"
+                      : "text-[#7a6a5f] hover:text-[#4c4138]",
+                  )}
+                >
+                  Experience Booking
+                </button>
+                <button
+                  onClick={() => {
+                    setTxType("items");
+                    setSelectedExperience(null);
+                  }}
+                  className={clsx(
+                    "flex-1 py-1.5 text-xs font-semibold rounded-md transition-all",
+                    txType === "items"
+                      ? "bg-white text-[#4c4138] shadow-sm"
+                      : "text-[#7a6a5f] hover:text-[#4c4138]",
+                  )}
+                >
+                  Items (Receipt)
+                </button>
+                <button
+                  onClick={() => {
+                    setTxType("addons");
+                    setSelectedExperience(null);
+                  }}
+                  className={clsx(
+                    "flex-1 py-1.5 text-xs font-semibold rounded-md transition-all",
+                    txType === "addons"
+                      ? "bg-white text-[#4c4138] shadow-sm"
+                      : "text-[#7a6a5f] hover:text-[#4c4138]",
+                  )}
+                >
+                  Add-ons
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#fdfbf7]">
               {/* Experience Config */}
-              {selectedExperience && (
+              {txType === "experience" && selectedExperience && (
                 <div className="bg-white border border-[#8b6f47]/40 rounded-xl p-4 shadow-sm relative">
                   <button
                     onClick={() => setSelectedExperience(null)}
@@ -644,21 +719,35 @@ export default function POSPage() {
                 </div>
               )}
 
-              {/* Items List */}
+              {/* Items List (Inline Editable) */}
               {itemLines.length > 0 && (
-                <div className="bg-white border border-[#e6dfd6] rounded-xl overflow-hidden">
+                <div className="bg-white border border-[#e6dfd6] rounded-xl overflow-hidden shadow-sm">
                   {itemLines.map((l) => (
                     <div
                       key={l.id}
-                      className="flex items-center gap-3 p-3 border-b border-[#f0ebe1] last:border-0"
+                      className="flex items-center gap-3 p-3 border-b border-[#f0ebe1] last:border-0 hover:bg-[#fbf9f6] transition-colors group"
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm truncate">{l.name}</p>
-                        <p className="text-xs text-[#8a7b70]">
-                          {formatCurrency(l.price)}
-                        </p>
+                        <input
+                          value={l.name}
+                          onChange={(e) => setItemName(l, e.target.value)}
+                          placeholder="Item name"
+                          className="font-medium text-sm w-full bg-transparent border-b border-transparent hover:border-[#d8cfc3] focus:border-[#8b6f47] focus:outline-none transition-colors truncate pb-0.5"
+                        />
+                        <div className="flex items-center mt-1">
+                          <span className="text-xs text-[#8a7b70] mr-1">€</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={l.price}
+                            onChange={(e) => setItemPriceRaw(l, e.target.value)}
+                            placeholder="0.00"
+                            className="text-xs font-mono text-[#8a7b70] w-20 bg-transparent border-b border-transparent hover:border-[#d8cfc3] focus:border-[#8b6f47] focus:outline-none transition-colors pb-0.5"
+                          />
+                        </div>
                       </div>
-                      <div className="flex items-center bg-[#f4f1ec] rounded-lg p-1 border border-[#e8e2d9]">
+                      <div className="flex items-center bg-[#f4f1ec] rounded-lg p-1 border border-[#e8e2d9] shrink-0">
                         <button
                           onClick={() => decItem(l)}
                           className="p-1.5 hover:bg-white rounded-md text-[#7a6a5f] transition-colors"
@@ -675,22 +764,48 @@ export default function POSPage() {
                           <Plus className="h-4 w-4" />
                         </button>
                       </div>
-                      <div className="w-16 text-right font-medium">
-                        {formatCurrency(l.price * l.qty)}
+                      <div className="w-16 text-right font-medium shrink-0 text-[#4c4138]">
+                        {formatCurrency((Number(l.price) || 0) * l.qty)}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {!selectedExperience && itemLines.length === 0 && (
-                <div className="text-center py-12 px-4 text-[#a09084]">
-                  <ShoppingBag className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                  <p>Tap items on the left to build the order.</p>
+              {/* Add-ons Configuration */}
+              {txType === "addons" && (
+                <div className="space-y-3 pt-2">
+                  <input
+                    placeholder="Existing Booking Reference (Optional)"
+                    value={bookingRef}
+                    onChange={(e) => setBookingRef(e.target.value)}
+                    className="w-full rounded-lg border border-[#d8cfc3] px-3 py-2.5 text-sm"
+                  />
                 </div>
               )}
 
-              {/* Discount / Info Toggle (Accordion style for space saving) */}
+              {/* Empty State */}
+              {((txType === "experience" && !selectedExperience) ||
+                (txType !== "experience" && itemLines.length === 0)) && (
+                <div className="text-center py-12 px-4 text-[#a09084]">
+                  <ShoppingBag className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                  <p className="mb-6">
+                    {txType === "experience"
+                      ? "Tap an experience on the left to build the booking."
+                      : "Tap items on the left or add a custom charge."}
+                  </p>
+                  {txType !== "experience" && (
+                    <button
+                      onClick={addCustomItem}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-[#d8cfc3] text-[#4c4138] rounded-xl hover:bg-[#f0e7d9] transition shadow-sm font-medium"
+                    >
+                      <Plus className="h-4 w-4" /> Add Custom Charge
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Discount / Customer */}
               <div className="space-y-3 pt-2">
                 <input
                   placeholder="Customer Email (Optional)"
@@ -769,7 +884,9 @@ export default function POSPage() {
                   ? "Push to Terminal"
                   : method === "card"
                     ? "Pay via Stripe"
-                    : "Complete Order"}
+                    : txType === "items"
+                      ? "Generate Receipt"
+                      : "Complete Order"}
               </button>
             </div>
           </aside>
@@ -785,6 +902,20 @@ export default function POSPage() {
               setTerminalIntentId(null);
               setReference(paymentId);
               handleCheckout(paymentId);
+            }}
+          />
+        )}
+
+        {/* Stripe Web Card Checkout Modal */}
+        {cardOpen && piClientSecret && (
+          <CardChargeSheet
+            clientSecret={piClientSecret}
+            amountCents={quote?.amountCents || Math.round(totalToCollect * 100)}
+            currency="EUR"
+            onClose={() => setCardOpen(false)}
+            onSuccess={() => {
+              setCardOpen(false);
+              handleCheckout();
             }}
           />
         )}
@@ -1012,17 +1143,15 @@ function TerminalWaitingSheet({ intentId, amount, onCancel, onSuccess }) {
   const [status, setStatus] = useState("pending");
 
   useEffect(() => {
-    // Poll Revolut API every 2.5 seconds to see if customer tapped card
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/pos/revolut/status?intentId=${intentId}`);
         const data = await res.json();
-
         setStatus(data.status);
 
         if (data.status === "completed") {
           clearInterval(interval);
-          onSuccess(data.paymentId); // Proceed to save booking in DB
+          onSuccess(data.paymentId);
         }
 
         if (data.status === "failed" || data.status === "cancelled") {
@@ -1040,13 +1169,11 @@ function TerminalWaitingSheet({ intentId, amount, onCancel, onSuccess }) {
     <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="relative w-full max-w-sm rounded-3xl bg-white p-8 shadow-2xl text-center">
         <SmartphoneNfc className="h-16 w-16 text-[#8b6f47] mx-auto mb-4 animate-pulse" />
-
         <h3 className="text-xl font-bold mb-2">Awaiting Payment</h3>
         <p className="text-[#7a6a5f] mb-6">
           Please ask the customer to tap their card on the Revolut Terminal for{" "}
           <strong>{formatCurrency(amount)}</strong>.
         </p>
-
         {status === "failed" || status === "cancelled" ? (
           <div className="text-red-600 font-medium mb-6">
             Payment {status}. Please try again.
@@ -1056,12 +1183,119 @@ function TerminalWaitingSheet({ intentId, amount, onCancel, onSuccess }) {
             <Spinner className="h-4 w-4" /> Polling terminal...
           </div>
         )}
-
         <button
           onClick={onCancel}
           className="w-full py-3 rounded-xl border border-[#d8cfc3] text-[#4c4138] font-semibold hover:bg-[#f0e7d9] transition"
         >
           Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CardChargeSheet({
+  clientSecret,
+  amountCents,
+  currency = "EUR",
+  onClose,
+  onSuccess,
+}) {
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-4">
+          <h3 className="text-xl font-bold">Charge Card (Web)</h3>
+          <p className="text-sm text-[#7a6a5f]">
+            Amount:{" "}
+            <span className="font-medium">
+              {formatCurrency((amountCents || 0) / 100)}
+            </span>
+          </p>
+        </div>
+        <Elements
+          stripe={stripePromise}
+          options={{
+            clientSecret,
+            appearance: { variables: { colorPrimary: ACCENT } },
+          }}
+        >
+          <CardChargeInner onClose={onClose} onSuccess={onSuccess} />
+        </Elements>
+      </div>
+    </div>
+  );
+}
+
+function CardChargeInner({ onClose, onSuccess }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    function onEsc(e) {
+      if (e.key === "Escape") onClose?.();
+    }
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [onClose]);
+
+  async function handlePay() {
+    if (!stripe || !elements) return;
+    setBusy(true);
+    setError(null);
+    const { error, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      confirmParams: { return_url: window.location.href },
+      redirect: "if_required",
+    });
+    setBusy(false);
+
+    if (error) {
+      setError(error.message || "Payment failed");
+      return;
+    }
+
+    const status = paymentIntent?.status;
+    if (["succeeded", "requires_capture", "processing"].includes(status)) {
+      await onSuccess?.();
+    } else {
+      setError(`Payment status: ${status}`);
+    }
+  }
+
+  return (
+    <div>
+      <div className="rounded-xl border border-[#e6dfd6] bg-[#f9f8f5] p-3 mb-4">
+        <PaymentElement options={{ layout: "tabs" }} />
+      </div>
+      {error && (
+        <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          {error}
+        </p>
+      )}
+      <div className="flex items-center justify-end gap-3">
+        <button
+          onClick={onClose}
+          className="px-4 py-2 rounded-xl border border-[#d8cfc3] text-[#4c4138] font-semibold hover:bg-[#f0e7d9] transition"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handlePay}
+          disabled={!stripe || !elements || busy}
+          className={clsx(
+            "px-6 py-2 rounded-xl font-semibold text-white transition shadow-sm",
+            busy ? "bg-[#8b6f47]/60" : "bg-[#8b6f47] hover:bg-[#765e3c]",
+          )}
+        >
+          {busy ? "Processing…" : "Charge Card"}
         </button>
       </div>
     </div>
