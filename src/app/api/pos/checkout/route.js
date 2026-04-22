@@ -10,7 +10,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 // Use the service role (server only)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
 );
 
 /* -------------------------------------------------------------
@@ -29,10 +29,10 @@ function itemizeNote(items = []) {
     .map(
       (l) =>
         `• ${l.name}${l.sku ? ` (${l.sku})` : ""} × ${l.quantity} @ €${Number(
-          l.unitPrice || 0
+          l.unitPrice || 0,
         ).toFixed(2)} = €${(
           Number(l.unitPrice || 0) * Number(l.quantity || 0)
-        ).toFixed(2)}`
+        ).toFixed(2)}`,
     );
   return ["Items:", ...lines].join("\n");
 }
@@ -53,7 +53,7 @@ async function fetchDiscountByCode(code) {
   const { data, error } = await supabase
     .from("DiscountCode")
     .select(
-      "id, code, discountType, discountValue, currency, maxRedemptions, redemptionCount, startsAt, endsAt, active, scope, experienceIds"
+      "id, code, discountType, discountValue, currency, maxRedemptions, redemptionCount, startsAt, endsAt, active, scope, experienceIds",
     )
     .ilike("code", code.trim())
     .maybeSingle();
@@ -102,7 +102,7 @@ async function fetchGiftCardByCode(code) {
   const { data, error } = await supabase
     .from("GiftCard")
     .select(
-      "id, code, remaining_amount_cents, currency, status, expires_at, recipient_email, recipient_name"
+      "id, code, remaining_amount_cents, currency, status, expires_at, recipient_email, recipient_name",
     )
     .ilike("code", code.trim())
     .maybeSingle();
@@ -138,7 +138,7 @@ export async function POST(req) {
     const customer = body?.customer || null;
     const startTime = body?.startTime || null; // ISO from client
     const clientCurrency = toCurrency(body?.currency || "eur");
-    const method = body?.payment?.method || "cash";
+    const method = body?.payment?.method || "cash"; // 'cash', 'terminal', 'card', 'comp'
     const reference = (body?.payment?.reference || "").trim() || null;
 
     /* -------------------------------
@@ -154,24 +154,24 @@ export async function POST(req) {
       if (!exp) {
         return NextResponse.json(
           { error: "Experience not found" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       unitPriceAdult = Number(exp.priceAdult || 0);
       unitPriceKid = Number(exp.priceKid || 0);
-      // Experience.duration is text in schema; only set if numeric provided in body
+
       if (typeof durationMinutes !== "number") {
         durationMinutes = null;
       }
     }
 
-    // Items subtotal (trusting client values due to lack of item table)
+    // Items subtotal
     const itemsSubtotal = items.reduce(
       (sum, it) =>
         sum +
         Number(it.unitPrice || it.price || 0) *
           Number(it.quantity || it.qty || 0),
-      0
+      0,
     );
 
     const expSubtotal = experienceId
@@ -180,7 +180,7 @@ export async function POST(req) {
 
     const subtotal = Math.max(
       0,
-      Math.round((expSubtotal + itemsSubtotal) * 100)
+      Math.round((expSubtotal + itemsSubtotal) * 100),
     ); // in cents
 
     /* -------------------------------
@@ -192,12 +192,7 @@ export async function POST(req) {
       if (isDiscountActive(dc, clientCurrency, experienceId)) {
         if (dc.discountType === "percent") {
           const pct = clamp(dc.discountValue, 0, 100);
-          promo = {
-            id: dc.id,
-            code: dc.code,
-            type: "percent",
-            value: pct,
-          };
+          promo = { id: dc.id, code: dc.code, type: "percent", value: pct };
         } else if (dc.discountType === "amount") {
           const amountEur = Math.max(0, Number(dc.discountValue || 0));
           promo = {
@@ -211,9 +206,10 @@ export async function POST(req) {
       }
     }
 
-    const manualDiscountCents = eur(manualDiscountEur * 100) / 100; // normalize euros -> cents via rounding steps
+    const manualDiscountCents = eur(manualDiscountEur * 100) / 100;
     const manualDiscountC = eur(manualDiscountEur * 100);
     let promoDiscountC = 0;
+
     if (promo) {
       if (promo.type === "percent") {
         promoDiscountC = Math.floor((subtotal * promo.value) / 100);
@@ -233,7 +229,6 @@ export async function POST(req) {
 
     /* -------------------------------
        Gift card (non-card flows)
-       For card flows, assume gift was applied at PI creation step.
     -------------------------------- */
     let gift = null;
     if (giftCode && method !== "card") {
@@ -251,7 +246,7 @@ export async function POST(req) {
 
     const netAfterGiftC =
       method === "card"
-        ? netBeforeGiftC // card handled by Stripe amount
+        ? netBeforeGiftC
         : Math.max(0, netBeforeGiftC - (gift?.redeem_cents || 0));
 
     /* -------------------------------
@@ -264,25 +259,26 @@ export async function POST(req) {
     let bookingStatus = "confirmed";
 
     if (method === "card") {
+      // 1. Web Stripe Card Flow
       const piId = body.stripePaymentIntentId;
       if (!piId) {
         return NextResponse.json(
           { error: "Missing stripePaymentIntentId" },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
-      // Dedupe: if this PI already produced a booking, return it
+      // Dedupe check
       const { data: existing, error: exErr } = await supabase
         .from("booking")
         .select("id")
         .eq("stripePaymentIntentId", piId)
         .maybeSingle();
+
       if (!exErr && existing?.id) {
         return NextResponse.json({ bookingId: existing.id });
       }
 
-      // Retrieve (and capture if necessary)
       let pi = await stripe.paymentIntents.retrieve(piId, {
         expand: ["latest_charge", "charges.data"],
       });
@@ -294,45 +290,43 @@ export async function POST(req) {
       if (!okStatuses.includes(pi.status)) {
         return NextResponse.json(
           { error: `PaymentIntent not payable: ${pi.status}` },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
       const charge =
         typeof pi.latest_charge === "string"
-          ? pi.charges?.data?.[0] ?? null
+          ? (pi.charges?.data?.[0] ?? null)
           : pi.latest_charge;
-
       const brand = charge?.payment_method_details?.card?.brand?.toUpperCase();
       const last4 = charge?.payment_method_details?.card?.last4;
       const receiptUrl =
         charge?.receipt_url || pi.charges?.data?.[0]?.receipt_url || null;
 
-      totalPaidAmount = fromCents(pi.amount_received ?? pi.amount); // euros
+      totalPaidAmount = fromCents(pi.amount_received ?? pi.amount);
       currency = toCurrency(pi.currency || currency);
       stripePaymentIntentId = pi.id;
 
       paymentNote =
-        `Paid by card • ${brand || "CARD"} • **** **** **** ${
-          last4 || "????"
-        } • PI ${pi.id}` + (receiptUrl ? ` • receipt: ${receiptUrl}` : "");
+        `Paid by web card • ${brand || "CARD"} • **** **** **** ${last4 || "????"} • PI ${pi.id}` +
+        (receiptUrl ? ` • receipt: ${receiptUrl}` : "");
 
       bookingStatus = pi.status === "succeeded" ? "confirmed" : "pending";
     } else if (method === "comp") {
+      // 2. Complimentary Flow
       totalPaidAmount = 0;
       paymentNote = "Complimentary";
     } else {
-      // cash / revolut (or other offline method)
-      const methodLabel =
-        method === "cash" ? "cash" : method === "revolut" ? "revolut" : method;
+      // 3. Offline flows: "cash", "terminal", "revolut", etc.
+      // Format string (e.g. "terminal" -> "Terminal") for cleaner DB notes
+      const methodLabel = method.charAt(0).toUpperCase() + method.slice(1);
       const giftPart = gift?.redeem_cents
         ? ` • gift: €${(gift.redeem_cents / 100).toFixed(2)}`
         : "";
-      paymentNote = `Paid by ${methodLabel}${
-        reference ? ` • ref: ${reference}` : ""
-      }${giftPart}`;
 
-      totalPaidAmount = fromCents(netBeforeGiftC); // full net is considered "paid" (gift+cash)
+      paymentNote = `Paid by ${methodLabel}${reference ? ` • ref: ${reference}` : ""}${giftPart}`;
+      totalPaidAmount = fromCents(netBeforeGiftC); // full net is assumed collected out-of-band
+      bookingStatus = "confirmed";
     }
 
     /* -------------------------------
@@ -417,13 +411,13 @@ export async function POST(req) {
       numberOfPeople,
       unitPriceAdult: experienceId ? unitPriceAdult : null,
       unitPriceKid: experienceId ? unitPriceKid : null,
-      totalPaidAmount, // euros, after discounts (gift included in promoJson breakdown)
-      currency, // text
-      stripePaymentIntentId, // for card
+      totalPaidAmount,
+      currency,
+      stripePaymentIntentId,
       primary_contact: customer ?? null,
       appliedPromoCode: promoCode ?? null,
-      discountAmount: fromCents(discountTotalC), // euros
-      promoJson, // full breakdown including items
+      discountAmount: fromCents(discountTotalC),
+      promoJson,
       notes,
       status: bookingStatus,
       duration: durationMinutes ?? null,
@@ -445,33 +439,20 @@ export async function POST(req) {
        Side-effects: promo & gift logs
     -------------------------------- */
     if (promo?.id) {
-      // best-effort bump
       await incrementDiscountRedemption(promo.id);
     }
 
     if (gift && method !== "card" && gift.redeem_cents > 0) {
-      // Deduct remaining balance
-      const { error: giftUpdateErr } = await supabase
-        .from("GiftCard")
-        .update({
-          remaining_amount_cents: Math.max(0, gift.redeem_cents), // we'll subtract with SQL expression below
-        })
-        .eq("id", gift.id)
-        .select("id")
-        .single();
-
-      // Because PostgREST can't do atomic arithmetic here without RPC,
-      // do a read-then-write approach:
       const { data: gcRow } = await supabase
         .from("GiftCard")
         .select("remaining_amount_cents")
         .eq("id", gift.id)
         .maybeSingle();
 
-      if (!giftUpdateErr && gcRow) {
+      if (gcRow) {
         const newRemain = Math.max(
           0,
-          (gcRow.remaining_amount_cents || 0) - gift.redeem_cents
+          (gcRow.remaining_amount_cents || 0) - gift.redeem_cents,
         );
         await supabase
           .from("GiftCard")
@@ -482,15 +463,12 @@ export async function POST(req) {
           .eq("id", gift.id);
       }
 
-      // Log redemption
       await supabase.from("GiftCardRedemption").insert({
         gift_card_id: gift.id,
         booking_id: bookingId,
         amount_cents: gift.redeem_cents,
         currency,
-        notes: `Redeemed during POS checkout (${method}${
-          reference ? `, ref: ${reference}` : ""
-        })`,
+        notes: `Redeemed during POS checkout (${method}${reference ? `, ref: ${reference}` : ""})`,
       });
     }
 
@@ -498,7 +476,7 @@ export async function POST(req) {
   } catch (e) {
     return NextResponse.json(
       { error: e.message || "Checkout error" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 }
