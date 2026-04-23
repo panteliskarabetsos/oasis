@@ -20,6 +20,7 @@ import {
   FileText,
   Banknote,
   SearchIcon,
+  Wallet,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
@@ -201,7 +202,6 @@ function normalizeBooking(raw) {
   if (!raw || typeof raw !== "object") return null;
 
   const scheduleSlotId = raw.scheduleSlotId ?? raw.slot?.id ?? null;
-  // If there's no schedule slot, it's a private bespoke booking.
   const isPrivate = !scheduleSlotId;
 
   const startTime = raw.startTime ?? raw.date ?? raw.ScheduleSlot?.date ?? null;
@@ -268,6 +268,7 @@ function normalizeBooking(raw) {
     stripePaymentIntentId:
       raw.payments?.stripePaymentIntentId ?? raw.stripePaymentIntentId ?? null,
     paymentMethod: raw.payments?.paymentMethod ?? raw.paymentMethod ?? null,
+    ledger: raw.payments?.ledger || [], // Ensure ledger is passed through
   };
 
   return {
@@ -655,15 +656,14 @@ export default function ReservationDetailPage() {
   } = stripeSummary;
 
   const hasPI = Boolean(item?.payments?.stripePaymentIntentId);
+  const offlineLedger = item?.payments?.ledger || []; // The offline payments from your DB
+  const isFullyPaid = paidTotal >= grandTotal && grandTotal > 0;
+
   const heroShowLoading = hasPI && stripeLoading;
-  const heroValue =
-    hasPI && stripe ? minorToMajor(netCents, stripeCurrency) : paidTotal;
-  const heroCurrency = hasPI && stripe ? stripeCurrency : moneyCurrency;
-  const heroLabel = hasPI
-    ? "Net via Stripe"
-    : typeof item?.money?.totalPaidAmount === "number"
-      ? "Total paid"
-      : "Total";
+  const heroValue = paidTotal;
+  const heroCurrency = moneyCurrency;
+  const heroLabel = "Total Paid";
+
   const paymentMethod = item?.payments?.paymentMethod || null;
   const paymentCard = paymentMethod?.card || null;
 
@@ -753,10 +753,8 @@ export default function ReservationDetailPage() {
             <IconButton
               onClick={() => {
                 if (piId) {
-                  // If we have an intent, go to the detailed transaction record
                   router.push(`/admin/payments/${piId}`);
                 } else {
-                  // If we DON'T have an intent, go to a page to create one or log manual payment
                   router.push(`/admin/bookings/${id}/payment-setup`);
                 }
               }}
@@ -856,7 +854,12 @@ export default function ReservationDetailPage() {
                   </div>
                   {paymentMethod?.label && (
                     <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#e3ddd2] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#5a4a3f] shadow-sm">
-                      <CreditCard size={12} className="text-[#8b6f47]" />
+                      {paymentMethod.type === "cash" ||
+                      paymentMethod.type === "bank_transfer" ? (
+                        <Wallet size={12} className="text-[#8b6f47]" />
+                      ) : (
+                        <CreditCard size={12} className="text-[#8b6f47]" />
+                      )}
                       {paymentMethod.label}
                     </div>
                   )}
@@ -931,7 +934,7 @@ export default function ReservationDetailPage() {
                   </Row>
                   <Row label="Internal Notes">
                     {item.notes ? (
-                      <span className="italic text-[#7a6a5f]">
+                      <span className="italic text-[#7a6a5f] whitespace-pre-wrap">
                         {item.notes}
                       </span>
                     ) : (
@@ -1074,8 +1077,8 @@ export default function ReservationDetailPage() {
                     </Row>
                   )}
 
-                  {/* Inside the Payment Ledger Card */}
-                  {!hasPI && !isCancelled && (
+                  {/* Warning: Awaiting Payment Provisioning */}
+                  {!hasPI && !isCancelled && !isFullyPaid && (
                     <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
                       <div className="flex items-start gap-4">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600">
@@ -1124,6 +1127,50 @@ export default function ReservationDetailPage() {
                     />
                   </Row>
 
+                  {/* OFFLINE PAYMENTS BLOCK */}
+                  {offlineLedger.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-[#e3ddd2] space-y-3">
+                      <div className="mt-4 rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] overflow-hidden">
+                        <div className="px-4 py-2 bg-[#fdfaf5] border-b border-[#e3ddd2] text-[10px] font-bold uppercase tracking-wider text-[#a09084]">
+                          Offline Payments Ledger
+                        </div>
+                        <ul className="divide-y divide-[#e3ddd2]">
+                          {offlineLedger.map((p) => (
+                            <li
+                              key={p.id}
+                              className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white transition-colors"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#8b6f47]">
+                                    {p.method === "cash"
+                                      ? "Cash Settlement"
+                                      : p.method === "bank_transfer"
+                                        ? "Bank Transfer"
+                                        : p.method}
+                                  </span>
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">
+                                    Logged
+                                  </span>
+                                </div>
+                                <div className="text-xs text-[#5a4a3f]">
+                                  {p.notes || "Offline settlement"}
+                                </div>
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mt-2">
+                                  {fmtDateShort(p.processed_at)}
+                                </div>
+                              </div>
+                              <div className="font-serif text-lg text-emerald-600 font-bold whitespace-nowrap self-start sm:self-auto">
+                                +{fmtMoney(p.amount, p.currency)}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* STRIPE SUMMARY BLOCK */}
                   {hasPI && (
                     <div className="mt-4 pt-4 border-t border-[#e3ddd2] space-y-3">
                       <Row label="Collected via Stripe" mono>
@@ -1584,10 +1631,7 @@ function IconButton({
       aria-label={ariaLabel || title}
       {...props}
     >
-      {/* 1. Render the icon prop if it exists */}
       {Icon && <Icon size={20} strokeWidth={2} />}
-
-      {/* 2. Render children if they exist (for flexibility) */}
       {children}
     </button>
   );
