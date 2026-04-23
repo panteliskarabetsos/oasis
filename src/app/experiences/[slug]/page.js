@@ -556,7 +556,9 @@ export default async function ExperienceDetailPage({ params }) {
 
             <LinkWithLoader
               href={
-                fromPrice !== null ? `/check-availability/${slug}` : "/contact"
+                fromPrice !== null
+                  ? `/check-availability/${slug}`
+                  : "/private/inquire"
               }
               className="w-full sm:w-auto shrink-0"
             >
@@ -592,7 +594,9 @@ export default async function ExperienceDetailPage({ params }) {
           </div>
           <LinkWithLoader
             href={
-              fromPrice !== null ? `/check-availability/${slug}` : "/contact"
+              fromPrice !== null
+                ? `/check-availability/${slug}`
+                : "/private/inquire"
             }
           >
             <button className="bg-[#1A1A1A] text-white px-8 md:px-10 py-3.5 md:py-4 rounded-full font-bold text-xs uppercase tracking-[0.15em] hover:bg-[#C8AA86] transition-colors shadow-lg shadow-black/20 w-full sm:w-auto active:scale-95 transform duration-150">

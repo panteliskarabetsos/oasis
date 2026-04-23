@@ -411,8 +411,7 @@ export default async function Experiences({ searchParams }) {
                     </button>
                   </LinkWithLoader>
 
-                  {/* 🔗 LEARN MORE LINK ADDED HERE */}
-                  <LinkWithLoader className="w-full group/btn" href="/bespoke">
+                  <LinkWithLoader className="w-full group/btn" href="/private">
                     <button className="w-full flex items-center justify-center gap-2 text-sm font-medium text-[#5a4a3f] hover:text-[#8b6f47] transition-colors">
                       Learn more
                       <span className="transition-transform duration-300 group-hover/btn:translate-x-1">

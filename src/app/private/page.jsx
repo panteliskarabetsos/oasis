@@ -1,475 +1,357 @@
 "use client";
-
-import { motion } from "framer-motion";
+import Image from "next/image";
 import Link from "next/link";
+import { motion, useScroll, useTransform } from "framer-motion";
+import { useRef } from "react";
 import {
-  Users,
-  HeartHandshake,
-  GlassWater,
+  ChefHat,
   Sparkles,
+  Wine,
+  Users,
+  CalendarHeart,
   MapPin,
-  CalendarDays,
-  MessageCircle,
-  MoonStar,
-  SunMedium,
+  Map,
+  Heart,
+  Compass,
   Anchor,
 } from "lucide-react";
 
-export default function PrivateGatheringsPage() {
-  return (
-    <main className="relative overflow-hidden bg-[#f4f1ec] text-[#2f2f2f]">
-      {/* Ambient background */}
-      <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute -left-24 -top-32 h-72 w-72 rounded-full bg-[#e3d3bc]/70 blur-3xl" />
-        <div className="absolute bottom-[-6rem] right-[-6rem] h-[26rem] w-[26rem] rounded-full bg-[#d2c3aa]/60 blur-3xl" />
-        <div className="absolute inset-0 opacity-[0.05] [background:radial-gradient(circle_at_center,rgba(90,74,63,0.35)_1px,transparent_1px)] [background-size:22px_22px]" />
-      </div>
+export default function PrivateInVilla() {
+  // --- Hero parallax ---
+  const heroRef = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: heroRef,
+    offset: ["start start", "end start"],
+  });
+  const y = useTransform(scrollYProgress, [0, 1], ["0%", "20%"]);
 
-      <section className="relative z-10 py-20 md:py-24">
-        <div className="mx-auto max-w-6xl px-6 md:px-10">
-          {/* Hero */}
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.4 }}
-            transition={{ duration: 0.6 }}
-            className="max-w-3xl"
+  // --- UI Helpers ---
+  const SectionHeading = ({ eyebrow, title, subtitle, center = false }) => (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-50px" }}
+      transition={{ duration: 0.8, ease: "easeOut" }}
+      className={`max-w-3xl ${center ? "mx-auto text-center" : ""} space-y-4`}
+    >
+      {eyebrow && (
+        <p className="text-xs tracking-[0.25em] uppercase text-[#8b6f47] font-semibold">
+          {eyebrow}
+        </p>
+      )}
+      <h2 className="text-3xl md:text-5xl font-serif text-[#4d3d33] leading-tight">
+        {title}
+      </h2>
+      {subtitle && (
+        <p className="text-base md:text-lg text-[#6b625a] leading-relaxed">
+          {subtitle}
+        </p>
+      )}
+    </motion.div>
+  );
+
+  return (
+    <main className="font-light text-[#2f2f2f] bg-[#f4f1ec] overflow-x-hidden">
+      {/* ================== HERO ================== */}
+      <section
+        ref={heroRef}
+        className="relative min-h-[90vh] w-full flex items-center justify-center text-center overflow-hidden"
+      >
+        <motion.div
+          style={{ y }}
+          className="absolute inset-0 z-0 pointer-events-none"
+        >
+          <Image
+            src="/bespoke-hero.jpeg"
+            alt="Private dining and experiences in Crete"
+            fill
+            priority
+            className="object-cover object-center brightness-[.60]"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+        </motion.div>
+
+        <div className="relative z-10 px-6 max-w-3xl space-y-8 mt-20">
+          <motion.p
+            className="text-xs tracking-[0.35em] uppercase text-[#eddcb9]"
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.9 }}
           >
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#d3c2aa] bg-white/80 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-[#8b6f47]">
-              Private gatherings
+            BESPOKE & EXCLUSIVE
+          </motion.p>
+          <motion.h1
+            className="text-4xl sm:text-5xl md:text-7xl font-serif text-white leading-tight tracking-tight drop-shadow-xl"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 1 }}
+          >
+            Private &<br />
+            <span className="text-[#e8d2b2] font-normal italic">In-Villa</span>
+          </motion.h1>
+          <motion.p
+            className="text-white/95 text-lg md:text-xl max-w-2xl mx-auto drop-shadow"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3, duration: 1 }}
+          >
+            Whether you wish to privatize one of our signature journeys, host a
+            chef in your villa, or build an entirely custom itinerary from
+            scratch—your vision is our canvas.
+          </motion.p>
+        </div>
+
+        {/* --- BLURRY FADE TRANSITION --- */}
+        <div className="absolute bottom-0 inset-x-0 h-48 z-10 pointer-events-none select-none">
+          <div className="absolute inset-0 backdrop-blur-[12px] [-webkit-mask-image:linear-gradient(to_top,black_10%,transparent_100%)] [mask-image:linear-gradient(to_top,black_10%,transparent_100%)]" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#f4f1ec] via-[#f4f1ec]/60 to-transparent" />
+        </div>
+      </section>
+
+      {/* ================== IN-VILLA CHEF'S TABLE ================== */}
+      <section className="relative z-10 pt-16 pb-32 px-6 bg-[#f4f1ec]">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-16 items-center">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="relative h-[600px] rounded-3xl overflow-hidden shadow-2xl border border-[#eadfce] order-2 lg:order-1"
+            >
+              <Image
+                src="/proposal.jpeg"
+                alt="In-villa chef preparing food"
+                fill
+                className="object-cover"
+              />
+              <div className="absolute inset-0 bg-black/10" />
+            </motion.div>
+
+            <div className="space-y-8 order-1 lg:order-2">
+              <SectionHeading
+                eyebrow="We Come To You"
+                title="The In-Villa Chef's Table"
+                subtitle="The ultimate customized cooking class and dining experience that comes directly to you. Your villa’s kitchen transforms into a private culinary workshop, blending total comfort with premium local ingredients."
+              />
+
+              <div className="space-y-6 pt-4">
+                {[
+                  {
+                    icon: <ChefHat className="w-5 h-5 text-[#8b6f47]" />,
+                    title: "Bespoke Menus",
+                    desc: "You set the tone. Choose a theme that suits your palate—whether that's Seafood Lovers, a Traditional Cretan Meat Feast, or a Vegan Botanical Garden menu.",
+                  },
+                  {
+                    icon: <Sparkles className="w-5 h-5 text-[#8b6f47]" />,
+                    title: "Hands-on Masterclass",
+                    desc: "Join us at the counter. Learn cutting techniques, food styling, and the storytelling behind authentic Cretan dishes before sitting down to eat.",
+                  },
+                  {
+                    icon: <Wine className="w-5 h-5 text-[#8b6f47]" />,
+                    title: "Full Service & Clean-up",
+                    desc: "Enjoy a welcome drink and curated local wine pairing while we take care of the entire service—and leave your kitchen spotless when we depart.",
+                  },
+                ].map((item, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: 20 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.5, delay: i * 0.15 }}
+                    className="flex gap-4"
+                  >
+                    <div className="mt-1">{item.icon}</div>
+                    <div>
+                      <h4 className="text-base font-semibold text-[#4d3d33]">
+                        {item.title}
+                      </h4>
+                      <p className="text-sm text-[#6b625a] mt-1 leading-relaxed">
+                        {item.desc}
+                      </p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ================== PRIVATE SIGNATURE TOURS ================== */}
+      <section className="relative z-20 py-32 px-6 bg-[#faf9f7] rounded-t-[3rem] lg:rounded-t-[5rem] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] -mt-12">
+        <div className="max-w-6xl mx-auto">
+          <SectionHeading
+            eyebrow="Our Portfolio, Privatized"
+            title="Make Any Signature Tour Yours"
+            subtitle="Fell in love with our Cooking with Yiayia or Zourva Foraging experience? You can book ANY of our existing signature journeys as a 100% private event. No strangers, no rigid schedules."
+            center
+          />
+
+          <div className="grid md:grid-cols-3 gap-8 mt-16">
+            {[
+              {
+                icon: <Users className="w-6 h-6" />,
+                title: "Just Your People",
+                desc: "Share the experience solely with your family, friends, or colleagues. The dynamic of the group dictates the flow of the day.",
+              },
+              {
+                icon: <CalendarHeart className="w-6 h-6" />,
+                title: "Your Rhythm",
+                desc: "We adapt the pace to you. Linger longer over the wine, start a little later in the morning, or adjust the physical intensity of a hike.",
+              },
+              {
+                icon: <MapPin className="w-6 h-6" />,
+                title: "Door-to-Door",
+                desc: "Forget logistics. Our private, premium vans offer direct pick-up and drop-off from your exact hotel or villa location.",
+              },
+            ].map((feature, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={{ duration: 0.6, delay: i * 0.1 }}
+                className="bg-white p-8 rounded-3xl border border-[#e8e2d8] shadow-sm flex flex-col text-center items-center group hover:shadow-xl transition-all"
+              >
+                <div className="w-14 h-14 bg-[#f7f2ea] rounded-full flex items-center justify-center mb-6 text-[#8b6f47] group-hover:scale-110 group-hover:bg-[#8b6f47] group-hover:text-white transition-all duration-500">
+                  {feature.icon}
+                </div>
+                <h4 className="text-xl font-serif text-[#4d3d33]">
+                  {feature.title}
+                </h4>
+                <p className="mt-3 text-sm text-[#6b625a] leading-relaxed">
+                  {feature.desc}
+                </p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ================== THE BLANK CANVAS (FULLY CUSTOM) ================== */}
+      <section className="relative z-30 py-32 px-6 bg-[#f4f1ec] rounded-t-[3rem] lg:rounded-t-[5rem] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] -mt-12">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-16 items-center">
+            <div className="space-y-8">
+              <SectionHeading
+                eyebrow="The Blank Canvas"
+                title="If You Can Dream It, We Can Curate It"
+                subtitle="Don't see exactly what you're looking for on our menu? Tell us what you envision. We specialize in crafting entirely custom, ground-up itineraries utilizing our extensive network of local artisans, farmers, captains, and chefs."
+              />
+
+              <div className="grid sm:grid-cols-2 gap-6 pt-2">
+                {[
+                  {
+                    icon: <Heart className="w-4 h-4 text-[#8b6f47]" />,
+                    title: "Milestones & Anniversaries",
+                    desc: "Private dinners hidden deep in a gorge, or a sunset vow renewal on a secluded beach.",
+                  },
+                  {
+                    icon: <Map className="w-4 h-4 text-[#8b6f47]" />,
+                    title: "Multi-Day Retreats",
+                    desc: "Designing a full 3 to 7-day holistic itinerary for your wellness group or family reunion.",
+                  },
+                  {
+                    icon: <Compass className="w-4 h-4 text-[#8b6f47]" />,
+                    title: "Hyper-Specific Interests",
+                    desc: "Want to focus purely on ancestral beekeeping? Or a deep-dive into high-altitude viticulture? We know the experts.",
+                  },
+                  {
+                    icon: <Anchor className="w-4 h-4 text-[#8b6f47]" />,
+                    title: "Sea & Land Fusions",
+                    desc: "Combining private sailing charters with remote beach foraging and onboard private chefs.",
+                  },
+                ].map((item, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.5, delay: i * 0.1 }}
+                    className="bg-white/60 p-5 rounded-2xl border border-[#eadfce]"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="bg-[#f7f2ea] p-2 rounded-full">
+                        {item.icon}
+                      </div>
+                      <h4 className="text-sm font-bold tracking-widest uppercase text-[#5a4a3f]">
+                        {item.title}
+                      </h4>
+                    </div>
+                    <p className="text-sm text-[#6b625a] leading-relaxed pl-11">
+                      {item.desc}
+                    </p>
+                  </motion.div>
+                ))}
+              </div>
             </div>
 
-            <h1 className="mt-4 font-serif text-3xl leading-tight text-[#3e3128] md:text-4xl lg:text-5xl">
-              Intimate moments,{" "}
-              <span className="text-[#8b6f47]">quietly celebrated</span>
-            </h1>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="relative h-[650px] rounded-3xl overflow-hidden shadow-2xl border border-[#eadfce]"
+            >
+              <Image
+                src="/reunion.jpeg" // Using an image from your logs
+                alt="Custom private event in Crete"
+                fill
+                className="object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+              <div className="absolute bottom-8 left-8 right-8">
+                <p className="text-white/90 italic font-serif text-xl leading-snug">
+                  "They took a few vague ideas we had about loving wine and the
+                  sea, and built a three-day private journey that our family
+                  will talk about for the rest of our lives."
+                </p>
+                <p className="text-[#e8d2b2] text-sm mt-3 uppercase tracking-widest">
+                  — Private bespoke booking
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        </div>
+      </section>
 
-            <p className="mt-4 text-[15px] leading-relaxed text-[#4a4a4a] md:text-[16px]">
-              From anniversaries and birthdays to team offsites and creative
-              residencies, we shape private gatherings in and around Chania that
-              feel spacious, considered and genuinely personal — never generic,
-              never rushed.
+      {/* ================== CTA / REQUEST FORM ================== */}
+      <section className="relative z-40 bg-[#8b6f47] py-32 px-6 overflow-hidden rounded-t-[3rem] lg:rounded-t-[5rem] -mt-10">
+        <div className="absolute inset-0 opacity-10 bg-[url('/pattern.png')] bg-repeat" />
+
+        <div className="max-w-4xl mx-auto relative z-10 text-center">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.8 }}
+            className="space-y-8"
+          >
+            <h2 className="text-4xl md:text-6xl font-serif text-white leading-tight">
+              Let's shape your gathering
+            </h2>
+            <p className="text-white/85 text-lg md:text-xl leading-relaxed max-w-2xl mx-auto font-light">
+              Whether you want a private Chef's Table, a privatized signature
+              tour, or a completely blank canvas—tell us your vision. We will
+              curate a proposal tailored perfectly to you.
             </p>
 
-            <div className="mt-6 flex flex-wrap gap-3 text-xs text-[#6a5a49]">
-              <HeroPill icon={<HeartHandshake className="h-3 w-3" />}>
-                Tailor-made around you
-              </HeroPill>
-              <HeroPill icon={<Users className="h-3 w-3" />}>
-                2–18 guests
-              </HeroPill>
-              <HeroPill icon={<MapPin className="h-3 w-3" />}>
-                Chania & nearby villages
-              </HeroPill>
-            </div>
-          </motion.div>
-
-          {/* Types of gatherings */}
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.6, delay: 0.05 }}
-            className="mt-12 space-y-6 md:mt-14"
-          >
-            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-              <div>
-                <h2 className="font-serif text-xl text-[#3e3128] md:text-2xl">
-                  What kind of gathering are you imagining?
-                </h2>
-                <p className="mt-1 text-sm text-[#6b625a]">
-                  A few examples of the kinds of moments we love designing. Your
-                  idea may already be here — or we can create something entirely
-                  new together.
-                </p>
-              </div>
-              <Link
-                href="/contact"
-                className="mt-2 inline-flex items-center justify-center rounded-full border border-[#d3c2aa] bg-white/80 px-4 py-2 text-xs font-medium text-[#4d3d33] shadow-sm transition hover:border-[#c2ae95] hover:bg-[#fbf7ef]"
-              >
-                Share your idea with us
+            <div className="flex flex-col sm:flex-row justify-center gap-4 pt-8">
+              <Link href="/contact">
+                <button className="w-full sm:w-auto bg-white text-[#4d3d33] px-10 py-4 rounded-full font-medium hover:bg-[#f4f1ec] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300">
+                  Request Private Experience
+                </button>
               </Link>
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              <Card
-                icon={<HeartHandshake className="h-5 w-5" />}
-                label="Celebrations"
-                title="Softly held milestones"
-                bullets={[
-                  "Anniversaries and birthdays by the sea.",
-                  "Vow renewals and elopement-style ceremonies.",
-                  "Long-table dinners with seasonal Cretan food.",
-                ]}
-                footnote="For couples or small groups who want something meaningful, not flashy."
-              />
-              <Card
-                icon={<Users className="h-5 w-5" />}
-                label="Friends & family"
-                title="Time together that actually feels spacious"
-                bullets={[
-                  "Slow days built around rest, not a packed agenda.",
-                  "Gentle guided experiences woven into free time.",
-                  "Support with logistics, bookings and local tips.",
-                ]}
-                footnote="Perfect for 4–12 guests staying in or near Chania."
-              />
-              <Card
-                icon={<GlassWater className="h-5 w-5" />}
-                label="Teams & circles"
-                title="Retreats for teams & communities"
-                bullets={[
-                  "Offsites for small teams who want depth, not slides.",
-                  "Creative residencies and circle gatherings.",
-                  "Facilitation support or collaboration on request.",
-                ]}
-                footnote="We can co-design the arc with your leader or facilitator."
-              />
-            </div>
-          </motion.div>
-
-          {/* Example scenarios */}
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.6, delay: 0.08 }}
-            className="mt-14 space-y-6 md:mt-16"
-          >
-            <div className="max-w-3xl">
-              <h2 className="font-serif text-xl text-[#3e3128] md:text-2xl">
-                A few ways this could look
-              </h2>
-              <p className="mt-1 text-sm text-[#6b625a]">
-                Every gathering is different, but these examples give a sense of
-                the pace, ingredients and feeling we tend to work with.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              <ScenarioCard
-                label="Seaside anniversary"
-                title="Golden-hour dinner for two (or a few)"
-                length="1 evening"
-                guests="2–6 guests"
-                vibe="Quiet, romantic, unhurried"
-                details={[
-                  "Private seaside terrace with soft styling.",
-                  "Local chef cooking a seasonal Cretan menu.",
-                  "Simple ritual or vow renewal woven into the evening.",
-                ]}
-              />
-              <ScenarioCard
-                label="Friends in Crete"
-                title="A slow, shared day together"
-                length="1 full day"
-                guests="4–10 guests"
-                vibe="Playful, light, connected"
-                details={[
-                  "Morning sea swim and long breakfast.",
-                  "Late-morning experience (e.g. boat, gentle hike or tasting).",
-                  "Afternoon rest time, then sunset drinks & dinner.",
-                ]}
-              />
-              <ScenarioCard
-                label="Small team offsite"
-                title="Soft structure, deep conversations"
-                length="2–3 days"
-                guests="6–12 guests"
-                vibe="Thoughtful, grounded, honest"
-                details={[
-                  "Lightly facilitated check-in circles.",
-                  "Plenty of unscheduled time for rest and informal talks.",
-                  "One simple shared experience (like a boat day or village walk).",
-                ]}
-              />
-            </div>
-          </motion.div>
-
-          {/* What we can shape */}
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.6, delay: 0.08 }}
-            className="mt-14 grid gap-10 md:mt-16 md:grid-cols-[1.1fr,0.9fr]"
-          >
-            <div className="rounded-3xl border border-[#e0d6c6] bg-white/80 p-6 md:p-7">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8b6f47]">
-                What we can shape for you
-              </p>
-              <h2 className="mt-2 font-serif text-xl text-[#3e3128] md:text-2xl">
-                You bring the people. We help with the rest.
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-[#6b625a]">
-                Some guests come with a clear picture; others just know they
-                want “something special, but not over the top”. Either way, we
-                can meet you where you are.
-              </p>
-
-              <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-[#4d3d33] md:grid-cols-2">
-                <ShapeItem
-                  title="Venues"
-                  items={[
-                    "Villas and guesthouses you’ve booked",
-                    "Seaside terraces, rooftops and village courtyards",
-                  ]}
-                />
-                <ShapeItem
-                  title="Food & drink"
-                  items={[
-                    "Seasonal Cretan menus (family-style or plated)",
-                    "Wine, herbal infusions and simple cocktails",
-                  ]}
-                />
-                <ShapeItem
-                  title="Experiences"
-                  items={[
-                    "Boat days, gentle hikes, village visits",
-                    "Tastings, workshops and creative moments",
-                  ]}
-                />
-                <ShapeItem
-                  title="Atmosphere"
-                  items={[
-                    "Styling, candles, flowers and details",
-                    "Simple rituals woven into the flow",
-                  ]}
-                />
-                <ShapeItem
-                  title="Support"
-                  items={[
-                    "Logistics and timing so the day feels smooth",
-                    "On-the-day coordination so you can be present",
-                  ]}
-                />
-                <ShapeItem
-                  title="Collaborators"
-                  items={[
-                    "Local chefs, photographers, musicians",
-                    "Facilitators or space-holders (on request)",
-                  ]}
-                />
-              </div>
-
-              <p className="mt-4 text-xs text-[#8b7a6b]">
-                We keep numbers intentionally small so we can stay close to the
-                details and the feeling of the day.
-              </p>
-            </div>
-
-            {/* How it works / practical */}
-            <div className="space-y-4 rounded-3xl border border-[#e0d6c6] bg-white/80 p-6 md:p-7">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8b6f47]">
-                How it works
-              </p>
-
-              <ol className="space-y-4 text-sm text-[#4d3d33]">
-                <Step
-                  number="01"
-                  title="You send a first note"
-                  body="Dates (or season), approximate guest count and the kind of atmosphere you’re imagining are more than enough to begin."
-                />
-                <Step
-                  number="02"
-                  title="We respond with possibilities"
-                  body="We’ll share a few ways the day could look, plus a rough budget range so you can feel into what fits."
-                />
-                <Step
-                  number="03"
-                  title="We refine and confirm"
-                  body="Together we adjust timings, menus and details until it feels like a true match for your people."
-                />
-                <Step
-                  number="04"
-                  title="You arrive — and exhale"
-                  body="We hold the flow and practicalities so you can actually be part of your own gathering."
-                />
-              </ol>
-
-              <div className="mt-3 space-y-3 text-sm text-[#4d3d33]">
-                <InfoRow
-                  icon={<CalendarDays className="h-4 w-4" />}
-                  title="How early should we reach out?"
-                  body="For spring and autumn, 3–6 months is ideal. For simpler one-evening gatherings, we sometimes can work with less."
-                />
-                <InfoRow
-                  icon={<Anchor className="h-4 w-4" />}
-                  title="Budget"
-                  body="We don’t do packages; we build around what matters most to you. Once we know your dates and guest count, we’ll share a clear range."
-                />
-                <InfoRow
-                  icon={<Sparkles className="h-4 w-4" />}
-                  title="Who this is for"
-                  body="People who care more about how it feels than how it looks on social media. If that’s you, we’ll probably get along."
-                />
-              </div>
-
-              <div className="mt-4 flex flex-col gap-2 rounded-2xl border border-dashed border-[#e0d6c6] bg-white/60 px-4 py-3 text-xs text-[#6a5a49]">
-                <div className="flex items-center gap-2">
-                  <MessageCircle className="h-4 w-4 text-[#8b6f47]" />
-                  <span className="font-semibold text-[#4d3d33]">
-                    Ready to start a conversation?
-                  </span>
-                </div>
-                <p>
-                  A short message like{" "}
-                  <em>
-                    “We&apos;re two families, in Crete in July, and want one
-                    unhurried day together”
-                  </em>{" "}
-                  is the perfect place to begin.
-                </p>
-                <div>
-                  <Link
-                    href="/contact"
-                    className="inline-flex items-center justify-center rounded-full bg-[#8b6f47] px-4 py-2 text-xs font-medium text-white shadow-sm shadow-[#8b6f47]/25 transition hover:-translate-y-0.5 hover:bg-[#a78b62]"
-                  >
-                    Start a private gathering enquiry
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Gentle closing strip */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.4 }}
-            transition={{ duration: 0.6, delay: 0.1 }}
-            className="mt-14 md:mt-16"
-          >
-            <div className="flex flex-col gap-3 rounded-3xl border border-[#e3d7c6] bg-white/70 px-5 py-4 text-sm text-[#4a4a4a] shadow-sm md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f4ebdf] text-[#8b6f47]">
-                  <MoonStar className="h-4 w-4" />
-                </div>
-                <p className="max-w-xl text-[13px] leading-relaxed">
-                  We keep our calendar intentionally light so we can stay close
-                  to each gathering. If your dates are flexible, let us know —
-                  it often opens up more beautiful options.
-                </p>
-              </div>
-              <Link
-                href="/contact"
-                className="inline-flex items-center justify-center rounded-full border border-[#d3c2aa] bg-white px-4 py-2 text-xs font-medium text-[#4d3d33] shadow-sm transition hover:border-[#c2ae95] hover:bg-[#fbf7ef]"
-              >
-                Ask about dates & availability
+              <Link href="/appointments">
+                <button className="w-full sm:w-auto border border-white/60 bg-transparent text-white px-10 py-4 rounded-full font-medium hover:bg-white/10 transition-all duration-300">
+                  Schedule a Clarity Call
+                </button>
               </Link>
             </div>
           </motion.div>
         </div>
       </section>
     </main>
-  );
-}
-
-/* --------------------------- UI subcomponents --------------------------- */
-
-function HeroPill({ children, icon }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-[#e0d6c6] bg-white/80 px-3 py-1 text-[11px]">
-      {icon && <span className="text-[#8b6f47]">{icon}</span>}
-      {children}
-    </span>
-  );
-}
-
-function Card({ icon, label, title, bullets, footnote }) {
-  return (
-    <article className="group flex flex-col overflow-hidden rounded-2xl border border-[#e0d6c6] bg-white/80 p-4 shadow-sm backdrop-blur-sm transition hover:-translate-y-1 hover:shadow-md">
-      <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-[#8b7a6b]">
-        <span>{label}</span>
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#f4ebdf] text-[#8b6f47]">
-          {icon}
-        </div>
-      </div>
-      <h3 className="font-serif text-lg text-[#3e3128]">{title}</h3>
-      <ul className="mt-3 space-y-1.5 text-[13px] text-[#4d3d33]">
-        {bullets.map((item) => (
-          <li key={item}>• {item}</li>
-        ))}
-      </ul>
-      {footnote && (
-        <p className="mt-3 text-[11px] text-[#8b7a6b]">{footnote}</p>
-      )}
-    </article>
-  );
-}
-
-function ScenarioCard({ label, title, length, guests, vibe, details }) {
-  return (
-    <article className="flex flex-col overflow-hidden rounded-2xl border border-[#e0d6c6] bg-white/80 p-4 shadow-sm">
-      <div className="text-[11px] uppercase tracking-[0.16em] text-[#8b7a6b]">
-        {label}
-      </div>
-      <h3 className="mt-1 font-serif text-lg text-[#3e3128]">{title}</h3>
-
-      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-[#6a5a49]">
-        <Tag>{length}</Tag>
-        <Tag>{guests}</Tag>
-        <Tag>{vibe}</Tag>
-      </div>
-
-      <ul className="mt-3 space-y-1.5 text-[13px] text-[#4d3d33]">
-        {details.map((d) => (
-          <li key={d}>• {d}</li>
-        ))}
-      </ul>
-    </article>
-  );
-}
-
-function Tag({ children }) {
-  return (
-    <span className="inline-flex items-center rounded-full bg-[#f9f3ea] px-2.5 py-1">
-      {children}
-    </span>
-  );
-}
-
-function ShapeItem({ title, items }) {
-  return (
-    <div>
-      <p className="text-[13px] font-semibold text-[#3e3128]">{title}</p>
-      <ul className="mt-1 space-y-0.5 text-[13px] text-[#6b625a]">
-        {items.map((item) => (
-          <li key={item}>• {item}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function Step({ number, title, body }) {
-  return (
-    <li className="flex gap-3">
-      <div className="mt-1 flex h-7 w-7 items-center justify-center rounded-full bg-[#f4ebdf] text-[11px] font-semibold text-[#8b6f47]">
-        {number}
-      </div>
-      <div>
-        <p className="text-[13px] font-semibold text-[#3e3128]">{title}</p>
-        <p className="mt-1 text-[13px] leading-relaxed text-[#6b625a]">
-          {body}
-        </p>
-      </div>
-    </li>
-  );
-}
-
-function InfoRow({ icon, title, body }) {
-  return (
-    <div className="flex gap-3">
-      <div className="mt-1 flex h-7 w-7 items-center justify-center rounded-full bg-[#f4ebdf] text-[#8b6f47]">
-        {icon}
-      </div>
-      <div>
-        <p className="text-[13px] font-semibold text-[#3e3128]">{title}</p>
-        <p className="mt-1 text-[13px] leading-relaxed text-[#6b625a]">
-          {body}
-        </p>
-      </div>
-    </div>
   );
 }
