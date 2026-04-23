@@ -8,7 +8,7 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
-// Match your `timestamp without time zone` by using NAIVE strings (no Z)
+// Match your dates. Note: Your schema uses `timestamp with time zone` for ScheduleSlot.date
 function toNaiveStart(ymd) {
   return `${ymd} 00:00:00`;
 }
@@ -35,7 +35,6 @@ export async function GET(req) {
   const from = (searchParams.get("from") || "").trim();
   const to = (searchParams.get("to") || "").trim();
 
-  // Helpful, explicit errors (these are the 400s you’re seeing)
   if (!Number.isFinite(experienceId)) {
     console.error("[availability] invalid experienceId", {
       raw: searchParams.get("experienceId"),
@@ -76,8 +75,9 @@ export async function GET(req) {
   const slotIds = slots.map((s) => s.id);
 
   // 2) Confirmed bookings that consume capacity
+  // FIX: Changed "Booking" to "booking" to match your PostgreSQL schema exactly.
   const { data: bookings, error: bookErr } = await admin
-    .from("Booking")
+    .from("booking")
     .select("scheduleSlotId, numberOfPeople, status")
     .in("scheduleSlotId", slotIds)
     .in("status", ["confirmed"]); // add "pending" if pending should block
@@ -89,11 +89,11 @@ export async function GET(req) {
     const n = Number(b.numberOfPeople) || 0;
     bookedBySlot.set(
       b.scheduleSlotId,
-      (bookedBySlot.get(b.scheduleSlotId) || 0) + n
+      (bookedBySlot.get(b.scheduleSlotId) || 0) + n,
     );
   }
 
-  // 3) Active holds (unexpired drafts/checkout) — include if you want them to block
+  // 3) Active holds (unexpired drafts/checkout)
   const { data: holds, error: holdsErr } = await admin
     .from("BookingDraft")
     .select("scheduleSlotId, counts, expiresAt, status")
@@ -107,13 +107,16 @@ export async function GET(req) {
   for (const h of holds || []) {
     const expTs = h.expiresAt ? new Date(h.expiresAt).getTime() : 0;
     if (!Number.isFinite(expTs) || expTs <= now) continue; // expired or null
+
+    // Schema defines counts as JSONB, so accessing .adults and .kids is correct
     const a = Number(h?.counts?.adults ?? 0) || 0;
     const k = Number(h?.counts?.kids ?? 0) || 0;
     const total = a + k;
+
     if (total > 0) {
       heldBySlot.set(
         h.scheduleSlotId,
-        (heldBySlot.get(h.scheduleSlotId) || 0) + total
+        (heldBySlot.get(h.scheduleSlotId) || 0) + total,
       );
     }
   }
@@ -139,7 +142,8 @@ export async function GET(req) {
 
   // 5) Return ordered days
   const days = Array.from(byDay.values()).sort((a, b) =>
-    a.date.localeCompare(b.date)
+    a.date.localeCompare(b.date),
   );
+
   return ok({ days });
 }

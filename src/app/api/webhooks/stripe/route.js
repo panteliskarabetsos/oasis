@@ -214,7 +214,7 @@ async function ensureConvertedFromDraft({
       "convertedBookingId",
       "appliedPromoCode", "discountAmount",
       currency
-    `
+    `,
     )
     .eq("id", draftId)
     .maybeSingle();
@@ -333,19 +333,15 @@ async function ensureConvertedFromDraft({
 }
 
 // --- webhook handler -------------------------------------------------------
+// src/app/api/webhooks/stripe/route.js
+
 export async function POST(req) {
   const sig = req.headers.get("stripe-signature");
   if (!sig) return bad("Missing Stripe signature header", 400);
 
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret) return bad("Webhook secret not configured", 500);
-
   const key = process.env.STRIPE_SECRET_KEY || "";
-  if (!key) return bad("Stripe not configured", 500);
-
   const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
-
-  // IMPORTANT: use raw body for signature verification
   const raw = await req.text();
 
   let event;
@@ -356,105 +352,134 @@ export async function POST(req) {
   }
 
   const admin = createSupabaseAdmin();
-  if (!admin) return bad("Server not configured", 500);
 
   try {
     switch (event.type) {
       case "checkout.session.completed": {
-        const s = event.data.object; // Stripe.Checkout.Session
+        const s = event.data.object;
+
+        // 1. CHECK IF THIS IS AN ADMIN-GENERATED LINK (Existing Booking)
+        const existingBookingId = s.metadata?.bookingId;
+        const isAdminGenerated = s.metadata?.admin_generated === "true";
+
+        if (existingBookingId && isAdminGenerated) {
+          console.log(
+            `🔔 Webhook: Updating Existing Booking ${existingBookingId}`,
+          );
+
+          const amountPaid = s.amount_total / 100;
+          const piId =
+            typeof s.payment_intent === "string"
+              ? s.payment_intent
+              : s.payment_intent?.id;
+
+          const { error: updateErr } = await admin
+            .from("booking") // FIXED: Use lowercase 'booking' per your schema
+            .update({
+              status: "confirmed",
+              totalPaidAmount: amountPaid,
+              stripePaymentIntentId: piId, // LINKING PI TO BOOKING
+              stripeSessionUrl: null, // Clear the link from UI
+              updatedAt: new Date().toISOString(),
+            })
+            .eq("id", existingBookingId);
+
+          if (updateErr) throw updateErr;
+
+          // Send confirmation email
+          await sendConfirmationEmail({
+            stripe,
+            admin,
+            bookingId: existingBookingId,
+            sessionId: s.id,
+            piId: piId,
+          });
+
+          return ok({ received: true, action: "updated_existing" });
+        }
+
+        // 2. FALLBACK TO STANDARD DRAFT CONVERSION (Web Checkout)
         const draftId = Number(s.client_reference_id || s.metadata?.draft_id);
         if (!Number.isFinite(draftId) || draftId <= 0)
           return ok({ skipped: true });
 
-        const stripeSessionId = s.id;
-        const piId =
-          typeof s.payment_intent === "string"
-            ? s.payment_intent
-            : s.payment_intent?.id || null;
-
-        const finalTotalCents =
-          toInt(s.metadata?.final_total_cents) || toInt(s.amount_total);
-        const currency = (
-          s.currency ||
-          s.metadata?.promo_currency ||
-          "eur"
-        ).toLowerCase();
-
         const { bookingId } = await ensureConvertedFromDraft({
           admin,
           draftId,
-          stripeSessionId,
-          stripePaymentIntentId: piId,
-          finalTotalCents,
-          currency,
+          stripeSessionId: s.id,
+          stripePaymentIntentId:
+            typeof s.payment_intent === "string"
+              ? s.payment_intent
+              : s.payment_intent?.id,
+          finalTotalCents: s.amount_total,
+          currency: s.currency,
         });
 
-        // Send confirmation with invoice PDF (if available) + receipt link
-        try {
-          await sendConfirmationEmail({
-            stripe,
-            admin,
-            bookingId,
-            sessionId: s.id,
-            piId: piId || null,
-            invoiceId: null, // session.invoice will be expanded inside helper
-          });
-        } catch (e) {
-          console.warn(
-            "[webhook] email send (session) failed:",
-            e?.message || e
-          );
-        }
-        return ok({ received: true, bookingId, emailed: true });
+        await sendConfirmationEmail({
+          stripe,
+          admin,
+          bookingId,
+          sessionId: s.id,
+        });
+        return ok({ received: true, bookingId, action: "converted_draft" });
       }
 
       case "payment_intent.succeeded": {
-        const pi = event.data.object; // Stripe.PaymentIntent
+        const pi = event.data.object;
+
+        // Logic for Payment Intent (Direct charges / Virtual Terminal)
+        const existingBookingId = pi.metadata?.bookingId;
+        if (existingBookingId) {
+          const amountPaid = pi.amount_received / 100;
+
+          const { error: updateErr } = await admin
+            .from("booking") // FIXED: Lowercase 'booking'
+            .update({
+              status: "confirmed",
+              totalPaidAmount: amountPaid,
+              stripePaymentIntentId: pi.id,
+              updatedAt: new Date().toISOString(),
+            })
+            .eq("id", existingBookingId);
+
+          if (updateErr) throw updateErr;
+
+          await sendConfirmationEmail({
+            stripe,
+            admin,
+            bookingId: existingBookingId,
+            piId: pi.id,
+          });
+          return ok({ received: true, action: "updated_existing_pi" });
+        }
+
+        // Standard draft flow for PIs
         const draftId = Number(pi.metadata?.draftId || pi.metadata?.draft_id);
-        if (!Number.isFinite(draftId) || draftId <= 0)
-          return ok({ skipped: true });
-
-        const stripePaymentIntentId = pi.id;
-        const finalTotalCents =
-          toInt(pi.metadata?.final_total_cents) || toInt(pi.amount_received);
-        const currency = (pi.currency || "eur").toLowerCase();
-
-        const { bookingId } = await ensureConvertedFromDraft({
-          admin,
-          draftId,
-          stripeSessionId: null,
-          stripePaymentIntentId,
-          finalTotalCents,
-          currency,
-        });
-
-        try {
+        if (Number.isFinite(draftId) && draftId > 0) {
+          const { bookingId } = await ensureConvertedFromDraft({
+            admin,
+            draftId,
+            stripePaymentIntentId: pi.id,
+            finalTotalCents: pi.amount_received,
+            currency: pi.currency,
+          });
           await sendConfirmationEmail({
             stripe,
             admin,
             bookingId,
-            sessionId: null,
-            piId: stripePaymentIntentId,
-            invoiceId: null,
+            piId: pi.id,
           });
-        } catch (e) {
-          console.warn("[webhook] email send (PI) failed:", e?.message || e);
+          return ok({ received: true, action: "converted_draft_pi" });
         }
-        return ok({ received: true, bookingId, emailed: true });
-      }
 
-      // Optional: mark failures / log
-      case "payment_intent.payment_failed": {
-        // could mark draft as "failed" or log error if you want
         return ok({ received: true });
       }
 
       default:
-        // Unhandled event types are OK
         return ok({ received: true });
     }
   } catch (e) {
-    console.error("[stripe webhook] handler error:", e?.message || e);
+    console.error("[stripe webhook] error:", e.message);
     return bad("Webhook handler error", 500);
   }
 }
