@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -17,16 +17,12 @@ import {
   Loader2,
   DollarSign,
   Info,
-  CalendarDays,
   FileText,
-  Tag,
   Banknote,
-  Clock,
   SearchIcon,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
-import BookingPricingEditor from "../../components/BookingPricingEditor";
 
 /* ---------------------------- helpers ---------------------------- */
 const cx = (...xs) => xs.filter(Boolean).join(" ");
@@ -205,6 +201,7 @@ function normalizeBooking(raw) {
   if (!raw || typeof raw !== "object") return null;
 
   const scheduleSlotId = raw.scheduleSlotId ?? raw.slot?.id ?? null;
+  // If there's no schedule slot, it's a private bespoke booking.
   const isPrivate = !scheduleSlotId;
 
   const startTime = raw.startTime ?? raw.date ?? raw.ScheduleSlot?.date ?? null;
@@ -215,11 +212,7 @@ function normalizeBooking(raw) {
     raw.experience?.id ??
     null;
   const experienceName =
-    raw.experienceName ??
-    raw.customExperienceName ??
-    raw.Experience?.name ??
-    raw.experience?.name ??
-    null;
+    raw.experienceName ?? raw.Experience?.name ?? raw.experience?.name ?? null;
 
   const u = raw.user || raw.User || {};
   const pc =
@@ -289,9 +282,10 @@ function normalizeBooking(raw) {
     scheduleSlotId,
     startTime,
     duration: raw.duration ?? null,
+    customExperienceName: raw.customExperienceName ?? null,
     experience: {
       id: experienceId,
-      name: experienceName || (isPrivate ? "Private booking" : null),
+      name: experienceName,
       location: raw.experience?.location ?? null,
       isCustom: isPrivate || !experienceId,
     },
@@ -311,7 +305,6 @@ function normalizeBooking(raw) {
     unitPriceAdult: raw.unitPriceAdult,
     unitPriceKid: raw.unitPriceKid,
     totalPaidAmount: raw.totalPaidAmount,
-    customExperienceName: raw.customExperienceName ?? null,
   };
 }
 
@@ -465,7 +458,6 @@ export default function ReservationDetailPage() {
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [showStripeSession, setShowStripeSession] = useState(false);
-  const [showPricing, setShowPricing] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
 
   const [slots, setSlots] = useState([]);
@@ -505,7 +497,7 @@ export default function ReservationDetailPage() {
         setLoading(false);
       }
     })();
-  }, [id]);
+  }, [id, rev]);
 
   // Fetch Stripe PI
   useEffect(() => {
@@ -539,36 +531,6 @@ export default function ReservationDetailPage() {
       aborted = true;
     };
   }, [piId, rev]);
-
-  // Lock scroll when pricing modal is open
-  useEffect(() => {
-    if (!showPricing) return;
-    const scrollY = window.scrollY;
-    const original = {
-      position: document.body.style.position,
-      top: document.body.style.top,
-      width: document.body.style.width,
-      overflow: document.documentElement.style.overflow,
-      paddingRight: document.documentElement.style.paddingRight,
-    };
-    const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
-    if (scrollbarW > 0)
-      document.documentElement.style.paddingRight = `${scrollbarW}px`;
-
-    document.body.style.position = "fixed";
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = "100%";
-    document.documentElement.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.position = original.position;
-      document.body.style.top = original.top;
-      document.body.style.width = original.width;
-      document.documentElement.style.overflow = original.overflow;
-      document.documentElement.style.paddingRight = original.paddingRight;
-      window.scrollTo(0, scrollY);
-    };
-  }, [showPricing]);
 
   /* ------------------------------ actions ------------------------------ */
   async function cancelBooking() {
@@ -642,6 +604,12 @@ export default function ReservationDetailPage() {
   const statusNorm = String(item?.status || "").toLowerCase();
   const isCancelled = statusNorm === "cancelled";
   const isPrivate = !!item?.isPrivate;
+
+  // Clean display name for the experience (handles custom/private names)
+  const displayExperienceName =
+    item?.customExperienceName ||
+    item?.experience?.name ||
+    "Custom Private Experience";
 
   const moneyCurrency = item?.money?.currency || "EUR";
   const paidTotal =
@@ -767,7 +735,11 @@ export default function ReservationDetailPage() {
             <IconButton
               onClick={() => setShowReschedule(true)}
               disabled={isCancelled || isPrivate}
-              title="Reschedule"
+              title={
+                isPrivate
+                  ? "Private bookings cannot be rescheduled here"
+                  : "Reschedule"
+              }
               icon={CalendarClock}
               tone="amber"
             />
@@ -779,58 +751,28 @@ export default function ReservationDetailPage() {
               tone="red"
             />
             <IconButton
-              onClick={() => setShowPricing(true)}
+              onClick={() => {
+                if (piId) {
+                  // If we have an intent, go to the detailed transaction record
+                  router.push(`/admin/payments/${piId}`);
+                } else {
+                  // If we DON'T have an intent, go to a page to create one or log manual payment
+                  router.push(`/admin/bookings/${id}/payment-setup`);
+                }
+              }}
               disabled={isCancelled}
-              title="Edit Pricing"
-              icon={DollarSign}
-              tone="emerald"
-            />
+              title={
+                piId
+                  ? "View Transaction Record"
+                  : "Awaiting Payment - Click to Setup"
+              }
+              tone={piId ? "emerald" : "amber"}
+            >
+              {piId ? <DollarSign size={20} /> : <Banknote size={20} />}
+            </IconButton>
           </div>
         </div>
       </div>
-
-      {/* Pricing Editor Modal */}
-      <AnimatePresence>
-        {showPricing && (
-          <motion.div
-            key="pricing-modal"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] grid place-items-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto overscroll-contain"
-            onClick={() => setShowPricing(false)}
-          >
-            <motion.div
-              initial={{ y: 20, scale: 0.95, opacity: 0 }}
-              animate={{ y: 0, scale: 1, opacity: 1 }}
-              exit={{ y: 20, scale: 0.95, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="w-full max-w-2xl rounded-[2rem] border border-[#e3ddd2] bg-white p-6 shadow-2xl max-h-[85vh] overflow-y-auto no-scrollbar"
-              onClick={(e) => e.stopPropagation()}
-              role="dialog"
-              aria-modal="true"
-            >
-              <div className="mb-6 flex items-center justify-between border-b border-[#e3ddd2] pb-4">
-                <h3 className="text-lg font-serif text-[#3f3127]">
-                  Pricing & Payment
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setShowPricing(false)}
-                  className="rounded-full p-2 hover:bg-[#fdfaf5] text-[#7a6a5f] transition-colors"
-                >
-                  <XCircle size={20} />
-                </button>
-              </div>
-              <BookingPricingEditor
-                bookingId={id}
-                onClose={() => setShowPricing(false)}
-                onSaved={() => setRev((v) => v + 1)}
-              />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <div className="mx-auto max-w-6xl px-4 sm:px-8 py-8">
         {loading ? (
@@ -881,25 +823,19 @@ export default function ReservationDetailPage() {
                           </span>
                         </>
                       )}
-                      {item.experience?.name && (
-                        <>
-                          <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
-                          <span className="flex items-center gap-1.5 min-w-0 truncate">
-                            <MapPin
-                              size={14}
-                              className="text-[#a09084] shrink-0"
-                            />
-                            <span className="truncate">
-                              {item.experience?.name}
-                            </span>
-                            {isPrivate && (
-                              <span className="ml-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 shrink-0">
-                                Private
-                              </span>
-                            )}
+
+                      <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
+                      <span className="flex items-center gap-1.5 min-w-0 truncate">
+                        <MapPin size={14} className="text-[#a09084] shrink-0" />
+                        <span className="truncate">
+                          {displayExperienceName}
+                        </span>
+                        {isPrivate && (
+                          <span className="ml-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 shrink-0">
+                            Private
                           </span>
-                        </>
-                      )}
+                        )}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -938,7 +874,7 @@ export default function ReservationDetailPage() {
               <Card title="Reservation Info" icon={<FileText size={16} />}>
                 <Row label="Date">{fmtDateLong(item.startTime)}</Row>
                 <Row label="Experience">
-                  {item.experience?.name || "-"}
+                  {displayExperienceName}
                   {isPrivate && (
                     <span className="ml-2 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">
                       Private
@@ -1136,6 +1072,36 @@ export default function ReservationDetailPage() {
                         −{fmtMoney(discountValue, moneyCurrency)}
                       </span>
                     </Row>
+                  )}
+
+                  {/* Inside the Payment Ledger Card */}
+                  {!hasPI && !isCancelled && (
+                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+                      <div className="flex items-start gap-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                          <Info size={20} />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-sm font-bold text-amber-900 uppercase tracking-tight">
+                            Awaiting Payment Provisioning
+                          </h4>
+                          <p className="mt-1 text-xs text-amber-800/80 leading-relaxed">
+                            No digital payment intent has been created for this
+                            booking yet. You can either generate a Stripe
+                            Payment Link or mark this as paid via Bank Transfer.
+                          </p>
+                          <button
+                            onClick={() =>
+                              router.push(`/admin/bookings/${id}/payment-setup`)
+                            }
+                            className="mt-4 inline-flex items-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-white hover:bg-amber-700 transition-all shadow-sm"
+                          >
+                            Resolve Payment{" "}
+                            <ArrowLeft size={14} className="rotate-180" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   <Row label="Stripe Session" mono>

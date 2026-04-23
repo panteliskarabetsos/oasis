@@ -92,18 +92,20 @@ export async function GET(req) {
     const created = toUnixRange({ date_from, date_to });
 
     // ---------- Enriched Booking Map ----------
+    // ---------- Enriched Booking Map ----------
     const dbDataMap = new Map();
     async function enrichBookingsByPi(piIds) {
       if (!piIds.length) return;
       try {
-        // Fetch from confirmed 'booking' table
-        // Join with 'User' table to get real registered names
+        // Fetch from 'booking' table (lowercase)
+        // We select primary_contact for Guest info and User for Registered info
         const { data: bookings, error: bErr } = await adminSupa
           .from("booking")
           .select(
             `
             id, 
             stripePaymentIntentId,
+            primary_contact,
             User ( name, surname, email )
           `,
           )
@@ -112,22 +114,27 @@ export async function GET(req) {
         if (!bErr && Array.isArray(bookings)) {
           for (const b of bookings) {
             if (b.stripePaymentIntentId) {
+              const pc = b.primary_contact || {};
+
+              // Priority: Registered User -> primary_contact.name -> primary_contact parts
               const fullName = b.User
                 ? `${b.User.name || ""} ${b.User.surname || ""}`.trim()
-                : null;
+                : pc.name ||
+                  [pc.firstName, pc.lastName].filter(Boolean).join(" ") ||
+                  null;
+
+              const dbEmail = b.User?.email || pc.email || null;
+
               dbDataMap.set(b.stripePaymentIntentId, {
                 booking_id: b.id,
                 dbName: fullName,
-                dbEmail: b.User?.email,
+                dbEmail: dbEmail,
               });
             }
           }
         }
       } catch (e) {
-        console.warn(
-          "[payments:list] booking enrichment failed:",
-          e?.message || e,
-        );
+        console.warn("[payments:list] booking enrichment failed:", e.message);
       }
     }
 
@@ -168,11 +175,18 @@ export async function GET(req) {
             ? true
             : String(statusOut).toLowerCase() === status;
         })
+
         .map((pi) => {
           const ch = asObj(pi.latest_charge);
           const pm = asObj(pi.payment_method);
           const customerObj = asObj(pi.customer);
-          const enrichment = dbDataMap.get(pi.id);
+
+          // 1. Get data from our Database Map
+          let enrichment = dbDataMap.get(pi.id);
+
+          // 2. FALLBACK: If DB lookup failed, check Stripe Metadata
+          // We set this metadata in our generate-payment-link API
+          const metadataBookingId = pi.metadata?.bookingId;
 
           const stripeEmail =
             customerObj?.email ||
@@ -183,14 +197,16 @@ export async function GET(req) {
             ch?.billing_details?.name ||
             pm?.billing_details?.name;
 
-          // Priority: 1. Real DB Name -> 2. Stripe Name -> 3. Email Prefix -> 4. "Guest"
+          // Priority for Name: DB Name -> Stripe Billing Name -> Stripe Email -> "Guest"
           const finalName =
             enrichment?.dbName ||
             stripeName ||
             stripeEmail?.split("@")[0] ||
             "Guest";
           const finalEmail = enrichment?.dbEmail || stripeEmail;
-
+          const finalBookingId =
+            enrichment?.booking_id ||
+            (metadataBookingId ? Number(metadataBookingId) : null);
           const method = ch?.payment_method_details?.type || pm?.type || "card";
           const cardObj = ch?.payment_method_details?.card || pm?.card || null;
 
@@ -231,6 +247,7 @@ export async function GET(req) {
               email: finalEmail,
               name: finalName,
             },
+            booking_id: finalBookingId, // Now has a fallback!
             method,
             card_brand: cardObj?.brand || null,
             card_last4: cardObj?.last4 || null,
