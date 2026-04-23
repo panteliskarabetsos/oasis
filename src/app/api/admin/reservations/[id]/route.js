@@ -60,7 +60,8 @@ export async function GET(req, ctx) {
          ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)),
          Experience:Experience!Booking_experienceId_fkey(id, name, location),
          User:User(id, email, name, surname, phone),
-         selected_meetup_point`,
+         selected_meetup_point,
+         payment(*)`, // 🔑 ADDED: Fetch the offline payments ledger
       )
       .eq("id", rid)
       .maybeSingle();
@@ -75,7 +76,6 @@ export async function GET(req, ctx) {
       const countsRaw = parseJSON(b?.counts, null) || {};
       const attendees = parseJSON(b?.attendees, []) || [];
       const pc = parseJSON(b?.primary_contact, null);
-      // 🔑 ADDED: Parse pickup point
       const selected_meetup_point = parseJSON(b?.selected_meetup_point, null);
 
       const adults =
@@ -126,6 +126,27 @@ export async function GET(req, ctx) {
       const promoExtract = extractPromoFromRow(b, unitPrices, counts);
       const promoPayload = buildPromoPayload(promoExtract);
 
+      // 🔑 ADDED: Check offline payments to set a default payment method
+      const offlinePayments = Array.isArray(b?.payment) ? b.payment : [];
+      let defaultPaymentMethod = null;
+
+      if (offlinePayments.length > 0) {
+        // Grab the most recent offline payment
+        const latestOffline = offlinePayments.sort(
+          (a, b) => new Date(b.processed_at) - new Date(a.processed_at),
+        )[0];
+
+        let label = "Offline Settlement";
+        if (latestOffline.method === "cash") label = "Cash Settlement";
+        if (latestOffline.method === "bank_transfer") label = "Bank Transfer";
+
+        defaultPaymentMethod = {
+          type: latestOffline.method,
+          label: label,
+          card: null,
+        };
+      }
+
       const item = {
         id: b.id,
         source: "booking",
@@ -137,7 +158,7 @@ export async function GET(req, ctx) {
 
         counts,
         attendees,
-        selected_meetup_point, // 🔑 ADDED: Include in returned object
+        selected_meetup_point,
 
         unitPrices,
         money: {
@@ -150,7 +171,8 @@ export async function GET(req, ctx) {
           stripeSessionId: b?.stripeSessionId ?? null,
           stripeSessionUrl: b?.stripeSessionUrl ?? null,
           stripePaymentIntentId: b?.stripePaymentIntentId ?? null,
-          paymentMethod: null,
+          paymentMethod: defaultPaymentMethod, // 👈 Pre-filled with offline data
+          ledger: offlinePayments, // 👈 Passing the full history just in case the UI needs it
         },
 
         scheduleSlotId,
@@ -184,6 +206,7 @@ export async function GET(req, ctx) {
       // -------------------------------------------------------------
       // LIVE STRIPE ENRICHMENT (The "Safety Net")
       // -------------------------------------------------------------
+      // This will override the "Offline" method ONLY IF Stripe confirms a digital payment occurred
       if (
         (b?.stripeSessionId || b?.stripePaymentIntentId) &&
         process.env.STRIPE_SECRET_KEY
@@ -231,27 +254,28 @@ export async function GET(req, ctx) {
 
           // 3. Apply Live Sync if Stripe confirms payment
           if (isPaid) {
-            // Force the API response to show the paid amount
-            item.money.totalPaidAmount = amountReceived;
-            item.totalPaidAmount = amountReceived;
+            // Only add the Stripe amount if we haven't already logged offline payments exceeding it
+            // (Prevents Stripe from overwriting combined Stripe + Cash totals)
+            const currentLoggedTotal = item.money.totalPaidAmount || 0;
+            if (currentLoggedTotal < amountReceived) {
+              item.money.totalPaidAmount = amountReceived;
+              item.totalPaidAmount = amountReceived;
 
-            // Hide the active link since it's already paid
-            item.payments.stripeSessionUrl = null;
-            item.payments.stripePaymentIntentId = finalPiId;
-
-            // Self-heal the database silently in the background
-            if ((b.totalPaidAmount || 0) < amountReceived) {
+              // Self-heal the database silently in the background
               supa
                 .from("booking")
                 .update({
                   totalPaidAmount: amountReceived,
                   status: "confirmed",
-                  stripePaymentIntentId: finalPiId, // Save the missing ID back to DB!
+                  stripePaymentIntentId: finalPiId,
                   stripeSessionUrl: null,
                 })
                 .eq("id", b.id)
                 .then(); // Fire and forget
             }
+
+            item.payments.stripeSessionUrl = null;
+            item.payments.stripePaymentIntentId = finalPiId;
           }
 
           // 4. Extract the card details (Visa ending in 4242, etc.)
@@ -273,7 +297,7 @@ export async function GET(req, ctx) {
       .from("BookingDraft")
       .select(
         `*, ScheduleSlot:ScheduleSlot(*, Experience:Experience(*)), selected_meetup_point`,
-      ) // 🔑 ADDED: Fetch pickup point from draft
+      )
       .eq("id", rid)
       .maybeSingle();
     if (dErr) throw dErr;
@@ -284,7 +308,6 @@ export async function GET(req, ctx) {
     const cnt = parseJSON(d?.counts, {}) || {};
     const pc = parseJSON(d?.primary_contact, {}) || {};
     const attendees = parseJSON(d?.attendees, []) || [];
-    // 🔑 ADDED: Parse pickup point
     const selectedMeetupPointDraft = parseJSON(d?.selected_meetup_point, null);
 
     const counts = {
@@ -323,7 +346,7 @@ export async function GET(req, ctx) {
 
       payments: {
         stripeSessionId: d?.stripeSessionId ?? null,
-        stripeSessionUrl: d?.stripeSessionUrl ?? null, // 👈 ADDED HERE
+        stripeSessionUrl: d?.stripeSessionUrl ?? null,
         stripePaymentIntentId: d?.stripePaymentIntentId ?? null,
       },
 
