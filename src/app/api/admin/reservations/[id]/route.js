@@ -148,6 +148,7 @@ export async function GET(req, ctx) {
 
         payments: {
           stripeSessionId: b?.stripeSessionId ?? null,
+          stripeSessionUrl: b?.stripeSessionUrl ?? null,
           stripePaymentIntentId: b?.stripePaymentIntentId ?? null,
           paymentMethod: null,
         },
@@ -180,28 +181,89 @@ export async function GET(req, ctx) {
         customExperienceName: b?.customExperienceName ?? null,
       };
 
-      // Stripe enrichment
-      if (b?.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
+      // -------------------------------------------------------------
+      // LIVE STRIPE ENRICHMENT (The "Safety Net")
+      // -------------------------------------------------------------
+      if (
+        (b?.stripeSessionId || b?.stripePaymentIntentId) &&
+        process.env.STRIPE_SECRET_KEY
+      ) {
         try {
           const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-            apiVersion: "2023-10-16",
+            apiVersion: "2024-06-20",
           });
-          const chargeList = await stripe.charges.list({
-            payment_intent: b.stripePaymentIntentId,
-            limit: 1,
-          });
-          const charge = chargeList?.data?.[0] || null;
-          if (charge) {
+
+          let isPaid = false;
+          let amountReceived = 0;
+          let latestCharge = null;
+          let finalPiId = b?.stripePaymentIntentId;
+
+          // 1. Check the Checkout Session First (Web Links)
+          if (b?.stripeSessionId) {
+            const session = await stripe.checkout.sessions.retrieve(
+              b.stripeSessionId,
+              {
+                expand: ["payment_intent", "payment_intent.latest_charge"],
+              },
+            );
+
+            if (session.payment_status === "paid") {
+              isPaid = true;
+              amountReceived = session.amount_total / 100;
+              if (session.payment_intent) {
+                finalPiId = session.payment_intent.id || session.payment_intent;
+                latestCharge = session.payment_intent.latest_charge;
+              }
+            }
+          }
+
+          // 2. Fallback: Check Payment Intent (For Physical Terminals / MOTO)
+          if (!isPaid && finalPiId) {
+            const pi = await stripe.paymentIntents.retrieve(finalPiId, {
+              expand: ["latest_charge"],
+            });
+            if (pi && pi.status === "succeeded") {
+              isPaid = true;
+              amountReceived = pi.amount_received / 100;
+              latestCharge = pi.latest_charge;
+            }
+          }
+
+          // 3. Apply Live Sync if Stripe confirms payment
+          if (isPaid) {
+            // Force the API response to show the paid amount
+            item.money.totalPaidAmount = amountReceived;
+            item.totalPaidAmount = amountReceived;
+
+            // Hide the active link since it's already paid
+            item.payments.stripeSessionUrl = null;
+            item.payments.stripePaymentIntentId = finalPiId;
+
+            // Self-heal the database silently in the background
+            if ((b.totalPaidAmount || 0) < amountReceived) {
+              supa
+                .from("booking")
+                .update({
+                  totalPaidAmount: amountReceived,
+                  status: "confirmed",
+                  stripePaymentIntentId: finalPiId, // Save the missing ID back to DB!
+                  stripeSessionUrl: null,
+                })
+                .eq("id", b.id)
+                .then(); // Fire and forget
+            }
+          }
+
+          // 4. Extract the card details (Visa ending in 4242, etc.)
+          if (latestCharge && typeof latestCharge !== "string") {
             item.payments.paymentMethod =
-              extractPaymentMethodSummaryFromCharge(charge);
+              extractPaymentMethodSummaryFromCharge(latestCharge);
           }
         } catch (err) {
-          console.error(
-            "[reservations/:id GET] Stripe charges fetch error:",
-            err,
-          );
+          console.error("[reservations/:id GET] Live Stripe fetch error:", err);
         }
       }
+      // -------------------------------------------------------------
 
       return ok({ item });
     }
@@ -261,6 +323,7 @@ export async function GET(req, ctx) {
 
       payments: {
         stripeSessionId: d?.stripeSessionId ?? null,
+        stripeSessionUrl: d?.stripeSessionUrl ?? null, // 👈 ADDED HERE
         stripePaymentIntentId: d?.stripePaymentIntentId ?? null,
       },
 
