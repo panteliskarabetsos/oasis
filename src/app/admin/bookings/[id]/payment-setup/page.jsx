@@ -222,7 +222,10 @@ export default function PaymentSetupPage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paymentLink }),
+          body: JSON.stringify({
+            paymentLink,
+            amountDue: balanceToPay,
+          }),
         },
       );
       if (!res.ok) throw new Error("Failed to send email");

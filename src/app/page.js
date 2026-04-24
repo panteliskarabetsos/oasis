@@ -249,7 +249,6 @@ export default function Home() {
       </section>
 
       {/* ================== SIGNATURE EXPERIENCES (DYNAMIC) ================== */}
-      {/* Note: Removed the heavy top padding (py-32 to pb-32 pt-16) so it hugs the faded edge nicely */}
       <section className="relative z-10 pt-16 pb-32 px-6 bg-[#f4f1ec]">
         <div className="max-w-7xl mx-auto relative">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8 mb-16">
@@ -265,12 +264,12 @@ export default function Home() {
               transition={{ duration: 0.8, delay: 0.3 }}
               className="flex gap-4"
             >
-              <Link
+              <LinkWithLoader
                 href="/experiences"
                 className="inline-flex items-center gap-2 text-sm font-medium text-[#8b6f47] hover:text-[#5a4a3f] transition-colors border-b border-transparent hover:border-[#5a4a3f] pb-1"
               >
                 View all experiences →
-              </Link>
+              </LinkWithLoader>
             </motion.div>
           </div>
 
@@ -407,12 +406,15 @@ export default function Home() {
                 Join our small-group experiences. Ideal for solo travelers and
                 couples looking to share a table and stories.
               </p>
-              <button className="mt-8 text-sm font-medium text-[#8b6f47] uppercase tracking-wider flex items-center gap-2 group-hover:text-[#5a4a3f] transition-colors">
+              <LinkWithLoader
+                href="/experiences"
+                className="mt-8 text-sm font-medium text-[#8b6f47] uppercase tracking-wider flex items-center gap-2 group-hover:text-[#5a4a3f] transition-colors w-fit"
+              >
                 Explore{" "}
                 <span className="text-lg transform group-hover:translate-x-1 transition-transform">
                   →
                 </span>
-              </button>
+              </LinkWithLoader>
             </motion.div>
 
             {/* Private */}
@@ -434,12 +436,15 @@ export default function Home() {
                 From our "In-Villa Chef's Table" to private bookings of our
                 signature tours. Tailored exclusively to your group.
               </p>
-              <button className="mt-8 text-sm font-medium text-[#e8d2b2] uppercase tracking-wider flex items-center gap-2 group-hover:text-white transition-colors relative z-10">
+              <LinkWithLoader
+                href="/private"
+                className="mt-8 text-sm font-medium text-[#e8d2b2] uppercase tracking-wider flex items-center gap-2 group-hover:text-white transition-colors relative z-10 w-fit"
+              >
                 Request Private{" "}
                 <span className="text-lg transform group-hover:translate-x-1 transition-transform">
                   →
                 </span>
-              </button>
+              </LinkWithLoader>
             </motion.div>
 
             {/* Clarity Call */}
@@ -460,12 +465,15 @@ export default function Home() {
                 Not sure what fits yet? Let's talk through ideas, timing, and
                 what you're hoping this will feel like.
               </p>
-              <button className="mt-8 text-sm font-medium text-[#8b6f47] uppercase tracking-wider flex items-center gap-2 group-hover:text-[#5a4a3f] transition-colors">
+              <LinkWithLoader
+                href="/contact"
+                className="mt-8 text-sm font-medium text-[#8b6f47] uppercase tracking-wider flex items-center gap-2 group-hover:text-[#5a4a3f] transition-colors w-fit"
+              >
                 Schedule{" "}
                 <span className="text-lg transform group-hover:translate-x-1 transition-transform">
                   →
                 </span>
-              </button>
+              </LinkWithLoader>
             </motion.div>
           </div>
         </div>
@@ -489,9 +497,11 @@ export default function Home() {
             reach out to craft your private journey through the heart of Crete.
           </p>
           <div className="flex justify-center gap-4 pt-4">
-            <button className="bg-white text-[#4d3d33] px-10 py-4 rounded-full font-medium hover:bg-[#f4f1ec] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300">
-              Book Your Experience
-            </button>
+            <LinkWithLoader href="/experiences">
+              <button className="bg-white text-[#4d3d33] px-10 py-4 rounded-full font-medium hover:bg-[#f4f1ec] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300">
+                Book Your Experience
+              </button>
+            </LinkWithLoader>
           </div>
         </motion.div>
       </section>

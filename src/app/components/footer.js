@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import {
   Mail,
@@ -6,10 +9,42 @@ import {
   Instagram,
   Facebook,
   ArrowRight,
+  Loader2,
 } from "lucide-react";
 
 export default function Footer() {
   const year = new Date().getFullYear();
+
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState("idle");
+  const [message, setMessage] = useState("");
+
+  const handleSubscribe = async (e) => {
+    e.preventDefault();
+    if (!email) return;
+
+    setStatus("loading");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/newsletter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to subscribe");
+      }
+
+      setStatus("success");
+      setMessage("Thank you! You have successfully joined our journal.");
+      setEmail("");
+    } catch (error) {
+      setStatus("error");
+      setMessage("Something went wrong. Please try again.");
+    }
+  };
 
   return (
     <footer className="relative bg-[#f4f1ec] text-[#4d3d33] overflow-hidden border-t border-[#eadfce]">
@@ -18,7 +53,7 @@ export default function Footer() {
 
       <div className="relative mx-auto max-w-7xl px-6 pt-24 pb-8 md:px-10 lg:pt-32">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 lg:gap-8">
-          {/* Brand & Tagline - Takes up 5 columns on desktop */}
+          {/* Brand & Tagline */}
           <div className="lg:col-span-5 flex flex-col justify-between">
             <div className="space-y-8 max-w-sm">
               <h3 className="font-serif text-3xl md:text-4xl text-[#4d3d33] leading-snug">
@@ -31,26 +66,49 @@ export default function Footer() {
               </p>
             </div>
 
-            {/* Minimal Newsletter Subscription */}
+            {/* Functional Newsletter Subscription */}
             <div className="mt-12 space-y-4">
               <h4 className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[#8b6f47]">
                 Join our journal
               </h4>
-              <form className="relative group max-w-sm">
+              <form
+                onSubmit={handleSubscribe}
+                className="relative group max-w-sm"
+              >
                 <input
                   type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={status === "loading" || status === "success"}
                   placeholder="Email address"
-                  className="w-full bg-transparent border-b border-[#d6c6b2] py-3 pl-0 pr-10 text-sm text-[#4d3d33] placeholder:text-[#8b7a6b] focus:outline-none focus:border-[#8b6f47] transition-colors"
+                  className="w-full bg-transparent border-b border-[#d6c6b2] py-3 pl-0 pr-10 text-sm text-[#4d3d33] placeholder:text-[#8b7a6b] focus:outline-none focus:border-[#8b6f47] transition-colors disabled:opacity-50"
                   required
                 />
                 <button
                   type="submit"
-                  className="absolute right-0 top-1/2 -translate-y-1/2 text-[#8b7a6b] group-focus-within:text-[#8b6f47] hover:text-[#4d3d33] transition-colors"
+                  disabled={status === "loading" || status === "success"}
+                  className="absolute right-0 top-1/2 -translate-y-1/2 text-[#8b7a6b] group-focus-within:text-[#8b6f47] hover:text-[#4d3d33] transition-colors disabled:opacity-50"
                   aria-label="Subscribe"
                 >
-                  <ArrowRight className="w-4 h-4" strokeWidth={1.5} />
+                  {status === "loading" ? (
+                    <Loader2
+                      className="w-4 h-4 animate-spin"
+                      strokeWidth={1.5}
+                    />
+                  ) : (
+                    <ArrowRight className="w-4 h-4" strokeWidth={1.5} />
+                  )}
                 </button>
               </form>
+
+              {/* Feedback Message */}
+              {message && (
+                <p
+                  className={`text-xs mt-2 ${status === "error" ? "text-red-500" : "text-[#8b6f47]"}`}
+                >
+                  {message}
+                </p>
+              )}
             </div>
           </div>
 

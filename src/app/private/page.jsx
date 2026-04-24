@@ -338,12 +338,12 @@ export default function PrivateInVilla() {
             </p>
 
             <div className="flex flex-col sm:flex-row justify-center gap-4 pt-8">
-              <Link href="/contact">
+              <Link href="/private/inquire">
                 <button className="w-full sm:w-auto bg-white text-[#4d3d33] px-10 py-4 rounded-full font-medium hover:bg-[#f4f1ec] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300">
                   Request Private Experience
                 </button>
               </Link>
-              <Link href="/appointments">
+              <Link href="/contact">
                 <button className="w-full sm:w-auto border border-white/60 bg-transparent text-white px-10 py-4 rounded-full font-medium hover:bg-white/10 transition-all duration-300">
                   Schedule a Clarity Call
                 </button>
