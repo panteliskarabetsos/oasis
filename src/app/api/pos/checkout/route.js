@@ -30,7 +30,7 @@ function itemizeNote(items = []) {
       (l) =>
         `• ${l.name}${l.sku ? ` (${l.sku})` : ""} × ${l.quantity} @ €${Number(
           l.unitPrice || 0,
-        ).toFixed(2)} = €${(
+        ).toFixed(2)} VAT ${Number(l.vatRate ?? l.vat ?? 24)}% = €${(
           Number(l.unitPrice || 0) * Number(l.quantity || 0)
         ).toFixed(2)}`,
     );
@@ -341,6 +341,8 @@ export async function POST(req) {
         sku: l.sku ?? null,
         unitPrice: Number(l.unitPrice || l.price || 0),
         quantity: Number(l.quantity || l.qty || 0),
+
+        vatRate: Number(l.vatRate ?? l.vat ?? 24),
       }));
 
     const notesPieces = [

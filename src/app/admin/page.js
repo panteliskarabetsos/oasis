@@ -59,13 +59,14 @@ export const dynamic = "force-dynamic";
 const PERMISSIONS = {
   experiences: "Experiences",
   bookings: "Bookings",
-  requests: "Guest Requests", // <-- NEW: Added requests permission
+  requests: "Guest Requests",
   guests: "Guests & CRM",
   planner: "Planner",
   schedule: "Schedule",
   admins: "Admins",
   payments: "Payments",
   invoices: "Invoices",
+  zreport: "End of Day Z-Report",
   promotions: "Promotions",
   checkins: "Check-ins",
   pos: "POS",
@@ -101,7 +102,7 @@ const ADMIN_ROLES = [
     permissions: [
       "experiences",
       "bookings",
-      "requests", // <-- Granted to Managers
+      "requests",
       "guests",
       "planner",
       "schedule",
@@ -119,7 +120,14 @@ const ADMIN_ROLES = [
     color: "text-emerald-700",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
-    permissions: ["payments", "invoices", "corporate", "giftcards", "pos"],
+    permissions: [
+      "payments",
+      "invoices",
+      "corporate",
+      "giftcards",
+      "pos",
+      "zreport",
+    ],
   },
   {
     id: "marketing",
@@ -276,6 +284,21 @@ export default function AdminDashboardPage() {
         desc: "Stripe & refunds",
         onClick: () => go("/admin/payments"),
         keywords: ["payment", "stripe"],
+      },
+      {
+        key: "zreport",
+        cat: "finance",
+        icon: <FileBarChart2 size={20} />,
+        title: "End of Day Z-Report",
+        desc: "Close daily ledger",
+        onClick: () => go("/admin/reports/daily"),
+        keywords: [
+          "z report",
+          "end of day",
+          "daily report",
+          "ledger",
+          "cash close",
+        ],
       },
       {
         key: "invoices",

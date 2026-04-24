@@ -4,27 +4,24 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import buildZReportPdfBuffer from "@/lib/pdf/buildZReport";
 
-const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 async function requireAdmin() {
   const supa = await createSupabaseServer();
-  if (!supa) {
+  if (!supa)
     return { error: true, response: bad("Server not configured", 500) };
-  }
 
   const { data, error } = await supa.auth.getUser();
   const user = data?.user;
 
-  if (error || !user) {
+  if (error || !user)
     return { error: true, response: bad("Unauthorized", 401) };
-  }
 
   const admin = createSupabaseAdmin();
-  if (!admin) {
+  if (!admin)
     return { error: true, response: bad("Server not configured", 500) };
-  }
 
   const { data: profile } = await admin
     .from("User")
@@ -42,12 +39,7 @@ async function requireAdmin() {
     return { error: true, response: bad("Forbidden", 403) };
   }
 
-  return {
-    error: false,
-    admin,
-    user,
-    profile,
-  };
+  return { error: false, admin, user, profile };
 }
 
 function getDateRange(dateParam) {
@@ -59,10 +51,8 @@ function getDateRange(dateParam) {
     endDate = new Date(`${dateParam}T23:59:59.999`);
   } else {
     const now = new Date();
-
     startDate = new Date(now);
     startDate.setHours(0, 0, 0, 0);
-
     endDate = new Date(now);
     endDate.setHours(23, 59, 59, 999);
   }
@@ -90,36 +80,21 @@ function addTender(summary, rawMethod, amount) {
   const method = normalizeMethod(rawMethod);
   const amt = round2(amount);
 
-  if (method === "cash") {
-    summary.cash += amt;
-  } else if (
+  if (method === "cash") summary.cash += amt;
+  else if (
     method === "card" ||
     method === "stripe" ||
     method === "terminal" ||
     method === "credit_card" ||
     method === "debit_card"
-  ) {
+  )
     summary.card += amt;
-  } else if (method === "bank_transfer" || method === "bank") {
+  else if (method === "bank_transfer" || method === "bank")
     summary.bank_transfer += amt;
-  } else {
-    summary.other += amt;
-  }
+  else summary.other += amt;
 
   summary.gross_total += amt;
   summary.net_total += amt;
-}
-
-function cleanSummary(summary) {
-  return {
-    cash: round2(summary.cash),
-    card: round2(summary.card),
-    bank_transfer: round2(summary.bank_transfer),
-    other: round2(summary.other),
-    refunds: round2(summary.refunds),
-    gross_total: round2(summary.gross_total),
-    net_total: round2(summary.net_total),
-  };
 }
 
 export async function GET(req) {
@@ -221,13 +196,10 @@ export async function GET(req) {
       net_total: 0,
     };
 
-    payments?.forEach((p) => {
-      addTender(summary, p.method, p.amount);
-    });
-
-    receipts?.forEach((r) => {
-      addTender(summary, r.paymentMethod, r.totalPaidAmount);
-    });
+    payments?.forEach((p) => addTender(summary, p.method, p.amount));
+    receipts?.forEach((r) =>
+      addTender(summary, r.paymentMethod, r.totalPaidAmount),
+    );
 
     refunds?.forEach((r) => {
       const amount = round2((Number(r.amount_cents) || 0) / 100);
@@ -235,8 +207,13 @@ export async function GET(req) {
       summary.net_total -= amount;
     });
 
+    Object.keys(summary).forEach((k) => {
+      summary[k] = round2(summary[k]);
+    });
+
     const paymentRows = (payments || []).map((p) => ({
       id: p.id,
+      document_no: `PAY-${String(p.id).padStart(6, "0")}`,
       source: "payment",
       type: "incoming",
       method: normalizeMethod(p.method) || "other",
@@ -246,13 +223,12 @@ export async function GET(req) {
       reference: p.stripe_payment_intent_id || p.reference || null,
       booking_id: p.booking_id || null,
       invoice_id: p.invoice_id || null,
-      customer_name: null,
-      customer_email: null,
       notes: p.notes || null,
     }));
 
     const receiptRows = (receipts || []).map((r) => ({
       id: r.id,
+      document_no: `REC-${String(r.id).padStart(6, "0")}`,
       source: "receipt",
       type: "incoming",
       method: normalizeMethod(r.paymentMethod) || "other",
@@ -274,7 +250,8 @@ export async function GET(req) {
 
     const refundRows = (refunds || []).map((r) => ({
       id: r.id,
-      source: "refund",
+      document_no: `REF-${String(r.id).padStart(6, "0")}`,
+      source: "payment",
       type: "outgoing",
       method: "refund",
       amount: round2((Number(r.amount_cents) || 0) / 100),
@@ -289,33 +266,50 @@ export async function GET(req) {
       performed_by_name: r.performed_by_name || null,
     }));
 
-    const allTransactions = [
-      ...paymentRows,
-      ...receiptRows,
-      ...refundRows,
-    ].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    const transactions = [...paymentRows, ...receiptRows, ...refundRows].sort(
+      (a, b) => new Date(a.created_at) - new Date(b.created_at),
+    );
 
-    return ok({
-      date: reportDate,
-      period: {
-        start: isoStart,
-        end: isoEnd,
+    const reconciliation = {
+      opening_float: Number(existingReport?.opening_float || 0),
+      cash_revenue: Number(existingReport?.cash_revenue ?? summary.cash ?? 0),
+      cash_drops: Number(existingReport?.cash_drops || 0),
+      expected_drawer: Number(existingReport?.expected_drawer || 0),
+      counted_cash: Number(existingReport?.counted_cash || 0),
+      discrepancy: Number(existingReport?.discrepancy || 0),
+      notes: existingReport?.notes || "",
+    };
+
+    const pdf = await buildZReportPdfBuffer({
+      report: {
+        id: existingReport?.id || null,
+        date: reportDate,
+        status:
+          existingReport?.status === "locked"
+            ? "VERIFIED & LOCKED"
+            : "UNVERIFIED",
       },
-      locked: existingReport?.status === "locked",
-      report: existingReport || null,
-      summary: cleanSummary(summary),
+      summary,
+      reconciliation,
+      transactions,
+      currency: "EUR",
+      store: {
+        name: "Oasis",
+        address: "Chania, Crete 73100",
+        taxId: "EL123456789",
+      },
+    });
 
-      raw_payments: paymentRows.length + receiptRows.length,
-      raw_refunds: refundRows.length,
-
-      payments: [...paymentRows, ...receiptRows].sort(
-        (a, b) => new Date(a.created_at) - new Date(b.created_at),
-      ),
-      refunds: refundRows,
-      transactions: allTransactions,
+    return new NextResponse(pdf, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="z-report-${reportDate}.pdf"`,
+        "Cache-Control": "no-store",
+      },
     });
   } catch (error) {
-    console.error("Daily Report Error:", error);
-    return bad("Failed to generate daily report", 500);
+    console.error("Z-Report PDF Error:", error);
+    return bad("Failed to generate Z-Report PDF", 500);
   }
 }
