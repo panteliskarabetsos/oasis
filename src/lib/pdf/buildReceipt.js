@@ -1,4 +1,3 @@
-// src/lib/pdf/buildReceipt.js
 import "server-only";
 import PDFDocument from "pdfkit";
 import fs from "node:fs";
@@ -11,12 +10,54 @@ const __dirname = path.dirname(__filename);
 function formatCurrency(amount, currency = "EUR") {
   return new Intl.NumberFormat("en-IE", {
     style: "currency",
-    currency: currency.toUpperCase(),
-  }).format(amount || 0);
+    currency: String(currency || "EUR").toUpperCase(),
+  }).format(Number(amount) || 0);
+}
+
+function safeItems(items) {
+  try {
+    if (typeof items === "string") return JSON.parse(items);
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+}
+
+function itemQty(item) {
+  return Number(item.quantity || item.qty || 1) || 1;
+}
+
+function itemGrossUnit(item) {
+  return Number(item.unitPrice || item.price || 0) || 0;
+}
+
+function itemVatRate(item) {
+  return Number(item.vatRate ?? item.vat ?? 24) || 0;
+}
+
+function getItemTaxParts(item) {
+  const qty = itemQty(item);
+  const grossUnit = itemGrossUnit(item);
+  const vatRate = itemVatRate(item);
+
+  const grossTotal = grossUnit * qty;
+  const netTotal = vatRate > 0 ? grossTotal / (1 + vatRate / 100) : grossTotal;
+  const taxTotal = grossTotal - netTotal;
+  const netUnit = qty > 0 ? netTotal / qty : netTotal;
+
+  return {
+    qty,
+    vatRate,
+    grossUnit,
+    grossTotal,
+    netUnit,
+    netTotal,
+    taxTotal,
+  };
 }
 
 class ReceiptGenerator {
-  constructor(args) {
+  constructor(args = {}) {
     this.args = args;
     this.receipt = args.receipt || {};
     this.store = args.store || {
@@ -25,7 +66,6 @@ class ReceiptGenerator {
       taxId: "EL123456789",
     };
 
-    // PREMIUM MINIMALIST THEME: Monochrome, high contrast
     this.theme = {
       primary: "#000000",
       text: "#111111",
@@ -35,12 +75,7 @@ class ReceiptGenerator {
       pageBg: "#ffffff",
     };
 
-    // Parse items safely
-    this.items =
-      typeof this.receipt.items === "string"
-        ? JSON.parse(this.receipt.items)
-        : this.receipt.items || [];
-
+    this.items = safeItems(this.receipt.items);
     this.inset = 50;
     this.currency = this.receipt.currency || "EUR";
   }
@@ -64,7 +99,9 @@ class ReceiptGenerator {
 
     if (!base) {
       throw new Error(
-        `[receipt] Premium font files not found.\nChecked:\n${candidates.join("\n")}\nPlease add ${fontRegular} and ${fontBold} to your fonts folder.`,
+        `[receipt] Premium font files not found.\nChecked:\n${candidates.join(
+          "\n",
+        )}\nPlease add ${fontRegular} and ${fontBold} to your fonts folder.`,
       );
     }
 
@@ -81,8 +118,8 @@ class ReceiptGenerator {
     this.layout = {
       x: this.inset,
       y: this.inset,
-      w: w,
-      h: h,
+      w,
+      h,
       contentW: w - this.inset * 2,
       rightEdge: w - this.inset,
       cols: {
@@ -94,8 +131,6 @@ class ReceiptGenerator {
     };
   }
 
-  /* ---------- DRAWING HELPERS ---------- */
-
   divider(y, thickness = 1, color = this.theme.border) {
     this.doc
       .moveTo(this.layout.x, y)
@@ -105,20 +140,35 @@ class ReceiptGenerator {
       .stroke();
   }
 
-  /* ---------- DRAWING PHASES ---------- */
+  newPage() {
+    this.doc.addPage();
+    this.setupLayout();
+
+    this.doc
+      .rect(0, 0, this.doc.page.width, this.doc.page.height)
+      .fill(this.theme.pageBg);
+
+    return this.layout.y;
+  }
+
+  checkPage(y, needed = 120) {
+    if (y + needed < this.layout.h - this.inset) return y;
+    return this.newPage();
+  }
 
   drawHeader() {
-    const { x, contentW, rightEdge } = this.layout;
+    const { x, contentW } = this.layout;
     const { store, receipt, theme } = this;
 
     let currentY = this.layout.y;
 
-    // Left: Store Info
     this.doc
       .font("Body-Bold")
       .fontSize(20)
       .fillColor(theme.text)
-      .text(store.name.toUpperCase(), x, currentY, { characterSpacing: 2 });
+      .text(String(store.name || "Oasis").toUpperCase(), x, currentY, {
+        characterSpacing: 2,
+      });
 
     currentY += 28;
 
@@ -126,11 +176,10 @@ class ReceiptGenerator {
       .font("Body")
       .fontSize(10)
       .fillColor(theme.subtext)
-      .text(store.address, x, currentY, { lineGap: 4 });
+      .text(store.address || "", x, currentY, { lineGap: 4 });
 
-    this.doc.text(`VAT: ${store.taxId}`, x, this.doc.y + 4);
+    this.doc.text(`VAT: ${store.taxId || "-"}`, x, this.doc.y + 4);
 
-    // Right: Document Meta
     const metaY = this.layout.y;
 
     this.doc
@@ -144,6 +193,7 @@ class ReceiptGenerator {
       });
 
     const receiptNum = String(receipt.id || "0").padStart(6, "0");
+
     const dateStr = receipt.created_at
       ? new Date(receipt.created_at).toLocaleDateString("en-US", {
           year: "numeric",
@@ -153,36 +203,50 @@ class ReceiptGenerator {
       : "-";
 
     this.doc
-      .font("Body-Bold")
-      .fontSize(10)
-      .fillColor(theme.text)
-      .text(`No. ${receiptNum}`, x, metaY + 30, {
+      .font("Body")
+      .fontSize(9)
+      .fillColor(theme.subtext)
+      .text("RECEIPT NO.", x, metaY + 28, {
         width: contentW,
         align: "right",
+        characterSpacing: 1,
+      });
+
+    this.doc
+      .font("Body-Bold")
+      .fontSize(14)
+      .fillColor(theme.text)
+      .text(receiptNum, x, metaY + 42, {
+        width: contentW,
+        align: "right",
+        characterSpacing: 2,
       });
 
     this.doc
       .font("Body")
+      .fontSize(10)
       .fillColor(theme.subtext)
-      .text(dateStr, x, metaY + 45, { width: contentW, align: "right" });
+      .text(dateStr, x, metaY + 62, {
+        width: contentW,
+        align: "right",
+      });
 
-    // Base divider
-    currentY = Math.max(this.doc.y, metaY + 60) + 30;
+    currentY = Math.max(this.doc.y, metaY + 76) + 28;
     this.divider(currentY, 2, theme.primary);
+
     return currentY + 20;
   }
 
   drawTable(startY) {
-    const { cols, rightEdge } = this.layout;
+    const { cols } = this.layout;
     const { theme, items, currency } = this;
 
     let y = startY;
 
-    // Table Headers
     this.doc.font("Body-Bold").fontSize(9).fillColor(theme.subtext);
     this.doc.text("QTY", cols.qty, y, { characterSpacing: 1 });
-    this.doc.text("ITEM", cols.item, y, { characterSpacing: 1 });
-    this.doc.text("PRICE", cols.price, y, {
+    this.doc.text("ITEM / TAX", cols.item, y, { characterSpacing: 1 });
+    this.doc.text("NET UNIT", cols.price, y, {
       width: 80,
       align: "right",
       characterSpacing: 1,
@@ -197,52 +261,66 @@ class ReceiptGenerator {
     this.divider(y);
     y += 15;
 
-    // Table Rows
-    this.doc.font("Body").fontSize(11).fillColor(theme.text);
-
     for (const item of items) {
-      // Pagination Check
-      if (y > this.layout.h - 150) {
-        this.doc.addPage();
-        y = this.layout.y;
-      }
+      y = this.checkPage(y, 90);
 
-      const qty = String(item.quantity || item.qty || 1);
       const name = item.name || "Custom Charge";
-      const unitPrice = Number(item.unitPrice || item.price || 0);
-      const total = unitPrice * Number(qty);
+      const sku = item.sku || null;
+      const parts = getItemTaxParts(item);
+      const itemW = cols.price - cols.item - 20;
 
-      this.doc.font("Body").fillColor(theme.subtext).text(qty, cols.qty, y);
+      this.doc
+        .font("Body")
+        .fontSize(11)
+        .fillColor(theme.subtext)
+        .text(String(parts.qty), cols.qty, y);
 
-      // Item name + optional SKU
       this.doc
         .font("Body-Bold")
+        .fontSize(11)
         .fillColor(theme.text)
-        .text(name, cols.item, y, { width: cols.price - cols.item - 20 });
-      const textHeight = this.doc.heightOfString(name, {
-        width: cols.price - cols.item - 20,
-      });
+        .text(name, cols.item, y, { width: itemW });
 
-      if (item.sku) {
+      const nameHeight = this.doc.heightOfString(name, { width: itemW });
+
+      let detailY = y + nameHeight + 3;
+
+      if (sku) {
         this.doc
           .font("Body")
-          .fontSize(9)
+          .fontSize(8)
           .fillColor(theme.subtext)
-          .text(`SKU: ${item.sku}`, cols.item, y + textHeight + 2);
+          .text(`SKU: ${sku}`, cols.item, detailY, { width: itemW });
+        detailY += 11;
       }
 
-      // Prices
+      this.doc
+        .font("Body")
+        .fontSize(8)
+        .fillColor(theme.subtext)
+        .text(
+          `VAT ${parts.vatRate}% - Net ${formatCurrency(
+            parts.netTotal,
+            currency,
+          )} - Tax ${formatCurrency(parts.taxTotal, currency)}`,
+          cols.item,
+          detailY,
+          { width: itemW },
+        );
+
       this.doc.font("Body").fontSize(11).fillColor(theme.text);
-      this.doc.text(formatCurrency(unitPrice, currency), cols.price, y, {
-        width: 80,
-        align: "right",
-      });
-      this.doc.text(formatCurrency(total, currency), cols.total, y, {
+
+      this.doc.text(formatCurrency(parts.netUnit, currency), cols.price, y, {
         width: 80,
         align: "right",
       });
 
-      y += textHeight + (item.sku ? 20 : 15);
+      this.doc.text(formatCurrency(parts.grossTotal, currency), cols.total, y, {
+        width: 80,
+        align: "right",
+      });
+
+      y = Math.max(detailY + 14, y + nameHeight + 28);
       this.divider(y, 1, theme.border);
       y += 15;
     }
@@ -250,51 +328,136 @@ class ReceiptGenerator {
     return y;
   }
 
+  getTaxSummary() {
+    const discount = Number(this.receipt.discountAmount || 0);
+
+    const grossBeforeDiscount = this.items.reduce((sum, item) => {
+      const parts = getItemTaxParts(item);
+      return sum + parts.grossTotal;
+    }, 0);
+
+    const discountRatio =
+      grossBeforeDiscount > 0 ? Math.min(discount / grossBeforeDiscount, 1) : 0;
+
+    const groups = {};
+
+    for (const item of this.items) {
+      const parts = getItemTaxParts(item);
+      const discountedGross = parts.grossTotal * (1 - discountRatio);
+      const net =
+        parts.vatRate > 0
+          ? discountedGross / (1 + parts.vatRate / 100)
+          : discountedGross;
+      const tax = discountedGross - net;
+
+      if (!groups[parts.vatRate]) {
+        groups[parts.vatRate] = {
+          rate: parts.vatRate,
+          net: 0,
+          tax: 0,
+          gross: 0,
+        };
+      }
+
+      groups[parts.vatRate].net += net;
+      groups[parts.vatRate].tax += tax;
+      groups[parts.vatRate].gross += discountedGross;
+    }
+
+    const netTotal = Object.values(groups).reduce((s, g) => s + g.net, 0);
+    const taxTotal = Object.values(groups).reduce((s, g) => s + g.tax, 0);
+    const grossTotal = Object.values(groups).reduce((s, g) => s + g.gross, 0);
+
+    return {
+      discount,
+      grossBeforeDiscount,
+      groups,
+      netTotal,
+      taxTotal,
+      grossTotal,
+    };
+  }
+
   drawTotals(startY) {
-    const { x, contentW, rightEdge } = this.layout;
+    const { rightEdge } = this.layout;
     const { theme, receipt, currency } = this;
 
-    let y = startY + 10;
-    const labelX = rightEdge - 200;
+    let y = this.checkPage(startY + 10, 170);
+
+    const labelX = rightEdge - 230;
     const valX = rightEdge - 100;
     const valW = 100;
 
-    // Calculate subtotal
-    const discount = Number(receipt.discountAmount || 0);
-    const total = Number(receipt.totalPaidAmount || receipt.totalAmount || 0);
-    const subtotal = total + discount;
+    const tax = this.getTaxSummary();
+
+    const receiptTotal = Number(
+      receipt.totalPaidAmount || receipt.totalAmount || tax.grossTotal || 0,
+    );
 
     this.doc.font("Body").fontSize(11).fillColor(theme.subtext);
-    this.doc.text("Subtotal", labelX, y);
+    this.doc.text("Amount before tax", labelX, y);
     this.doc
       .fillColor(theme.text)
-      .text(formatCurrency(subtotal, currency), valX, y, {
+      .text(formatCurrency(tax.netTotal, currency), valX, y, {
         width: valW,
         align: "right",
       });
     y += 20;
 
-    if (discount > 0) {
-      this.doc.fillColor(theme.subtext).text("Discount", labelX, y);
-      this.doc.text(`-${formatCurrency(discount, currency)}`, valX, y, {
+    Object.values(tax.groups)
+      .sort((a, b) => Number(a.rate) - Number(b.rate))
+      .forEach((group) => {
+        this.doc
+          .font("Body")
+          .fontSize(11)
+          .fillColor(theme.subtext)
+          .text(`VAT ${group.rate}%`, labelX, y);
+
+        this.doc
+          .fillColor(theme.text)
+          .text(formatCurrency(group.tax, currency), valX, y, {
+            width: valW,
+            align: "right",
+          });
+
+        y += 20;
+      });
+
+    this.doc.font("Body").fontSize(11).fillColor(theme.subtext);
+    this.doc.text("Tax total", labelX, y);
+    this.doc
+      .fillColor(theme.text)
+      .text(formatCurrency(tax.taxTotal, currency), valX, y, {
         width: valW,
         align: "right",
       });
+    y += 20;
+
+    if (tax.discount > 0) {
+      this.doc.fillColor(theme.subtext).text("Discount", labelX, y);
+      this.doc
+        .fillColor(theme.text)
+        .text(`-${formatCurrency(tax.discount, currency)}`, valX, y, {
+          width: valW,
+          align: "right",
+        });
       y += 20;
     }
 
     y += 5;
+
     this.doc
       .moveTo(labelX, y)
       .lineTo(rightEdge, y)
       .strokeColor(theme.border)
       .lineWidth(1)
       .stroke();
+
     y += 15;
 
     this.doc.font("Body-Bold").fontSize(14).fillColor(theme.text);
-    this.doc.text("Total", labelX, y);
-    this.doc.text(formatCurrency(total, currency), valX, y, {
+    this.doc.text("Total after tax", labelX, y);
+    this.doc.text(formatCurrency(receiptTotal, currency), valX, y, {
       width: valW,
       align: "right",
     });
@@ -306,10 +469,9 @@ class ReceiptGenerator {
     const { x, contentW, h } = this.layout;
     const { theme, receipt } = this;
 
-    let y = startY;
+    let y = this.checkPage(startY, 120);
 
-    // Payment Info Box
-    this.doc.save().rect(x, y, 250, 70).fill(theme.panel).restore();
+    this.doc.save().rect(x, y, 250, 78).fill(theme.panel).restore();
 
     this.doc
       .font("Body-Bold")
@@ -325,12 +487,20 @@ class ReceiptGenerator {
 
     if (receipt.paymentReference) {
       this.doc
-        .fontSize(9)
+        .fontSize(8)
         .fillColor(theme.subtext)
-        .text(`REF: ${receipt.paymentReference}`, x + 15, y + 48);
+        .text(`REF: ${receipt.paymentReference}`, x + 15, y + 49, {
+          width: 220,
+          ellipsis: true,
+        });
     }
 
-    // Thank you message at the absolute bottom
+    this.doc
+      .font("Body")
+      .fontSize(8)
+      .fillColor(theme.subtext)
+      .text(`Receipt ID: ${receipt.id || "-"}`, x + 15, y + 62);
+
     this.doc
       .font("Body")
       .fontSize(10)
@@ -346,7 +516,16 @@ class ReceiptGenerator {
   async generate() {
     const fonts = await this.loadFonts();
 
-    this.doc = new PDFDocument({ size: "A4", margin: 0, font: fonts.regular });
+    this.doc = new PDFDocument({
+      size: "A4",
+      margin: 0,
+      font: fonts.regular,
+    });
+
+    this.doc.registerFont("Body", fonts.regular);
+    this.doc.registerFont("Body-Bold", fonts.bold);
+    this.doc.font("Body");
+
     this.setupLayout();
 
     this.doc.info.Title = `Receipt ${this.receipt.id || ""}`;
@@ -354,15 +533,12 @@ class ReceiptGenerator {
     this.doc.info.Subject = "Customer Receipt";
 
     const chunks = [];
+
     return new Promise((resolve, reject) => {
       this.doc.on("data", (c) => chunks.push(c));
       this.doc.on("end", () => resolve(Buffer.concat(chunks)));
       this.doc.on("error", reject);
 
-      this.doc.registerFont("Body", fonts.regular);
-      this.doc.registerFont("Body-Bold", fonts.bold);
-
-      // White Background
       this.doc
         .rect(0, 0, this.doc.page.width, this.doc.page.height)
         .fill(this.theme.pageBg);
