@@ -298,15 +298,7 @@ class ReceiptGenerator {
         .font("Body")
         .fontSize(8)
         .fillColor(theme.subtext)
-        .text(
-          `VAT ${parts.vatRate}% - Net ${formatCurrency(
-            parts.netTotal,
-            currency,
-          )} - Tax ${formatCurrency(parts.taxTotal, currency)}`,
-          cols.item,
-          detailY,
-          { width: itemW },
-        );
+        .text(`VAT ${parts.vatRate}% `, cols.item, detailY, { width: itemW });
 
       this.doc.font("Body").fontSize(11).fillColor(theme.text);
 
@@ -404,24 +396,24 @@ class ReceiptGenerator {
       });
     y += 20;
 
-    Object.values(tax.groups)
-      .sort((a, b) => Number(a.rate) - Number(b.rate))
-      .forEach((group) => {
-        this.doc
-          .font("Body")
-          .fontSize(11)
-          .fillColor(theme.subtext)
-          .text(`VAT ${group.rate}%`, labelX, y);
+    // Object.values(tax.groups)
+    //   .sort((a, b) => Number(a.rate) - Number(b.rate))
+    //   .forEach((group) => {
+    //     this.doc
+    //       .font("Body")
+    //       .fontSize(11)
+    //       .fillColor(theme.subtext)
+    //       .text(`VAT ${group.rate}%`, labelX, y);
 
-        this.doc
-          .fillColor(theme.text)
-          .text(formatCurrency(group.tax, currency), valX, y, {
-            width: valW,
-            align: "right",
-          });
+    //     this.doc
+    //       .fillColor(theme.text)
+    //       .text(formatCurrency(group.tax, currency), valX, y, {
+    //         width: valW,
+    //         align: "right",
+    //       });
 
-        y += 20;
-      });
+    //     y += 20;
+    //   });
 
     this.doc.font("Body").fontSize(11).fillColor(theme.subtext);
     this.doc.text("Tax total", labelX, y);
