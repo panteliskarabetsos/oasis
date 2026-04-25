@@ -5,28 +5,49 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "../../../../lib/supabase/admin";
 
-// Response helpers
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
+
+function money(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function calculateBookingTotal(booking) {
+  const adults = Number(booking.adultsCount || booking.counts?.adults || 0);
+  const kids = Number(booking.kidsCount || booking.counts?.kids || 0);
+
+  const adultPrice = Number(booking.unitPriceAdult || 0);
+  const kidPrice = Number(booking.unitPriceKid || 0);
+  const discount = Number(booking.discountAmount || 0);
+
+  let total = 0;
+
+  if (adults > 0 || kids > 0) {
+    total = adults * adultPrice + kids * kidPrice;
+  } else if (booking.numberOfPeople && adultPrice > 0) {
+    total = Number(booking.numberOfPeople || 1) * adultPrice;
+  } else if (booking.totalPaidAmount) {
+    total = Number(booking.totalPaidAmount || 0);
+  }
+
+  return money(Math.max(0, total - discount));
+}
 
 export async function GET(req) {
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
 
   try {
-    // 1. Extract query parameters
     const { searchParams } = new URL(req.url);
     const ref = searchParams.get("ref") || "";
     const lastName = searchParams.get("lastName") || "";
 
-    // 2. Validate input
     if (!ref.trim() || !lastName.trim()) {
       return bad("Both booking reference and last name are required.", 400);
     }
 
-    // 3. Parse the Booking ID from the Reference String
-    // Assuming format like "BK-000343" -> extracts "343"
     const numericId = parseInt(ref.replace(/\D/g, ""), 10);
+
     if (isNaN(numericId)) {
       return bad(
         "Booking not found. Please check your details and try again.",
@@ -34,22 +55,31 @@ export async function GET(req) {
       );
     }
 
-    // 4. Look up the booking in the database
     const { data: booking, error } = await admin
       .from("booking")
       .select(
         `
         id,
         experienceId,
+        customExperienceName,
         status,
         numberOfPeople,
         adultsCount,
         kidsCount,
+        counts,
+        unitPriceAdult,
+        unitPriceKid,
         totalPaidAmount,
+        discountAmount,
+        currency,
         startTime,
         primary_contact,
         selected_meetup_point,
         attendees,
+        promoJson,
+        stripePaymentIntentId,
+        stripeSessionId,
+        stripeSessionUrl,
         Experience ( name, location, cancellationPolicy ),
         User ( name, surname, email ),
         ScheduleSlot ( date )
@@ -63,7 +93,6 @@ export async function GET(req) {
       return bad("An error occurred while looking up your booking.", 500);
     }
 
-    // 5. Return 404 if booking doesn't exist
     if (!booking) {
       return bad(
         "Booking not found. Please check your details and try again.",
@@ -71,7 +100,6 @@ export async function GET(req) {
       );
     }
 
-    // 6. Extract and Verify the Last Name
     const contactLastName =
       booking.primary_contact?.lastName || booking.User?.surname || "";
     const contactFirstName =
@@ -82,6 +110,7 @@ export async function GET(req) {
       "No email provided";
 
     const dbGuestName = `${contactFirstName} ${contactLastName}`.trim();
+
     const nameMatches = contactLastName
       .toLowerCase()
       .includes(lastName.trim().toLowerCase());
@@ -93,29 +122,89 @@ export async function GET(req) {
       );
     }
 
-    // 7. Check for existing modification requests
-    const { data: requests, error: requestsError } = await admin
-      .from("booking_request")
-      .select("type, status")
-      .eq("booking_id", numericId);
+    const [
+      { data: requests, error: requestsError },
+      { data: payments, error: paymentsError },
+      { data: refunds, error: refundsError },
+    ] = await Promise.all([
+      admin
+        .from("booking_request")
+        .select("type, status")
+        .eq("booking_id", numericId),
 
-    if (requestsError) {
+      admin
+        .from("payment")
+        .select("amount, currency")
+        .eq("booking_id", numericId),
+
+      admin
+        .from("payment_refund")
+        .select("amount_cents, currency")
+        .eq("booking_id", numericId),
+    ]);
+
+    if (requestsError)
       console.error("[lookup] requests fetch error:", requestsError);
-      // We log the error but don't fail the whole lookup just because the request check failed
+    if (paymentsError)
+      console.error("[lookup] payments fetch error:", paymentsError);
+    if (refundsError)
+      console.error("[lookup] refunds fetch error:", refundsError);
+
+    const hasRescheduled = (requests || []).some(
+      (req) => req.type === "reschedule",
+    );
+
+    const updateRequested = (requests || []).some(
+      (req) => req.status === "pending",
+    );
+
+    const currency = String(booking.currency || "EUR").toUpperCase();
+    const bookingTotal = calculateBookingTotal(booking);
+
+    let paidAmount = money(
+      (payments || []).reduce((sum, p) => {
+        if (String(p.currency || currency).toUpperCase() !== currency) {
+          return sum;
+        }
+
+        return sum + Number(p.amount || 0);
+      }, 0),
+    );
+
+    if (paidAmount <= 0 && booking.stripePaymentIntentId && bookingTotal > 0) {
+      paidAmount = bookingTotal;
     }
 
-    let hasRescheduled = false;
-    let updateRequested = false;
-
-    if (requests && requests.length > 0) {
-      // True if the user has EVER submitted a reschedule request (enforces 1-time rule)
-      hasRescheduled = requests.some((req) => req.type === "reschedule");
-
-      // True if there is currently an unresolved request pending admin action
-      updateRequested = requests.some((req) => req.status === "pending");
+    if (
+      paidAmount <= 0 &&
+      String(booking.status || "").toLowerCase() === "confirmed" &&
+      Number(booking.totalPaidAmount || 0) >= bookingTotal &&
+      bookingTotal > 0
+    ) {
+      paidAmount = bookingTotal;
     }
 
-    // 8. Resolve Date and Time
+    const refundedAmount = money(
+      (refunds || []).reduce((sum, r) => {
+        if (String(r.currency || currency).toUpperCase() !== currency) {
+          return sum;
+        }
+
+        return sum + Number(r.amount_cents || 0) / 100;
+      }, 0),
+    );
+
+    const amountDue = money(
+      Math.max(0, bookingTotal - paidAmount + refundedAmount),
+    );
+
+    const paymentStatus =
+      amountDue <= 0 && bookingTotal > 0
+        ? "paid"
+        : paidAmount > 0
+          ? "partially_paid"
+          : "unpaid";
+
     const bookingDateObj = booking.startTime
       ? new Date(booking.startTime)
       : booking.ScheduleSlot?.date
@@ -125,6 +214,7 @@ export async function GET(req) {
     const formattedDate = bookingDateObj
       ? bookingDateObj.toISOString().split("T")[0]
       : null;
+
     const formattedTime = bookingDateObj
       ? bookingDateObj.toLocaleTimeString("en-US", {
           hour12: false,
@@ -133,33 +223,58 @@ export async function GET(req) {
         })
       : "TBD";
 
-    // 9. Format the response to match the frontend expectations
-    const payload = {
+    const isPrivate =
+      booking.promoJson?.private === true ||
+      booking.promoJson?.isPrivate === true ||
+      booking.promoJson?.bookingType === "private" ||
+      Boolean(booking.customExperienceName);
+
+    return ok({
       id: booking.id,
       experienceId: booking.experienceId,
       reference: `BK-${String(booking.id).padStart(6, "0")}`,
+
       guestName: dbGuestName,
       email: contactEmail,
-      experienceName: booking.Experience?.name || "Unknown Experience",
+
+      experienceName:
+        booking.customExperienceName ||
+        booking.Experience?.name ||
+        "Unknown Experience",
+
+      customExperienceName: booking.customExperienceName || null,
+      isPrivate,
+      bookingType: isPrivate ? "private" : "public",
+
       date: formattedDate,
       time: formattedTime,
+
       guests: booking.numberOfPeople || 1,
       adultsCount: booking.adultsCount || 0,
       kidsCount: booking.kidsCount || 0,
+
       status: booking.status || "confirmed",
-      totalAmount: booking.totalPaidAmount
-        ? Number(booking.totalPaidAmount)
-        : 0.0,
+
+      currency,
+      totalAmount: bookingTotal,
+      bookingTotal,
+      paidAmount,
+      refundedAmount,
+      amountDue,
+      paymentStatus,
+
+      stripePaymentIntentId: booking.stripePaymentIntentId || null,
+      stripeSessionId: booking.stripeSessionId || null,
+      stripeSessionUrl: booking.stripeSessionUrl || null,
+
       location: booking.Experience?.location || "Main Location",
       meetupPoint: booking.selected_meetup_point || null,
       cancellationPolicy: booking.Experience?.cancellationPolicy || "moderate",
       attendees: booking.attendees || [],
+
       updateRequested,
       hasRescheduled,
-    };
-
-    // 10. Return success
-    return ok(payload);
+    });
   } catch (err) {
     console.error("[lookup] unhandled error:", err);
     return bad(
