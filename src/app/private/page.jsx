@@ -120,7 +120,7 @@ export default function PrivateInVilla() {
               className="relative h-[600px] rounded-3xl overflow-hidden shadow-2xl border border-[#eadfce] order-2 lg:order-1"
             >
               <Image
-                src="/proposal.jpeg"
+                src="/private-chef.webp"
                 alt="In-villa chef preparing food"
                 fill
                 className="object-cover"
