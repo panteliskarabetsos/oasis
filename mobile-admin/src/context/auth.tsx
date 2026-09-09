@@ -4,11 +4,13 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 
 import { api, registerSessionGetter } from "@/lib/api";
+import { can, toAccess, type Access } from "@/lib/permissions";
 import { getSupabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 
@@ -16,6 +18,10 @@ type AuthState = {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
+  /** Effective component access for the signed-in staff member. */
+  access: Access;
+  /** Does this staff member hold `permission`? Omit it to ask "are they staff?". */
+  can: (permission?: string) => boolean;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -25,6 +31,8 @@ const AuthContext = createContext<AuthState>({
   session: null,
   profile: null,
   loading: true,
+  access: [],
+  can: () => false,
   signIn: async () => ({ error: "Auth not configured" }),
   signOut: async () => {},
   refreshProfile: async () => {},
@@ -94,9 +102,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   }, []);
 
+  const access = useMemo(() => toAccess(profile?.permissions), [profile?.permissions]);
+  const canDo = useCallback((permission?: string) => can(access, permission), [access]);
+
   return (
     <AuthContext.Provider
-      value={{ session, profile, loading, signIn, signOut, refreshProfile }}
+      value={{
+        session,
+        profile,
+        loading,
+        access,
+        can: canDo,
+        signIn,
+        signOut,
+        refreshProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>

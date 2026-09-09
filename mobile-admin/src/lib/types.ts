@@ -270,6 +270,8 @@ export type Profile = {
   name?: string | null;
   surname?: string | null;
   role?: string;
+  /** Effective component access from /api/me: "*" or a list of permissions. */
+  permissions?: "*" | string[];
   createdAt?: string | null;
   phone?: string | null;
   dateOfBirth?: string | null;

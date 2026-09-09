@@ -60,6 +60,7 @@ const GLOBALS = new Set([
   "MediaStream","ImageCapture","exports","module","require","__dirname","__filename",
   "Uint8Array","Uint16Array","Uint32Array","Int8Array","Int16Array","Int32Array",
   "Float32Array","Float64Array","ArrayBuffer","DataView","AbortSignal","Notification",
+  "escape","unescape","WeakRef","FinalizationRegistry","Iterator","fetchPriority",
 ]);
 
 function collectFiles(p, out = []) {
@@ -68,7 +69,7 @@ function collectFiles(p, out = []) {
       if (e === "node_modules" || e.startsWith(".")) continue;
       collectFiles(join(p, e), out);
     }
-  } else if ([".js", ".jsx", ".mjs"].includes(extname(p))) out.push(p);
+  } else if ([".js", ".jsx", ".mjs", ".ts", ".tsx"].includes(extname(p))) out.push(p);
   return out;
 }
 
@@ -96,7 +97,9 @@ function check(file) {
   const src = readFileSync(file, "utf8");
   let code;
   try {
-    code = transformSync(src, { loader: "jsx", format: "esm", jsx: "transform" }).code;
+    const ext = extname(file);
+    const loader = ext === ".ts" ? "ts" : ext === ".tsx" ? "tsx" : "jsx";
+    code = transformSync(src, { loader, format: "esm", jsx: "transform" }).code;
   } catch { return []; }
 
   let ast;
