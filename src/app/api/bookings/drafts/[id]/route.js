@@ -203,19 +203,33 @@ export async function PATCH(req, ctx) {
 
   // The booking contact is what the manifest and the day-of comms rely on, so
   // validate it here as well: the client checks are trivially bypassable.
-  if (!primaryContact?.name?.trim())
-    return bad("A booking contact name is required");
+  //
+  // The website sends { name }, the app sends { firstName, lastName }. Accept
+  // either and store a single `name` so everything downstream — manifest,
+  // emails, check-in — has one key to read.
+  const contactName = String(
+    primaryContact?.name ||
+      [primaryContact?.firstName, primaryContact?.lastName].filter(Boolean).join(" ") ||
+      "",
+  ).trim();
+  if (!contactName) return bad("A booking contact name is required");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(primaryContact?.email ?? "").trim()))
     return bad("A valid booking contact email is required");
   if (!isValidStoredPhone(primaryContact?.phone))
     return bad("A booking contact phone number with country code is required");
 
-  // A pickup point is required whenever the experience offers any.
+  // A pickup point is required whenever the experience offers any — but it is
+  // chosen a step earlier and stored on the draft, and this request does not
+  // resend it. Fall back to what is already there rather than rejecting a
+  // choice the customer has plainly made.
+  const effectiveMeetupPoint =
+    selected_meetup_point ?? draft?.selected_meetup_point ?? null;
+
   const meetupPoints = Array.isArray(draft?.Experience?.meetupPoints)
     ? draft.Experience.meetupPoints
     : [];
   if (meetupPoints.length > 0) {
-    const chosen = selected_meetup_point?.name;
+    const chosen = effectiveMeetupPoint?.name;
     if (!chosen) return bad("Please choose a pickup point");
     if (!meetupPoints.some((p) => p?.name === chosen))
       return bad("That pickup point is not offered for this experience");
@@ -225,8 +239,8 @@ export async function PATCH(req, ctx) {
     .from("BookingDraft")
     .update({
       attendees,
-      primary_contact: primaryContact,
-      selected_meetup_point,
+      primary_contact: { ...primaryContact, name: contactName },
+      selected_meetup_point: effectiveMeetupPoint,
       updatedAt: new Date().toISOString(),
     })
     .eq("id", draftId)
