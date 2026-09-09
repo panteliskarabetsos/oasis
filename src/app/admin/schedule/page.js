@@ -1,46 +1,47 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+export const dynamic = "force-dynamic";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  format,
-  addDays,
-  subDays,
-  startOfWeek,
-  endOfWeek,
-  startOfDay,
-  endOfDay,
-  isSameDay,
-  startOfMonth,
-  endOfMonth,
-  eachDayOfInterval,
-  isSameMonth,
-  addMonths,
-  subMonths,
+  addDays, addMonths, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
+  format, isSameDay, isSameMonth, startOfDay, startOfMonth, startOfWeek,
+  subDays, subMonths,
 } from "date-fns";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Calendar as CalendarIcon,
-  Users,
-  MapPin,
-  User,
-  Loader2,
-  AlertCircle,
-  Printer,
-  ChevronRightIcon,
-  ChevronDown,
-} from "lucide-react";
 
-// Helper to group slots by day
-const groupSlotsByDay = (slots) => {
-  return slots.reduce((acc, slot) => {
-    const dayStr = format(new Date(slot.date), "yyyy-MM-dd");
-    if (!acc[dayStr]) acc[dayStr] = [];
-    acc[dayStr].push(slot);
+import Icon from "../_ui/Icon";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorNote,
+  Page,
+  PageHeader,
+  Select,
+  Skeleton,
+  inputClass,
+} from "../_ui";
+
+/**
+ * /admin/schedule — the daily manifest.
+ *
+ * GET /api/admin/schedule/overview?from&to&experienceId
+ *   -> { items: [{ id, date, experienceName, totalSlots, totalBooked,
+ *                  isCancelled, bookings: [{ id, code, pax, guestName, meetupPoint }] }] }
+ * GET /api/admin/schedule/active-dates?from&to&experienceId -> dates with tours
+ * GET /api/admin/experiences?limit=50 -> { items }
+ */
+
+const groupSlotsByDay = (slots) =>
+  slots.reduce((acc, slot) => {
+    const day = format(new Date(slot.date), "yyyy-MM-dd");
+    (acc[day] ||= []).push(slot);
     return acc;
   }, {});
-};
+
+const NO_PICKUP = /^no pickup set$/i;
 
 export default function SchedulePage() {
   const [view, setView] = useState("day"); // 'day' | 'week'
@@ -51,10 +52,10 @@ export default function SchedulePage() {
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
   const [showCalendar, setShowCalendar] = useState(false);
+  const [query, setQuery] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  // Calculate Date Ranges based on view
   const { from, to, title } = useMemo(() => {
     if (view === "day") {
       return {
@@ -62,445 +63,478 @@ export default function SchedulePage() {
         to: endOfDay(currentDate).toISOString(),
         title: format(currentDate, "EEEE, MMMM do, yyyy"),
       };
-    } else {
-      const start = startOfWeek(currentDate, { weekStartsOn: 1 }); // Starts Monday
-      const end = endOfWeek(currentDate, { weekStartsOn: 1 });
-      return {
-        from: startOfDay(start).toISOString(),
-        to: endOfDay(end).toISOString(),
-        title: `${format(start, "MMM do")} - ${format(end, "MMM do, yyyy")}`,
-      };
     }
+    const start = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const end = endOfWeek(currentDate, { weekStartsOn: 1 });
+    return {
+      from: startOfDay(start).toISOString(),
+      to: endOfDay(end).toISOString(),
+      title: `${format(start, "MMM do")} – ${format(end, "MMM do, yyyy")}`,
+    };
   }, [view, currentDate]);
 
-  // Fetch Experiences for Dropdown
   useEffect(() => {
-    fetch("/api/admin/experiences?limit=50")
-      .then((res) => res.json())
-      .then((data) => setExperiences(data.items || []))
+    fetch("/api/admin/experiences?limit=50", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => setExperiences(d.items || []))
       .catch(() => {});
   }, []);
 
-  // Fetch Agenda Data
   useEffect(() => {
-    const fetchAgenda = async () => {
+    const ctrl = new AbortController();
+    (async () => {
       setLoading(true);
       setError("");
       try {
         const qs = new URLSearchParams({ from, to });
         if (experienceId !== "all") qs.set("experienceId", experienceId);
-
-        const res = await fetch(`/api/admin/schedule/overview?${qs}`);
-        if (!res.ok) throw new Error("Failed to fetch schedule");
-
+        const res = await fetch(`/api/admin/schedule/overview?${qs}`, {
+          signal: ctrl.signal,
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j?.error || `Failed to load the schedule (${res.status})`);
+        }
         const data = await res.json();
         setSlots(data.items || []);
-      } catch (err) {
-        setError(err.message);
+      } catch (e) {
+        if (e?.name !== "AbortError") {
+          setError(e.message || "Failed to load the schedule");
+          setSlots([]);
+        }
       } finally {
         setLoading(false);
       }
+    })();
+    return () => ctrl.abort();
+  }, [from, to, experienceId, refreshKey]);
+
+  /* ------------------------------- derived -------------------------------- */
+
+  const visibleSlots = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return slots;
+    return slots
+      .map((s) => ({
+        ...s,
+        bookings: (s.bookings || []).filter((b) =>
+          [b.guestName, b.code, b.meetupPoint, String(b.id)].join(" ").toLowerCase().includes(q)
+        ),
+      }))
+      .filter((s) => s.bookings.length || (s.experienceName || "").toLowerCase().includes(q));
+  }, [slots, query]);
+
+  const totals = useMemo(() => {
+    const active = visibleSlots.filter((s) => !s.isCancelled);
+    return {
+      tours: active.length,
+      cancelled: visibleSlots.length - active.length,
+      guests: active.reduce((sum, s) => sum + (s.totalBooked || 0), 0),
+      capacity: active.reduce((sum, s) => sum + (s.totalSlots || 0), 0),
+      noPickup: active.reduce(
+        (sum, s) => sum + (s.bookings || []).filter((b) => NO_PICKUP.test(b.meetupPoint || "")).length,
+        0
+      ),
     };
+  }, [visibleSlots]);
 
-    fetchAgenda();
-  }, [from, to, experienceId]);
+  const grouped = useMemo(() => groupSlotsByDay(visibleSlots), [visibleSlots]);
+  const sortedDays = useMemo(() => Object.keys(grouped).sort(), [grouped]);
 
-  // Navigation Handlers
-  const handlePrev = () =>
+  /* -------------------------------- actions -------------------------------- */
+
+  const shift = (dir) =>
     setCurrentDate((prev) =>
-      view === "day" ? subDays(prev, 1) : subDays(prev, 7),
+      view === "day"
+        ? dir < 0 ? subDays(prev, 1) : addDays(prev, 1)
+        : dir < 0 ? subDays(prev, 7) : addDays(prev, 7)
     );
-  const handleNext = () =>
-    setCurrentDate((prev) =>
-      view === "day" ? addDays(prev, 1) : addDays(prev, 7),
-    );
-  const handleToday = () => setCurrentDate(new Date());
-  const handlePrint = () => window.print();
 
-  const groupedSlots = groupSlotsByDay(slots);
-  const sortedDays = Object.keys(groupedSlots).sort();
+  function exportCsv() {
+    const head = ["date", "time", "experience", "booking_id", "code", "guest", "pax", "meetup_point"];
+    const rows = [];
+    for (const s of visibleSlots) {
+      const d = new Date(s.date);
+      for (const b of s.bookings || []) {
+        rows.push([
+          format(d, "yyyy-MM-dd"), format(d, "HH:mm"), s.experienceName,
+          b.id, b.code, b.guestName, b.pax, b.meetupPoint,
+        ]);
+      }
+    }
+    if (!rows.length) return;
+    const csv = [head, ...rows]
+      .map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `manifest-${format(currentDate, "yyyy-MM-dd")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /* --------------------------------- view ---------------------------------- */
 
   return (
-    <div className="min-h-screen bg-[#fdfcfb] text-[#3f3127] p-4 sm:p-8 print:p-0 print:bg-white relative">
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* --- HEADER CONTROLS (Hidden on Print) --- */}
-        <div className="print:hidden flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-[#e3ddd2] shadow-sm relative z-20">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrev}
-              className="p-2 rounded-full hover:bg-[#fdfaf5] border border-[#e3ddd2] transition-colors"
-              aria-label="Previous"
-            >
-              <ChevronLeft size={20} className="text-[#7a6a5f]" />
-            </button>
-            <button
-              onClick={handleToday}
-              className="px-4 py-2 text-sm font-bold text-[#5a4a3f] bg-[#fdfaf5] border border-[#e3ddd2] rounded-full hover:bg-[#f5f1ea] transition-colors"
-            >
-              Today
-            </button>
-            <button
-              onClick={handleNext}
-              className="p-2 rounded-full hover:bg-[#fdfaf5] border border-[#e3ddd2] transition-colors"
-              aria-label="Next"
-            >
-              <ChevronRight size={20} className="text-[#7a6a5f]" />
-            </button>
+    <Page className="print:max-w-none print:px-0">
+      <style>{`
+        @media print {
+          @page { margin: 14mm; }
+          body { background: #fff !important; }
+          .no-print { display: none !important; }
+          .print-block { break-inside: avoid; page-break-inside: avoid; }
+        }
+      `}</style>
 
-            {/* Date Title with Calendar Dropdown Trigger */}
-            <div className="relative ml-2">
-              <button
-                onClick={() => setShowCalendar(!showCalendar)}
-                className="flex items-center gap-2 text-lg font-serif font-semibold hover:text-[#8b6f47] transition-colors group"
-              >
-                <span className="w-56 text-left truncate">{title}</span>
-                <ChevronDown
-                  size={18}
-                  className={`text-[#d8cfc3] transition-transform duration-200 group-hover:text-[#8b6f47] ${
-                    showCalendar ? "rotate-180" : ""
-                  }`}
-                />
-              </button>
+      <div className="no-print">
+        <PageHeader
+          eyebrow="Operations"
+          title="Daily manifest"
+          description={title}
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setRefreshKey((k) => k + 1)} disabled={loading}>
+                <Icon name="clock" size={15} /> Refresh
+              </Button>
+              <Button variant="secondary" onClick={exportCsv} disabled={!totals.guests}>
+                <Icon name="download" size={15} /> CSV
+              </Button>
+              <Button variant="primary" onClick={() => window.print()}>
+                <Icon name="file" size={15} /> Print
+              </Button>
+            </>
+          }
+        />
+      </div>
 
-              {/* Popover Calendar */}
-              {showCalendar && (
-                <>
-                  <div
-                    className="fixed inset-0 z-30"
-                    onClick={() => setShowCalendar(false)}
+      {/* print-only header */}
+      <div className="mb-6 hidden border-b-2 border-black pb-3 print:block">
+        <h1 className="font-serif text-[22px] font-bold">Daily manifest</h1>
+        <p className="text-[13px]">
+          {title}
+          {experienceId !== "all"
+            ? ` — ${experiences.find((e) => String(e.id) === String(experienceId))?.name || ""}`
+            : ""}
+        </p>
+        <p className="mt-1 text-[12px]">
+          {totals.tours} tour{totals.tours === 1 ? "" : "s"} · {totals.guests} guest
+          {totals.guests === 1 ? "" : "s"} · printed {format(new Date(), "d MMM yyyy HH:mm")}
+        </p>
+      </div>
+
+      {/* controls */}
+      <Card className="no-print mb-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="icon" onClick={() => shift(-1)} aria-label="Previous">‹</Button>
+          <Button variant="secondary" onClick={() => setCurrentDate(new Date())}>Today</Button>
+          <Button variant="secondary" size="icon" onClick={() => shift(1)} aria-label="Next">›</Button>
+
+          <div className="relative">
+            <Button variant="ghost" onClick={() => setShowCalendar((v) => !v)}>
+              <Icon name="calendar" size={15} />
+              <span className="max-w-[220px] truncate">{title}</span>
+            </Button>
+            {showCalendar ? (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowCalendar(false)} />
+                <div className="absolute left-0 top-full z-40 mt-2">
+                  <MiniCalendar
+                    selectedDate={currentDate}
+                    experienceId={experienceId}
+                    onSelect={(d) => { setCurrentDate(d); setShowCalendar(false); }}
                   />
-                  <div className="absolute top-full left-0 mt-3 z-40">
-                    <MiniCalendar
-                      selectedDate={currentDate}
-                      experienceId={experienceId}
-                      onSelect={(date) => {
-                        setCurrentDate(date);
-                        setShowCalendar(false);
-                      }}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
+                </div>
+              </>
+            ) : null}
           </div>
 
-          <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
-            {/* Experience Filter */}
-            <select
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[190px]">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+                <Icon name="search" size={16} />
+              </span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Guest, code or pickup"
+                className={`${inputClass} h-10 pl-9 ${query ? "pr-9" : ""}`}
+              />
+              {query ? (
+                <button onClick={() => setQuery("")} aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4]">
+                  <Icon name="x" size={14} />
+                </button>
+              ) : null}
+            </div>
+
+            <Select
               value={experienceId}
               onChange={(e) => setExperienceId(e.target.value)}
-              className="bg-white border border-[#e3ddd2] text-sm rounded-full px-4 py-2 focus:ring-2 focus:ring-[#8b6f47]/30 outline-none shrink-0"
+              className="h-10 !w-auto min-w-[170px]"
             >
-              <option value="all">All Experiences</option>
+              <option value="all">All experiences</option>
               {experiences.map((ex) => (
-                <option key={ex.id} value={ex.id}>
-                  {ex.name}
-                </option>
+                <option key={ex.id} value={ex.id}>{ex.name}</option>
               ))}
-            </select>
+            </Select>
 
-            {/* View Toggle */}
-            <div className="flex bg-[#fdfaf5] border border-[#e3ddd2] rounded-full p-1 shrink-0">
-              <button
-                onClick={() => setView("day")}
-                className={`px-4 py-1.5 text-sm font-semibold rounded-full transition-all ${
-                  view === "day"
-                    ? "bg-white shadow-sm text-[#3f3127]"
-                    : "text-[#a09084] hover:text-[#5a4a3f]"
-                }`}
-              >
-                Day
-              </button>
-              <button
-                onClick={() => setView("week")}
-                className={`px-4 py-1.5 text-sm font-semibold rounded-full transition-all ${
-                  view === "week"
-                    ? "bg-white shadow-sm text-[#3f3127]"
-                    : "text-[#a09084] hover:text-[#5a4a3f]"
-                }`}
-              >
-                Week
-              </button>
+            <div className="inline-flex rounded-xl border border-[#e6e0d6] bg-white p-1">
+              {[["day", "Day"], ["week", "Week"]].map(([v, l]) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={`rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+                    view === v ? "bg-[#2a211a] text-white" : "text-[#6b5c4d] hover:bg-[#f2ede4]"
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
             </div>
-
-            {/* Print Button */}
-            <div className="w-[1px] h-6 bg-[#e3ddd2] mx-1 shrink-0" />
-            <button
-              onClick={handlePrint}
-              className="p-2 rounded-full hover:bg-[#fdfaf5] border border-[#e3ddd2] text-[#7a6a5f] transition-colors shrink-0"
-              title="Print Manifest"
-            >
-              <Printer size={18} />
-            </button>
           </div>
         </div>
+      </Card>
 
-        {/* --- PRINT HEADER (Visible only on Print) --- */}
-        <div className="hidden print:block mb-8 border-b border-black pb-4">
-          <h1 className="text-2xl font-serif font-bold">Daily Manifest</h1>
-          <p className="text-sm">{title}</p>
+      {/* totals */}
+      {!loading && !error && visibleSlots.length ? (
+        <div className="no-print mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat label="Tours" value={totals.tours} hint={totals.cancelled ? `${totals.cancelled} cancelled` : undefined} />
+          <Stat label="Guests" value={totals.guests} />
+          <Stat
+            label="Capacity used"
+            value={totals.capacity ? `${Math.round((totals.guests / totals.capacity) * 100)}%` : "—"}
+            hint={totals.capacity ? `${totals.guests} of ${totals.capacity}` : undefined}
+          />
+          <Stat
+            label="No pickup set"
+            value={totals.noPickup}
+            accent={totals.noPickup > 0 ? "warn" : undefined}
+            hint={totals.noPickup ? "needs a meeting point" : "all set"}
+          />
         </div>
+      ) : null}
 
-        {/* --- MAIN CONTENT --- */}
-        {loading ? (
-          <div className="flex items-center justify-center py-24 text-[#8b6f47]">
-            <Loader2 size={40} className="animate-spin" />
-          </div>
-        ) : error ? (
-          <div className="bg-red-50 text-red-700 p-6 rounded-2xl border border-red-200 flex items-center gap-3 print:hidden">
-            <AlertCircle size={24} /> {error}
-          </div>
-        ) : sortedDays.length === 0 ? (
-          <div className="text-center py-24 bg-white rounded-2xl border border-[#e3ddd2] shadow-sm print:shadow-none print:border-none">
-            <CalendarIcon
-              size={48}
-              className="mx-auto text-[#d8cfc3] mb-4 print:hidden"
-            />
-            <h3 className="text-xl font-serif text-[#7a6a5f]">
-              No tours scheduled
-            </h3>
-            <p className="text-[#a09084] mt-1 print:hidden">
-              Try selecting a different date range or experience.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-8 relative z-10">
-            {sortedDays.map((dayStr) => {
-              const daySlots = groupedSlots[dayStr];
-              const dateObj = new Date(dayStr);
-              const isToday = isSameDay(dateObj, new Date());
+      {/* manifest */}
+      {error ? (
+        <Card className="no-print">
+          <ErrorNote>{error}</ErrorNote>
+          <Button className="mt-3" variant="secondary" onClick={() => setRefreshKey((k) => k + 1)}>Try again</Button>
+        </Card>
+      ) : loading ? (
+        <div className="space-y-4">
+          {[0, 1].map((i) => <Skeleton key={i} className="h-56" />)}
+        </div>
+      ) : !sortedDays.length ? (
+        <Card>
+          <EmptyState
+            icon={<Icon name="calendar" size={20} />}
+            title={query ? "Nothing matches" : "No tours scheduled"}
+            description={
+              query
+                ? "No guests or tours match your search in this range."
+                : "Try a different date range or experience."
+            }
+            action={query ? <Button variant="secondary" onClick={() => setQuery("")}>Clear search</Button> : null}
+          />
+        </Card>
+      ) : (
+        <div className="space-y-7">
+          {sortedDays.map((day) => {
+            const daySlots = grouped[day];
+            const dateObj = new Date(day);
+            const today = isSameDay(dateObj, new Date());
+            const dayGuests = daySlots.reduce((s, x) => s + (x.totalBooked || 0), 0);
 
-              return (
-                <div key={dayStr} className="space-y-4 break-inside-avoid">
-                  {/* Day Header */}
-                  <h3 className="flex items-center gap-2 text-xl font-serif text-[#2a1f18] border-b border-[#e3ddd2] print:border-black pb-2 sticky top-0 bg-[#fdfcfb] print:bg-white z-10 pt-2">
-                    {format(dateObj, "EEEE, MMM do")}
-                    {isToday && (
-                      <span className="text-[10px] bg-[#8b6f47] text-white px-2 py-0.5 rounded-full uppercase tracking-wider font-bold -translate-y-0.5 print:hidden">
-                        Today
-                      </span>
-                    )}
-                  </h3>
-
-                  {/* Slots for the day */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 print:grid-cols-1 print:gap-6">
-                    {daySlots.map((slot) => (
-                      <SlotCard key={slot.id} slot={slot} />
-                    ))}
-                  </div>
+            return (
+              <section key={day} className="print-block">
+                <div className="mb-3 flex items-center gap-2 border-b border-[#e6e0d6] pb-2 print:border-black">
+                  <h2 className="font-serif text-[18px] text-[#2a211a]">
+                    {format(dateObj, "EEEE, d MMMM")}
+                  </h2>
+                  {today ? <Badge variant="brand">Today</Badge> : null}
+                  <span className="ml-auto text-[12.5px] text-[#7a6a5f]">
+                    {daySlots.length} tour{daySlots.length === 1 ? "" : "s"} · {dayGuests} guest
+                    {dayGuests === 1 ? "" : "s"}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 print:grid-cols-1 print:gap-5">
+                  {daySlots.map((slot) => <SlotCard key={slot.id} slot={slot} />)}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </Page>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* SUBCOMPONENTS                                                              */
-/* -------------------------------------------------------------------------- */
+/* ------------------------------- components ------------------------------- */
 
-// --- Mini Calendar Popover ---
-function MiniCalendar({ selectedDate, experienceId, onSelect }) {
-  const [viewMonth, setViewMonth] = useState(() => startOfMonth(selectedDate));
-  const [activeDates, setActiveDates] = useState(new Set());
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Fetch active dates for the currently viewed month
-  useEffect(() => {
-    setIsLoading(true);
-    const start = startOfDay(startOfMonth(viewMonth)).toISOString();
-    const end = endOfDay(endOfMonth(viewMonth)).toISOString();
-
-    const qs = new URLSearchParams({ from: start, to: end });
-    if (experienceId !== "all") qs.set("experienceId", experienceId);
-
-    fetch(`/api/admin/schedule/active-dates?${qs}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setActiveDates(new Set(data.items || []));
-      })
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
-  }, [viewMonth, experienceId]);
-
-  // Generate grid of days for the calendar
-  const calendarDays = useMemo(() => {
-    const monthStart = startOfMonth(viewMonth);
-    const monthEnd = endOfMonth(monthStart);
-    const startDate = startOfWeek(monthStart, { weekStartsOn: 1 }); // Monday start
-    const endDate = endOfWeek(monthEnd, { weekStartsOn: 1 });
-    return eachDayOfInterval({ start: startDate, end: endDate });
-  }, [viewMonth]);
-
-  const handlePrevMonth = () => setViewMonth(subMonths(viewMonth, 1));
-  const handleNextMonth = () => setViewMonth(addMonths(viewMonth, 1));
-
+function Stat({ label, value, hint, accent }) {
+  const color = accent === "warn" ? "text-[#8a6412]" : "text-[#2a211a]";
   return (
-    <div className="bg-white rounded-2xl border border-[#e3ddd2] shadow-xl p-4 w-72 animate-in fade-in slide-in-from-top-2 duration-200">
-      {/* Calendar Header */}
-      <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={handlePrevMonth}
-          className="p-1 rounded-full hover:bg-[#fdfaf5] text-[#7a6a5f] transition-colors"
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <div className="font-serif font-bold text-[#3f3127] flex items-center gap-2">
-          {format(viewMonth, "MMMM yyyy")}
-          {isLoading && (
-            <Loader2 size={12} className="animate-spin text-[#8b6f47]" />
-          )}
-        </div>
-        <button
-          onClick={handleNextMonth}
-          className="p-1 rounded-full hover:bg-[#fdfaf5] text-[#7a6a5f] transition-colors"
-        >
-          <ChevronRight size={18} />
-        </button>
-      </div>
-
-      {/* Days of Week */}
-      <div className="grid grid-cols-7 mb-2">
-        {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((day) => (
-          <div
-            key={day}
-            className="text-center text-[10px] font-bold uppercase tracking-wider text-[#a09084]"
-          >
-            {day}
-          </div>
-        ))}
-      </div>
-
-      {/* Date Grid */}
-      <div className="grid grid-cols-7 gap-1">
-        {calendarDays.map((day) => {
-          const isSelected = isSameDay(day, selectedDate);
-          const isCurrentMonth = isSameMonth(day, viewMonth);
-          const isTodayDate = isSameDay(day, new Date());
-
-          // Check if this date has active tours
-          const dayStr = format(day, "yyyy-MM-dd");
-          const hasTours = activeDates.has(dayStr);
-
-          return (
-            <button
-              key={day.toISOString()}
-              onClick={() => onSelect(day)}
-              className={`
-                relative h-8 w-8 rounded-full flex items-center justify-center text-sm transition-all
-                ${!isCurrentMonth ? "text-[#d8cfc3]" : "text-[#3f3127] hover:bg-[#fdfaf5]"}
-                ${isSelected ? "bg-[#8b6f47] text-white hover:bg-[#7a603c] font-bold shadow-sm" : ""}
-                ${isTodayDate && !isSelected ? "ring-1 ring-[#8b6f47] text-[#8b6f47] font-bold" : ""}
-              `}
-            >
-              {format(day, "d")}
-              {/* The "Active Tours" Dot */}
-              {hasTours && (
-                <span
-                  className={`absolute bottom-1 w-1 h-1 rounded-full ${isSelected ? "bg-white" : "bg-[#8b6f47]"}`}
-                />
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <Card className="py-3.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">{label}</p>
+      <p className={`mt-1 font-serif text-[20px] ${color}`}>{value}</p>
+      {hint ? <p className="mt-0.5 text-[11.5px] text-[#9a8c7e]">{hint}</p> : null}
+    </Card>
   );
 }
 
 function SlotCard({ slot }) {
-  const fillPercentage =
-    slot.totalSlots > 0
-      ? Math.min(100, (slot.totalBooked / slot.totalSlots) * 100)
-      : 0;
-
-  const isFull = slot.totalBooked >= slot.totalSlots;
+  const booked = slot.totalBooked || 0;
+  const cap = slot.totalSlots || 0;
+  const pct = cap > 0 ? Math.min(100, (booked / cap) * 100) : 0;
+  const full = cap > 0 && booked >= cap;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e3ddd2] shadow-sm overflow-hidden flex flex-col print:shadow-none print:border-black print:rounded-none">
-      {/* Slot Header */}
-      <div className="bg-[#fcfbf9] border-b border-[#e3ddd2] print:border-black p-4">
-        <div className="flex justify-between items-start mb-2">
-          <div>
-            <div className="text-sm font-bold text-[#8b6f47] print:text-black mb-0.5">
-              {format(new Date(slot.date), "HH:mm")} — {slot.experienceName}
+    <Card padded={false} className="print-block overflow-hidden print:rounded-none print:border-black print:shadow-none">
+      <div className="border-b border-[#e6e0d6] bg-[#fdfbf7] px-4 py-3 print:border-black print:bg-transparent">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2">
+              <span className="font-serif text-[18px] text-[#2a211a]">
+                {format(new Date(slot.date), "HH:mm")}
+              </span>
+              <span className="truncate text-[14px] font-medium text-[#6b5c4d]">
+                {slot.experienceName}
+              </span>
             </div>
-            <div className="text-xs font-semibold text-[#a09084] print:text-gray-700 flex items-center gap-1.5">
-              <Users size={12} />
-              {slot.totalBooked} / {slot.totalSlots} Guests Booked
-            </div>
+            <p className="mt-0.5 text-[12px] font-medium text-[#9a8c7e]">
+              {booked} / {cap || "—"} guests booked
+            </p>
           </div>
-          {slot.isCancelled && (
-            <span className="bg-red-100 text-red-700 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded print:border print:border-red-700">
-              Cancelled
-            </span>
-          )}
+          {slot.isCancelled ? <Badge variant="danger">Cancelled</Badge> : full ? <Badge variant="warning">Full</Badge> : null}
         </div>
 
-        {/* Capacity Bar */}
-        {!slot.isCancelled && (
-          <div className="w-full h-1.5 bg-[#e3ddd2] rounded-full overflow-hidden print:hidden mt-1">
+        {!slot.isCancelled && cap > 0 ? (
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#efe9df] print:hidden">
             <div
-              className={`h-full transition-all duration-500 ${isFull ? "bg-red-500" : "bg-[#8b6f47]"}`}
-              style={{ width: `${fillPercentage}%` }}
+              className={`h-full rounded-full transition-all duration-500 ${full ? "bg-[#a33c22]" : "bg-[#8b6f47]"}`}
+              style={{ width: `${pct}%` }}
             />
           </div>
-        )}
+        ) : null}
       </div>
 
-      {/* Guest Manifest */}
-      <div className="p-4 flex-1">
-        {slot.bookings.length === 0 ? (
-          <div className="text-sm italic text-[#a09084] text-center py-4 print:text-left">
-            No active bookings yet.
-          </div>
-        ) : (
-          <ul className="space-y-3 print:space-y-1">
-            {slot.bookings.map((b) => (
-              <li key={b.id}>
+      {slot.bookings?.length ? (
+        <ul className="divide-y divide-[#f0ebe2] print:divide-dashed print:divide-gray-400">
+          {slot.bookings.map((b) => {
+            const noPickup = NO_PICKUP.test(b.meetupPoint || "");
+            return (
+              <li key={b.id} className="px-4 py-2.5">
                 <Link
                   href={`/admin/bookings/${b.id}`}
-                  className="group flex justify-between items-center gap-4 p-3 rounded-xl bg-[#fdfaf5] border border-[#e3ddd2]/50 hover:border-[#8b6f47]/30 hover:shadow-sm transition-all print:bg-transparent print:border-b print:border-dashed print:border-gray-300 print:rounded-none print:p-2"
+                  className="group flex items-center justify-between gap-3 print:pointer-events-none"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-[#3f3127] print:text-black flex items-center gap-2 text-sm truncate">
-                      <User
-                        size={14}
-                        className="text-[#a09084] print:hidden shrink-0"
-                      />
-                      <span className="truncate">{b.guestName}</span>
-                      <span className="text-[10px] font-bold text-[#a09084] print:text-black bg-white print:bg-transparent border border-[#e3ddd2] print:border-black px-1.5 py-0.5 rounded shrink-0">
-                        {b.pax} PAX
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[13.5px] font-semibold text-[#2a211a] group-hover:text-[#8b6f47]">
+                        {b.guestName}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-[#f2ede4] px-2 py-0.5 text-[11px] font-semibold text-[#6b5c4d] print:border print:border-black print:bg-transparent">
+                        {b.pax} pax
                       </span>
                     </div>
-                    <div className="mt-1 text-xs text-[#7a6a5f] print:text-black flex items-start gap-1.5">
-                      <MapPin
-                        size={12}
-                        className="text-emerald-600 print:text-black mt-0.5 shrink-0"
-                      />
-                      <span className="leading-tight truncate">
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px]">
+                      <Icon name="leaf" size={12} className={noPickup ? "text-[#c9a227]" : "text-[#6b8f6b]"} />
+                      <span className={`truncate ${noPickup ? "font-medium text-[#8a6412]" : "text-[#7a6a5f]"}`}>
                         {b.meetupPoint}
                       </span>
                     </div>
                   </div>
-
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <div className="text-[10px] font-mono text-[#a09084] print:text-black">
-                      {b.code}
-                    </div>
-                    <ChevronRightIcon
-                      size={14}
-                      className="text-[#d8cfc3] group-hover:text-[#8b6f47] transition-colors print:hidden"
-                    />
-                  </div>
+                  <span className="shrink-0 font-mono text-[10.5px] text-[#9a8c7e] print:text-black">
+                    {b.code}
+                  </span>
                 </Link>
               </li>
-            ))}
-          </ul>
-        )}
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="px-4 py-5 text-center text-[13px] italic text-[#9a8c7e] print:text-left">
+          No active bookings yet.
+        </p>
+      )}
+
+      {/* signature strip for the guide's printed copy */}
+      {slot.bookings?.length ? (
+        <div className="hidden border-t border-black px-4 py-3 text-[11px] print:block">
+          Guide: ______________________ &nbsp;&nbsp; Departed: ________ &nbsp;&nbsp; Returned: ________
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function MiniCalendar({ selectedDate, experienceId, onSelect }) {
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(selectedDate));
+  const [activeDates, setActiveDates] = useState(() => new Set());
+
+  const loadActive = useCallback(async () => {
+    const qs = new URLSearchParams({
+      from: startOfDay(startOfMonth(viewMonth)).toISOString(),
+      to: endOfDay(endOfMonth(viewMonth)).toISOString(),
+    });
+    if (experienceId !== "all") qs.set("experienceId", experienceId);
+    try {
+      const res = await fetch(`/api/admin/schedule/active-dates?${qs}`, { credentials: "include" });
+      const data = await res.json();
+      setActiveDates(new Set(data.items || []));
+    } catch {
+      setActiveDates(new Set());
+    }
+  }, [viewMonth, experienceId]);
+
+  useEffect(() => { loadActive(); }, [loadActive]);
+
+  const days = eachDayOfInterval({
+    start: startOfWeek(startOfMonth(viewMonth), { weekStartsOn: 1 }),
+    end: endOfWeek(endOfMonth(viewMonth), { weekStartsOn: 1 }),
+  });
+
+  return (
+    <div className="w-[290px] rounded-2xl border border-[#e6e0d6] bg-white p-3 shadow-xl">
+      <div className="mb-2 flex items-center justify-between">
+        <button onClick={() => setViewMonth((m) => subMonths(m, 1))} aria-label="Previous month"
+          className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4]">‹</button>
+        <span className="font-serif text-[15px] text-[#2a211a]">{format(viewMonth, "MMMM yyyy")}</span>
+        <button onClick={() => setViewMonth((m) => addMonths(m, 1))} aria-label="Next month"
+          className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4]">›</button>
+      </div>
+      <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wider text-[#b0a294]">
+        {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => <span key={i}>{d}</span>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {days.map((day) => {
+          const selected = isSameDay(day, selectedDate);
+          const inMonth = isSameMonth(day, viewMonth);
+          const today = isSameDay(day, new Date());
+          const hasTours = activeDates.has(format(day, "yyyy-MM-dd"));
+          return (
+            <button
+              key={day.toISOString()}
+              onClick={() => onSelect(day)}
+              className={`relative flex h-8 w-8 items-center justify-center rounded-full text-[13px] transition-colors ${
+                selected
+                  ? "bg-[#8b6f47] font-bold text-white"
+                  : inMonth
+                    ? "text-[#2a211a] hover:bg-[#f2ede4]"
+                    : "text-[#d5ccc0]"
+              } ${today && !selected ? "font-bold text-[#8b6f47] ring-1 ring-[#8b6f47]" : ""}`}
+            >
+              {format(day, "d")}
+              {hasTours ? (
+                <span className={`absolute bottom-1 h-1 w-1 rounded-full ${selected ? "bg-white" : "bg-[#8b6f47]"}`} />
+              ) : null}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

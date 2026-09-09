@@ -18,7 +18,7 @@ function clampInt(v, { min = 0, max = 1000, def = 0 } = {}) {
 
 export async function GET(req, ctx) {
   // Auth gate
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("giftcards");
   if (!gate.ok) return gate.response;
 
   const { id } = await ctx.params;

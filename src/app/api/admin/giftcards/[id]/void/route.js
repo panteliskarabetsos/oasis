@@ -7,7 +7,7 @@ import { NextResponse as NX } from "next/server";
 import { requireAdmin as rAdm } from "@/lib/auth/requireAdmin";
 
 export async function POST(req, { params }) {
-  const r = await rAdm();
+  const r = await rAdm("giftcards");
   if (!r.ok) return r.response;
   const admin = r.admin;
   const id = params?.id;

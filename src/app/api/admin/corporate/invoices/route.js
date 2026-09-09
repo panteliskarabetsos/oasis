@@ -8,26 +8,19 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin as requireAdminAuth } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
+// Delegates to the shared guard (see @/lib/auth/requireAdmin).
+// Previously this called createSupabaseServer() without awaiting it, so
+// supa.auth was undefined and every request returned 401.
 async function requireAdmin() {
-  try {
-    const supa = createSupabaseServer();
-    const {
-      data: { user },
-      error,
-    } = await supa.auth.getUser();
-    if (error || !user) return { error: bad("Unauthorized", 401) };
-    const role = user?.app_metadata?.role || user?.user_metadata?.role;
-    if (role !== "admin") return { error: bad("Forbidden", 403) };
-    return { supaAdmin: createSupabaseAdmin() };
-  } catch {
-    return { error: bad("Unauthorized", 401) };
-  }
+  const auth = await requireAdminAuth("corporate");
+  if (!auth.ok) return { error: auth.response };
+  return { supaAdmin: auth.admin };
 }
-
 export async function GET() {
   const { supaAdmin, error } = await requireAdmin();
   if (error) return error;

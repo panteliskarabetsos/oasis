@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { v2 as cloudinary } from "cloudinary";
 import { Readable } from "stream";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 // Configure via env:
 // CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
@@ -26,6 +27,8 @@ async function uploadStreamToCloudinary(webFile, opts = {}) {
 }
 
 export async function POST(req) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
   try {
     const ctype = req.headers.get("content-type") || "";
     if (!ctype.toLowerCase().includes("multipart/form-data")) {

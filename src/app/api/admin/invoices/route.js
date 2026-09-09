@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import Stripe from "stripe";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200, headers = {}) =>
   new NextResponse(JSON.stringify(d), {
@@ -58,12 +59,12 @@ export async function GET(req) {
   ].join(",");
 
   let listQ = admin
-    .from("Booking")
+    .from("booking")
     .select(baseSelect)
     .order("createdAt", { ascending: false });
 
   let countQ = admin
-    .from("Booking")
+    .from("booking")
     .select("id", { count: "exact", head: true });
 
   // Explicit IDs override all other filters
@@ -436,13 +437,10 @@ async function requireAdmin() {
   } = await supa.auth.getUser();
   if (!user) return { error: true, response: bad("Unauthorized", 401) };
 
-  const { data: row, error } = await supa
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-
-  if (error || (row?.role ?? "user") !== "admin")
+  // Resolve with the service client — the user client is RLS-bound and was
+  // silently downgrading real staff to "user".
+  const { permissions } = await resolveStaffAccess(user);
+  if (!accessCan(permissions, "invoices"))
     return { error: true, response: bad("Forbidden", 403) };
 
   return { error: false };

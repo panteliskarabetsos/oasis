@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function PATCH(req, { params }) {
-  const auth = await requireAdmin();
+  const auth = await requireAdmin("bookings");
   if (!auth.ok) return auth.response;
   const { admin } = auth;
 

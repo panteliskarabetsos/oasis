@@ -29,7 +29,7 @@ function normalizeCode(v) {
 }
 
 export async function POST(req) {
-  const r = await requireAdmin();
+  const r = await requireAdmin("giftcards");
   if (!r.ok) return r.response;
   if (!stripe)
     return bad("Stripe is not configured (missing STRIPE_SECRET_KEY)", 500);

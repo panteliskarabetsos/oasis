@@ -3,11 +3,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok6 = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad6 = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 export async function GET(req) {
+  const auth = await requireAdmin("eshop");
+  if (!auth.ok) return auth.response;
   const supabase = createSupabaseAdmin();
   const { searchParams } = new URL(req.url);
   const status = (searchParams.get("status") || "").trim();

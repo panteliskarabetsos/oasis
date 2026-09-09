@@ -1,32 +1,29 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  CalendarClock,
-  XCircle,
-  Mail,
-  Phone,
-  User2,
-  MapPin,
-  Printer,
-  Copy,
-  CreditCard,
-  Users,
-  Loader2,
-  DollarSign,
-  Info,
-  FileText,
-  Banknote,
-  SearchIcon,
-  Wallet,
-} from "lucide-react";
 import { toast } from "react-hot-toast";
-import { AnimatePresence, motion } from "framer-motion";
+
+import Icon from "../../_ui/Icon";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorNote,
+  Field,
+  Input,
+  Muted,
+  Page,
+  PageHeader,
+  Skeleton,
+  StatusBadge,
+  inputClass,
+} from "../../_ui";
 
 /* ---------------------------- helpers ---------------------------- */
-const cx = (...xs) => xs.filter(Boolean).join(" ");
 
 const fmtDateLong = (d) =>
   d
@@ -128,74 +125,6 @@ function extractPromoFromRaw(raw, unitPrices, counts) {
 }
 
 // Extract payment method + card details from Stripe payload
-function extractPaymentMethodSummary(raw) {
-  const empty = { type: null, label: null, card: null };
-  if (!raw || typeof raw !== "object") return empty;
-
-  const unwrapPI = (x) => {
-    if (!x || typeof x !== "object") return null;
-    if (x.object === "payment_intent") return x;
-    if (x.payment_intent && typeof x.payment_intent === "object")
-      return x.payment_intent;
-    if (x.paymentIntent && typeof x.paymentIntent === "object")
-      return x.paymentIntent;
-    if (x.item && typeof x.item === "object") return unwrapPI(x.item);
-    if (x.data && x.data.object) return unwrapPI(x.data.object);
-    return x;
-  };
-
-  const pi = unwrapPI(raw);
-  const charges = Array.isArray(pi?.charges?.data)
-    ? pi.charges.data
-    : Array.isArray(raw?.charges?.data)
-      ? raw.charges.data
-      : [];
-
-  const charge = charges[0] || null;
-  const pmd =
-    charge?.payment_method_details || pi?.payment_method_details || null;
-
-  if (!pmd) return empty;
-
-  let type = pmd.type;
-  if (!type) {
-    if (pmd.card) type = "card";
-    else {
-      const keys = Object.keys(pmd).filter((k) => k !== "type");
-      type = keys[0] || null;
-    }
-  }
-
-  let card = null;
-  if (type === "card") {
-    const cardObj =
-      pmd.card ||
-      charge?.payment_method_details?.card ||
-      pi?.payment_method?.card ||
-      null;
-
-    if (cardObj) {
-      card = {
-        brand: cardObj.brand || null,
-        last4: cardObj.last4 || null,
-        expMonth: cardObj.exp_month || null,
-        expYear: cardObj.exp_year || null,
-        country: cardObj.country || null,
-        funding: cardObj.funding || null,
-      };
-    }
-  }
-
-  const labelParts = [];
-  if (type === "card") {
-    if (card?.brand) labelParts.push(card.brand.toUpperCase());
-    if (card?.last4) labelParts.push(`•••• ${card.last4}`);
-  } else if (type) {
-    labelParts.push(type);
-  }
-
-  return { type, label: labelParts.join(" · ") || null, card };
-}
 
 // Normalize API payload into a clean booking model
 function normalizeBooking(raw) {
@@ -437,7 +366,9 @@ const fmtTs = (sec) =>
       })
     : "-";
 
+
 /* ------------------------------ Page ------------------------------ */
+
 export default function ReservationDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -449,28 +380,21 @@ export default function ReservationDetailPage() {
 
   const piId = useMemo(
     () =>
-      item?.payments?.stripePaymentIntentId ||
-      item?.stripePaymentIntentId ||
-      null,
-    [item],
+      item?.payments?.stripePaymentIntentId || item?.stripePaymentIntentId || null,
+    [item]
   );
 
-  // Modal state
-  const [showCancel, setShowCancel] = useState(false);
+  const [modal, setModal] = useState(null); // "cancel" | "reschedule"
   const [cancelReason, setCancelReason] = useState("");
-  const [showStripeSession, setShowStripeSession] = useState(false);
-  const [showReschedule, setShowReschedule] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   const [slots, setSlots] = useState([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotFrom, setSlotFrom] = useState(() => toDateInput(new Date()));
-  const [slotTo, setSlotTo] = useState(() =>
-    toDateInput(plusDays(new Date(), 60)),
-  );
+  const [slotTo, setSlotTo] = useState(() => toDateInput(plusDays(new Date(), 60)));
   const [targetSlotId, setTargetSlotId] = useState("");
-  const [rev, setRev] = useState(0);
 
-  // Stripe state
   const [stripe, setStripe] = useState(null);
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeErr, setStripeErr] = useState("");
@@ -487,26 +411,19 @@ export default function ReservationDetailPage() {
           credentials: "include",
         });
         if (!res.ok)
-          throw new Error(
-            (await res.json().catch(() => ({})))?.error || "Failed to load",
-          );
-        const { item } = await res.json();
-        setItem(normalizeBooking(item));
+          throw new Error((await res.json().catch(() => ({})))?.error || "Failed to load");
+        const { item: raw } = await res.json();
+        setItem(normalizeBooking(raw));
       } catch (e) {
         setError(e.message || "Failed to load");
       } finally {
         setLoading(false);
       }
     })();
-  }, [id, rev]);
+  }, [id]);
 
-  // Fetch Stripe PI
   useEffect(() => {
-    if (!piId) {
-      setStripe(null);
-      setStripeErr("");
-      return;
-    }
+    if (!piId) return;
     let aborted = false;
     (async () => {
       try {
@@ -531,48 +448,52 @@ export default function ReservationDetailPage() {
     return () => {
       aborted = true;
     };
-  }, [piId, rev]);
+  }, [piId]);
 
   /* ------------------------------ actions ------------------------------ */
-  async function cancelBooking() {
-    const res = await fetch(`/api/admin/reservations/${item.id}/cancel`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ reason: cancelReason }),
-    });
-    if (!res.ok)
-      throw new Error(
-        (await res.json().catch(() => ({})))?.error || "Cancellation failed",
-      );
-    setItem((curr) => ({ ...curr, status: "cancelled" }));
-    setShowCancel(false);
-    toast.success("Reservation cancelled");
+  async function run(fn, ok) {
+    setBusy(true);
+    setActionError("");
+    try {
+      await fn();
+      if (ok) toast.success(ok);
+      setModal(null);
+    } catch (e) {
+      setActionError(e?.message || "Action failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function loadSlots() {
-    if (!item || item?.isPrivate || !item?.experience?.id) {
-      setSlots([]);
-      return;
-    }
+  const cancelBooking = () =>
+    run(async () => {
+      const res = await fetch(`/api/admin/reservations/${item.id}/cancel`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ reason: cancelReason }),
+      });
+      if (!res.ok)
+        throw new Error((await res.json().catch(() => ({})))?.error || "Cancellation failed");
+      setItem((c) => ({ ...c, status: "cancelled" }));
+    }, "Reservation cancelled");
+
+  async function loadSlots(f = slotFrom, t = slotTo) {
+    if (!item || item?.isPrivate || !item?.experience?.id) return setSlots([]);
     setSlotsLoading(true);
     try {
-      const qs = new URLSearchParams({
-        experienceId: String(item.experience.id),
-      });
-      if (slotFrom) qs.set("from", slotFrom);
-      if (slotTo) qs.set("to", slotTo);
-      const res = await fetch(`/api/admin/schedule/slots?${qs.toString()}`, {
+      const qs = new URLSearchParams({ experienceId: String(item.experience.id) });
+      if (f) qs.set("from", f);
+      if (t) qs.set("to", t);
+      const res = await fetch(`/api/admin/schedule/slots?${qs}`, {
         credentials: "include",
         cache: "no-store",
       });
       if (!res.ok)
         throw new Error(
-          (await res.json().catch(() => ({})))?.error ||
-            "Failed to load availability",
+          (await res.json().catch(() => ({})))?.error || "Failed to load availability"
         );
-      const payload = await res.json();
-      setSlots(payload?.items || []);
+      setSlots((await res.json())?.items || []);
     } catch (e) {
       toast.error(e.message || "Failed to load availability");
     } finally {
@@ -580,37 +501,27 @@ export default function ReservationDetailPage() {
     }
   }
 
-  async function submitReschedule() {
+  const submitReschedule = () => {
     if (!targetSlotId) return toast.error("Select a new slot");
-    const res = await fetch(`/api/admin/reservations/${item.id}/reschedule`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ scheduleSlotId: Number(targetSlotId) }),
-    });
-    if (!res.ok)
-      throw new Error(
-        (await res.json().catch(() => ({})))?.error || "Reschedule failed",
-      );
-    const payload = await res.json();
-    setItem((curr) => ({
-      ...curr,
-      startTime: payload?.newStartTime || curr.startTime,
-    }));
-    setShowReschedule(false);
-    toast.success("Reservation rescheduled");
-  }
+    return run(async () => {
+      const res = await fetch(`/api/admin/reservations/${item.id}/reschedule`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ scheduleSlotId: Number(targetSlotId) }),
+      });
+      if (!res.ok)
+        throw new Error((await res.json().catch(() => ({})))?.error || "Reschedule failed");
+      const payload = await res.json();
+      setItem((c) => ({ ...c, startTime: payload?.newStartTime || c.startTime }));
+    }, "Reservation rescheduled");
+  };
 
   /* ----------------------- derived UI state ----------------------- */
-  const statusNorm = String(item?.status || "").toLowerCase();
-  const isCancelled = statusNorm === "cancelled";
+  const isCancelled = String(item?.status || "").toLowerCase() === "cancelled";
   const isPrivate = !!item?.isPrivate;
-
-  // Clean display name for the experience (handles custom/private names)
   const displayExperienceName =
-    item?.customExperienceName ||
-    item?.experience?.name ||
-    "Custom Private Experience";
+    item?.customExperienceName || item?.experience?.name || "Custom private experience";
 
   const moneyCurrency = item?.money?.currency || "EUR";
   const paidTotal =
@@ -622,1065 +533,545 @@ export default function ReservationDetailPage() {
   const unitPriceKid = Number(item?.unitPrices?.kid ?? 0);
   const adults = Number(item?.counts?.adults ?? 0);
   const kids = Number(item?.counts?.kids ?? 0);
-
   const estimate = +(adults * unitPriceAdult + kids * unitPriceKid).toFixed(2);
   const promoCode = item?.promo?.code || null;
   const discountValue = Number(item?.promo?.discountAmount || 0);
   const grandTotal = Math.max(0, +(estimate - discountValue).toFixed(2));
-  const balance = +(
-    grandTotal - (Number.isFinite(paidTotal) ? paidTotal : 0)
-  ).toFixed(2);
-
-  const guestName = (item?.guest?.name || "").trim() || "";
-  const guestInitials = (guestName || "-")
-    .split(" ")
-    .filter(Boolean)
-    .map((x) => x[0])
-    .slice(0, 2)
-    .join("");
-
-  const priceAdult = item?.unitPrices?.adult ?? null;
-  const priceKid = item?.unitPrices?.kid ?? null;
-  const currency = moneyCurrency;
+  const balance = +(grandTotal - (Number.isFinite(paidTotal) ? paidTotal : 0)).toFixed(2);
 
   const stripeSummary = useMemo(
-    () => normalizeStripeSummary(stripe, item?.money?.currency || "EUR"),
-    [stripe, item?.money?.currency],
+    () => normalizeStripeSummary(stripe, moneyCurrency),
+    [stripe, moneyCurrency]
   );
-  const {
-    currency: stripeCurrency,
-    collectedCents,
-    refundedCents,
-    netCents,
-    refunds,
-  } = stripeSummary;
+  const { currency: stripeCurrency, collectedCents, refundedCents, netCents, refunds } =
+    stripeSummary;
 
-  const hasPI = Boolean(item?.payments?.stripePaymentIntentId);
-  const offlineLedger = item?.payments?.ledger || []; // The offline payments from your DB
-  const isFullyPaid = paidTotal >= grandTotal && grandTotal > 0;
-
-  const heroShowLoading = hasPI && stripeLoading;
-  const heroValue = paidTotal;
-  const heroCurrency = moneyCurrency;
-  const heroLabel = "Total Paid";
-
+  const offlineLedger = item?.payments?.ledger || [];
   const paymentMethod = item?.payments?.paymentMethod || null;
-  const paymentCard = paymentMethod?.card || null;
+  const guestName = (item?.guest?.name || "").trim();
+  const attendees = Array.isArray(item?.attendees) ? item.attendees : [];
 
-  const sourceBadge = item?.source ? (
-    <span
-      className={cx(
-        "ml-2 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-        item.source === "admin" &&
-          "bg-purple-50 border-purple-200 text-purple-700",
-        item.source === "web" && "bg-blue-50 border-blue-200 text-blue-700",
-        item.source === "phone" &&
-          "bg-amber-50 border-amber-200 text-amber-800",
-        !["admin", "web", "phone"].includes(item.source) &&
-          "bg-neutral-100 border-neutral-200 text-neutral-600",
-      )}
-    >
-      {item.source}
-    </span>
-  ) : null;
+  /* -------------------------------- view -------------------------------- */
 
-  /* ------------------------------ UI ------------------------------ */
+  if (loading) {
+    return (
+      <Page>
+        <Skeleton className="mb-4 h-8 w-52" />
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="space-y-4 lg:col-span-2">
+            <Skeleton className="h-44" />
+            <Skeleton className="h-64" />
+          </div>
+          <Skeleton className="h-80" />
+        </div>
+      </Page>
+    );
+  }
+
+  if (error || !item) {
+    return (
+      <Page>
+        <Card padded={false}>
+          <EmptyState
+            icon={<Icon name="calendar" size={20} />}
+            title="Reservation not found"
+            description={error || "This booking may have been deleted."}
+            action={
+              <Button as={Link} href="/admin/bookings" variant="secondary">
+                Back to bookings
+              </Button>
+            }
+          />
+        </Card>
+      </Page>
+    );
+  }
+
   return (
-    <div className="pb-24 min-h-screen bg-[#fdfcfb] text-[#3f3127] selection:bg-[#8b6f47]/20">
-      {/* Sticky Header */}
-      <div className="sticky top-0 z-30 border-b border-[#e3ddd2] bg-white/90 backdrop-blur-md print:hidden">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-8">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <button
-              onClick={() => router.push("/admin/bookings")}
-              className="flex items-center justify-center w-10 h-10 rounded-full border border-[#e3ddd2] bg-[#fdfaf5] text-[#5a4a3f] hover:bg-[#f5f1ea] transition-colors shrink-0"
-              title="Back to Bookings"
+    <Page>
+      <div className="mb-4">
+        <Link
+          href="/admin/bookings"
+          className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#8b6f47] hover:underline"
+        >
+          <Icon name="x" size={13} className="rotate-45" /> All bookings
+        </Link>
+      </div>
+
+      <PageHeader
+        eyebrow={item.code}
+        title={displayExperienceName}
+        description={
+          item.startTime
+            ? fmtDateLong(item.startTime)
+            : isPrivate
+              ? "Private booking — no scheduled slot"
+              : "No date set"
+        }
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                navigator.clipboard?.writeText(window.location.href);
+                toast.success("Link copied");
+              }}
             >
-              <ArrowLeft size={18} />
-            </button>
-            <div className="flex flex-col min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-[#a09084]">
-                Booking Reference
+              <Icon name="external" size={15} /> Copy link
+            </Button>
+            {!isPrivate && !isCancelled ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setActionError("");
+                  setTargetSlotId("");
+                  setModal("reschedule");
+                  loadSlots();
+                }}
+              >
+                <Icon name="clock" size={15} /> Reschedule
+              </Button>
+            ) : null}
+            {!isCancelled ? (
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setActionError("");
+                  setCancelReason("");
+                  setModal("cancel");
+                }}
+              >
+                <Icon name="x" size={15} /> Cancel
+              </Button>
+            ) : null}
+            {piId ? (
+              <Button as={Link} href={`/admin/payments/${piId}`} variant="primary">
+                <Icon name="card" size={15} /> Payment
+              </Button>
+            ) : balance > 0 ? (
+              <Button as={Link} href={`/admin/bookings/${id}/payment-setup`} variant="primary">
+                <Icon name="card" size={15} /> Collect {fmtMoney(balance, moneyCurrency)}
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+
+      {/* status strip */}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <StatusBadge status={item.status} />
+        {isPrivate ? <Badge variant="info">private</Badge> : null}
+        {item.source ? <Badge>{item.source}</Badge> : null}
+        {promoCode ? <Badge variant="brand">{promoCode}</Badge> : null}
+        {balance > 0 && !isCancelled ? (
+          <Badge variant="warning">{fmtMoney(balance, moneyCurrency)} outstanding</Badge>
+        ) : grandTotal > 0 ? (
+          <Badge variant="success">paid in full</Badge>
+        ) : null}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* ------------------------- left column ------------------------- */}
+        <div className="space-y-6 lg:col-span-2">
+          <Card>
+            <CardHeader title="Reservation" />
+            <dl className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+              <Row label="When">
+                {item.startTime ? fmtDateLong(item.startTime) : "—"}
+              </Row>
+              <Row label="Experience">{displayExperienceName}</Row>
+              <Row label="Location">{item.experience?.location || "—"}</Row>
+              <Row label="Duration">{item.duration ? `${item.duration} min` : "—"}</Row>
+              <Row label="Party">
+                {adults} adult{adults === 1 ? "" : "s"}
+                {kids ? `, ${kids} child${kids === 1 ? "" : "ren"}` : ""}
+              </Row>
+              <Row label="Created">{item.createdAt ? fmtDateShort(item.createdAt) : "—"}</Row>
+              {item.selected_meetup_point ? (
+                <Row label="Meeting point" className="sm:col-span-2">
+                  {typeof item.selected_meetup_point === "string"
+                    ? item.selected_meetup_point
+                    : item.selected_meetup_point?.name || "—"}
+                </Row>
+              ) : null}
+              {item.notes ? (
+                <Row label="Notes" className="sm:col-span-2">
+                  <span className="whitespace-pre-wrap">{item.notes}</span>
+                </Row>
+              ) : null}
+            </dl>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Guest roster"
+              description={`${attendees.length || adults + kids} guest${
+                (attendees.length || adults + kids) === 1 ? "" : "s"
+              } on this booking`}
+            />
+            {attendees.length === 0 ? (
+              <Muted>No attendee details were captured.</Muted>
+            ) : (
+              <ul className="divide-y divide-[#f0ebe2]">
+                {attendees.map((a, i) => {
+                  const name =
+                    a?.name || [a?.firstName, a?.lastName].filter(Boolean).join(" ") || `Guest ${i + 1}`;
+                  return (
+                    <li key={i} className="flex items-center gap-3 py-2.5">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f2ede4] text-[11px] font-bold text-[#8b6f47]">
+                        {name.split(" ").filter(Boolean).map((x) => x[0]).slice(0, 2).join("") || "?"}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-semibold text-[#2a211a]">{name}</p>
+                        {a?.allergies ? (
+                          <p className="truncate text-[11.5px] text-[#a33c22]">{a.allergies}</p>
+                        ) : null}
+                      </div>
+                      {a?.age ? (
+                        <span className="text-[12px] text-[#9a8c7e]">{a.age}y</span>
+                      ) : null}
+                      {a?.category ? <Badge>{a.category}</Badge> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Payment ledger"
+              description={paymentMethod?.label || (piId ? "Card via Stripe" : "No payment recorded")}
+              actions={
+                piId ? (
+                  <Button as={Link} href={`/admin/payments/${piId}`} size="sm" variant="secondary">
+                    Open in payments
+                  </Button>
+                ) : null
+              }
+            />
+
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Money label="Order total" value={fmtMoney(grandTotal, moneyCurrency)} />
+              <Money label="Paid" value={fmtMoney(paidTotal, moneyCurrency)} tone="success" />
+              <Money
+                label="Balance"
+                value={fmtMoney(balance, moneyCurrency)}
+                tone={balance > 0 ? "warning" : "muted"}
+              />
+              <Money
+                label="Refunded"
+                value={fmtMoney(minorToMajor(refundedCents, stripeCurrency), stripeCurrency)}
+                tone={refundedCents > 0 ? "danger" : "muted"}
+              />
+            </div>
+
+            <dl className="grid grid-cols-1 gap-x-8 gap-y-2 border-t border-[#f0ebe2] pt-4 sm:grid-cols-2">
+              <Row label={`Adults × ${adults}`}>
+                {fmtMoney(adults * unitPriceAdult, moneyCurrency)}
+              </Row>
+              {kids > 0 ? (
+                <Row label={`Children × ${kids}`}>
+                  {fmtMoney(kids * unitPriceKid, moneyCurrency)}
+                </Row>
+              ) : null}
+              {discountValue > 0 ? (
+                <Row label={`Discount${promoCode ? ` (${promoCode})` : ""}`}>
+                  −{fmtMoney(discountValue, moneyCurrency)}
+                </Row>
+              ) : null}
+            </dl>
+
+            {stripeErr ? <ErrorNote className="mt-4">{stripeErr}</ErrorNote> : null}
+
+            {stripeLoading ? (
+              <Skeleton className="mt-4 h-16" />
+            ) : piId ? (
+              <div className="mt-4 rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] p-4">
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[#9a8c7e]">
+                  Stripe
+                </p>
+                <div className="grid grid-cols-3 gap-3 text-[13px]">
+                  <div>
+                    <p className="text-[11px] text-[#9a8c7e]">Collected</p>
+                    <p className="font-semibold">
+                      {fmtMoney(minorToMajor(collectedCents, stripeCurrency), stripeCurrency)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-[#9a8c7e]">Refunded</p>
+                    <p className="font-semibold">
+                      {fmtMoney(minorToMajor(refundedCents, stripeCurrency), stripeCurrency)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-[#9a8c7e]">Net</p>
+                    <p className="font-semibold">
+                      {fmtMoney(minorToMajor(netCents, stripeCurrency), stripeCurrency)}
+                    </p>
+                  </div>
+                </div>
+                {refunds?.length ? (
+                  <ul className="mt-3 space-y-1.5 border-t border-[#e6e0d6] pt-3">
+                    {refunds.map((r, i) => (
+                      <li key={r.id || i} className="flex items-center gap-2 text-[12px]">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#a33c22]" />
+                        <span className="text-[#3f3127]">
+                          {fmtMoney(minorToMajor(r.amount, stripeCurrency), stripeCurrency)} refunded
+                        </span>
+                        {r.created ? (
+                          <span className="ml-auto text-[#9a8c7e]">{fmtTs(r.created)}</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+
+            {offlineLedger.length ? (
+              <div className="mt-4">
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[#9a8c7e]">
+                  Manual payments
+                </p>
+                <ul className="divide-y divide-[#f0ebe2]">
+                  {offlineLedger.map((p, i) => (
+                    <li key={p.id || i} className="flex items-center gap-3 py-2 text-[13px]">
+                      <Badge>{p.method || "other"}</Badge>
+                      <span className="font-semibold">
+                        {fmtMoney(p.amount, p.currency || moneyCurrency)}
+                      </span>
+                      {p.processed_at || p.created_at ? (
+                        <span className="ml-auto text-[12px] text-[#9a8c7e]">
+                          {fmtDateShort(p.processed_at || p.created_at)}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </Card>
+        </div>
+
+        {/* ------------------------- right column ------------------------- */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader title="Guest" />
+            <div className="mb-4 flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#8b6f47] text-[14px] font-bold text-white">
+                {(guestName || "?").split(" ").filter(Boolean).map((x) => x[0]).slice(0, 2).join("") || "?"}
               </span>
-              <div className="flex items-center text-sm font-semibold text-[#3f3127] truncate">
-                {item?.code ? (
-                  <span className="font-mono tracking-tight">{item.code}</span>
-                ) : (
-                  <span className="text-neutral-400 font-mono">#{id}</span>
-                )}
-                {sourceBadge}
+              <div className="min-w-0">
+                <p className="truncate font-serif text-[16px] text-[#2a211a]">
+                  {guestName || "Unnamed guest"}
+                </p>
+                <Muted className="text-[12px]">{item.guest?.email || "No email"}</Muted>
               </div>
             </div>
-          </div>
+            <div className="space-y-2">
+              {item.guest?.email ? (
+                <a
+                  href={`mailto:${item.guest.email}`}
+                  className="flex items-center gap-2 rounded-xl border border-[#e6e0d6] px-3 py-2 text-[13px] text-[#3f3127] transition-colors hover:border-[#c9b393] hover:bg-[#fdfbf7]"
+                >
+                  <Icon name="inbox" size={15} className="text-[#8b6f47]" />
+                  <span className="truncate">{item.guest.email}</span>
+                </a>
+              ) : null}
+              {item.guest?.phone ? (
+                <a
+                  href={`tel:${item.guest.phone}`}
+                  className="flex items-center gap-2 rounded-xl border border-[#e6e0d6] px-3 py-2 text-[13px] text-[#3f3127] transition-colors hover:border-[#c9b393] hover:bg-[#fdfbf7]"
+                >
+                  <Icon name="users" size={15} className="text-[#8b6f47]" />
+                  <span>{item.guest.phone}</span>
+                </a>
+              ) : null}
+            </div>
+          </Card>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
-            <IconButton
-              onClick={() => {
-                if (navigator?.clipboard?.writeText) {
-                  navigator.clipboard.writeText(window.location.href);
-                  toast.success("Link copied");
-                } else {
-                  toast.error("Copy not supported by this browser");
-                }
-              }}
-              title="Copy Link"
-              icon={Copy}
-            />
-            <IconButton
-              onClick={() => window.print()}
-              title="Print Details"
-              icon={Printer}
-            />
-            <div className="h-6 w-[1px] bg-[#e3ddd2] mx-1 hidden sm:block shrink-0" />
-            <IconButton
-              onClick={() => setShowReschedule(true)}
-              disabled={isCancelled || isPrivate}
-              title={
-                isPrivate
-                  ? "Private bookings cannot be rescheduled here"
-                  : "Reschedule"
-              }
-              icon={CalendarClock}
-              tone="amber"
-            />
-            <IconButton
-              onClick={() => setShowCancel(true)}
-              disabled={isCancelled}
-              title="Cancel Booking"
-              icon={XCircle}
-              tone="red"
-            />
-            <IconButton
-              onClick={() => {
-                if (piId) {
-                  router.push(`/admin/payments/${piId}`);
-                } else {
-                  router.push(`/admin/bookings/${id}/payment-setup`);
-                }
-              }}
-              disabled={isCancelled}
-              title={
-                piId
-                  ? "View Transaction Record"
-                  : "Awaiting Payment - Click to Setup"
-              }
-              tone={piId ? "emerald" : "amber"}
-            >
-              {piId ? <DollarSign size={20} /> : <Banknote size={20} />}
-            </IconButton>
-          </div>
+          <Card>
+            <CardHeader title="Manage" />
+            <div className="space-y-2">
+              <Button
+                as={Link}
+                href={`/admin/bookings/${id}/edit`}
+                variant="secondary"
+                className="w-full justify-start"
+              >
+                <Icon name="file" size={15} /> Edit details
+              </Button>
+              <Button
+                as={Link}
+                href={`/admin/bookings/${id}/payment-setup`}
+                variant="secondary"
+                className="w-full justify-start"
+              >
+                <Icon name="card" size={15} /> Collect payment
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full justify-start"
+                onClick={() => window.print()}
+              >
+                <Icon name="file" size={15} /> Print
+              </Button>
+            </div>
+          </Card>
         </div>
       </div>
 
-      <div className="mx-auto max-w-6xl px-4 sm:px-8 py-8">
-        {loading ? (
-          <Skeleton />
-        ) : error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-red-700 text-center font-medium shadow-sm">
-            {error}
-          </div>
-        ) : !item ? (
-          <div className="rounded-2xl border border-[#e3ddd2] bg-white p-12 text-center text-[#7a6a5f] shadow-sm">
-            Reservation not found.
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Hero Profile Card */}
-            <div className="overflow-hidden rounded-[2rem] border border-[#e3ddd2] bg-white shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex flex-col md:flex-row justify-between gap-6 p-6 sm:p-8 md:items-center">
-                <div className="flex items-center gap-4 sm:gap-5 min-w-0 flex-1">
-                  <div className="flex h-14 w-14 sm:h-16 sm:w-16 shrink-0 items-center justify-center rounded-full border border-[#e3ddd2] bg-[#fdfaf5] text-lg sm:text-xl font-serif text-[#8b6f47] shadow-sm">
-                    {guestInitials || "?"}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-3 mb-1.5">
-                      <h1 className="truncate text-xl sm:text-2xl font-serif text-[#2a1f18]">
-                        {guestName || "No name provided"}
-                      </h1>
-                      <StatusBadge status={statusNorm} />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs sm:text-sm font-medium text-[#7a6a5f]">
-                      <span className="flex items-center gap-1.5">
-                        <Users size={14} className="text-[#a09084]" />
-                        {item.counts?.adults ?? 0}{" "}
-                        {typeof item.counts?.kids === "number"
-                          ? ` + ${item.counts.kids}`
-                          : ""}
-                      </span>
-                      <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
-                      <span className="flex items-center gap-1.5">
-                        <CalendarClock size={14} className="text-[#a09084]" />
-                        {fmtDateShort(item.startTime)}
-                      </span>
-                      {item.selected_meetup_point && (
-                        <>
-                          <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
-                          <span className="flex items-center gap-1.5 text-emerald-700">
-                            <MapPin size={14} />
-                            {item.selected_meetup_point.name || "Pickup Set"}
-                          </span>
-                        </>
-                      )}
-
-                      <span className="w-1 h-1 rounded-full bg-[#d8cfc3]" />
-                      <span className="flex items-center gap-1.5 min-w-0 truncate">
-                        <MapPin size={14} className="text-[#a09084] shrink-0" />
-                        <span className="truncate">
-                          {displayExperienceName}
-                        </span>
-                        {isPrivate && (
-                          <span className="ml-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 shrink-0">
-                            Private
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="md:text-right bg-[#fdfcfb] md:bg-transparent p-4 md:p-0 rounded-2xl border border-[#e3ddd2] md:border-none shrink-0">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-1">
-                    {heroLabel}
-                  </div>
-                  <div className="text-2xl sm:text-3xl font-serif text-[#2a1f18]">
-                    {heroShowLoading ? (
-                      <Loader2
-                        size={24}
-                        className="animate-spin text-[#8b6f47]"
-                      />
-                    ) : (
-                      fmtMoney(heroValue, heroCurrency)
-                    )}
-                  </div>
-                  {paymentMethod?.label && (
-                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#e3ddd2] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#5a4a3f] shadow-sm">
-                      {paymentMethod.type === "cash" ||
-                      paymentMethod.type === "bank_transfer" ? (
-                        <Wallet size={12} className="text-[#8b6f47]" />
-                      ) : (
-                        <CreditCard size={12} className="text-[#8b6f47]" />
-                      )}
-                      {paymentMethod.label}
-                    </div>
-                  )}
-                  {stripeErr && (
-                    <div className="mt-2 text-[11px] font-medium text-red-500">
-                      {stripeErr}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Bento Grid Cards */}
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 items-start">
-              <Card title="Reservation Info" icon={<FileText size={16} />}>
-                <Row label="Date">{fmtDateLong(item.startTime)}</Row>
-                <Row label="Experience">
-                  {displayExperienceName}
-                  {isPrivate && (
-                    <span className="ml-2 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">
-                      Private
-                    </span>
-                  )}
-                </Row>
-                <Row label="Location">{item.experience?.location || "-"}</Row>
-                <Row label="Meetup Point">
-                  {item.selected_meetup_point?.name || "-"}
-                </Row>
-                <Row label="Duration">
-                  {Number.isFinite(item.duration)
-                    ? `${item.duration} min`
-                    : "-"}
-                </Row>
-                <Row label="Code" mono>
-                  <Copyable value={item.code} empty="-" />
-                </Row>
-                <Row label="Adult Price">{fmtMoney(priceAdult, currency)}</Row>
-                <Row label="Child Price">{fmtMoney(priceKid, currency)}</Row>
-                <Row label="Created On">{fmtDateShort(item.createdAt)}</Row>
-                <Row label="Last Updated">{fmtDateShort(item.updatedAt)}</Row>
-                <Row label="Source" mono>
-                  {item.source || "-"}
-                </Row>
-              </Card>
-
-              <div className="space-y-6">
-                <Card title="Customer Details" icon={<User2 size={16} />}>
-                  <Row label="Full Name">{guestName || "-"}</Row>
-                  <Row label="Email Address" mono>
-                    {item.guest?.email ? (
-                      <a
-                        className="text-[#8b6f47] hover:underline break-all"
-                        href={`mailto:${item.guest.email}`}
-                      >
-                        {item.guest.email}
-                      </a>
-                    ) : (
-                      "-"
-                    )}
-                  </Row>
-                  <Row label="Phone Number" mono>
-                    {item.guest?.phone ? (
-                      <a
-                        className="text-[#8b6f47] hover:underline break-all"
-                        href={`tel:${item.guest.phone}`}
-                      >
-                        {item.guest.phone}
-                      </a>
-                    ) : (
-                      "-"
-                    )}
-                  </Row>
-                  <Row label="Internal Notes">
-                    {item.notes ? (
-                      <span className="italic text-[#7a6a5f] whitespace-pre-wrap">
-                        {item.notes}
-                      </span>
-                    ) : (
-                      "-"
-                    )}
-                  </Row>
-                </Card>
-
-                {Array.isArray(item?.attendees) &&
-                  item.attendees.length > 0 && (
-                    <Card title="Roster & Attendees" icon={<Users size={16} />}>
-                      <div className="divide-y divide-[#e3ddd2] border border-[#e3ddd2] rounded-xl overflow-hidden bg-[#fdfcfb]">
-                        {item.attendees.map((a, idx) => {
-                          const name =
-                            a?.name ||
-                            [a?.firstName, a?.lastName]
-                              .filter(Boolean)
-                              .join(" ") ||
-                            `Guest #${idx + 1}`;
-                          const type = a?.type || a?.category || "adult";
-                          const age =
-                            typeof a?.age === "number" && Number.isFinite(a.age)
-                              ? a.age
-                              : null;
-                          const notes =
-                            (typeof a?.notes === "string" && a.notes.trim()) ||
-                            (typeof a?.allergies === "string" &&
-                              a.allergies.trim()) ||
-                            (typeof a?.dietary === "string" &&
-                              a.dietary.trim()) ||
-                            null;
-
-                          return (
-                            <div
-                              key={idx}
-                              className="p-4 hover:bg-[#fdfaf5] transition-colors"
-                            >
-                              <div className="flex items-center justify-between gap-3 mb-1">
-                                <span className="font-semibold text-[#3f3127] truncate min-w-0">
-                                  {name}
-                                </span>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {age !== null && (
-                                    <span className="rounded-md bg-white border border-[#e3ddd2] px-2 py-0.5 text-[10px] font-bold text-[#7a6a5f] shadow-sm">
-                                      {age} yrs
-                                    </span>
-                                  )}
-                                  <span className="rounded-md bg-white border border-[#e3ddd2] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#8b6f47] shadow-sm">
-                                    {type}
-                                  </span>
-                                </div>
-                              </div>
-                              {notes && (
-                                <div className="text-xs text-[#7a6a5f] bg-white border border-[#e3ddd2] rounded-lg p-2 mt-2">
-                                  <span className="font-semibold text-[#5a4a3f]">
-                                    Note:
-                                  </span>{" "}
-                                  {notes}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </Card>
-                  )}
-              </div>
-
-              <div className="lg:col-span-2">
-                <Card title="Payment Ledger" icon={<Banknote size={16} />}>
-                  <Row label="Status">
-                    <StatusBadge status={statusNorm} />
-                  </Row>
-                  <Row label="Method">
-                    {paymentMethod?.label ? (
-                      paymentMethod.label
-                    ) : hasPI ? (
-                      stripeLoading ? (
-                        <Loader2
-                          size={14}
-                          className="animate-spin text-[#8b6f47]"
-                        />
-                      ) : (
-                        "Card"
-                      )
-                    ) : (
-                      "—"
-                    )}
-                  </Row>
-
-                  {paymentCard && (
-                    <Row label="Card Details">
-                      <div className="space-y-1 text-sm font-medium text-[#3f3127]">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded border border-[#e3ddd2] bg-white text-[10px] uppercase tracking-wider shadow-sm">
-                            {paymentCard.brand || "Card"}
-                          </span>
-                          {paymentCard.last4 && (
-                            <span>•••• {paymentCard.last4}</span>
-                          )}
-                        </div>
-                        {(paymentCard.expMonth || paymentCard.expYear) && (
-                          <div className="text-xs text-[#7a6a5f] mt-1">
-                            Expires:{" "}
-                            {paymentCard.expMonth
-                              ? String(paymentCard.expMonth).padStart(2, "0")
-                              : "??"}
-                            /
-                            {paymentCard.expYear
-                              ? String(paymentCard.expYear).slice(-2)
-                              : "??"}
-                          </div>
-                        )}
-                        {paymentCard.funding && (
-                          <div className="text-xs text-[#7a6a5f] capitalize">
-                            Type: {paymentCard.funding}
-                          </div>
-                        )}
-                        {paymentCard.country && (
-                          <div className="text-xs text-[#7a6a5f]">
-                            Issuer: {paymentCard.country}
-                          </div>
-                        )}
-                      </div>
-                    </Row>
-                  )}
-
-                  {promoCode && (
-                    <Row label="Promo Code" mono>
-                      <span className="text-[#8b6f47] font-bold bg-[#8b6f47]/10 px-2 py-1 rounded">
-                        {promoCode}
-                      </span>
-                    </Row>
-                  )}
-                  {discountValue > 0 && (
-                    <Row label="Discount Applied" mono>
-                      <span className="text-emerald-600 font-bold">
-                        −{fmtMoney(discountValue, moneyCurrency)}
-                      </span>
-                    </Row>
-                  )}
-
-                  {/* Warning: Awaiting Payment Provisioning */}
-                  {!hasPI && !isCancelled && !isFullyPaid && (
-                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
-                      <div className="flex items-start gap-4">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-                          <Info size={20} />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-sm font-bold text-amber-900 uppercase tracking-tight">
-                            Awaiting Payment Provisioning
-                          </h4>
-                          <p className="mt-1 text-xs text-amber-800/80 leading-relaxed">
-                            No digital payment intent has been created for this
-                            booking yet. You can either generate a Stripe
-                            Payment Link or mark this as paid via Bank Transfer.
-                          </p>
-                          <button
-                            onClick={() =>
-                              router.push(`/admin/bookings/${id}/payment-setup`)
-                            }
-                            className="mt-4 inline-flex items-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-white hover:bg-amber-700 transition-all shadow-sm"
-                          >
-                            Resolve Payment{" "}
-                            <ArrowLeft size={14} className="rotate-180" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <Row label="Stripe Session" mono>
-                    {item?.payments?.stripeSessionId ? (
-                      <button
-                        onClick={() => setShowStripeSession(true)}
-                        className="text-xs font-bold uppercase tracking-wider text-[#8b6f47] hover:underline break-all text-left"
-                      >
-                        View Session ID
-                      </button>
-                    ) : (
-                      "-"
-                    )}
-                  </Row>
-
-                  <Row label="Payment Intent" mono>
-                    <Copyable
-                      value={item.payments?.stripePaymentIntentId}
-                      empty="-"
-                    />
-                  </Row>
-
-                  {/* OFFLINE PAYMENTS BLOCK */}
-                  {offlineLedger.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-[#e3ddd2] space-y-3">
-                      <div className="mt-4 rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] overflow-hidden">
-                        <div className="px-4 py-2 bg-[#fdfaf5] border-b border-[#e3ddd2] text-[10px] font-bold uppercase tracking-wider text-[#a09084]">
-                          Offline Payments Ledger
-                        </div>
-                        <ul className="divide-y divide-[#e3ddd2]">
-                          {offlineLedger.map((p) => (
-                            <li
-                              key={p.id}
-                              className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white transition-colors"
-                            >
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#8b6f47]">
-                                    {p.method === "cash"
-                                      ? "Cash Settlement"
-                                      : p.method === "bank_transfer"
-                                        ? "Bank Transfer"
-                                        : p.method}
-                                  </span>
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">
-                                    Logged
-                                  </span>
-                                </div>
-                                <div className="text-xs text-[#5a4a3f]">
-                                  {p.notes || "Offline settlement"}
-                                </div>
-                                <div className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mt-2">
-                                  {fmtDateShort(p.processed_at)}
-                                </div>
-                              </div>
-                              <div className="font-serif text-lg text-emerald-600 font-bold whitespace-nowrap self-start sm:self-auto">
-                                +{fmtMoney(p.amount, p.currency)}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* STRIPE SUMMARY BLOCK */}
-                  {hasPI && (
-                    <div className="mt-4 pt-4 border-t border-[#e3ddd2] space-y-3">
-                      <Row label="Collected via Stripe" mono>
-                        {stripeLoading ? (
-                          "…"
-                        ) : (
-                          <span className="font-bold">
-                            {fmtMoney(
-                              minorToMajor(collectedCents, stripeCurrency),
-                              stripeCurrency,
-                            )}
-                          </span>
-                        )}
-                      </Row>
-                      <Row label="Refunded via Stripe" mono>
-                        {stripeLoading ? (
-                          "…"
-                        ) : (
-                          <span className="text-rose-600 font-bold">
-                            {fmtMoney(
-                              minorToMajor(refundedCents, stripeCurrency),
-                              stripeCurrency,
-                            )}
-                          </span>
-                        )}
-                      </Row>
-                      <Row label="Net Revenue" mono>
-                        {stripeLoading ? (
-                          "…"
-                        ) : (
-                          <span className="text-emerald-600 font-bold">
-                            {fmtMoney(
-                              minorToMajor(netCents, stripeCurrency),
-                              stripeCurrency,
-                            )}
-                          </span>
-                        )}
-                      </Row>
-
-                      {refunds.length > 0 && (
-                        <div className="mt-4 rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] overflow-hidden">
-                          <div className="px-4 py-2 bg-[#fdfaf5] border-b border-[#e3ddd2] text-[10px] font-bold uppercase tracking-wider text-[#a09084]">
-                            Refund History
-                          </div>
-                          <ul className="divide-y divide-[#e3ddd2]">
-                            {refunds.map((r) => (
-                              <li
-                                key={r.id}
-                                className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white transition-colors"
-                              >
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <code className="text-[10px] font-bold text-[#7a6a5f] bg-[#e3ddd2]/40 px-1.5 py-0.5 rounded truncate max-w-[150px]">
-                                      {r.id}
-                                    </code>
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">
-                                      {r.status || "Completed"}
-                                    </span>
-                                  </div>
-                                  <div className="text-xs text-[#5a4a3f]">
-                                    {r.reason || "No reason provided"}
-                                  </div>
-                                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mt-2">
-                                    {fmtTs(r.created)}
-                                  </div>
-                                </div>
-                                <div className="font-serif text-lg text-rose-600 font-bold whitespace-nowrap self-start sm:self-auto">
-                                  -
-                                  {fmtMoney(
-                                    minorToMajor(r.amount, r.currency),
-                                    r.currency,
-                                  )}
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="mt-4 pt-4 border-t border-[#e3ddd2]">
-                    <Row
-                      label={
-                        typeof item?.money?.totalPaidAmount === "number"
-                          ? "Total Paid (System)"
-                          : "Total (System)"
-                      }
-                      mono
-                    >
-                      <span className="font-bold text-lg">
-                        {fmtMoney(paidTotal, moneyCurrency)}
-                      </span>
-                      {balance < 0 && (
-                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm flex items-start gap-3">
-                          <Info size={18} className="shrink-0 mt-0.5" />
-                          <div>
-                            <strong className="block mb-1">
-                              Overpaid by{" "}
-                              {fmtMoney(Math.abs(balance), moneyCurrency)}
-                            </strong>
-                            <span className="text-xs opacity-80">
-                              Consider issuing a refund or retaining as store
-                              credit.
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </Row>
-                  </div>
-                </Card>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* --- MODALS --- */}
-
-      {/* Stripe session modal */}
-      {showStripeSession && (
-        <Modal
-          onClose={() => setShowStripeSession(false)}
-          title="Stripe Session ID"
-          icon={<CreditCard size={20} className="text-[#8b6f47]" />}
-        >
-          <div className="space-y-4">
-            <textarea
-              readOnly
-              value={item?.payments?.stripeSessionId || ""}
-              rows={4}
-              className="w-full rounded-xl border border-[#e3ddd2] bg-[#fdfcfb] p-4 font-mono text-xs text-[#3f3127] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 shadow-inner"
-            />
-            <div className="flex items-center justify-end gap-3">
-              <Button
-                variant="ghost"
-                onClick={() => setShowStripeSession(false)}
-              >
-                Close
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  const v = item?.payments?.stripeSessionId || "";
-                  if (navigator?.clipboard?.writeText) {
-                    navigator.clipboard.writeText(v);
-                    toast.success("Session ID Copied");
-                  } else {
-                    toast.error("Copy not supported");
-                  }
-                }}
-              >
-                Copy ID
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Cancel modal */}
-      {showCancel && (
-        <Modal
-          onClose={() => setShowCancel(false)}
-          title="Cancel Reservation"
-          icon={<XCircle size={20} className="text-red-500" />}
-        >
-          <div className="space-y-5">
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 leading-relaxed">
-              You are about to cancel this booking.{" "}
-              {isPrivate
-                ? "This will release the privately held time block."
-                : "This will immediately free up seats for this schedule slot."}
-            </div>
-            <label className="block text-sm">
-              <span className="text-[#3f3127] font-semibold mb-1.5 block">
-                Internal Note / Reason (Optional)
-              </span>
-              <textarea
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                className="w-full rounded-xl border border-[#e3ddd2] p-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/30 shadow-sm"
-                rows={3}
-                placeholder="e.g. Guest requested cancellation due to travel delay..."
-              />
-            </label>
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <Button variant="ghost" onClick={() => setShowCancel(false)}>
-                Keep Booking
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() =>
-                  cancelBooking().catch((e) => toast.error(e.message))
-                }
-              >
-                Yes, Cancel
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Reschedule modal */}
-      {showReschedule && !isPrivate && (
-        <Modal
-          onClose={() => setShowReschedule(false)}
-          title="Reschedule Reservation"
-          icon={<CalendarClock size={20} className="text-amber-500" />}
-        >
-          <div className="space-y-5">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-5 p-4 bg-[#fdfcfb] border border-[#e3ddd2] rounded-xl">
-              <div className="sm:col-span-2">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
-                  Look From
-                </label>
-                <input
-                  type="date"
-                  value={slotFrom}
-                  onChange={(e) => setSlotFrom(e.target.value)}
-                  className="w-full rounded-lg border border-[#e3ddd2] p-2 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 outline-none"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1.5 block">
-                  Look To
-                </label>
-                <input
-                  type="date"
-                  value={slotTo}
-                  onChange={(e) => setSlotTo(e.target.value)}
-                  className="w-full rounded-lg border border-[#e3ddd2] p-2 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 outline-none"
-                />
-              </div>
-              <div className="sm:col-span-1 flex items-end">
-                <button
-                  onClick={loadSlots}
-                  disabled={slotsLoading}
-                  className="w-full rounded-lg bg-white border border-[#e3ddd2] p-2 text-sm font-semibold hover:bg-[#fdfaf5] shadow-sm flex justify-center items-center h-[38px]"
-                >
-                  {slotsLoading ? (
-                    <Loader2
-                      size={16}
-                      className="animate-spin text-[#8b6f47]"
-                    />
-                  ) : (
-                    <SearchIcon size={16} className="text-[#8b6f47]" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-[#e3ddd2] bg-white overflow-hidden shadow-sm">
-              <div className="grid grid-cols-1 sm:grid-cols-2">
-                <div className="p-4 border-b sm:border-b-0 sm:border-r border-[#e3ddd2] bg-[#fdfaf5]">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1">
-                    Current Slot
-                  </div>
-                  <div className="text-sm font-semibold text-[#3f3127]">
-                    {fmtDateShort(item?.startTime)}
-                  </div>
-                </div>
-                <div className="p-4">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#a09084] mb-1">
-                    New Target Slot
-                  </div>
-                  <select
-                    value={targetSlotId}
-                    onChange={(e) => setTargetSlotId(e.target.value)}
-                    className="w-full rounded-lg border border-[#e3ddd2] bg-white p-2 text-sm focus:ring-2 focus:ring-amber-500/30 outline-none"
-                  >
-                    <option value="">— Select Available Slot —</option>
-                    {slots.length === 0 && !slotsLoading && (
-                      <option value="" disabled>
-                        Search to load availability
-                      </option>
-                    )}
-                    {slotsLoading && (
-                      <option value="" disabled>
-                        Searching calendar…
-                      </option>
-                    )}
-                    {!slotsLoading &&
-                      slots.map((s) => (
-                        <option
-                          key={s.id}
-                          value={s.id}
-                          disabled={(s.available ?? 0) <= 0}
-                        >
-                          {fmtDateShort(s.date)} — Avail: {s.available}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <Button variant="ghost" onClick={() => setShowReschedule(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="amber"
-                onClick={() =>
-                  submitReschedule().catch((e) => toast.error(e.message))
-                }
-                disabled={!targetSlotId}
-              >
-                Confirm Reschedule
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* print helpers */}
-      <style jsx global>{`
-        @media print {
-          .print\:hidden {
-            display: none !important;
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/* ---------------------------- Subcomponents ---------------------------- */
-
-function Card({ title, icon, children }) {
-  return (
-    <div className="rounded-[1.5rem] border border-[#e3ddd2] bg-white shadow-sm overflow-hidden flex flex-col h-full">
-      <div className="border-b border-[#e3ddd2] bg-[#fcfbf9] px-6 py-4 flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-[#8b6f47]">
-        {icon && <span className="opacity-70">{icon}</span>}
-        {title}
-      </div>
-      <div className="p-5 sm:p-6 flex flex-col flex-1">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, children, mono }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 sm:gap-4 text-sm border-b border-[#e3ddd2]/50 py-3 first:pt-0 last:border-0 last:pb-0">
-      <div className="sm:min-w-[140px] shrink-0 text-[10px] font-bold uppercase tracking-wider text-[#a09084] pt-0.5">
-        {label}
-      </div>
-      <div
-        className={cx(
-          "flex-1 min-w-0 text-[#3f3127] font-medium sm:text-right break-words overflow-hidden",
-          mono && "font-mono tracking-tight",
-        )}
+      {/* ------------------------------ modals ------------------------------ */}
+      <Modal
+        open={modal === "cancel"}
+        onClose={() => setModal(null)}
+        title="Cancel reservation"
+        subtitle={`${item.code} · ${guestName || "Guest"}`}
       >
+        <Field label="Reason">
+          <Input
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Guest requested cancellation"
+          />
+        </Field>
+        <Muted className="mt-3 text-[12px]">
+          Seats are released immediately. Refunds are issued separately from the payment screen.
+        </Muted>
+        {actionError ? <ErrorNote className="mt-3">{actionError}</ErrorNote> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setModal(null)}>
+            Keep it
+          </Button>
+          <Button variant="danger" onClick={cancelBooking} disabled={busy}>
+            {busy ? "Cancelling…" : "Cancel reservation"}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={modal === "reschedule"}
+        onClose={() => setModal(null)}
+        title="Reschedule"
+        subtitle={displayExperienceName}
+      >
+        <div className="mb-3 flex items-center gap-2">
+          <input
+            type="date"
+            value={slotFrom}
+            onChange={(e) => {
+              setSlotFrom(e.target.value);
+              loadSlots(e.target.value, slotTo);
+            }}
+            className={`${inputClass} h-9 flex-1 text-[12px]`}
+          />
+          <span className="text-[12px] text-[#9a8c7e]">→</span>
+          <input
+            type="date"
+            value={slotTo}
+            onChange={(e) => {
+              setSlotTo(e.target.value);
+              loadSlots(slotFrom, e.target.value);
+            }}
+            className={`${inputClass} h-9 flex-1 text-[12px]`}
+          />
+        </div>
+        {slotsLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+          </div>
+        ) : slots.length === 0 ? (
+          <Muted>No slots with availability in this range.</Muted>
+        ) : (
+          <div className="max-h-[300px] space-y-1.5 overflow-y-auto pr-1">
+            {slots.map((s) => {
+              const active = String(targetSlotId) === String(s.id);
+              const free = s.available ?? Math.max(0, (s.totalSlots || 0) - (s.bookedSlots || 0));
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => setTargetSlotId(s.id)}
+                  className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                    active ? "border-[#8b6f47] bg-[#f7f3ec]" : "border-[#e6e0d6] hover:border-[#c9b393]"
+                  }`}
+                >
+                  <span className="text-[13px] font-semibold text-[#2a211a]">
+                    {fmtDateShort(s.date)}
+                  </span>
+                  <span className="ml-auto text-[12px] text-[#9a8c7e]">{free} free</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {actionError ? <ErrorNote className="mt-3">{actionError}</ErrorNote> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setModal(null)}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={submitReschedule} disabled={busy || !targetSlotId}>
+            {busy ? "Moving…" : "Move booking"}
+          </Button>
+        </div>
+      </Modal>
+    </Page>
+  );
+}
+
+/* ---------------------------- small local bits ---------------------------- */
+
+function Row({ label, children, className = "" }) {
+  return (
+    <div className={className}>
+      <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9a8c7e]">
+        {label}
+      </dt>
+      <dd className="mt-0.5 text-[13.5px] text-[#2a211a]">{children}</dd>
+    </div>
+  );
+}
+
+function Money({ label, value, tone = "default" }) {
+  const tones = {
+    default: "text-[#2a211a]",
+    success: "text-[#3f6b3f]",
+    warning: "text-[#8a6412]",
+    danger: "text-[#a33c22]",
+    muted: "text-[#9a8c7e]",
+  };
+  return (
+    <div className="rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] px-3 py-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9a8c7e]">
+        {label}
+      </p>
+      <p className={`mt-1 font-serif text-[17px] ${tones[tone]}`}>{value}</p>
+    </div>
+  );
+}
+
+function Modal({ open, onClose, title, subtitle, children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-lg rounded-t-3xl border border-[#e6e0d6] bg-white p-6 shadow-2xl sm:rounded-3xl">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-serif text-[19px] text-[#2a211a]">{title}</h2>
+            {subtitle ? <p className="mt-0.5 text-[12px] text-[#9a8c7e]">{subtitle}</p> : null}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]"
+          >
+            <Icon name="x" size={18} />
+          </button>
+        </div>
         {children}
       </div>
     </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const s = String(status || "").toLowerCase();
-  const map = {
-    paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    confirmed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    checked_in: "bg-indigo-50 text-indigo-700 border-indigo-200",
-    pending: "bg-amber-50 text-amber-700 border-amber-200",
-    cancelled: "bg-red-50 text-red-700 border-red-200",
-    draft: "bg-gray-50 text-gray-700 border-gray-200",
-    converted: "bg-sky-50 text-sky-700 border-sky-200",
-  };
-  const labelMap = {
-    paid: "Paid",
-    confirmed: "Confirmed",
-    completed: "Completed",
-    checked_in: "Checked-in",
-    pending: "Pending",
-    cancelled: "Cancelled",
-    draft: "Draft",
-    converted: "Converted",
-  };
-  const cls = map[s] || "bg-gray-50 text-gray-700 border-gray-200";
-  const label = labelMap[s] || status || "-";
-  return (
-    <span
-      className={cx(
-        "inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-        cls,
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
-function Modal({ title, icon, children, onClose }) {
-  return (
-    <div
-      className="fixed inset-0 z-[100] grid place-items-center bg-black/60 backdrop-blur-sm p-4 print:hidden animate-in fade-in duration-200"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
-      <div className="w-full max-w-xl overflow-hidden rounded-[2rem] bg-white shadow-2xl animate-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between border-b border-[#e3ddd2] px-6 py-5 bg-[#fdfcfb]">
-          <h3 className="text-xl font-serif text-[#2a1f18] flex items-center gap-3">
-            {icon} {title}
-          </h3>
-          <button
-            className="rounded-full p-2 hover:bg-[#e3ddd2]/50 text-[#7a6a5f] transition-colors"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <XCircle className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="p-6 sm:p-8">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function Skeleton() {
-  return (
-    <div className="mx-auto mt-6 max-w-6xl space-y-6">
-      <div className="h-32 animate-pulse rounded-[2rem] bg-[#e3ddd2]/30 border border-[#e3ddd2]" />
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div className="h-80 animate-pulse rounded-[1.5rem] bg-[#e3ddd2]/30 border border-[#e3ddd2]" />
-        <div className="h-80 animate-pulse rounded-[1.5rem] bg-[#e3ddd2]/30 border border-[#e3ddd2]" />
-      </div>
-    </div>
-  );
-}
-
-function IconButton({
-  icon: Icon,
-  children,
-  className,
-  title,
-  ariaLabel,
-  tone,
-  ...props
-}) {
-  const tones = {
-    red: "text-red-500 hover:bg-red-50 hover:border-red-200",
-    amber: "text-amber-500 hover:bg-amber-50 hover:border-amber-200",
-    emerald: "text-emerald-600 hover:bg-emerald-50 hover:border-emerald-200",
-    default: "text-[#5a4a3f] hover:bg-[#fdfaf5] hover:border-[#e3ddd2]",
-  };
-
-  return (
-    <button
-      className={cx(
-        "flex shrink-0 items-center justify-center w-10 h-10 rounded-full border border-transparent transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed",
-        tones[tone] || tones.default,
-        className,
-      )}
-      title={title}
-      aria-label={ariaLabel || title}
-      {...props}
-    >
-      {Icon && <Icon size={20} strokeWidth={2} />}
-      {children}
-    </button>
-  );
-}
-
-function Button({ variant = "default", className, children, ...props }) {
-  const base =
-    "inline-flex items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:opacity-50 shadow-sm";
-  const variants = {
-    default:
-      "border border-[#e3ddd2] bg-white text-[#3f3127] hover:bg-[#fdfaf5] focus-visible:ring-[#8b6f47]/30",
-    primary:
-      "border border-transparent bg-[#1a1a1a] text-white hover:bg-[#333] shadow-md focus-visible:ring-[#1a1a1a]/50",
-    ghost:
-      "border-transparent bg-transparent text-[#7a6a5f] hover:bg-[#e3ddd2]/50 shadow-none focus-visible:ring-[#8b6f47]/30",
-    destructive:
-      "border border-transparent bg-red-600 text-white hover:bg-red-700 shadow-md focus-visible:ring-red-500/50",
-    amber:
-      "border border-transparent bg-amber-600 text-white hover:bg-amber-700 shadow-md focus-visible:ring-amber-500/50",
-  };
-  return (
-    <button className={cx(base, variants[variant], className)} {...props}>
-      {children}
-    </button>
-  );
-}
-
-function Copyable({ value, empty = "-" }) {
-  if (!value) return <span>{empty}</span>;
-  return (
-    <span className="group inline-flex max-w-full items-center gap-2 bg-neutral-50 px-2 py-0.5 rounded border border-[#e3ddd2]">
-      <span className="truncate">{value}</span>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          if (navigator?.clipboard?.writeText) {
-            navigator.clipboard.writeText(String(value));
-            toast.success("Copied!");
-          } else {
-            toast.error("Copy not supported");
-          }
-        }}
-        className="opacity-0 group-hover:opacity-100 rounded-md p-1 hover:bg-[#e3ddd2] text-[#7a6a5f] transition-all shrink-0"
-        title="Copy"
-        aria-label="Copy"
-      >
-        <Copy className="h-3.5 w-3.5" />
-      </button>
-    </span>
   );
 }

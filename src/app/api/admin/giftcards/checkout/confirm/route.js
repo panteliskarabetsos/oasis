@@ -19,7 +19,7 @@ const stripe = (() => {
 })();
 
 export async function GET(req) {
-  const r = await requireAdmin();
+  const r = await requireAdmin("giftcards");
   if (!r.ok) return r.response;
   if (!stripe) return bad("Stripe is not configured", 500);
 

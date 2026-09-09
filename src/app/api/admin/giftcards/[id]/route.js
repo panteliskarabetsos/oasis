@@ -34,7 +34,7 @@ const STRIPE_COLS = ["stripe_session_id", "stripe_payment_intent_id"].join(
 );
 
 export async function GET(_req, ctx) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("giftcards");
   if (!gate.ok) return gate.response;
 
   // ✅ Must await params

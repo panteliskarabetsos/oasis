@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -33,10 +34,14 @@ async function recomputeBookedSlots(admin, slotId, nowISO) {
 }
 
 export async function PATCH(req, ctx) {
+  const auth = await requireAdmin("bookings");
+  if (!auth.ok) return auth.response;
   return POST(req, ctx);
 }
 
 export async function POST(req, ctx) {
+  const auth = await requireAdmin("bookings");
+  if (!auth.ok) return auth.response;
   const { id } = await ctx.params; // App Router: params is async
   const rawId = Array.isArray(id) ? id[0] : id;
   if (!isInt(rawId)) return bad("Invalid id");

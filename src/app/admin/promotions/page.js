@@ -1,22 +1,16 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import {
-  Plus,
-  Loader2,
   Percent,
-  Tag,
-  Gift,
-  Calendar as CalIcon,
-  CheckCircle2,
-  RefreshCw,
   Trash2,
   Power,
   PowerOff,
   Pencil,
   Layers,
-  RefreshCcw,
   Check,
   X,
   Search,
@@ -28,12 +22,23 @@ import {
   UserCog,
   Copy,
   Edit,
-  PauseCircle,
-  Repeat2,
-  PlayCircle,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
-import { Fragment } from "react";
+
+import Icon from "../_ui/Icon";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorNote,
+  Field,
+  Page,
+  PageHeader,
+  Select,
+  Skeleton,
+  inputClass,
+} from "../_ui";
 
 function UserAssign({ value, onChange }) {
   const [query, setQuery] = useState(value?.display || value?.email || "");
@@ -207,28 +212,6 @@ function UserAssign({ value, onChange }) {
     </div>
   );
 }
-function validateVoucher() {
-  const vf = voucherForm;
-  if (!vf.discountType) return "Choose discount type";
-  if (!vf.discountValue || Number(vf.discountValue) <= 0)
-    return "Discount value must be > 0";
-  if (vf.discountType === "percent" && Number(vf.discountValue) > 100)
-    return "Percent cannot exceed 100";
-  if (vf.discountType === "amount" && !vf.currency)
-    return "Currency is required for amount discounts";
-  if (!vf.startsAt || !vf.endsAt) return "Start & end required";
-  if (new Date(vf.endsAt) <= new Date(vf.startsAt))
-    return "End must be after start";
-  if (
-    vf.scope === "experience" &&
-    (!vf.experienceIds || vf.experienceIds.length === 0)
-  )
-    return "Pick at least one experience";
-  if (vf.assignedToUserId && vf.assignedToEmail)
-    return "Pick user OR email, not both";
-  return null;
-}
-
 function displayUser(u) {
   const name = [u.name, u.surname].filter(Boolean).join(" ").trim();
   return name || u.email || `User #${u.id}`;
@@ -242,29 +225,6 @@ const cx = (...xs) => xs.filter(Boolean).join(" ");
 const fmtDate = (d) => (d ? new Date(d).toLocaleString("el-GR") : "-");
 const toISO = (s) => (s ? new Date(s).toISOString() : null);
 
-const Field = ({ label, required = false, hint, children }) => (
-  <label className="block">
-    <span className="flex items-center gap-2 text-sm font-medium text-[#5a4a3f]">
-      {label} {required ? <span className="text-[#b44d4d]">*</span> : null}
-    </span>
-    <div className="mt-1">{children}</div>
-    {hint ? <p className="mt-1 text-xs text-[#7a6a58]">{hint}</p> : null}
-  </label>
-);
-
-const Card = ({ title, icon: Icon, actions, children }) => (
-  <section className="rounded-2xl border border-[#e8e5df] bg-white shadow-sm">
-    <header className="flex items-center justify-between border-b border-[#eee8df] px-4 py-3">
-      <div className="flex items-center gap-2 text-[#5a4a3f]">
-        {Icon ? <Icon className="h-5 w-5" /> : null}
-        <h2 className="text-base font-semibold">{title}</h2>
-      </div>
-      <div className="flex items-center gap-2">{actions}</div>
-    </header>
-    <div className="p-4">{children}</div>
-  </section>
-);
-
 /* ----------------------------- page ----------------------------- */
 export default function PromotionsPage() {
   const [loading, setLoading] = useState(true);
@@ -273,6 +233,9 @@ export default function PromotionsPage() {
   const [codes, setCodes] = useState([]);
   const [vouchers, setVouchers] = useState([]);
   const [tab, setTab] = useState("campaigns");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [createOpen, setCreateOpen] = useState(false);
   // state for inline reassign UI
   const [editingAssigneeFor, setEditingAssigneeFor] = useState(null);
   const [assigneeDraft, setAssigneeDraft] = useState(null);
@@ -562,9 +525,9 @@ export default function PromotionsPage() {
         dRes.ok ? dRes.json() : { data: [] },
         vRes.ok ? vRes.json() : { data: [] },
       ]);
-      setCampaigns(cJs.data || []);
-      setCodes(dJs.data || []);
-      setVouchers(vJs.data || []);
+      setCampaigns(pickItems(cJs));
+      setCodes(pickItems(dJs));
+      setVouchers(pickItems(vJs));
     } catch (e) {
       console.error(e);
     } finally {
@@ -828,7 +791,7 @@ export default function PromotionsPage() {
       if (!res.ok) throw new Error(js?.error || "Failed to create");
       toast.success(`Created code ${js.code || "(auto)"}`);
       setCodeForm({ ...codeForm, code: "", codeMode: "auto" });
-      await loadAll();
+      await reload();
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -995,47 +958,6 @@ export default function PromotionsPage() {
 
   const [voucherForm, setVoucherForm] = useState(EMPTY_VOUCHER_FORM);
 
-  const Toolbar = () => (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div className="inline-flex rounded-2xl border border-[#e8e5df] bg-white p-1 text-sm">
-        {[
-          ["campaigns", "Campaigns"],
-          ["codes", "Discount codes"],
-          ["vouchers", "Vouchers"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={cx(
-              "rounded-xl px-3 py-1.5",
-              tab === key ? "bg-[#fcf9f4] text-[#5a4a3f]" : "text-[#7a6a58]"
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Link
-          href="/admin/promotions/email"
-          className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-[#5a4a3f] px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-95"
-        >
-          <Plus className="h-4 w-4" />
-          New email campaign
-        </Link>
-
-        <button
-          onClick={reload}
-          className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-white px-3 py-1.5 text-sm text-[#5a4a3f] shadow-sm"
-        >
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </button>
-      </div>
-    </div>
-  );
-
-  /* ------------------------------- functions ------------------------------- */
   function sanitizeCode(s = "") {
     return s
       .toUpperCase()
@@ -1373,1476 +1295,682 @@ export default function PromotionsPage() {
       toast.success("Campaign deleted");
     } catch (e) {
       // reload list if you want to be 100% consistent
-      await loadAll?.();
+      await reload();
       toast.error(e.message);
     }
   }
 
   /* ------------------------------- render ------------------------------- */
+  /* ------------------------------ presentation ----------------------------- */
+
+  const promoStatus = (x) => {
+    if (!x?.active) return "inactive";
+    const now = Date.now();
+    const s = x.startsAt ? new Date(x.startsAt).getTime() : null;
+    const e = x.endsAt ? new Date(x.endsAt).getTime() : null;
+    if (s && now < s) return "scheduled";
+    if (e && now > e) return "expired";
+    return "active";
+  };
+
+  const STATUS_TONE = {
+    active: "success",
+    scheduled: "info",
+    expired: "neutral",
+    inactive: "danger",
+  };
+
+  const fmtDay = (v) => {
+    if (!v) return "—";
+    const d = new Date(v);
+    return isNaN(d) ? "—" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  };
+
+  const fmtValue = (x) =>
+    x?.discountType === "percent"
+      ? `${x.discountValue}%`
+      : `${Number(x?.discountValue || 0).toFixed(2)} ${x?.currency || "EUR"}`;
+
+  const activeList = tab === "campaigns" ? campaigns : tab === "codes" ? codes : vouchers;
+
+  const matches = (x) => {
+    const q = search.trim().toLowerCase();
+    if (statusFilter !== "all" && promoStatus(x) !== statusFilter) return false;
+    if (!q) return true;
+    return [x.code, x.name, x.description, x.assignedToEmail, String(x.id)]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  };
+
+  const visible = useMemo(
+    () => (activeList || []).filter(matches),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeList, search, statusFilter],
+  );
+
+  const stats = useMemo(() => {
+    const live = (xs) => (xs || []).filter((x) => promoStatus(x) === "active").length;
+    return {
+      campaigns: live(campaigns),
+      codes: live(codes),
+      vouchers: live(vouchers),
+      assigned: (vouchers || []).filter((v) => v.assignedToUserId || v.assignedToEmail).length,
+    };
+  }, [campaigns, codes, vouchers]);
+
+  const TABS = [
+    ["campaigns", "Campaigns", campaigns.length],
+    ["codes", "Discount codes", codes.length],
+    ["vouchers", "Vouchers", vouchers.length],
+  ];
+
+  const StatusChip = ({ x }) => {
+    const s = promoStatus(x);
+    return <Badge variant={STATUS_TONE[s]}>{s}</Badge>;
+  };
+
+  const PeriodCell = ({ x }) => (
+    <span className="whitespace-nowrap text-[12.5px] text-[#7a6a5f]">
+      {fmtDay(x.startsAt)} → {x.endsAt ? fmtDay(x.endsAt) : "open"}
+    </span>
+  );
+
   return (
-    <main className="rounded-3xl min-h-screen bg-[#fcf9f4] p-4 sm:p-6">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-[#5a4a3f]">Promotions</h1>
-          <Link
-            href="/admin"
-            className="text-sm text-[#7a6a58] underline-offset-2 hover:underline"
-          >
-            ← Back to admin
-          </Link>
-        </div>
+    <Page>
+      <PageHeader
+        eyebrow="Growth"
+        title="Promotions"
+        description={
+          loading
+            ? "Loading promotions…"
+            : `${stats.campaigns} live campaign${stats.campaigns === 1 ? "" : "s"} · ${stats.codes} live code${stats.codes === 1 ? "" : "s"}`
+        }
+        actions={
+          <>
+            <Button variant="secondary" onClick={reload} disabled={loading}>
+              <Icon name="clock" size={15} /> Refresh
+            </Button>
+            <Button as={Link} href="/admin/promotions/email" variant="secondary">
+              <Icon name="mail" size={15} /> Email campaigns
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                // the voucher modal reuses voucherForm, so start a create from a clean slate
+                if (!createOpen && tab === "vouchers") setVoucherForm(EMPTY_VOUCHER_FORM);
+                setCreateOpen((v) => !v);
+              }}
+            >
+              <Icon name={createOpen ? "x" : "plus"} size={15} />
+              {createOpen ? "Close form" : `New ${tab === "campaigns" ? "campaign" : tab === "codes" ? "code" : "voucher"}`}
+            </Button>
+          </>
+        }
+      />
 
-        <Toolbar />
-
-        {/* CAMPAIGNS */}
-        {tab === "campaigns" && (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {/* ------------------ Create card ------------------ */}
-            <Card title="Create campaign" icon={Tag}>
-              <div className="grid gap-4">
-                <Field label="Name" required>
-                  <input
-                    value={campaignForm.name}
-                    onChange={(e) =>
-                      setCampaignForm({ ...campaignForm, name: e.target.value })
-                    }
-                    placeholder="e.g. Autumn Early Bird"
-                    className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm placeholder-[#b1a79e] focus:ring-2 focus:ring-[#dacbb9]"
-                  />
-                </Field>
-
-                <Field label="Description">
-                  <textarea
-                    rows={3}
-                    value={campaignForm.description}
-                    onChange={(e) =>
-                      setCampaignForm({
-                        ...campaignForm,
-                        description: e.target.value,
-                      })
-                    }
-                    placeholder="Optional admin-only notes"
-                    className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm placeholder-[#b1a79e] focus:ring-2 focus:ring-[#dacbb9]"
-                  />
-                </Field>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Scope" required>
-                    <select
-                      value={campaignForm.scope}
-                      onChange={(e) =>
-                        setCampaignForm({
-                          ...campaignForm,
-                          scope: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-[#dacbb9]"
-                    >
-                      <option value="global">Global</option>
-                      <option value="experience">Specific experiences</option>
-                    </select>
-                    <p className="mt-1 text-xs text-[#7a6a58]">
-                      Global applies to all experiences; “Specific” lets you
-                      target IDs.
-                    </p>
-                  </Field>
-
-                  <Field label="Active?">
-                    <select
-                      value={campaignForm.active ? "true" : "false"}
-                      onChange={(e) =>
-                        setCampaignForm({
-                          ...campaignForm,
-                          active: e.target.value === "true",
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-[#dacbb9]"
-                    >
-                      <option value="true">Yes</option>
-                      <option value="false">No</option>
-                    </select>
-                  </Field>
-                </div>
-
-                {campaignForm.scope === "experience" && (
-                  <Field label="Experiences" required hint="Pick one or more">
-                    <ExperienceMulti
-                      value={campaignForm.experienceIds}
-                      onChange={(xs) =>
-                        setCampaignForm({ ...campaignForm, experienceIds: xs })
-                      }
-                    />
-                  </Field>
-                )}
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Starts at" required>
-                    <input
-                      type="datetime-local"
-                      value={campaignForm.startsAt}
-                      onChange={(e) =>
-                        setCampaignForm({
-                          ...campaignForm,
-                          startsAt: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-[#dacbb9]"
-                    />
-                  </Field>
-                  <Field label="Ends at" required>
-                    <input
-                      type="datetime-local"
-                      value={campaignForm.endsAt}
-                      onChange={(e) =>
-                        setCampaignForm({
-                          ...campaignForm,
-                          endsAt: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-[#dacbb9]"
-                    />
-                  </Field>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="text-xs text-[#7a6a58]">
-                    Tip: Keep windows tight. You can toggle Active later.
-                  </div>
-                  <button
-                    onClick={submitCampaign}
-                    disabled={submitting}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-[#5a4a3f] px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
-                  >
-                    {submitting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Plus className="h-4 w-4" />
-                    )}
-                    Create campaign
-                  </button>
-                </div>
-              </div>
-            </Card>
-
-            {/* ------------------ List + actions ------------------ */}
-            <Card title="Campaigns" icon={CheckCircle2}>
-              {loading ? (
-                <div className="flex items-center gap-2 text-[#7a6a58]">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading...
-                </div>
-              ) : campaigns.length === 0 ? (
-                <p className="text-sm text-[#7a6a58]">No campaigns yet.</p>
-              ) : (
-                <>
-                  {/* Table (desktop) */}
-                  <div className="hidden sm:block overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="sticky top-0 bg-[#fcf9f4] text-left text-[#7a6a58]">
-                        <tr>
-                          <th className="px-2 py-2">Name</th>
-                          <th className="px-2 py-2">Scope</th>
-                          <th className="px-2 py-2">Status</th>
-                          <th className="px-2 py-2">Starts</th>
-                          <th className="px-2 py-2">Ends</th>
-                          <th className="px-2 py-2 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {campaigns.map((c) => (
-                          <tr key={c.id} className="border-t border-[#f0ece6]">
-                            <td className="px-2 py-2">
-                              <div className="font-medium text-[#463a30]">
-                                {c.name}
-                              </div>
-                              <div className="text-xs text-[#7a6a58]">
-                                {c.description || "—"}
-                              </div>
-                            </td>
-                            <td className="px-2 py-2">
-                              <ScopeBadge c={c} />
-                            </td>
-                            <td className="px-2 py-2">
-                              <StatusPill ok={!!c.active} />
-                            </td>
-                            <td className="px-2 py-2">{fmtDate(c.startsAt)}</td>
-                            <td className="px-2 py-2">{fmtDate(c.endsAt)}</td>
-                            <td className="px-2 py-2">
-                              <div className="flex items-center justify-end gap-2">
-                                <IconButton
-                                  title={c.active ? "Deactivate" : "Activate"}
-                                  onClick={() => toggleCampaignActive(c)}
-                                  kind={c.active ? "off" : "on"}
-                                />
-                                {/* (Optional) Link to edit page if you add one */}
-                                {/* <IconButton title="Edit" onClick={() => router.push(`/admin/promotions/campaign/${c.id}`)} kind="edit" /> */}
-                                <IconButton
-                                  title="Delete"
-                                  onClick={() => deleteCampaign(c)}
-                                  kind="delete"
-                                />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Cards (mobile) */}
-                  <div className="sm:hidden grid gap-3">
-                    {campaigns.map((c) => (
-                      <div
-                        key={c.id}
-                        className="rounded-xl border border-[#ece7df] bg-white p-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-[#463a30] font-semibold">
-                              {c.name}
-                            </div>
-                            <div className="text-xs text-[#7a6a58]">
-                              {c.description || "—"}
-                            </div>
-                          </div>
-                          <StatusPill ok={!!c.active} />
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#7a6a58]">
-                          <ScopeBadge c={c} />
-                          <span>•</span>
-                          <span>
-                            {fmtDate(c.startsAt)} → {fmtDate(c.endsAt)}
-                          </span>
-                        </div>
-                        <div className="mt-3 flex items-center justify-end gap-2">
-                          <IconButton
-                            title={c.active ? "Deactivate" : "Activate"}
-                            onClick={() => toggleCampaignActive(c)}
-                            kind={c.active ? "off" : "on"}
-                          />
-                          {/* <IconButton title="Edit" onClick={() => router.push(`/admin/promotions/campaign/${c.id}`)} kind="edit" /> */}
-                          <IconButton
-                            title="Delete"
-                            onClick={() => deleteCampaign(c)}
-                            kind="delete"
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </Card>
-          </div>
-        )}
-
-        {/* DISCOUNT CODES */}
-        {tab === "codes" && (
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card title="Create discount code" icon={Percent}>
-              <div className="grid gap-4">
-                {/* --- Code Mode: Auto vs Custom --- */}
-                <div>
-                  <label className="text-sm font-medium text-[#5a4a3f]">
-                    Code
-                  </label>
-                  <div className="mt-2 inline-flex rounded-xl border border-[#e8e5df] bg-white p-1">
-                    <button
-                      type="button"
-                      className={`px-3 py-1.5 text-sm rounded-lg ${
-                        codeForm.codeMode !== "custom"
-                          ? "bg-[#463a30] text-white shadow"
-                          : "text-[#7a6a58] hover:bg-[#fcf9f4]"
-                      }`}
-                      onClick={() =>
-                        setCodeForm({ ...codeForm, codeMode: "auto", code: "" })
-                      }
-                    >
-                      Auto-generate (DISC-XXXXXXXX)
-                    </button>
-                    <button
-                      type="button"
-                      className={`px-3 py-1.5 text-sm rounded-lg ${
-                        codeForm.codeMode === "custom"
-                          ? "bg-[#463a30] text-white shadow"
-                          : "text-[#7a6a58] hover:bg-[#fcf9f4]"
-                      }`}
-                      onClick={() =>
-                        setCodeForm({ ...codeForm, codeMode: "custom" })
-                      }
-                    >
-                      Custom
-                    </button>
-                  </div>
-
-                  {/* Custom input */}
-                  {codeForm.codeMode === "custom" ? (
-                    <div className="mt-3 flex items-center gap-2">
-                      <input
-                        value={codeForm.code}
-                        onChange={(e) =>
-                          setCodeForm({
-                            ...codeForm,
-                            code: sanitizeCodeTyping(e.target.value),
-                          })
-                        }
-                        placeholder="e.g. SUMMER25 or SAVE-2025"
-                        className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm placeholder-[#b1a79e] focus:ring-2 focus:ring-[#dacbb9] font-mono"
-                      />
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] hover:bg-[#fcf9f4]"
-                        onClick={() =>
-                          setCodeForm({
-                            ...codeForm,
-                            code: generateCode("DISC-", 8),
-                          })
-                        }
-                        title="Generate suggestion"
-                      >
-                        <RefreshCcw className="h-4 w-4" />
-                        Suggest
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-xs text-[#7a6a58]">
-                      Code will be generated automatically (format like{" "}
-                      <strong>DISC-XXXXXXXX</strong>).
-                    </p>
-                  )}
-
-                  {/* Availability status */}
-                  {codeForm.codeMode === "custom" && (
-                    <CodeAvailabilityBadge code={codeForm.code} />
-                  )}
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Campaign">
-                    <select
-                      value={codeForm.campaignId}
-                      onChange={(e) =>
-                        setCodeForm({ ...codeForm, campaignId: e.target.value })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="">— none —</option>
-                      {campaigns.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Scope" required>
-                    <select
-                      value={codeForm.scope}
-                      onChange={(e) =>
-                        setCodeForm({ ...codeForm, scope: e.target.value })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="global">Global</option>
-                      <option value="experience">Specific experiences</option>
-                    </select>
-                  </Field>
-                </div>
-
-                {codeForm.scope === "experience" && (
-                  <Field label="Experiences" required>
-                    <ExperienceMulti
-                      value={codeForm.experienceIds}
-                      onChange={(xs) =>
-                        setCodeForm({ ...codeForm, experienceIds: xs })
-                      }
-                    />
-                  </Field>
-                )}
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <Field label="Type" required>
-                    <select
-                      value={codeForm.discountType}
-                      onChange={(e) =>
-                        setCodeForm({
-                          ...codeForm,
-                          discountType: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="percent">Percent</option>
-                      <option value="amount">Amount</option>
-                    </select>
-                  </Field>
-                  <Field label="Value" required>
-                    <input
-                      type="number"
-                      min="1"
-                      step="0.01"
-                      value={codeForm.discountValue}
-                      onChange={(e) =>
-                        setCodeForm({
-                          ...codeForm,
-                          discountValue: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                  {codeForm.discountType === "amount" && (
-                    <Field label="Currency" required>
-                      <input
-                        value={codeForm.currency}
-                        onChange={(e) =>
-                          setCodeForm({ ...codeForm, currency: e.target.value })
-                        }
-                        className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                      />
-                    </Field>
-                  )}
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <Field label="Max redemptions">
-                    <input
-                      type="number"
-                      min="1"
-                      value={codeForm.maxRedemptions}
-                      onChange={(e) =>
-                        setCodeForm({
-                          ...codeForm,
-                          maxRedemptions: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                  <Field label="Per-user limit" required>
-                    <input
-                      type="number"
-                      min="1"
-                      value={codeForm.perUserLimit}
-                      onChange={(e) =>
-                        setCodeForm({
-                          ...codeForm,
-                          perUserLimit: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                  <Field label="Min spend (optional)">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={codeForm.minSpend}
-                      onChange={(e) =>
-                        setCodeForm({ ...codeForm, minSpend: e.target.value })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Starts at" required>
-                    <input
-                      type="datetime-local"
-                      value={codeForm.startsAt}
-                      onChange={(e) =>
-                        setCodeForm({ ...codeForm, startsAt: e.target.value })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                  <Field label="Ends at">
-                    <input
-                      type="datetime-local"
-                      value={codeForm.endsAt}
-                      onChange={(e) =>
-                        setCodeForm({ ...codeForm, endsAt: e.target.value })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Stackable?">
-                    <select
-                      value={codeForm.stackable ? "true" : "false"}
-                      onChange={(e) =>
-                        setCodeForm({
-                          ...codeForm,
-                          stackable: e.target.value === "true",
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="false">No</option>
-                      <option value="true">Yes</option>
-                    </select>
-                  </Field>
-                  <Field label="Active?">
-                    <select
-                      value={codeForm.active ? "true" : "false"}
-                      onChange={(e) =>
-                        setCodeForm({
-                          ...codeForm,
-                          active: e.target.value === "true",
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="true">Yes</option>
-                      <option value="false">No</option>
-                    </select>
-                  </Field>
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    onClick={submitCode}
-                    disabled={
-                      submitting ||
-                      (codeForm.codeMode === "custom" &&
-                        codeForm.code &&
-                        codeAvail?.exists)
-                    }
-                    className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-[#5a4a3f] px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
-                  >
-                    {submitting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Plus className="h-4 w-4" />
-                    )}
-                    Create discount code
-                  </button>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="Discount codes" icon={Tag}>
-              {loading ? (
-                <div className="flex items-center gap-2 text-[#7a6a58]">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading...
-                </div>
-              ) : codes.length === 0 ? (
-                <p className="text-sm text-[#7a6a58]">No codes yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="text-left text-[#7a6a58]">
-                      <tr>
-                        <th className="px-2 py-1">Code</th>
-                        <th className="px-2 py-1">Type</th>
-                        <th className="px-2 py-1">Value</th>
-                        <th className="px-2 py-1">Redemptions</th>
-                        <th className="px-2 py-1">Active</th>
-                        <th className="px-2 py-1">Period</th>
-                        <th className="px-2 py-1 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {codes.map((c) => (
-                        <tr key={c.id} className="border-t border-[#f0ece6]">
-                          <td className="px-2 py-1 font-mono">{c.code}</td>
-                          <td className="px-2 py-1">{c.discountType}</td>
-                          <td className="px-2 py-1">
-                            {c.discountType === "percent"
-                              ? `${c.discountValue}%`
-                              : `${c.discountValue} ${c.currency || ""}`}
-                          </td>
-                          <td className="px-2 py-1">
-                            {c.redemptionCount}/{c.maxRedemptions ?? "∞"}
-                          </td>
-                          <td className="px-2 py-1">
-                            <span
-                              className={
-                                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 border " +
-                                (c.active
-                                  ? "border-[#e8e5df] text-[#5a4a3f] bg-[#faf7f2]"
-                                  : "border-[#e8e5df] text-[#b1a595] bg-white")
-                              }
-                            >
-                              <span className="h-1.5 w-1.5 rounded-full bg-[#d6cfc4]" />
-                              {c.active ? "Yes" : "No"}
-                            </span>
-                          </td>
-                          <td className="px-2 py-1">
-                            {fmtDate(c.startsAt)} — {fmtDate(c.endsAt)}
-                          </td>
-                          <td className="px-2 py-1">
-                            <div className="relative">
-                              <div className="flex justify-end gap-1">
-                                <button
-                                  onClick={() => onCopy(c)}
-                                  className="rounded-md px-2 py-1.5 border border-[#e8e5df] text-[#7a6a58] hover:bg-[#faf7f2]"
-                                  aria-label="Copy code"
-                                  title="Copy"
-                                  disabled={workingId === c.id}
-                                >
-                                  <Copy className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => onEdit(c)}
-                                  className="rounded-md px-2 py-1.5 border border-[#e8e5df] text-[#7a6a58] hover:bg-[#faf7f2]"
-                                  aria-label="Edit code"
-                                  title="Edit"
-                                  disabled={workingId === c.id}
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </button>
-
-                                <button
-                                  onClick={() => onToggleActive(c)}
-                                  className="rounded-md px-2 py-1.5 border border-[#e8e5df] text-[#7a6a58] hover:bg-[#faf7f2]"
-                                  aria-label={
-                                    c.active ? "Deactivate" : "Activate"
-                                  }
-                                  title={c.active ? "Deactivate" : "Activate"}
-                                  disabled={workingId === c.id}
-                                >
-                                  {c.active ? (
-                                    <PauseCircle className="w-4 h-4" />
-                                  ) : (
-                                    <PlayCircle className="w-4 h-4" />
-                                  )}
-                                </button>
-
-                                <button
-                                  onClick={() => onDelete(c)}
-                                  className="rounded-md px-2 py-1.5 border border-[#f3dfdb] text-[#7a4a4a] hover:bg-[#fff6f6]"
-                                  aria-label="Delete"
-                                  title="Delete"
-                                  disabled={workingId === c.id}
-                                >
-                                  {workingId === c.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="w-4 h-4" />
-                                  )}
-                                </button>
-                                {/* Optional compact menu instead of separate buttons */}
-                                {/* <button ...><MoreHorizontal /></button> */}
-                              </div>
-
-                              {/* little 'Copied!' chip */}
-                              {copiedId === c.id && (
-                                <span className="absolute -top-6 right-0 text-[11px] bg-[#f6f2ea] text-[#5a4a3f] border border-[#e8e5df] rounded px-2 py-0.5 shadow">
-                                  Copied!
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
-          </div>
-        )}
-
-        {/* VOUCHERS */}
-        {tab === "vouchers" && (
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card title="Create voucher" icon={Gift}>
-              <div className="grid gap-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Campaign">
-                    <select
-                      value={voucherForm.campaignId ?? ""}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          campaignId: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="">— none —</option>
-                      {campaigns.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <div className="mt-1 text-xs text-[#7a6a58]">
-                    Voucher code will be generated automatically (format like{" "}
-                    <strong>VCHR-XXXXXXXXXX</strong>).
-                  </div>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <Field label="Type" required>
-                    <select
-                      value={voucherForm.discountType || "percent"}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          discountType: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="percent">Percent</option>
-                      <option value="amount">Amount</option>
-                    </select>
-                  </Field>
-                  <Field label="Value" required>
-                    <input
-                      type="number"
-                      min="1"
-                      step="0.01"
-                      value={voucherForm.discountValue ?? ""}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          discountValue: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                  {voucherForm.discountType === "amount" && (
-                    <Field label="Currency" required>
-                      <input
-                        value={voucherForm.currency ?? "EUR"}
-                        onChange={(e) =>
-                          setVoucherForm({
-                            ...voucherForm,
-                            currency: e.target.value,
-                          })
-                        }
-                        className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                      />
-                    </Field>
-                  )}
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    label="Assign to (optional)"
-                    hint="Pick an existing user or type an email"
-                  >
-                    <UserAssign
-                      value={{
-                        userId: voucherForm.assignedToUserId || null,
-                        email: voucherForm.assignedToEmail || "",
-                        display: voucherForm._assigneeDisplay || "",
-                      }}
-                      onChange={(v) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          assignedToUserId: v?.userId || "",
-                          assignedToEmail: v?.email || "",
-                          _assigneeDisplay: v?.display || "",
-                        })
-                      }
-                    />
-                  </Field>
-
-                  <Field label="Assign to email">
-                    <input
-                      disabled={!!voucherForm.assignedToUserId}
-                      type="email"
-                      placeholder="user@example.com"
-                      value={voucherForm.assignedToEmail ?? ""}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          assignedToEmail: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <Field label="Max redemptions" required>
-                    <input
-                      type="number"
-                      min="1"
-                      value={voucherForm.maxRedemptions ?? ""}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          maxRedemptions: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                  <Field label="Per-user limit" required>
-                    <input
-                      type="number"
-                      min="1"
-                      value={voucherForm.perUserLimit ?? ""}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          perUserLimit: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                  <Field label="Min spend (optional)">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={voucherForm.minSpend ?? ""}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          minSpend: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <Field label="Scope" required>
-                    <select
-                      value={voucherForm.scope || "global"}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          scope: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="global">Global</option>
-                      <option value="experience">Specific experiences</option>
-                    </select>
-                  </Field>
-                  <Field label="Active?">
-                    <select
-                      value={voucherForm.active ? "true" : "false"}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          active: e.target.value === "true",
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="true">Yes</option>
-                      <option value="false">No</option>
-                    </select>
-                  </Field>
-                </div>
-
-                {voucherForm.scope === "experience" && (
-                  <Field label="Experiences" required>
-                    <ExperienceMulti
-                      value={voucherForm.experienceIds || []}
-                      onChange={(xs) =>
-                        setVoucherForm({ ...voucherForm, experienceIds: xs })
-                      }
-                    />
-                  </Field>
-                )}
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Starts at" required>
-                    <input
-                      type="datetime-local"
-                      value={voucherForm.startsAt || ""}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          startsAt: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                  <Field label="Ends at" required>
-                    <input
-                      type="datetime-local"
-                      value={voucherForm.endsAt || ""}
-                      onChange={(e) =>
-                        setVoucherForm({
-                          ...voucherForm,
-                          endsAt: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm"
-                    />
-                  </Field>
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    onClick={submitVoucher}
-                    disabled={submitting}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-[#5a4a3f] px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
-                  >
-                    {submitting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Plus className="h-4 w-4" />
-                    )}
-                    Create voucher
-                  </button>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="Vouchers" icon={Gift}>
-              {loading ? (
-                <div className="flex items-center gap-2 text-[#7a6a58]">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading...
-                </div>
-              ) : vouchers.length === 0 ? (
-                <p className="text-sm text-[#7a6a58]">No vouchers yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="text-left text-[#7a6a58]">
-                      <tr>
-                        <th className="px-2 py-1">Code</th>
-                        <th className="px-2 py-1">Assigned</th>
-                        <th className="px-2 py-1">Type</th>
-                        <th className="px-2 py-1">Value</th>
-                        <th className="px-2 py-1">Redemptions</th>
-                        <th className="px-2 py-1">Active</th>
-                        <th className="px-2 py-1">Period</th>
-                        <th className="px-2 py-1 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {vouchers.map((v) => (
-                        <Fragment key={v.id}>
-                          <tr className="border-t border-[#f0ece6]">
-                            <td className="px-2 py-1 font-mono">{v.code}</td>
-                            <td className="px-2 py-1">
-                              {v.assignedToUserId
-                                ? `User #${v.assignedToUserId}${
-                                    v.assignedToEmail
-                                      ? ` (${v.assignedToEmail})`
-                                      : ""
-                                  }`
-                                : v.assignedToEmail || "—"}
-                            </td>
-                            <td className="px-2 py-1">{v.discountType}</td>
-                            <td className="px-2 py-1">
-                              {v.discountType === "percent"
-                                ? `${v.discountValue}%`
-                                : `${v.discountValue} ${v.currency || ""}`}
-                            </td>
-                            <td className="px-2 py-1">
-                              {v.redemptionCount}/{v.maxRedemptions}
-                            </td>
-                            <td className="px-2 py-1">
-                              <StatusPill ok={!!v.active} />
-                            </td>
-                            <td className="px-2 py-1">
-                              {fmtDate(v.startsAt)} — {fmtDate(v.endsAt)}
-                            </td>
-                            <td className="px-2 py-1">
-                              <div className="flex items-center justify-end gap-2">
-                                <IconButton
-                                  title="Copy code"
-                                  onClick={() => copyVoucherCode(v)}
-                                  kind="copy"
-                                />
-                                <IconButton
-                                  title={v.active ? "Deactivate" : "Activate"}
-                                  onClick={() => toggleVoucherActive(v)}
-                                  kind={v.active ? "off" : "on"}
-                                />
-                                <IconButton
-                                  title="Edit"
-                                  onClick={() => openVoucherModal(v)}
-                                  kind="edit"
-                                />
-
-                                <IconButton
-                                  title="Delete"
-                                  onClick={() => deleteVoucher(v)}
-                                  kind="delete"
-                                />
-                              </div>
-                            </td>
-                          </tr>
-
-                          {/* Inline reassignment row */}
-                          {editingAssigneeFor === v.id && (
-                            <tr className="border-t border-[#f0ece6] bg-[#fcf9f4]">
-                              <td className="px-2 py-2" colSpan={8}>
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                  <div className="flex-1">
-                                    <UserAssign
-                                      value={
-                                        assigneeDraft || {
-                                          userId: v.assignedToUserId || null,
-                                          email: v.assignedToEmail || "",
-                                          display:
-                                            v.assignedToEmail ||
-                                            (v.assignedToUserId
-                                              ? `User #${v.assignedToUserId}`
-                                              : ""),
-                                        }
-                                      }
-                                      onChange={(val) => setAssigneeDraft(val)}
-                                    />
-                                    <p className="mt-1 text-xs text-[#7a6a58]">
-                                      Pick an existing user or type an email. If
-                                      a user is selected, email will be cleared.
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => saveReassign(v)}
-                                      className="inline-flex items-center gap-2 rounded-xl bg-[#463a30] px-3 py-2 text-xs font-semibold text-white hover:bg-[#3c3027]"
-                                    >
-                                      Save
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={cancelReassign}
-                                      className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-xs text-[#5a4a3f] hover:bg-[#fcf9f4]"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
-          </div>
-        )}
-
-        {editOpen && (
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="edit-promo-title"
-            className="fixed inset-0 z-50"
-          >
-            <div
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-              onClick={() => setEditOpen(false)}
-            />
-            <div className="relative mx-auto max-w-2xl mt-24 px-4">
-              <div className="relative rounded-2xl border border-[#e8e5df] bg-white shadow-lg">
-                <button
-                  onClick={() => setEditOpen(false)}
-                  className="absolute top-3 right-3 inline-flex items-center justify-center rounded-full p-1.5 hover:bg-[#f6f2ea]"
-                  aria-label="Close"
-                >
-                  <X className="h-5 w-5 text-[#7a6a58]" />
-                </button>
-
-                <div className="p-6">
-                  <h2
-                    id="edit-promo-title"
-                    className="text-lg font-semibold text-[#5a4a3f]"
-                  >
-                    Edit discount code
-                  </h2>
-
-                  {editError && (
-                    <div className="mt-3 rounded-lg bg-[#fff6f6] border border-[#f1d7d7] px-3 py-2 text-sm text-[#7a4a4a]">
-                      {editError}
-                    </div>
-                  )}
-
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className="text-sm text-[#7a6a58]">
-                      Code
-                      <input
-                        ref={firstInputRef}
-                        value={editForm.code}
-                        onChange={(e) => setField("code", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                        placeholder="SPRING25"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58]">
-                      Type
-                      <select
-                        value={editForm.discountType}
-                        onChange={(e) =>
-                          setField("discountType", e.target.value)
-                        }
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                      >
-                        <option value="percent">Percent</option>
-                        <option value="fixed">Fixed</option>
-                      </select>
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58]">
-                      Value
-                      <input
-                        type="number"
-                        step="0.01"
-                        inputMode="decimal"
-                        value={editForm.discountValue}
-                        onChange={(e) =>
-                          setField("discountValue", e.target.value)
-                        }
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                        placeholder="10"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58]">
-                      Currency
-                      <input
-                        value={editForm.currency}
-                        onChange={(e) => setField("currency", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                        placeholder="EUR"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58]">
-                      Max redemptions
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        value={editForm.maxRedemptions}
-                        onChange={(e) =>
-                          setField("maxRedemptions", e.target.value)
-                        }
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                        placeholder="Unlimited"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58] sm:col-span-1">
-                      Starts at
-                      <input
-                        type="datetime-local"
-                        value={editForm.startsAt}
-                        onChange={(e) => setField("startsAt", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58] sm:col-span-1">
-                      Ends at
-                      <input
-                        type="datetime-local"
-                        value={editForm.endsAt}
-                        onChange={(e) => setField("endsAt", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58] sm:col-span-2 inline-flex items-center gap-2 mt-1">
-                      <input
-                        type="checkbox"
-                        checked={editForm.active}
-                        onChange={(e) => setField("active", e.target.checked)}
-                        className="h-4 w-4 rounded border-[#e8e5df] text-[#8b6f47] focus:ring-[#8b6f47]/40"
-                      />
-                      Active
-                    </label>
-                  </div>
-                </div>
-
-                <div className="p-4 border-t border-[#eee9df] bg-[#fcf9f4] rounded-b-2xl flex justify-end gap-3">
-                  <button
-                    onClick={() => setEditOpen(false)}
-                    className="rounded-lg border border-[#e8e5df] px-4 py-2 text-sm text-[#5a4a3f] hover:bg-[#f6f2ea]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={saveEdit}
-                    disabled={savingEdit}
-                    className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
-                      savingEdit
-                        ? "bg-gray-300 cursor-not-allowed"
-                        : "bg-[#8b6f47] hover:bg-[#7a5f3a]"
-                    }`}
-                  >
-                    {savingEdit ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" /> Saving…
-                      </span>
-                    ) : (
-                      "Save changes"
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {voucherOpen && (
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="voucher-edit-title"
-            className="fixed inset-0 z-50"
-          >
-            <div
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-              onClick={() => setVoucherOpen(false)}
-            />
-            <div className="relative mx-auto max-w-2xl mt-24 px-4">
-              <div className="relative rounded-2xl border border-[#e8e5df] bg-white shadow-lg">
-                <button
-                  onClick={() => setVoucherOpen(false)}
-                  className="absolute top-3 right-3 inline-flex items-center justify-center rounded-full p-1.5 hover:bg-[#f6f2ea]"
-                  aria-label="Close"
-                >
-                  <X className="h-5 w-5 text-[#7a6a58]" />
-                </button>
-
-                <div className="p-6">
-                  <h2
-                    id="voucher-edit-title"
-                    className="text-lg font-semibold text-[#5a4a3f] flex items-center gap-2"
-                  >
-                    <Gift className="w-5 h-5 text-[#8b6f47]" />
-                    Manage voucher
-                  </h2>
-
-                  {voucherError && (
-                    <div className="mt-3 rounded-lg bg-[#fff6f6] border border-[#f1d7d7] px-3 py-2 text-sm text-[#7a4a4a]">
-                      {voucherError}
-                    </div>
-                  )}
-
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className="text-sm text-[#7a6a58]">
-                      Code
-                      <div className="mt-1 flex gap-2">
-                        <input
-                          ref={firstVoucherInputRef}
-                          value={voucherForm.code}
-                          onChange={(e) => setVField("code", e.target.value)}
-                          className="flex-1 rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] placeholder:text-[#b1a595] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                          placeholder="GFT-ABCD1234"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setVField("code", randomCode())}
-                          className="rounded-lg border border-[#e8e5df] px-3 py-2 text-xs text-[#5a4a3f] hover:bg-[#f6f2ea]"
-                          title="Generate"
-                        >
-                          Generate
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(
-                                voucherForm.code
-                              );
-                            } catch {}
-                          }}
-                          className="rounded-lg border border-[#e8e5df] px-3 py-2 text-xs text-[#5a4a3f] hover:bg-[#f6f2ea]"
-                          title="Copy"
-                        >
-                          <Copy className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58]">
-                      Type
-                      <select
-                        value={voucherForm.discountType}
-                        onChange={(e) =>
-                          setVField("discountType", e.target.value)
-                        }
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                      >
-                        <option value="percent">Percent</option>
-                        <option value="fixed">Fixed</option>
-                      </select>
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58]">
-                      Value
-                      <input
-                        type="number"
-                        step="0.01"
-                        inputMode="decimal"
-                        value={voucherForm.discountValue}
-                        onChange={(e) =>
-                          setVField("discountValue", e.target.value)
-                        }
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                        placeholder="25"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58]">
-                      Currency
-                      <input
-                        value={voucherForm.currency}
-                        onChange={(e) => setVField("currency", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                        placeholder="EUR"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58]">
-                      Max redemptions
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        value={voucherForm.maxRedemptions ?? ""}
-                        onChange={(e) =>
-                          setVField("maxRedemptions", e.target.value)
-                        }
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                        placeholder="Unlimited"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58] sm:col-span-1">
-                      Starts at
-                      <input
-                        type="datetime-local"
-                        value={voucherForm.startsAt}
-                        onChange={(e) => setVField("startsAt", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58] sm:col-span-1">
-                      Ends at
-                      <input
-                        type="datetime-local"
-                        value={voucherForm.endsAt}
-                        onChange={(e) => setVField("endsAt", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#5a4a3f] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
-                      />
-                    </label>
-
-                    <label className="text-sm text-[#7a6a58] sm:col-span-2 inline-flex items-center gap-2 mt-1">
-                      <input
-                        type="checkbox"
-                        checked={!!voucherForm.active}
-                        onChange={(e) => setVField("active", e.target.checked)}
-                        className="h-4 w-4 rounded border-[#e8e5df] text-[#8b6f47] focus:ring-[#8b6f47]/40"
-                      />
-                      Active
-                    </label>
-
-                    {/* Assignee */}
-                    <div className="sm:col-span-2">
-                      <div className="text-sm text-[#7a6a58] mb-1">
-                        Assignee
-                      </div>
-                      <UserAssign
-                        value={{
-                          userId: assignDraft?.userId || null,
-                          email: assignDraft?.email || "",
-                          display:
-                            assignDraft?.email ||
-                            (assignDraft?.userId
-                              ? `User #${assignDraft.userId}`
-                              : ""),
-                        }}
-                        onChange={(val) => setAssignDraft(val)}
-                      />
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setAssignDraft({ userId: null, email: "" })
-                          }
-                          className="inline-flex items-center gap-2 rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-xs text-[#5a4a3f] hover:bg-[#fcf9f4]"
-                        >
-                          Clear assignee
-                        </button>
-                      </div>
-                      <p className="mt-1 text-xs text-[#7a6a58]">
-                        Pick an existing user or type an email. If a user is
-                        selected, the email will be cleared.
-                      </p>
-                    </div>
-
-                    {/* Read-only stats */}
-                    <div className="sm:col-span-2 grid grid-cols-2 gap-3 text-sm">
-                      <div className="rounded-lg border border-[#e8e5df] bg-[#fcf9f4] p-3">
-                        <div className="text-[#7a6a58]">Redemptions</div>
-                        <div className="text-[#5a4a3f] font-semibold">
-                          {voucherTarget?.redemptionCount ?? 0} /{" "}
-                          {voucherTarget?.maxRedemptions ?? "∞"}
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-[#e8e5df] bg-[#fcf9f4] p-3">
-                        <div className="text-[#7a6a58]">Assigned to</div>
-                        <div className="text-[#5a4a3f] font-semibold">
-                          {voucherTarget?.assignedToEmail ||
-                            (voucherTarget?.assignedToUserId
-                              ? `User #${voucherTarget.assignedToUserId}`
-                              : "—")}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 border-t border-[#eee9df] bg-[#fcf9f4] rounded-b-2xl flex justify-between gap-3">
-                  <button
-                    onClick={deleteVoucherFromModal}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[#f3dfdb] bg-white px-4 py-2 text-sm text-[#7a4a4a] hover:bg-[#fff6f6]"
-                  >
-                    <Trash2 className="w-4 h-4" /> Delete
-                  </button>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setVoucherOpen(false)}
-                      className="rounded-lg border border-[#e8e5df] px-4 py-2 text-sm text-[#5a4a3f] hover:bg-[#f6f2ea]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={saveVoucher}
-                      disabled={savingVoucher}
-                      className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
-                        savingVoucher
-                          ? "bg-gray-300 cursor-not-allowed"
-                          : "bg-[#8b6f47] hover:bg-[#7a5f3a]"
-                      }`}
-                    >
-                      {savingVoucher ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Saving…
-                        </span>
-                      ) : (
-                        "Save changes"
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="Live campaigns" value={stats.campaigns} />
+        <StatCard label="Live codes" value={stats.codes} />
+        <StatCard label="Live vouchers" value={stats.vouchers} />
+        <StatCard label="Assigned vouchers" value={stats.assigned} />
       </div>
-    </main>
+
+      {/* tabs + filters */}
+      <Card padded={false} className="mb-5 overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 p-4">
+          <div className="inline-flex rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] p-1">
+            {TABS.map(([key, label, count]) => (
+              <button
+                key={key}
+                onClick={() => { setTab(key); setSearch(""); setStatusFilter("all"); }}
+                className={`rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+                  tab === key ? "bg-[#2a211a] text-white" : "text-[#6b5c4d] hover:bg-[#f2ede4]"
+                }`}
+              >
+                {label}
+                <span className={`ml-1.5 text-[11px] ${tab === key ? "text-white/60" : "text-[#b0a294]"}`}>
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="relative ml-auto min-w-[200px] flex-1 sm:max-w-[320px]">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+              <Icon name="search" size={16} />
+            </span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={tab === "campaigns" ? "Search campaigns…" : "Search code or email…"}
+              className={`${inputClass} h-10 pl-9 ${search ? "pr-9" : ""}`}
+            />
+            {search ? (
+              <button onClick={() => setSearch("")} aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4]">
+                <Icon name="x" size={14} />
+              </button>
+            ) : null}
+          </div>
+
+          <Select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="h-10 !w-auto min-w-[140px]"
+          >
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="scheduled">Scheduled</option>
+            <option value="expired">Expired</option>
+            <option value="inactive">Inactive</option>
+          </Select>
+        </div>
+      </Card>
+
+      {/* create forms */}
+      {createOpen ? (
+        <Card className="mb-5">
+          <h2 className="mb-4 font-serif text-[17px] text-[#2a211a]">
+            {tab === "campaigns" ? "New campaign" : tab === "codes" ? "New discount code" : "New voucher"}
+          </h2>
+
+          {tab === "campaigns" ? (
+            <form
+              onSubmit={(e) => { e.preventDefault(); submitCampaign(); }}
+              className="grid gap-3 sm:grid-cols-2"
+            >
+              <Field label="Name" className="sm:col-span-2">
+                <input value={campaignForm.name}
+                  onChange={(e) => setCampaignForm((f) => ({ ...f, name: e.target.value }))}
+                  className={inputClass} placeholder="Spring escape" />
+              </Field>
+              <Field label="Description" className="sm:col-span-2">
+                <input value={campaignForm.description}
+                  onChange={(e) => setCampaignForm((f) => ({ ...f, description: e.target.value }))}
+                  className={inputClass} placeholder="Shown on the site banner" />
+              </Field>
+              <Field label="Starts">
+                <input type="datetime-local" value={campaignForm.startsAt}
+                  onChange={(e) => setCampaignForm((f) => ({ ...f, startsAt: e.target.value }))}
+                  className={inputClass} />
+              </Field>
+              <Field label="Ends">
+                <input type="datetime-local" value={campaignForm.endsAt}
+                  onChange={(e) => setCampaignForm((f) => ({ ...f, endsAt: e.target.value }))}
+                  className={inputClass} />
+              </Field>
+              <Field label="Scope">
+                <Select value={campaignForm.scope}
+                  onChange={(e) => setCampaignForm((f) => ({ ...f, scope: e.target.value }))}>
+                  <option value="global">All experiences</option>
+                  <option value="experience">Selected experiences</option>
+                </Select>
+              </Field>
+              <div className="flex items-end">
+                <label className="flex cursor-pointer items-center gap-2 pb-2">
+                  <input type="checkbox" checked={campaignForm.active}
+                    onChange={(e) => setCampaignForm((f) => ({ ...f, active: e.target.checked }))}
+                    className="h-4 w-4 accent-[#8b6f47]" />
+                  <span className="text-[13px] text-[#2a211a]">Active</span>
+                </label>
+              </div>
+              {campaignForm.scope === "experience" ? (
+                <div className="sm:col-span-2">
+                  <span className="mb-1 block text-[11px] font-semibold text-[#6b5c4d]">Experiences</span>
+                  <ExperienceMulti
+                    value={campaignForm.experienceIds}
+                    onChange={(ids) => setCampaignForm((f) => ({ ...f, experienceIds: ids }))}
+                  />
+                </div>
+              ) : null}
+              <div className="sm:col-span-2">
+                <Button type="submit" variant="primary" disabled={submitting}>
+                  {submitting ? "Creating…" : "Create campaign"}
+                </Button>
+              </div>
+            </form>
+          ) : null}
+
+          {tab === "codes" ? (
+            <form
+              onSubmit={(e) => { e.preventDefault(); submitCode(); }}
+              className="grid gap-3 sm:grid-cols-2"
+            >
+              <Field label="Code" hint="Leave blank to generate one automatically.">
+                <div className="flex gap-2">
+                  <input value={codeForm.code}
+                    onChange={(e) => setCodeForm((f) => ({ ...f, code: sanitizeCodeTyping(e.target.value) }))}
+                    className={`${inputClass} font-mono uppercase`} placeholder="SPRING20" />
+                  <Button type="button" variant="secondary"
+                    onClick={() => setCodeForm((f) => ({ ...f, code: generateCode() }))}>
+                    Generate
+                  </Button>
+                </div>
+                <CodeAvailabilityBadge code={codeForm.code} />
+              </Field>
+              <Field label="Campaign">
+                <Select value={codeForm.campaignId}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, campaignId: e.target.value }))}>
+                  <option value="">No campaign</option>
+                  {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </Select>
+              </Field>
+              <Field label="Discount type">
+                <Select value={codeForm.discountType}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, discountType: e.target.value }))}>
+                  <option value="percent">Percentage</option>
+                  <option value="amount">Fixed amount</option>
+                </Select>
+              </Field>
+              <Field label={codeForm.discountType === "percent" ? "Percent off" : `Amount off (${codeForm.currency})`}>
+                <input type="number" min="0" step="0.01" value={codeForm.discountValue}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, discountValue: e.target.value }))}
+                  className={inputClass} />
+              </Field>
+              <Field label="Max redemptions" hint="Blank means unlimited.">
+                <input type="number" min="0" value={codeForm.maxRedemptions}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, maxRedemptions: e.target.value }))}
+                  className={inputClass} />
+              </Field>
+              <Field label="Per-customer limit">
+                <input type="number" min="1" value={codeForm.perUserLimit}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, perUserLimit: e.target.value }))}
+                  className={inputClass} />
+              </Field>
+              <Field label="Minimum spend">
+                <input type="number" min="0" step="0.01" value={codeForm.minSpend}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, minSpend: e.target.value }))}
+                  className={inputClass} placeholder="Optional" />
+              </Field>
+              <Field label="Scope">
+                <Select value={codeForm.scope}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, scope: e.target.value }))}>
+                  <option value="global">All experiences</option>
+                  <option value="experience">Selected experiences</option>
+                </Select>
+              </Field>
+              <Field label="Starts">
+                <input type="datetime-local" value={codeForm.startsAt}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, startsAt: e.target.value }))}
+                  className={inputClass} />
+              </Field>
+              <Field label="Ends">
+                <input type="datetime-local" value={codeForm.endsAt}
+                  onChange={(e) => setCodeForm((f) => ({ ...f, endsAt: e.target.value }))}
+                  className={inputClass} />
+              </Field>
+              {codeForm.scope === "experience" ? (
+                <div className="sm:col-span-2">
+                  <span className="mb-1 block text-[11px] font-semibold text-[#6b5c4d]">Experiences</span>
+                  <ExperienceMulti
+                    value={codeForm.experienceIds}
+                    onChange={(ids) => setCodeForm((f) => ({ ...f, experienceIds: ids }))}
+                  />
+                </div>
+              ) : null}
+              <div className="flex items-center gap-4 sm:col-span-2">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input type="checkbox" checked={codeForm.stackable}
+                    onChange={(e) => setCodeForm((f) => ({ ...f, stackable: e.target.checked }))}
+                    className="h-4 w-4 accent-[#8b6f47]" />
+                  <span className="text-[13px] text-[#2a211a]">Stackable with other offers</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input type="checkbox" checked={codeForm.active}
+                    onChange={(e) => setCodeForm((f) => ({ ...f, active: e.target.checked }))}
+                    className="h-4 w-4 accent-[#8b6f47]" />
+                  <span className="text-[13px] text-[#2a211a]">Active</span>
+                </label>
+              </div>
+              <div className="sm:col-span-2">
+                <Button type="submit" variant="primary" disabled={submitting}>
+                  {submitting ? "Creating…" : "Create code"}
+                </Button>
+              </div>
+            </form>
+          ) : null}
+
+          {tab === "vouchers" ? (
+            <form
+              onSubmit={(e) => { e.preventDefault(); submitVoucher(); }}
+              className="grid gap-3 sm:grid-cols-2"
+            >
+              <div className="sm:col-span-2">
+                <span className="mb-1 block text-[11px] font-semibold text-[#6b5c4d]">Assign to</span>
+                <UserAssign
+                  value={{
+                    userId: voucherForm.assignedToUserId,
+                    email: voucherForm.assignedToEmail,
+                    display: voucherForm._assigneeDisplay,
+                  }}
+                  onChange={(v) =>
+                    setVoucherForm((f) => ({
+                      ...f,
+                      assignedToUserId: v?.userId ?? null,
+                      assignedToEmail: v?.email ?? "",
+                      _assigneeDisplay: v?.display ?? "",
+                    }))
+                  }
+                />
+              </div>
+              <Field label="Campaign">
+                <Select value={voucherForm.campaignId}
+                  onChange={(e) => setVField("campaignId", e.target.value)}>
+                  <option value="">No campaign</option>
+                  {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </Select>
+              </Field>
+              <Field label="Discount type">
+                <Select value={voucherForm.discountType}
+                  onChange={(e) => setVField("discountType", e.target.value)}>
+                  <option value="percent">Percentage</option>
+                  <option value="amount">Fixed amount</option>
+                </Select>
+              </Field>
+              <Field label={voucherForm.discountType === "percent" ? "Percent off" : `Amount off (${voucherForm.currency})`}>
+                <input type="number" min="0" step="0.01" value={voucherForm.discountValue}
+                  onChange={(e) => setVField("discountValue", e.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Minimum spend">
+                <input type="number" min="0" step="0.01" value={voucherForm.minSpend}
+                  onChange={(e) => setVField("minSpend", e.target.value)} className={inputClass} placeholder="Optional" />
+              </Field>
+              <Field label="Starts">
+                <input type="datetime-local" value={voucherForm.startsAt}
+                  onChange={(e) => setVField("startsAt", e.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Ends">
+                <input type="datetime-local" value={voucherForm.endsAt}
+                  onChange={(e) => setVField("endsAt", e.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Scope">
+                <Select value={voucherForm.scope} onChange={(e) => setVField("scope", e.target.value)}>
+                  <option value="global">All experiences</option>
+                  <option value="experience">Selected experiences</option>
+                </Select>
+              </Field>
+              <div className="flex items-end">
+                <label className="flex cursor-pointer items-center gap-2 pb-2">
+                  <input type="checkbox" checked={voucherForm.active}
+                    onChange={(e) => setVField("active", e.target.checked)}
+                    className="h-4 w-4 accent-[#8b6f47]" />
+                  <span className="text-[13px] text-[#2a211a]">Active</span>
+                </label>
+              </div>
+              {voucherForm.scope === "experience" ? (
+                <div className="sm:col-span-2">
+                  <span className="mb-1 block text-[11px] font-semibold text-[#6b5c4d]">Experiences</span>
+                  <ExperienceMulti
+                    value={voucherForm.experienceIds}
+                    onChange={(ids) => setVField("experienceIds", ids)}
+                  />
+                </div>
+              ) : null}
+              {voucherError ? <div className="sm:col-span-2"><ErrorNote>{voucherError}</ErrorNote></div> : null}
+              <div className="sm:col-span-2">
+                <Button type="submit" variant="primary" disabled={submitting}>
+                  {submitting ? "Creating…" : "Create voucher"}
+                </Button>
+              </div>
+            </form>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {/* lists */}
+      {loading ? (
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}
+        </div>
+      ) : !visible.length ? (
+        <Card>
+          <EmptyState
+            icon={<Icon name="tag" size={20} />}
+            title={activeList.length ? "Nothing matches" : `No ${tab} yet`}
+            description={
+              activeList.length
+                ? "No entries match your search or status filter."
+                : "Create one to get started."
+            }
+            action={
+              activeList.length ? (
+                <Button variant="secondary" onClick={() => { setSearch(""); setStatusFilter("all"); }}>
+                  Clear filters
+                </Button>
+              ) : (
+                <Button variant="primary" onClick={() => setCreateOpen(true)}>Create</Button>
+              )
+            }
+          />
+        </Card>
+      ) : (
+        <Card padded={false} className="overflow-hidden">
+          <ul className="divide-y divide-[#f0ebe2]">
+            {visible.map((x) => (
+              <li key={x.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {tab === "campaigns" ? (
+                      <span className="text-[14px] font-semibold text-[#2a211a]">{x.name}</span>
+                    ) : (
+                      <span className="rounded-lg bg-[#f3ece1] px-2 py-0.5 font-mono text-[13px] font-bold tracking-wider text-[#8b6f47]">
+                        {x.code || "—"}
+                      </span>
+                    )}
+                    <StatusChip x={x} />
+                    <ScopeBadge c={x} />
+                    {tab !== "campaigns" ? (
+                      <span className="text-[13px] font-semibold text-[#2a211a]">{fmtValue(x)}</span>
+                    ) : null}
+                    {x.stackable ? <Badge variant="neutral">stackable</Badge> : null}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[11.5px] text-[#9a8c7e]">
+                    <PeriodCell x={x} />
+                    {tab === "campaigns" && x.description ? <span className="truncate">{x.description}</span> : null}
+                    {tab === "codes" && x.maxRedemptions ? (
+                      <span>{x.redemptionCount ?? 0} / {x.maxRedemptions} used</span>
+                    ) : null}
+                    {tab === "vouchers" ? (
+                      <span>
+                        {x.assignedToEmail || x.assignedToUserId
+                          ? `assigned to ${x.assignedToEmail || `user #${x.assignedToUserId}`}`
+                          : "unassigned"}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  {tab === "campaigns" ? (
+                    <>
+                      <Button size="sm" variant="ghost" disabled={workingId === x.id}
+                        onClick={() => toggleCampaignActive(x)}>
+                        {x.active ? "Pause" : "Resume"}
+                      </Button>
+                      <IconBtn title="Delete campaign" tone="bad" icon="trash" onClick={() => deleteCampaign(x)} />
+                    </>
+                  ) : null}
+
+                  {tab === "codes" ? (
+                    <>
+                      <IconBtn title="Copy code" icon="copy" onClick={() => onCopy(x)} />
+                      <IconBtn title="Edit" icon="file" onClick={() => onEdit(x)} />
+                      <Button size="sm" variant="ghost" disabled={workingId === x.id}
+                        onClick={() => onToggleActive(x)}>
+                        {x.active ? "Pause" : "Resume"}
+                      </Button>
+                      <IconBtn title="Delete code" tone="bad" icon="trash" onClick={() => onDelete(x)} />
+                    </>
+                  ) : null}
+
+                  {tab === "vouchers" ? (
+                    <>
+                      <IconBtn title="Copy code" icon="copy" onClick={() => copyVoucherCode(x)} />
+                      <IconBtn title="Edit voucher" icon="file" onClick={() => openVoucherModal(x)} />
+                      {x.assignedToUserId || x.assignedToEmail ? (
+                        <IconBtn title="Unassign" icon="users" onClick={() => unassignVoucher(x)} />
+                      ) : null}
+                      <Button size="sm" variant="ghost" disabled={workingId === x.id}
+                        onClick={() => toggleVoucherActive(x)}>
+                        {x.active ? "Pause" : "Resume"}
+                      </Button>
+                      <IconBtn title="Delete voucher" tone="bad" icon="trash" onClick={() => deleteVoucher(x)} />
+                    </>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {/* ------------------------- edit discount code modal ------------------------ */}
+      {editOpen && editTarget ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditOpen(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-t-3xl border border-[#e6e0d6] bg-white p-6 shadow-2xl sm:rounded-3xl">
+            <div className="mb-4 flex items-start justify-between">
+              <h2 className="font-serif text-[19px] text-[#2a211a]">Edit code</h2>
+              <button onClick={() => setEditOpen(false)} aria-label="Close"
+                className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]">
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <Field label="Code">
+                <input value={editForm.code || ""} onChange={(e) => setField("code", e.target.value)}
+                  className={`${inputClass} font-mono uppercase`} />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Type">
+                  <Select value={editForm.discountType} onChange={(e) => setField("discountType", e.target.value)}>
+                    <option value="percent">Percentage</option>
+                    <option value="amount">Fixed amount</option>
+                  </Select>
+                </Field>
+                <Field label="Value">
+                  <input type="number" min="0" step="0.01" value={editForm.discountValue ?? ""}
+                    onChange={(e) => setField("discountValue", e.target.value)} className={inputClass} />
+                </Field>
+              </div>
+              <Field label="Max redemptions" hint="Blank means unlimited.">
+                <input type="number" min="0" value={editForm.maxRedemptions ?? ""}
+                  onChange={(e) => setField("maxRedemptions", e.target.value)} className={inputClass} />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Starts">
+                  <input type="datetime-local" value={editForm.startsAt || ""}
+                    onChange={(e) => setField("startsAt", e.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Ends">
+                  <input type="datetime-local" value={editForm.endsAt || ""}
+                    onChange={(e) => setField("endsAt", e.target.value)} className={inputClass} />
+                </Field>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={!!editForm.active}
+                  onChange={(e) => setField("active", e.target.checked)} className="h-4 w-4 accent-[#8b6f47]" />
+                <span className="text-[13px] text-[#2a211a]">Active</span>
+              </label>
+            </div>
+            {editError ? <ErrorNote className="mt-3">{editError}</ErrorNote> : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setEditOpen(false)}>Cancel</Button>
+              <Button variant="primary" onClick={saveEdit} disabled={savingEdit}>
+                {savingEdit ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ----------------------------- voucher modal ------------------------------ */}
+      {voucherOpen && voucherTarget ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setVoucherOpen(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-t-3xl border border-[#e6e0d6] bg-white p-6 shadow-2xl sm:rounded-3xl">
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h2 className="font-serif text-[19px] text-[#2a211a]">Edit voucher</h2>
+                <p className="mt-0.5 font-mono text-[12px] text-[#9a8c7e]">{voucherTarget.code}</p>
+              </div>
+              <button onClick={() => setVoucherOpen(false)} aria-label="Close"
+                className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]">
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <span className="mb-1 block text-[11px] font-semibold text-[#6b5c4d]">Assigned to</span>
+                <UserAssign value={assignDraft} onChange={setAssignDraft} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Type">
+                  <Select value={voucherForm.discountType} onChange={(e) => setVField("discountType", e.target.value)}>
+                    <option value="percent">Percentage</option>
+                    <option value="amount">Fixed amount</option>
+                  </Select>
+                </Field>
+                <Field label="Value">
+                  <input type="number" min="0" step="0.01" value={voucherForm.discountValue}
+                    onChange={(e) => setVField("discountValue", e.target.value)} className={inputClass} />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Starts">
+                  <input type="datetime-local" value={voucherForm.startsAt}
+                    onChange={(e) => setVField("startsAt", e.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Ends">
+                  <input type="datetime-local" value={voucherForm.endsAt}
+                    onChange={(e) => setVField("endsAt", e.target.value)} className={inputClass} />
+                </Field>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={!!voucherForm.active}
+                  onChange={(e) => setVField("active", e.target.checked)} className="h-4 w-4 accent-[#8b6f47]" />
+                <span className="text-[13px] text-[#2a211a]">Active</span>
+              </label>
+            </div>
+            {voucherError ? <ErrorNote className="mt-3">{voucherError}</ErrorNote> : null}
+            <div className="mt-5 flex items-center justify-between gap-2">
+              <Button variant="danger" onClick={deleteVoucherFromModal}>Delete</Button>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setVoucherOpen(false)}>Cancel</Button>
+                <Button variant="primary" onClick={saveVoucher} disabled={savingVoucher}>
+                  {savingVoucher ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </Page>
+  );
+}
+
+/* ------------------------------- small parts ------------------------------ */
+
+function StatCard({ label, value }) {
+  return (
+    <Card className="py-3.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">{label}</p>
+      <p className="mt-1 font-serif text-[20px] text-[#2a211a]">{value}</p>
+    </Card>
+  );
+}
+
+function IconBtn({ title, onClick, icon, tone }) {
+  const hover =
+    tone === "bad"
+      ? "hover:bg-[#fbeae5] hover:text-[#a33c22]"
+      : "hover:bg-[#f2ede4] hover:text-[#2a211a]";
+  return (
+    <button title={title} aria-label={title} onClick={onClick}
+      className={`rounded-lg p-1.5 text-[#7a6a5f] transition-colors ${hover}`}>
+      <Icon name={icon} size={15} />
+    </button>
   );
 }

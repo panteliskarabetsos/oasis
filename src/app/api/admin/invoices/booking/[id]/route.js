@@ -4,12 +4,15 @@
 // ==============================================
 import { NextResponse as NextResponse3 } from "next/server";
 import { getSupabaseAdmin as getSupabaseAdmin3 } from "@/lib/supabaseAdmin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function GET(req, { params }) {
+  const auth = await requireAdmin("invoices");
+  if (!auth.ok) return auth.response;
   const supabase = getSupabaseAdmin3();
   const id = Number(params.id);
   const { data: b, error } = await supabase
-    .from("Booking")
+    .from("booking")
     .select(
       "id, primary_contact, experienceId, currency, totalPaidAmount, startTime, Experience:experienceId(name)"
     )

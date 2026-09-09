@@ -5,8 +5,11 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import sendRequestUpdateEmail from "@/lib/email/sendRequestUpdateEmail";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function PATCH(req, { params }) {
+  const auth = await requireAdmin("requests");
+  if (!auth.ok) return auth.response;
   const admin = createSupabaseAdmin();
   if (!admin)
     return NextResponse.json(
@@ -73,7 +76,12 @@ export async function PATCH(req, { params }) {
                 new URL("/api/admin/refunds/create", req.url),
                 {
                   method: "POST",
-                  headers: { "Content-Type": "application/json" },
+                  headers: {
+                    "Content-Type": "application/json",
+                    // forward the acting admin's session so the internal
+                    // call is authenticated and attributed to them
+                    cookie: req.headers.get("cookie") ?? "",
+                  },
                   body: JSON.stringify({
                     bookingId: request.booking_id,
                     amount: refundAmount,

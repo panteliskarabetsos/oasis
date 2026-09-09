@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -20,13 +21,9 @@ async function requireAdmin() {
   } = await supa.auth.getUser();
   if (!user) return { error: true, response: bad("Unauthorized", 401) };
 
-  const { data: row } = await supa
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  const { permissions } = await resolveStaffAccess(user);
 
-  if ((row?.role ?? "user") !== "admin")
+  if (!accessCan(permissions, "invoices"))
     return { error: true, response: bad("Forbidden", 403) };
 
   return { error: false };

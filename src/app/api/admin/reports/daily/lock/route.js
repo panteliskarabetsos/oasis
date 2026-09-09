@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -29,13 +30,9 @@ async function requireAdmin() {
     .eq("auth_user_id", user.id)
     .single();
 
-  const role =
-    profile?.role ||
-    user?.app_metadata?.role ||
-    user?.user_metadata?.role ||
-    "user";
+  const { role, permissions } = await resolveStaffAccess(user);
 
-  if (!["admin", "superadmin", "manager", "finance"].includes(role)) {
+  if (!accessCan(permissions, "zreport")) {
     return { error: true, response: bad("Forbidden", 403) };
   }
 
@@ -110,20 +107,30 @@ export async function POST(req) {
 
     if (upsertErr) throw upsertErr;
 
-    await admin.from("z_report_audit_log").insert({
-      z_report_id: report.id,
-      action: existing ? "locked" : "created",
-      performed_by: user.id,
-      notes: payload.notes,
-    });
-
-    if (existing) {
-      await admin.from("z_report_audit_log").insert({
+    const { error: auditErr } = await admin
+      .from("z_report_audit_log")
+      .insert({
         z_report_id: report.id,
-        action: "locked",
+        action: existing ? "locked" : "created",
         performed_by: user.id,
         notes: payload.notes,
       });
+    // Never fail the close because the audit write failed, but do not swallow
+    // it either — a missing audit trail on a financial close must be visible.
+    if (auditErr)
+      console.error("[z-report] audit log write failed:", auditErr.code, auditErr.message);
+
+    if (existing) {
+      const { error: auditErr2 } = await admin
+        .from("z_report_audit_log")
+        .insert({
+          z_report_id: report.id,
+          action: "locked",
+          performed_by: user.id,
+          notes: payload.notes,
+        });
+      if (auditErr2)
+        console.error("[z-report] audit log write failed:", auditErr2.code, auditErr2.message);
     }
 
     return ok({

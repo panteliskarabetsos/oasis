@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 /* ---------------------------- helpers ---------------------------- */
 const bad = (msg, status = 400) =>
@@ -102,27 +103,13 @@ async function requireAdmin() {
     return bad("Unauthorized – No active session", 401);
 
   const user = session.user;
-  const metaRole = user.app_metadata?.role || user.user_metadata?.role;
-
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
 
-  if (metaRole === "admin") return { user, admin };
+  const { permissions } = await resolveStaffAccess(user);
+  if (accessCan(permissions, "schedule")) return { user, admin };
 
-  // Fallback to DB role check (public."User" with auth_user_id)
-  const { data: dbUser, error: dbErr } = await admin
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-
-  if (dbErr) {
-    console.error("[admin/schedule] role lookup error", dbErr);
-    return bad("Server error", 500);
-  }
-  if (dbUser?.role === "admin") return { user, admin };
-
-  return bad("Unauthorized – Admin access required", 403);
+  return bad("Forbidden", 403);
 }
 
 /* ------------------------------ GET ------------------------------ */

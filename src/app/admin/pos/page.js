@@ -1,7 +1,10 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -9,27 +12,24 @@ import {
   useStripe,
   useElements,
 } from "@stripe/react-stripe-js";
+import { SmartphoneNfc } from "lucide-react";
 
+import Icon from "../_ui/Icon";
 import {
-  Search,
-  Plus,
-  Minus,
-  Trash2,
-  CreditCard,
-  Banknote,
-  CheckCircle2,
-  AlertTriangle,
-  ShoppingBag,
-  Package2,
-  X,
-  SmartphoneNfc,
-  Receipt,
-  Percent,
-  Lock,
-  PauseCircle,
-  RotateCcw,
-  FileBarChart2,
-} from "lucide-react";
+  Badge,
+  Button,
+  Card,
+  Field,
+  Muted,
+  Page,
+  PageHeader,
+  Skeleton,
+  inputClass,
+} from "../_ui";
+
+/* The Stripe card sheet and the Revolut terminal sheet at the bottom of this
+   file are preserved exactly as they were — they talk to payment hardware and
+   there is no terminal here to re-test them against. */
 
 const ACCENT = "#8b6f47";
 const RING = "ring-[rgba(139,111,71,0.3)]";
@@ -100,6 +100,11 @@ const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
 );
 
+
+const TENDER_NOTES = [5, 10, 20, 50, 100];
+
+/* --------------------------------- page ---------------------------------- */
+
 export default function POSPage() {
   const router = useRouter();
 
@@ -113,6 +118,7 @@ export default function POSPage() {
 
   const [queryRaw, setQueryRaw] = useState("");
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
   const searchRef = useRef(null);
   const [selectedExperience, setSelectedExperience] = useState(null);
 
@@ -120,7 +126,8 @@ export default function POSPage() {
   const [adults, setAdults] = useState(1);
   const [kids, setKids] = useState(0);
 
-  const [manualDiscount, setManualDiscount] = useState(0);
+  const [discountMode, setDiscountMode] = useState("amount"); // 'amount' | 'percent'
+  const [discountInput, setDiscountInput] = useState(0);
   const [promoCode, setPromoCode] = useState("");
   const [giftCode, setGiftCode] = useState("");
 
@@ -141,43 +148,19 @@ export default function POSPage() {
   const [piClientSecret, setPiClientSecret] = useState(null);
   const [piId, setPiId] = useState(null);
   const [quote, setQuote] = useState(null);
-
   const [terminalIntentId, setTerminalIntentId] = useState(null);
 
   const [submitting, setSubmitting] = useState(false);
-  const [serverMsg, setServerMsg] = useState(null);
   const [undoData, setUndoData] = useState(null);
   const [heldOrders, setHeldOrders] = useState([]);
+  const [heldOpen, setHeldOpen] = useState(false);
   const [todayLocked, setTodayLocked] = useState(false);
 
-  useEffect(() => {
-    let cancel = false;
-
-    async function checkZLock() {
-      try {
-        const res = await fetch(`/api/admin/reports/daily?date=${todayISO()}`, {
-          cache: "no-store",
-        });
-        const json = await res.json();
-        if (!cancel) setTodayLocked(json?.locked === true);
-      } catch {
-        if (!cancel) setTodayLocked(false);
-      }
-    }
-
-    checkZLock();
-
-    return () => {
-      cancel = true;
-    };
-  }, []);
+  /* ------------------------------- loading -------------------------------- */
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(
-        localStorage.getItem("oasis_pos_held_orders") || "[]",
-      );
-      setHeldOrders(Array.isArray(saved) ? saved : []);
+      setHeldOrders(JSON.parse(localStorage.getItem("oasis_pos_held_orders") || "[]"));
     } catch {
       setHeldOrders([]);
     }
@@ -185,61 +168,53 @@ export default function POSPage() {
 
   useEffect(() => {
     let cancel = false;
-
-    (async function () {
+    (async () => {
       try {
-        const res = await fetch("/api/pos/experiences", { cache: "no-store" });
-        if (!res.ok) throw new Error("Failed to load experiences");
-        const data = await res.json();
-
-        if (!cancel) {
-          setExperiences(data || []);
-          setLoadingExp(false);
-        }
-      } catch (e) {
-        if (!cancel) {
-          setExperiences([]);
-          setLoadingExp(false);
-          setServerMsg({
-            type: "error",
-            text: e.message || "Load error (experiences)",
-          });
-        }
+        const res = await fetch(`/api/admin/reports/daily?date=${todayISO()}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const j = await res.json();
+        if (!cancel) setTodayLocked(Boolean(j?.locked));
+      } catch {
+        /* non-critical */
       }
     })();
-
-    return () => {
-      cancel = true;
-    };
+    return () => { cancel = true; };
   }, []);
 
   useEffect(() => {
     let cancel = false;
-
-    (async function () {
+    (async () => {
       try {
-        const res = await fetch("/api/pos/items", { cache: "no-store" });
-        const data = res.ok ? await res.json() : [];
-
-        if (!cancel) {
-          setItems(Array.isArray(data) ? data : []);
-          setLoadingItems(false);
-        }
+        const res = await fetch("/api/pos/experiences", { cache: "no-store", credentials: "include" });
+        if (!res.ok) throw new Error("Failed to load experiences");
+        const data = await res.json();
+        if (!cancel) setExperiences(Array.isArray(data) ? data : []);
       } catch (e) {
         if (!cancel) {
-          setItems([]);
-          setLoadingItems(false);
-          setServerMsg({
-            type: "error",
-            text: e.message || "Load error (items)",
-          });
+          setExperiences([]);
+          toast.error(e.message || "Could not load experiences.");
         }
+      } finally {
+        if (!cancel) setLoadingExp(false);
       }
     })();
+    return () => { cancel = true; };
+  }, []);
 
-    return () => {
-      cancel = true;
-    };
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/pos/items", { cache: "no-store", credentials: "include" });
+        const data = res.ok ? await res.json() : [];
+        if (!cancel) setItems(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancel) setItems([]);
+      } finally {
+        if (!cancel) setLoadingItems(false);
+      }
+    })();
+    return () => { cancel = true; };
   }, []);
 
   useEffect(() => {
@@ -247,157 +222,153 @@ export default function POSPage() {
     return () => clearTimeout(t);
   }, [queryRaw]);
 
+  /* --------------------------- barcode scanner ----------------------------- */
+  // A hardware scanner types very fast then sends Enter; a 50ms gap resets the
+  // buffer so ordinary typing never accumulates.
   useEffect(() => {
-    let barcodeBuffer = "";
-    let timeout;
+    let buffer = "";
+    let timer;
 
-    function handleGlobalKeyDown(e) {
+    function onKeyDown(e) {
       if (isInputFocused() && e.target !== searchRef.current) return;
       if (e.key.length !== 1 && e.key !== "Enter") return;
 
-      if (e.key === "Enter" && barcodeBuffer.length > 3) {
-        const matchedItem = items.find(
-          (i) =>
-            i.sku === barcodeBuffer ||
-            String(i.name || "")
-              .toLowerCase()
-              .includes(barcodeBuffer.toLowerCase()),
+      if (e.key === "Enter" && buffer.length > 3) {
+        const needle = buffer.toLowerCase();
+        const match = items.find(
+          (i) => i.sku === buffer || String(i.name || "").toLowerCase().includes(needle),
         );
-
-        if (matchedItem) {
-          addItem(matchedItem);
-          setServerMsg({
-            type: "success",
-            text: `Scanned: ${matchedItem.name}`,
-          });
+        if (match) {
+          if (isOutOfStock(match)) toast.error(`${match.name} is out of stock.`);
+          else {
+            addItem(match);
+            toast.success(`Scanned: ${match.name}`);
+          }
           setQueryRaw("");
+        } else {
+          toast.error(`No product matches "${buffer}".`);
         }
-
-        barcodeBuffer = "";
+        buffer = "";
         return;
       }
 
       if (e.key.length === 1) {
-        barcodeBuffer += e.key;
-        clearTimeout(timeout);
-        timeout = setTimeout(() => {
-          barcodeBuffer = "";
-        }, 50);
+        buffer += e.key;
+        clearTimeout(timer);
+        timer = setTimeout(() => { buffer = ""; }, 50);
       }
     }
 
-    window.addEventListener("keydown", handleGlobalKeyDown);
-    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
+  /* -------------------------------- derived -------------------------------- */
+
+  const categories = useMemo(() => {
+    const set = new Set(items.map((i) => i.category).filter(Boolean));
+    return ["all", ...Array.from(set).sort()];
   }, [items]);
 
   const filteredExperiences = useMemo(() => {
     const q = query.toLowerCase();
-    if (!q) return experiences || [];
-    return (experiences || []).filter((x) =>
-      (x.name + " " + (x.slug || "")).toLowerCase().includes(q),
-    );
+    if (!q) return experiences;
+    return experiences.filter((x) => `${x.name} ${x.slug || ""}`.toLowerCase().includes(q));
   }, [experiences, query]);
 
   const filteredItems = useMemo(() => {
     const q = query.toLowerCase();
-    if (!q) return items || [];
-    return (items || []).filter((x) =>
-      (x.name + " " + (x.sku || "")).toLowerCase().includes(q),
-    );
-  }, [items, query]);
+    return items.filter((x) => {
+      if (category !== "all" && x.category !== category) return false;
+      if (!q) return true;
+      return `${x.name} ${x.sku || ""}`.toLowerCase().includes(q);
+    });
+  }, [items, query, category]);
 
   const priceAdult = selectedExperience?.pricing?.priceAdult ?? 0;
   const priceKid = selectedExperience?.pricing?.priceKid ?? 0;
-
-  const expGross =
-    (selectedExperience ? adults * priceAdult + kids * priceKid : 0) || 0;
-
+  const expGross = (selectedExperience ? adults * priceAdult + kids * priceKid : 0) || 0;
   const expVatRate = 0.24;
   const expVatTotal = expGross - expGross / (1 + expVatRate);
 
   const itemLines = useMemo(() => Object.values(cartItems), [cartItems]);
 
   const itemsGross = useMemo(
-    () =>
-      itemLines.reduce(
-        (sum, it) => sum + (Number(it.price) || 0) * (Number(it.qty) || 0),
-        0,
-      ),
+    () => itemLines.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0),
     [itemLines],
   );
 
   const itemsVatTotal = useMemo(
     () =>
-      itemLines.reduce((sum, it) => {
+      itemLines.reduce((s, it) => {
         const gross = (Number(it.price) || 0) * (Number(it.qty) || 0);
         const rate = Number(it.vat ?? 24) / 100;
-        return sum + (gross - gross / (1 + rate));
+        return s + (gross - gross / (1 + rate));
       }, 0),
     [itemLines],
   );
 
   const totalGross = expGross + itemsGross;
 
-  const clampedDiscount = Math.max(
-    0,
-    Math.min(Number(manualDiscount) || 0, totalGross),
-  );
+  // The server contract takes an absolute discount; percent is a till-side convenience.
+  const rawDiscount =
+    discountMode === "percent"
+      ? (totalGross * (Number(discountInput) || 0)) / 100
+      : Number(discountInput) || 0;
+  const clampedDiscount = Math.max(0, Math.min(rawDiscount, totalGross));
 
   const finalTotalToCollect = Math.max(0, totalGross - clampedDiscount);
-
   const discountRatio = totalGross > 0 ? clampedDiscount / totalGross : 0;
   const finalVatTotal = (expVatTotal + itemsVatTotal) * (1 - discountRatio);
   const finalNetTotal = finalTotalToCollect - finalVatTotal;
 
   const amountToCharge = method === "comp" ? 0 : finalTotalToCollect;
-
   const cashReceivedAmount = Number(cashReceived) || 0;
-  const changeDue =
-    method === "cash" ? Math.max(0, cashReceivedAmount - amountToCharge) : 0;
+  const changeDue = method === "cash" ? Math.max(0, cashReceivedAmount - amountToCharge) : 0;
   const cashShort = method === "cash" && cashReceivedAmount < amountToCharge;
 
-  const hasAnyCart = useMemo(() => {
-    return (
-      (!!selectedExperience && adults + kids > 0) ||
-      itemLines.some((l) => l.qty > 0)
-    );
-  }, [itemLines, selectedExperience, adults, kids]);
+  const hasAnyCart = useMemo(
+    () => (!!selectedExperience && adults + kids > 0) || itemLines.some((l) => l.qty > 0),
+    [itemLines, selectedExperience, adults, kids],
+  );
 
-  const canSubmit = useMemo(() => {
-    if (todayLocked) return false;
+  const emailOk = validateEmail(custEmail);
+  const phoneOk = validatePhone(custPhone);
 
-    const emailOk = validateEmail(custEmail);
-    const phoneOk = validatePhone(custPhone);
-
-    if (!emailOk || !phoneOk) return false;
-    if (method === "cash" && cashShort) return false;
-
+  const blockers = useMemo(() => {
+    const out = [];
+    if (todayLocked) out.push("Today's Z-report is locked.");
+    if (!hasAnyCart) out.push("The cart is empty.");
+    if (!emailOk) out.push("Customer email is missing or invalid.");
+    if (!phoneOk) out.push("Customer phone is missing or invalid.");
+    if (method === "cash" && cashShort) out.push("Cash received is less than the total.");
     if (txType === "experience") {
-      const startValid =
-        !!selectedExperience && startTime && isValidDateInput(startTime);
+      if (!selectedExperience) out.push("Pick an experience.");
+      else if (!startTime || !isValidDateInput(startTime)) out.push("Set a valid start time.");
+    } else if (!itemLines.length) out.push("Add at least one item.");
+    if (txType === "addons" && !bookingRef.trim()) out.push("Add the booking reference.");
+    return out;
+  }, [todayLocked, hasAnyCart, emailOk, phoneOk, method, cashShort, txType,
+      selectedExperience, startTime, itemLines.length, bookingRef]);
 
-      return !submitting && hasAnyCart && startValid;
-    }
+  const canSubmit = !submitting && blockers.length === 0;
 
-    return !submitting && itemLines.length > 0;
-  }, [
-    todayLocked,
-    method,
-    cashShort,
-    txType,
-    hasAnyCart,
-    selectedExperience,
-    startTime,
-    submitting,
-    custEmail,
-    custPhone,
-    itemLines,
-  ]);
+  /* --------------------------------- cart ---------------------------------- */
+
+  const isOutOfStock = useCallback(
+    (it) => typeof it?.stock === "number" && it.stock <= 0,
+    [],
+  );
 
   const addItem = useCallback((it) => {
     setCartItems((prev) => {
       const cur = prev[it.id];
-
+      const nextQty = (cur?.qty || 0) + 1;
+      if (typeof it.stock === "number" && nextQty > it.stock) {
+        toast.error(`Only ${it.stock} of ${it.name} left.`);
+        return prev;
+      }
       return {
         ...prev,
         [it.id]: {
@@ -405,8 +376,9 @@ export default function POSPage() {
           name: it.name,
           sku: it.sku || null,
           price: Number(it.price || 0),
-          qty: (cur?.qty || 0) + 1,
+          qty: nextQty,
           vat: cur?.vat ?? (it.vatRate || 24),
+          stock: typeof it.stock === "number" ? it.stock : null,
         },
       };
     });
@@ -414,285 +386,126 @@ export default function POSPage() {
 
   const addCustomItem = useCallback(() => {
     const id = `custom-${Date.now()}`;
-
     setCartItems((prev) => ({
       ...prev,
-      [id]: {
-        id,
-        name: "Custom Charge",
-        sku: null,
-        price: "",
-        qty: 1,
-        vat: 24,
-      },
+      [id]: { id, name: "Custom charge", sku: null, price: "", qty: 1, vat: 24, stock: null },
     }));
-
-    setTxType((current) => (current === "experience" ? "items" : current));
+    setTxType((cur) => (cur === "experience" ? "items" : cur));
+    setMode("items");
   }, []);
 
-  const setItemPriceRaw = useCallback((it, val) => {
+  const setQty = useCallback((id, qty) => {
     setCartItems((prev) => {
-      const cur = prev[it.id];
-      if (!cur) return prev;
-      return { ...prev, [it.id]: { ...cur, price: val } };
+      const line = prev[id];
+      if (!line) return prev;
+      const n = Math.max(0, Number(qty) || 0);
+      if (n === 0) {
+        const { [id]: _drop, ...rest } = prev;
+        return rest;
+      }
+      if (typeof line.stock === "number" && n > line.stock) {
+        toast.error(`Only ${line.stock} in stock.`);
+        return { ...prev, [id]: { ...line, qty: line.stock } };
+      }
+      return { ...prev, [id]: { ...line, qty: n } };
     });
   }, []);
 
-  const setItemName = useCallback((it, newName) => {
+  const setLinePrice = useCallback((id, price) => {
+    setCartItems((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], price } } : prev));
+  }, []);
+
+  const removeLine = useCallback((id) => {
     setCartItems((prev) => {
-      const cur = prev[it.id];
-      if (!cur) return prev;
-      return { ...prev, [it.id]: { ...cur, name: newName } };
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
     });
   }, []);
 
-  const setItemVat = useCallback((it, newVat) => {
-    setCartItems((prev) => {
-      const cur = prev[it.id];
-      if (!cur) return prev;
-      return { ...prev, [it.id]: { ...cur, vat: newVat } };
-    });
-  }, []);
+  const snapshot = useCallback(
+    () => ({
+      selectedExperience, adults, kids, cartItems,
+      discountMode, discountInput, custName, custEmail, custPhone,
+      startTime, bookingRef, txType,
+    }),
+    [selectedExperience, adults, kids, cartItems, discountMode, discountInput,
+     custName, custEmail, custPhone, startTime, bookingRef, txType],
+  );
 
-  const decItem = useCallback((it) => {
-    setCartItems((prev) => {
-      const cur = prev[it.id];
-      if (!cur) return prev;
+  const clearCart = useCallback(
+    (keepUndo = true) => {
+      if (keepUndo && hasAnyCart) setUndoData(snapshot());
+      setSelectedExperience(null);
+      setCartItems({});
+      setAdults(1);
+      setKids(0);
+      setDiscountInput(0);
+      setPromoCode("");
+      setGiftCode("");
+      setCustName("");
+      setCustEmail("");
+      setCustPhone("");
+      setReference("");
+      setCashReceived("");
+      setBookingRef("");
+      setStartTime(toLocalDatetimeInputValue(addMinutes(new Date(), 10)));
+    },
+    [hasAnyCart, snapshot],
+  );
 
-      const nextQty = Math.max(0, (cur.qty || 0) - 1);
-      const copy = { ...prev };
-
-      if (nextQty === 0) delete copy[it.id];
-      else copy[it.id] = { ...cur, qty: nextQty };
-
-      return copy;
-    });
-  }, []);
-
-  const clearCart = useCallback(() => {
-    setUndoData({
-      selectedExperience,
-      adults,
-      kids,
-      cartItems,
-      manualDiscount,
-      custName,
-      custEmail,
-      custPhone,
-      startTime,
-      bookingRef,
-      txType,
-    });
-
-    setCartItems({});
-    setAdults(1);
-    setKids(0);
-    setSelectedExperience(null);
-    setManualDiscount(0);
-    setPromoCode("");
-    setGiftCode("");
-    setReference("");
-    setCashReceived("");
-    setCustName("");
-    setCustEmail("");
-    setCustPhone("");
-    setBookingRef("");
-    setStartTime(toLocalDatetimeInputValue(addMinutes(new Date(), 10)));
-  }, [
-    selectedExperience,
-    adults,
-    kids,
-    cartItems,
-    manualDiscount,
-    custName,
-    custEmail,
-    custPhone,
-    startTime,
-    bookingRef,
-    txType,
-  ]);
+  function restore(s) {
+    setSelectedExperience(s.selectedExperience);
+    setAdults(s.adults ?? 1);
+    setKids(s.kids ?? 0);
+    setCartItems(s.cartItems || {});
+    setDiscountMode(s.discountMode || "amount");
+    setDiscountInput(s.discountInput ?? s.manualDiscount ?? 0);
+    setCustName(s.custName || "");
+    setCustEmail(s.custEmail || "");
+    setCustPhone(s.custPhone || "");
+    setStartTime(s.startTime || toLocalDatetimeInputValue(addMinutes(new Date(), 10)));
+    setBookingRef(s.bookingRef || "");
+    setTxType(s.txType || "items");
+  }
 
   function undoClear() {
     if (!undoData) return;
-
-    setSelectedExperience(undoData.selectedExperience);
-    setAdults(undoData.adults);
-    setKids(undoData.kids);
-    setCartItems(undoData.cartItems);
-    setManualDiscount(undoData.manualDiscount);
-    setCustName(undoData.custName || "");
-    setCustEmail(undoData.custEmail || "");
-    setCustPhone(undoData.custPhone || "");
-    setStartTime(undoData.startTime);
-    setBookingRef(undoData.bookingRef || "");
-    setTxType(undoData.txType || "items");
+    restore(undoData);
     setUndoData(null);
+    toast.success("Cart restored.");
+  }
+
+  function persistHeld(next) {
+    setHeldOrders(next);
+    try {
+      localStorage.setItem("oasis_pos_held_orders", JSON.stringify(next));
+    } catch {
+      /* private mode — the list simply won't survive a reload */
+    }
   }
 
   function holdOrder() {
     if (!hasAnyCart) return;
-
     const held = {
-      id: Date.now(),
-      txType,
-      selectedExperience,
-      adults,
-      kids,
-      cartItems,
-      manualDiscount,
-      custName,
-      custEmail,
-      custPhone,
-      startTime,
-      bookingRef,
-      createdAt: new Date().toISOString(),
+      id: `hold-${Date.now()}`,
+      at: new Date().toISOString(),
+      label: selectedExperience?.name || `${itemLines.length} item${itemLines.length === 1 ? "" : "s"}`,
+      total: finalTotalToCollect,
+      ...snapshot(),
     };
-
-    const next = [held, ...heldOrders].slice(0, 10);
-    setHeldOrders(next);
-    localStorage.setItem("oasis_pos_held_orders", JSON.stringify(next));
-
-    clearCart();
-    setServerMsg({ type: "success", text: "Order held." });
+    persistHeld([held, ...heldOrders].slice(0, 10));
+    clearCart(false);
+    toast.success("Sale parked.");
   }
 
   function resumeOrder(order) {
-    setTxType(order.txType);
-    setSelectedExperience(order.selectedExperience);
-    setAdults(order.adults);
-    setKids(order.kids);
-    setCartItems(order.cartItems);
-    setManualDiscount(order.manualDiscount);
-    setCustName(order.custName || "");
-    setCustEmail(order.custEmail || "");
-    setCustPhone(order.custPhone || "");
-    setStartTime(order.startTime);
-    setBookingRef(order.bookingRef || "");
-
-    const next = heldOrders.filter((x) => x.id !== order.id);
-    setHeldOrders(next);
-    localStorage.setItem("oasis_pos_held_orders", JSON.stringify(next));
+    restore(order);
+    persistHeld(heldOrders.filter((x) => x.id !== order.id));
+    setHeldOpen(false);
+    toast.success("Sale resumed.");
   }
 
-  async function openCardCharge() {
-    if (!hasAnyCart)
-      return setServerMsg({ type: "error", text: "Cart is empty." });
-    if (todayLocked)
-      return setServerMsg({
-        type: "error",
-        text: "Today’s Z-Report is locked. POS is disabled.",
-      });
-
-    try {
-      setSubmitting(true);
-      const payload = createPayload();
-
-      const res = await fetch("/api/pos/payments/intent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok)
-        throw new Error(data?.error || "Could not start card payment");
-
-      setPiClientSecret(data.clientSecret);
-      setPiId(data.intentId);
-      setQuote(data.quote);
-      setCardOpen(true);
-    } catch (e) {
-      setServerMsg({ type: "error", text: e.message || "Card flow error" });
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function openTerminalCharge() {
-    if (!hasAnyCart)
-      return setServerMsg({ type: "error", text: "Cart is empty." });
-    if (todayLocked)
-      return setServerMsg({
-        type: "error",
-        text: "Today’s Z-Report is locked. POS is disabled.",
-      });
-
-    try {
-      setSubmitting(true);
-
-      const res = await fetch("/api/pos/revolut/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: amountToCharge,
-          currency: "EUR",
-          reference: `POS-${Date.now()}`,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error || "Failed to push to terminal");
-
-      setTerminalIntentId(data.intentId);
-    } catch (e) {
-      setServerMsg({
-        type: "error",
-        text: e.message || "Failed to wake up Terminal",
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleCheckout(overrideRef = null) {
-    if (!hasAnyCart) return;
-    if (todayLocked)
-      return setServerMsg({
-        type: "error",
-        text: "Today’s Z-Report is locked. POS is disabled.",
-      });
-
-    setSubmitting(true);
-    setServerMsg(null);
-
-    try {
-      const payload = createPayload(overrideRef);
-
-      const res = await fetch("/api/pos/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data?.error || "Checkout failed");
-
-      if (txType === "items" || txType === "addons") {
-        const receiptId = data.receiptId || data.bookingId;
-
-        setServerMsg({ type: "success", text: "Receipt generated." });
-        clearCart();
-
-        if (receiptId) {
-          window.open(`/api/receipts/${receiptId}/pdf`, "_blank");
-          router.push(`/admin/receipts/${receiptId}`);
-        }
-
-        return;
-      }
-
-      setServerMsg({ type: "success", text: "Booking recorded." });
-      clearCart();
-      router.push(`/admin/bookings/${data.bookingId}`);
-    } catch (e) {
-      setServerMsg({ type: "error", text: e.message || "Checkout error" });
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  /* -------------------------------- payment -------------------------------- */
 
   function createPayload(overrideRef = null) {
     return {
@@ -731,118 +544,242 @@ export default function POSPage() {
     };
   }
 
+  function guardTill() {
+    if (!hasAnyCart) {
+      toast.error("The cart is empty.");
+      return false;
+    }
+    if (todayLocked) {
+      toast.error("Today's Z-report is locked. The till is closed.");
+      return false;
+    }
+    return true;
+  }
+
+  async function openCardCharge() {
+    if (!guardTill()) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/pos/payments/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(createPayload()),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not start the card payment");
+      setPiClientSecret(data.clientSecret);
+      setPiId(data.intentId);
+      setQuote(data.quote);
+      setCardOpen(true);
+    } catch (e) {
+      toast.error(e.message || "Card payment could not be started.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function openTerminalCharge() {
+    if (!guardTill()) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/pos/revolut/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          amount: amountToCharge,
+          currency: "EUR",
+          reference: `POS-${Date.now()}`,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to push to the terminal");
+      setTerminalIntentId(data.intentId);
+    } catch (e) {
+      toast.error(e.message || "The terminal did not respond.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCheckout(overrideRef = null) {
+    if (!hasAnyCart) return;
+    if (todayLocked) return toast.error("Today's Z-report is locked. The till is closed.");
+
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/pos/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(createPayload(overrideRef)),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Checkout failed");
+
+      if (txType === "items" || txType === "addons") {
+        const receiptId = data.receiptId || data.bookingId;
+        toast.success("Receipt generated.");
+        clearCart(false);
+        if (receiptId) {
+          window.open(`/api/receipts/${receiptId}/pdf`, "_blank");
+          router.push(`/admin/receipts/${receiptId}`);
+        }
+        return;
+      }
+
+      toast.success("Booking recorded.");
+      clearCart(false);
+      router.push(`/admin/bookings/${data.bookingId}`);
+    } catch (e) {
+      toast.error(e.message || "Checkout failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   function onConfirmClick() {
     if (method === "card") return openCardCharge();
     if (method === "terminal") return openTerminalCharge();
     return handleCheckout();
   }
 
+  /* --------------------------------- view ---------------------------------- */
+
   return (
-    <div className="min-h-screen bg-[#f4f1ec] text-[#4c4138] selection:bg-[#f0e7d9] font-sans">
-      <div className="relative mx-auto px-4 sm:px-6 pt-4 pb-28 h-screen flex flex-col max-w-[1600px]">
-        <header className="shrink-0 mb-4 bg-white/80 backdrop-blur rounded-2xl shadow-sm border border-[#e8e2d9] p-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-serif font-semibold tracking-tight flex items-center gap-2">
-              <Receipt className="h-6 w-6 text-[#8b6f47]" /> Oasis POS
-            </h1>
+    <Page className="pb-10">
+      <PageHeader
+        eyebrow="Operations"
+        title="Point of sale"
+        description={
+          todayLocked
+            ? "The till is closed for today."
+            : hasAnyCart
+              ? `${formatCurrency(finalTotalToCollect)} in the cart`
+              : "Scan, tap or search to start a sale."
+        }
+        actions={
+          <>
+            {heldOrders.length ? (
+              <Button variant="secondary" onClick={() => setHeldOpen((v) => !v)}>
+                <Icon name="clock" size={15} /> Parked ({heldOrders.length})
+              </Button>
+            ) : null}
+            {undoData ? (
+              <Button variant="secondary" onClick={undoClear}>
+                <Icon name="clock" size={15} /> Undo clear
+              </Button>
+            ) : null}
+            <Button variant="secondary" onClick={addCustomItem}>
+              <Icon name="plus" size={15} /> Custom line
+            </Button>
+            <Button variant="secondary" onClick={() => router.push("/admin/reports/daily")}>
+              <Icon name="chart" size={15} /> Z-report
+            </Button>
+          </>
+        }
+      />
 
-            <div className="hidden md:flex bg-[#faf7f2] border border-[#d8cfc3] rounded-lg p-1">
-              <SegmentBtn
-                active={mode === "experiences"}
-                onClick={() => setMode("experiences")}
-                icon={<Package2 className="h-4 w-4" />}
-                label="Experiences"
-              />
-              <SegmentBtn
-                active={mode === "items"}
-                onClick={() => setMode("items")}
-                icon={<ShoppingBag className="h-4 w-4" />}
-                label="Items & Merch"
-              />
-            </div>
-          </div>
+      {todayLocked ? (
+        <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-[#f0e0bb] bg-[#fbf1dc] px-4 py-3">
+          <Icon name="lock" size={17} className="text-[#8a6412]" />
+          <span className="text-[13px] font-semibold text-[#8a6412]">
+            Today’s Z-report is locked — no new sales can be taken until it is reopened.
+          </span>
+          <Button as="a" href="/admin/reports/daily" size="sm" variant="secondary" className="ml-auto">
+            Open Z-report
+          </Button>
+        </div>
+      ) : null}
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={holdOrder}
-              disabled={!hasAnyCart}
-              className="hidden sm:flex px-4 py-2 text-sm font-medium text-[#4c4138] bg-white border border-[#d8cfc3] hover:bg-[#f0e7d9] rounded-xl transition items-center gap-2 shadow-sm disabled:opacity-40"
-            >
-              <PauseCircle className="h-4 w-4" /> Hold
+      {heldOpen && heldOrders.length ? (
+        <Card className="mb-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-serif text-[16px] text-[#2a211a]">Parked sales</h2>
+            <button onClick={() => setHeldOpen(false)} className="rounded-lg p-1 text-[#9a8c7e] hover:bg-[#f2ede4]">
+              <Icon name="x" size={16} />
             </button>
-
-            {undoData && (
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {heldOrders.map((o) => (
               <button
-                onClick={undoClear}
-                className="hidden sm:flex px-4 py-2 text-sm font-medium text-[#4c4138] bg-white border border-[#d8cfc3] hover:bg-[#f0e7d9] rounded-xl transition items-center gap-2 shadow-sm"
+                key={o.id}
+                onClick={() => resumeOrder(o)}
+                className="rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] px-3 py-2 text-left transition-colors hover:border-[#c9b393] hover:bg-white"
               >
-                <RotateCcw className="h-4 w-4" /> Undo
+                <span className="block text-[13px] font-semibold text-[#2a211a]">{o.label}</span>
+                <span className="block text-[11.5px] text-[#9a8c7e]">
+                  {formatCurrency(o.total || 0)} ·{" "}
+                  {new Date(o.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                </span>
               </button>
-            )}
-
-            <button
-              onClick={() => router.push("/admin/reports/daily")}
-              className="hidden sm:flex px-4 py-2 text-sm font-medium text-[#4c4138] bg-white border border-[#d8cfc3] hover:bg-[#f0e7d9] rounded-xl transition items-center gap-2 shadow-sm"
-            >
-              <FileBarChart2 className="h-4 w-4" /> Z-Report
-            </button>
-
-            <button
-              onClick={addCustomItem}
-              className="hidden sm:flex px-4 py-2 text-sm font-medium text-[#4c4138] bg-white border border-[#d8cfc3] hover:bg-[#f0e7d9] rounded-xl transition items-center gap-2 shadow-sm"
-            >
-              <Plus className="h-4 w-4" /> Custom Line
-            </button>
-
-            <button
-              onClick={() => {
-                if (hasAnyCart) clearCart();
-              }}
-              className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl transition shadow-sm"
-            >
-              Clear Cart
-            </button>
+            ))}
           </div>
-        </header>
+        </Card>
+      ) : null}
 
-        {todayLocked && (
-          <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800 flex items-start gap-3">
-            <Lock className="h-5 w-5 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-sm">POS Locked</p>
-              <p className="text-sm">
-                Today’s Z-Report is already closed. New POS transactions are
-                disabled.
-              </p>
-            </div>
-          </div>
-        )}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
+        {/* catalogue */}
+        <div className="space-y-4">
+          <Card padded={false} className="overflow-hidden">
+            <div className="flex flex-wrap items-center gap-2 border-b border-[#e6e0d6] p-4">
+              <div className="inline-flex rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] p-1">
+                {[
+                  ["experiences", "Experiences"],
+                  ["items", "Shop"],
+                ].map(([v, l]) => (
+                  <button
+                    key={v}
+                    onClick={() => setMode(v)}
+                    className={`rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+                      mode === v ? "bg-[#2a211a] text-white" : "text-[#6b5c4d] hover:bg-[#f2ede4]"
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
 
-        {serverMsg && (
-          <Toast type={serverMsg.type} onDismiss={() => setServerMsg(null)}>
-            {serverMsg.text}
-          </Toast>
-        )}
-
-        <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4">
-          <main className="flex-1 flex flex-col bg-white/90 backdrop-blur border border-[#e0dcd4] shadow-md rounded-2xl overflow-hidden">
-            <div className="p-4 border-b border-[#e0dcd4] bg-[#fdfbf7] flex items-center gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-4 top-3.5 h-5 w-5 text-[#8b6f47]" />
+              <div className="relative min-w-[200px] flex-1">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+                  <Icon name="search" size={16} />
+                </span>
                 <input
                   ref={searchRef}
                   value={queryRaw}
                   onChange={(e) => setQueryRaw(e.target.value)}
-                  placeholder={`Search or scan barcode for ${mode}...`}
-                  className={clsx(
-                    "w-full rounded-xl border border-[#d8cfc3] bg-white px-12 py-3.5 text-base placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:border-[#8b6f47] shadow-inner",
-                    RING,
-                  )}
+                  placeholder={mode === "items" ? "Search or scan a product…" : "Search experiences…"}
+                  className={`${inputClass} h-11 pl-9 ${queryRaw ? "pr-9" : ""}`}
                 />
+                {queryRaw ? (
+                  <button onClick={() => setQueryRaw("")} aria-label="Clear"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4]">
+                    <Icon name="x" size={14} />
+                  </button>
+                ) : null}
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 bg-[#f9f8f5]">
+            {mode === "items" && categories.length > 2 ? (
+              <div className="flex flex-wrap gap-1.5 border-b border-[#f0ebe2] bg-[#fdfbf7] px-4 py-2.5">
+                {categories.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setCategory(c)}
+                    className={`rounded-full px-3 py-1 text-[12px] font-medium capitalize transition-colors ${
+                      category === c
+                        ? "bg-[#2a211a] text-white"
+                        : "bg-white text-[#6b5c4d] ring-1 ring-inset ring-[#e6e0d6] hover:bg-[#f2ede4]"
+                    }`}
+                  >
+                    {c === "all" ? "All" : c}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="p-4">
               {mode === "experiences" ? (
                 <ExpGrid
                   loading={loadingExp}
@@ -851,7 +788,6 @@ export default function POSPage() {
                   onSelect={(x) => {
                     setSelectedExperience(x);
                     setTxType("experience");
-                    setAdults((v) => (v === 0 ? 1 : v));
                   }}
                 />
               ) : (
@@ -859,569 +795,410 @@ export default function POSPage() {
                   loading={loadingItems}
                   list={filteredItems}
                   cartMap={cartItems}
-                  onInc={addItem}
-                />
-              )}
-            </div>
-          </main>
-
-          <aside className="w-full lg:w-[440px] xl:w-[480px] shrink-0 flex flex-col bg-white border border-[#e0dcd4] shadow-xl rounded-2xl overflow-hidden">
-            <div className="p-5 border-b border-[#e0dcd4] bg-[#faf7f2]">
-              <h2 className="text-lg font-semibold flex items-center gap-2 mb-4 text-[#4c4138]">
-                <ShoppingBag className="h-5 w-5 text-[#8b6f47]" /> Current Order
-              </h2>
-
-              <div className="flex bg-[#e0dcd4]/50 border border-[#d8cfc3] rounded-lg p-1 shadow-inner">
-                <button
-                  onClick={() => setTxType("experience")}
-                  className={clsx(
-                    "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-md transition-all",
-                    txType === "experience"
-                      ? "bg-white text-[#4c4138] shadow-sm"
-                      : "text-[#7a6a5f] hover:text-[#4c4138]",
-                  )}
-                >
-                  Booking
-                </button>
-                <button
-                  onClick={() => {
-                    setTxType("items");
-                    setSelectedExperience(null);
+                  onInc={(it) => {
+                    if (isOutOfStock(it)) return toast.error(`${it.name} is out of stock.`);
+                    addItem(it);
+                    setTxType((cur) => (cur === "experience" && !selectedExperience ? "items" : cur));
                   }}
-                  className={clsx(
-                    "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-md transition-all",
-                    txType === "items"
-                      ? "bg-white text-[#4c4138] shadow-sm"
-                      : "text-[#7a6a5f] hover:text-[#4c4138]",
-                  )}
-                >
-                  Retail
-                </button>
-                <button
-                  onClick={() => {
-                    setTxType("addons");
-                    setSelectedExperience(null);
-                  }}
-                  className={clsx(
-                    "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-md transition-all",
-                    txType === "addons"
-                      ? "bg-white text-[#4c4138] shadow-sm"
-                      : "text-[#7a6a5f] hover:text-[#4c4138]",
-                  )}
-                >
-                  Add-on
-                </button>
-              </div>
+                />
+              )}
             </div>
+          </Card>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[#fdfbf7]">
-              {heldOrders.length > 0 && (
-                <div className="bg-white border border-[#e6dfd6] rounded-xl p-4 shadow-sm">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-3">
-                    Held Orders
-                  </p>
-
-                  <div className="space-y-2">
-                    {heldOrders.map((o) => (
-                      <button
-                        key={o.id}
-                        onClick={() => resumeOrder(o)}
-                        className="w-full flex items-center justify-between rounded-xl border border-[#e8e2d9] bg-[#fdfbf7] px-4 py-3 text-left hover:bg-[#f0e7d9]"
-                      >
-                        <div>
-                          <p className="text-sm font-bold text-[#4c4138]">
-                            {o.txType === "experience"
-                              ? o.selectedExperience?.name || "Booking"
-                              : "Retail Order"}
-                          </p>
-                          <p className="text-xs text-[#a09084]">
-                            {new Date(o.createdAt).toLocaleTimeString("en-GB", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </p>
-                        </div>
-                        <span className="text-xs font-bold text-[#8b6f47]">
-                          Resume
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+          {/* experience details */}
+          {selectedExperience ? (
+            <Card>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-serif text-[17px] text-[#2a211a]">{selectedExperience.name}</h2>
+                  <Muted className="text-[12px]">
+                    {formatCurrency(priceAdult)} adult · {formatCurrency(priceKid)} child
+                  </Muted>
                 </div>
-              )}
-
-              {txType === "experience" && selectedExperience && (
-                <div className="bg-white border border-[#8b6f47]/40 rounded-xl p-5 shadow-sm relative">
-                  <button
-                    onClick={() => setSelectedExperience(null)}
-                    className="absolute top-3 right-3 text-[#d8cfc3] hover:text-red-500 bg-[#f9f8f5] hover:bg-red-50 rounded-lg p-1.5 transition-colors"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-
-                  <h3 className="font-bold text-lg mb-1 pr-8 text-[#4c4138]">
-                    {selectedExperience.name}
-                  </h3>
-
-                  <p className="text-sm text-[#8b6f47] font-medium mb-5">
-                    {formatCurrency(priceAdult)} / adult •{" "}
-                    {formatCurrency(priceKid)} / kid
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-4 mb-5">
-                    <Counter
-                      label="Adults"
-                      value={adults}
-                      onChange={setAdults}
-                      min={1}
-                    />
-                    <Counter
-                      label="Kids"
-                      value={kids}
-                      onChange={setKids}
-                      min={0}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold uppercase tracking-widest text-[#a09084] block mb-2">
-                      Start Time
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={startTime}
-                      onChange={(e) => setStartTime(e.target.value)}
-                      className="w-full rounded-xl border border-[#d8cfc3] px-4 py-3 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 bg-[#fbf9f6] outline-none"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {itemLines.length > 0 && (
-                <div className="bg-white border border-[#e6dfd6] rounded-xl overflow-hidden shadow-sm">
-                  {itemLines.map((l) => (
-                    <div
-                      key={l.id}
-                      className="flex items-start gap-3 p-4 border-b border-[#f0ebe1] last:border-0 hover:bg-[#fbf9f6] transition-colors group"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <input
-                          value={l.name}
-                          onChange={(e) => setItemName(l, e.target.value)}
-                          placeholder="Item name"
-                          className="font-bold text-[#4c4138] text-sm w-full bg-transparent border-b border-transparent hover:border-[#d8cfc3] focus:border-[#8b6f47] focus:outline-none transition-colors truncate pb-1"
-                        />
-
-                        <div className="flex items-center gap-3 mt-2">
-                          <div className="flex items-center bg-[#f4f1ec] px-2 py-1 rounded-md border border-[#e8e2d9]">
-                            <span className="text-xs font-bold text-[#a09084] mr-1">
-                              €
-                            </span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={l.price}
-                              onChange={(e) =>
-                                setItemPriceRaw(l, e.target.value)
-                              }
-                              placeholder="0.00"
-                              className="text-sm font-semibold text-[#4c4138] w-16 bg-transparent focus:outline-none"
-                            />
-                          </div>
-
-                          <div className="flex items-center gap-1.5 bg-[#f4f1ec] px-2 py-1 rounded-md border border-[#e8e2d9]">
-                            <Percent className="h-3 w-3 text-[#a09084]" />
-                            <select
-                              value={l.vat}
-                              onChange={(e) => setItemVat(l, e.target.value)}
-                              className="text-xs font-semibold text-[#7a6a5f] bg-transparent focus:outline-none cursor-pointer"
-                            >
-                              <option value="24">24%</option>
-                              <option value="13">13%</option>
-                              <option value="0">0%</option>
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-end gap-2 shrink-0 mt-0.5">
-                        <div className="text-base text-right font-bold text-[#4c4138]">
-                          {formatCurrency((Number(l.price) || 0) * l.qty)}
-                        </div>
-
-                        <div className="flex items-center bg-[#fdfbf7] rounded-lg p-0.5 border border-[#e8e2d9]">
-                          <button
-                            onClick={() => decItem(l)}
-                            className="p-1 hover:bg-white rounded text-[#7a6a5f] shadow-sm"
-                          >
-                            <Minus className="h-4 w-4" />
-                          </button>
-                          <span className="w-8 text-center font-bold text-sm">
-                            {l.qty}
-                          </span>
-                          <button
-                            onClick={() => addItem(l)}
-                            className="p-1 hover:bg-white rounded text-[#7a6a5f] shadow-sm"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {txType === "addons" && (
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084]">
-                    Existing Booking Ref
-                  </label>
+                <Button size="sm" variant="ghost" onClick={() => setSelectedExperience(null)}>
+                  <Icon name="x" size={14} /> Remove
+                </Button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Counter label="Adults" value={adults} onChange={setAdults} min={0} />
+                <Counter label="Children" value={kids} onChange={setKids} min={0} />
+                <Field label="Start time">
                   <input
-                    placeholder="e.g. B-001234"
-                    value={bookingRef}
-                    onChange={(e) => setBookingRef(e.target.value)}
-                    className="w-full rounded-xl border border-[#d8cfc3] px-4 py-3 text-sm focus:ring-2 focus:ring-[#8b6f47]/30 outline-none"
+                    type="datetime-local"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className={inputClass}
                   />
-                </div>
-              )}
-
-              {((txType === "experience" && !selectedExperience) ||
-                (txType !== "experience" && itemLines.length === 0)) && (
-                <div className="text-center py-12 px-4 text-[#a09084] border-2 border-dashed border-[#e8e2d9] rounded-2xl bg-[#faf7f2]/50">
-                  <ShoppingBag className="h-10 w-10 mx-auto mb-3 opacity-20 text-[#8b6f47]" />
-                  <p className="text-sm font-medium mb-4">
-                    {txType === "experience"
-                      ? "Select an experience to begin."
-                      : "Select items from the catalog or add a custom line."}
-                  </p>
-
-                  {txType !== "experience" && (
-                    <button
-                      onClick={addCustomItem}
-                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-[#d8cfc3] text-[#4c4138] rounded-xl hover:bg-[#f0e7d9] transition shadow-sm font-semibold text-sm"
-                    >
-                      <Plus className="h-4 w-4" /> Custom Line
-                    </button>
-                  )}
-                </div>
-              )}
-
-              <div className="space-y-2 pt-2">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-[#a09084]">
-                  Customer Data
-                </label>
-
-                <input
-                  placeholder="Customer Name"
-                  value={custName}
-                  onChange={(e) => setCustName(e.target.value)}
-                  className="w-full rounded-xl border border-[#d8cfc3] bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 shadow-sm"
-                />
-
-                <input
-                  placeholder="Email Address"
-                  value={custEmail}
-                  onChange={(e) => setCustEmail(e.target.value)}
-                  className="w-full rounded-xl border border-[#d8cfc3] bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 shadow-sm"
-                />
-
-                <input
-                  placeholder="Phone Number"
-                  value={custPhone}
-                  onChange={(e) => setCustPhone(e.target.value)}
-                  className="w-full rounded-xl border border-[#d8cfc3] bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 shadow-sm"
-                />
-
-                {!validateEmail(custEmail) && (
-                  <p className="text-xs font-bold text-red-600">
-                    Invalid email address.
-                  </p>
-                )}
-
-                {!validatePhone(custPhone) && (
-                  <p className="text-xs font-bold text-red-600">
-                    Invalid phone number.
-                  </p>
-                )}
+                </Field>
               </div>
-            </div>
-
-            <div className="bg-white border-t border-[#e0dcd4] p-5 shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-10">
-              <div className="mb-5 bg-[#fdfbf7] rounded-xl border border-[#e8e2d9] p-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-[#7a6a5f]">
-                    Net Subtotal
-                  </span>
-                  <span className="text-sm font-medium text-[#4c4138]">
-                    {formatCurrency(finalNetTotal)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-[#7a6a5f]">
-                    VAT Included
-                  </span>
-                  <span className="text-sm font-medium text-[#4c4138]">
-                    {formatCurrency(finalVatTotal)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-center pt-2 border-t border-[#e8e2d9] mt-2">
-                  <span className="text-sm font-bold text-emerald-700">
-                    Manual Discount
-                  </span>
-                  <div className="relative w-24">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 text-sm">
-                      -€
-                    </span>
-                    <input
-                      type="number"
-                      value={manualDiscount || ""}
-                      onChange={(e) => setManualDiscount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full rounded-lg border border-emerald-200 bg-emerald-50 py-1 pl-7 pr-2 text-sm text-right font-bold text-emerald-800 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-end mt-4 pt-3 border-t-2 border-[#e8e2d9]">
-                  <p className="text-sm font-bold uppercase tracking-wider text-[#a09084] mb-1">
-                    Total to Pay
-                  </p>
-                  <p className="text-4xl font-serif font-bold tracking-tight text-[#2a1f18]">
-                    {formatCurrency(finalTotalToCollect)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-4 gap-3 mb-5">
-                <PayBtn
-                  active={method === "cash"}
-                  onClick={() => setMethod("cash")}
-                  icon={<Banknote className="h-5 w-5 mb-1" />}
-                  label="Cash"
-                />
-                <PayBtn
-                  active={method === "card"}
-                  onClick={() => setMethod("card")}
-                  icon={<CreditCard className="h-5 w-5 mb-1" />}
-                  label="Web"
-                />
-                <PayBtn
-                  active={method === "terminal"}
-                  onClick={() => setMethod("terminal")}
-                  icon={<SmartphoneNfc className="h-5 w-5 mb-1" />}
-                  label="Terminal"
-                />
-                <PayBtn
-                  active={method === "comp"}
-                  onClick={() => setMethod("comp")}
-                  icon={<CheckCircle2 className="h-5 w-5 mb-1" />}
-                  label="Comp"
-                />
-              </div>
-
-              {method === "cash" && (
-                <div className="bg-[#fdfaf5] border border-[#8b6f47]/30 p-4 rounded-xl mb-5 shadow-sm">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] block mb-2">
-                    Cash Received
-                  </label>
-
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={cashReceived}
-                    onChange={(e) => setCashReceived(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full rounded-xl border border-[#d8cfc3] bg-white px-4 py-3 text-xl font-bold text-[#2a1f18] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30"
-                  />
-
-                  <div className="mt-3 flex justify-between text-sm">
-                    <span className="text-[#7a6a5f]">Change Due</span>
-                    <span className="font-bold text-[#2a1f18]">
-                      {formatCurrency(changeDue)}
-                    </span>
-                  </div>
-
-                  {cashShort && (
-                    <p className="mt-2 text-xs font-bold text-red-600">
-                      Cash received is less than the total.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {method === "terminal" && (
-                <div className="bg-[#fdfaf5] border border-[#8b6f47]/30 p-3 rounded-xl mb-5 text-sm text-[#5a4a3f] flex gap-3 items-center shadow-sm">
-                  <SmartphoneNfc className="h-6 w-6 text-[#8b6f47] shrink-0" />
-                  <p>
-                    Ready to push <b>{formatCurrency(amountToCharge)}</b> to the
-                    physical card terminal.
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={onConfirmClick}
-                disabled={!canSubmit}
-                className={clsx(
-                  "w-full flex items-center justify-center gap-3 rounded-xl px-4 py-4 text-lg font-bold text-white transition-all shadow-md active:scale-[0.98]",
-                  canSubmit
-                    ? "bg-[#1a1a1a] hover:bg-black"
-                    : "bg-[#c4b9aa] cursor-not-allowed",
-                )}
-              >
-                {submitting ? (
-                  <Spinner className="h-6 w-6" />
-                ) : (
-                  <CheckCircle2 className="h-6 w-6" />
-                )}
-                {todayLocked
-                  ? "POS Locked"
-                  : method === "terminal"
-                    ? "Send to Terminal"
-                    : method === "card"
-                      ? "Pay via Web Stripe"
-                      : txType === "items" || txType === "addons"
-                        ? "Complete & Print Receipt"
-                        : "Confirm Booking"}
-              </button>
-            </div>
-          </aside>
+            </Card>
+          ) : null}
         </div>
 
-        {terminalIntentId && (
-          <TerminalWaitingSheet
-            intentId={terminalIntentId}
-            amount={amountToCharge}
-            onCancel={() => setTerminalIntentId(null)}
-            onSuccess={(paymentId) => {
-              setTerminalIntentId(null);
-              setReference(paymentId);
-              handleCheckout(paymentId);
-            }}
-          />
-        )}
+        {/* cart + payment */}
+        <div className="space-y-4 xl:sticky xl:top-6">
+          <Card padded={false} className="overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[#e6e0d6] px-4 py-3">
+              <h2 className="font-serif text-[17px] text-[#2a211a]">Current sale</h2>
+              {hasAnyCart ? (
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" onClick={holdOrder}>Park</Button>
+                  <Button size="sm" variant="ghost" onClick={() => clearCart()}>Clear</Button>
+                </div>
+              ) : null}
+            </div>
 
-        {cardOpen && piClientSecret && (
-          <CardChargeSheet
-            clientSecret={piClientSecret}
-            amountCents={quote?.amountCents || Math.round(amountToCharge * 100)}
-            currency="EUR"
-            onClose={() => setCardOpen(false)}
-            onSuccess={() => {
-              setCardOpen(false);
-              handleCheckout();
-            }}
-          />
-        )}
+            <div className="max-h-[280px] overflow-y-auto">
+              {!hasAnyCart ? (
+                <p className="px-4 py-10 text-center text-[13px] text-[#9a8c7e]">
+                  Nothing in the cart yet.
+                </p>
+              ) : (
+                <ul className="divide-y divide-[#f0ebe2]">
+                  {selectedExperience ? (
+                    <li className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0">
+                        <span className="block truncate text-[13.5px] font-semibold text-[#2a211a]">
+                          {selectedExperience.name}
+                        </span>
+                        <span className="text-[11.5px] text-[#9a8c7e]">
+                          {adults} adult{adults === 1 ? "" : "s"}
+                          {kids ? ` · ${kids} child${kids === 1 ? "" : "ren"}` : ""}
+                        </span>
+                      </div>
+                      <span className="shrink-0 text-[13.5px] font-semibold">{formatCurrency(expGross)}</span>
+                    </li>
+                  ) : null}
+
+                  {itemLines.map((l) => (
+                    <li key={l.id} className="px-4 py-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-[13.5px] font-semibold text-[#2a211a]">{l.name}</span>
+                          {l.sku ? <span className="text-[11px] text-[#b0a294]">{l.sku}</span> : null}
+                        </div>
+                        <button onClick={() => removeLine(l.id)} aria-label="Remove line"
+                          className="rounded-lg p-1 text-[#b0a294] hover:bg-[#fbeae5] hover:text-[#a33c22]">
+                          <Icon name="trash" size={14} />
+                        </button>
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <div className="flex items-center rounded-lg border border-[#e6e0d6] bg-white">
+                          <button onClick={() => setQty(l.id, l.qty - 1)}
+                            className="px-2.5 py-1 text-[#6b5c4d] hover:bg-[#f2ede4]">−</button>
+                          <span className="min-w-[28px] text-center text-[13px] font-semibold">{l.qty}</span>
+                          <button onClick={() => setQty(l.id, l.qty + 1)}
+                            className="px-2.5 py-1 text-[#6b5c4d] hover:bg-[#f2ede4]">+</button>
+                        </div>
+                        <span className="text-[12px] text-[#9a8c7e]">×</span>
+                        <input
+                          type="number" min="0" step="0.01"
+                          value={l.price}
+                          onChange={(e) => setLinePrice(l.id, e.target.value)}
+                          className={`${inputClass} h-8 w-[86px] text-[12.5px]`}
+                        />
+                        <span className="ml-auto text-[13.5px] font-semibold">
+                          {formatCurrency((Number(l.price) || 0) * l.qty)}
+                        </span>
+                      </div>
+                      {typeof l.stock === "number" && l.qty >= l.stock ? (
+                        <p className="mt-1 text-[11px] font-medium text-[#8a6412]">
+                          All {l.stock} in stock are in this sale.
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* totals */}
+            <div className="space-y-1.5 border-t border-[#e6e0d6] bg-[#fdfbf7] px-4 py-3 text-[13px]">
+              <Row label="Gross" value={formatCurrency(totalGross)} />
+              {clampedDiscount > 0 ? (
+                <Row label="Discount" value={`−${formatCurrency(clampedDiscount)}`} accent />
+              ) : null}
+              <Row label="Net" value={formatCurrency(finalNetTotal)} muted />
+              <Row label="VAT" value={formatCurrency(finalVatTotal)} muted />
+              <div className="flex items-baseline justify-between border-t border-[#e6e0d6] pt-2">
+                <span className="text-[12px] font-semibold uppercase tracking-wider text-[#9a8c7e]">To pay</span>
+                <span className="font-serif text-[24px] text-[#2a211a]">{formatCurrency(amountToCharge)}</span>
+              </div>
+            </div>
+          </Card>
+
+          {/* discount */}
+          <Card>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">Discount</span>
+              <div className="inline-flex rounded-lg border border-[#e6e0d6] bg-[#fdfbf7] p-0.5">
+                {[["amount", "€"], ["percent", "%"]].map(([v, l]) => (
+                  <button
+                    key={v}
+                    onClick={() => { setDiscountMode(v); setDiscountInput(0); }}
+                    className={`rounded-md px-2.5 py-0.5 text-[12px] font-semibold transition-colors ${
+                      discountMode === v ? "bg-[#2a211a] text-white" : "text-[#6b5c4d]"
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number" min="0" step={discountMode === "percent" ? "1" : "0.01"}
+                max={discountMode === "percent" ? 100 : undefined}
+                value={discountInput}
+                onChange={(e) => setDiscountInput(e.target.value)}
+                className={`${inputClass} h-9`}
+              />
+              {discountMode === "percent" ? (
+                <div className="flex gap-1">
+                  {[10, 20, 50].map((p) => (
+                    <button key={p} onClick={() => setDiscountInput(p)}
+                      className="rounded-full bg-[#f2ede4] px-2.5 py-1 text-[12px] font-medium text-[#6b5c4d] hover:bg-[#e8e0d3]">
+                      {p}%
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Field label="Promo code">
+                <input value={promoCode} onChange={(e) => setPromoCode(e.target.value)}
+                  className={`${inputClass} h-9`} placeholder="Optional" />
+              </Field>
+              <Field label="Gift card">
+                <input value={giftCode} onChange={(e) => setGiftCode(e.target.value)}
+                  className={`${inputClass} h-9`} placeholder="Optional" />
+              </Field>
+            </div>
+          </Card>
+
+          {/* customer */}
+          <Card>
+            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
+              Customer
+            </span>
+            <div className="space-y-2">
+              <input value={custName} onChange={(e) => setCustName(e.target.value)}
+                placeholder="Name" className={`${inputClass} h-9`} />
+              <input
+                type="email" value={custEmail} onChange={(e) => setCustEmail(e.target.value)}
+                placeholder="Email (required)"
+                className={`${inputClass} h-9 ${custEmail && !emailOk ? "border-[#e0a89a]" : ""}`}
+              />
+              <input
+                value={custPhone} onChange={(e) => setCustPhone(e.target.value)}
+                placeholder="Phone (required)"
+                className={`${inputClass} h-9 ${custPhone && !phoneOk ? "border-[#e0a89a]" : ""}`}
+              />
+              {txType === "addons" ? (
+                <input value={bookingRef} onChange={(e) => setBookingRef(e.target.value)}
+                  placeholder="Booking reference" className={`${inputClass} h-9`} />
+              ) : null}
+            </div>
+          </Card>
+
+          {/* payment */}
+          <Card>
+            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
+              Payment
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ["terminal", "Terminal", "card"],
+                ["card", "Card (online)", "card"],
+                ["cash", "Cash", "register"],
+                ["comp", "Comp", "gift"],
+              ].map(([v, label, icon]) => (
+                <button
+                  key={v}
+                  onClick={() => setMethod(v)}
+                  className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[13px] font-semibold transition-colors ${
+                    method === v
+                      ? "border-[#2a211a] bg-[#2a211a] text-white"
+                      : "border-[#e6e0d6] bg-white text-[#6b5c4d] hover:border-[#c9b393]"
+                  }`}
+                >
+                  <Icon name={icon} size={15} /> {label}
+                </button>
+              ))}
+            </div>
+
+            {method === "cash" ? (
+              <div className="mt-3 rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] p-3">
+                <Field label="Cash received">
+                  <input
+                    type="number" min="0" step="0.01" inputMode="decimal"
+                    value={cashReceived}
+                    onChange={(e) => setCashReceived(e.target.value)}
+                    className={`${inputClass} bg-white text-[16px] font-semibold`}
+                  />
+                </Field>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setCashReceived(amountToCharge.toFixed(2))}
+                    className="rounded-full bg-[#2a211a] px-3 py-1 text-[12px] font-semibold text-white"
+                  >
+                    Exact
+                  </button>
+                  {TENDER_NOTES.filter((n) => n >= amountToCharge).slice(0, 4).map((n) => (
+                    <button key={n} onClick={() => setCashReceived(String(n))}
+                      className="rounded-full bg-white px-3 py-1 text-[12px] font-medium text-[#6b5c4d] ring-1 ring-inset ring-[#e6e0d6] hover:bg-[#f2ede4]">
+                      €{n}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 flex items-baseline justify-between border-t border-[#e6e0d6] pt-2">
+                  <span className="text-[12px] font-semibold uppercase tracking-wider text-[#9a8c7e]">Change</span>
+                  <span className={`font-serif text-[20px] ${cashShort ? "text-[#a33c22]" : "text-[#2a211a]"}`}>
+                    {cashShort ? `${formatCurrency(amountToCharge - cashReceivedAmount)} short` : formatCurrency(changeDue)}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
+            {method === "comp" ? (
+              <Muted className="mt-2 text-[12px]">
+                Nothing will be charged. The sale is still recorded for the Z-report.
+              </Muted>
+            ) : null}
+
+            {method !== "cash" && method !== "comp" ? (
+              <Field label="Reference (optional)" className="mt-3">
+                <input value={reference} onChange={(e) => setReference(e.target.value)}
+                  className={`${inputClass} h-9`} placeholder="Terminal or transaction id" />
+              </Field>
+            ) : null}
+          </Card>
+
+          {blockers.length && hasAnyCart ? (
+            <div className="rounded-2xl border border-[#f0e0bb] bg-[#fbf1dc] px-4 py-3">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a6412]">
+                Before you can charge
+              </p>
+              <ul className="list-inside list-disc space-y-0.5 text-[12.5px] text-[#8a6412]">
+                {blockers.map((b) => <li key={b}>{b}</li>)}
+              </ul>
+            </div>
+          ) : null}
+
+          <Button
+            variant="primary"
+            size="lg"
+            className="w-full text-[15px]"
+            disabled={!canSubmit}
+            onClick={onConfirmClick}
+          >
+            {submitting
+              ? "Working…"
+              : method === "comp"
+                ? "Record comp sale"
+                : `Charge ${formatCurrency(amountToCharge)}`}
+          </Button>
+        </div>
       </div>
+
+      {terminalIntentId ? (
+        <TerminalWaitingSheet
+          intentId={terminalIntentId}
+          amount={amountToCharge}
+          onCancel={() => setTerminalIntentId(null)}
+          onSuccess={(paymentId) => {
+            setTerminalIntentId(null);
+            setReference(paymentId);
+            handleCheckout(paymentId);
+          }}
+        />
+      ) : null}
+
+      {cardOpen && piClientSecret ? (
+        <CardChargeSheet
+          clientSecret={piClientSecret}
+          amountCents={quote?.amountCents || Math.round(amountToCharge * 100)}
+          currency="EUR"
+          onClose={() => setCardOpen(false)}
+          onSuccess={() => {
+            setCardOpen(false);
+            handleCheckout();
+          }}
+        />
+      ) : null}
+    </Page>
+  );
+}
+
+/* ------------------------------- components ------------------------------- */
+
+function Row({ label, value, muted, accent }) {
+  return (
+    <div className="flex justify-between">
+      <span className={muted ? "text-[#b0a294]" : "text-[#7a6a5f]"}>{label}</span>
+      <span className={accent ? "font-medium text-[#a33c22]" : muted ? "text-[#9a8c7e]" : "font-medium text-[#2a211a]"}>
+        {value}
+      </span>
     </div>
   );
 }
 
-/* Components below are unchanged from your version */
+function Counter({ label, value, onChange, min = 0 }) {
+  return (
+    <div>
+      <span className="mb-1 block text-[11px] font-semibold text-[#6b5c4d]">{label}</span>
+      <div className="flex items-center justify-between rounded-xl border border-[#e6e0d6] bg-white px-2 py-1.5">
+        <button
+          onClick={() => onChange(Math.max(min, Number(value) - 1))}
+          className="rounded-lg px-3 py-1 text-[16px] text-[#6b5c4d] hover:bg-[#f2ede4]"
+          aria-label={`Fewer ${label}`}
+        >
+          −
+        </button>
+        <span className="text-[16px] font-semibold text-[#2a211a]">{value}</span>
+        <button
+          onClick={() => onChange(Number(value) + 1)}
+          className="rounded-lg px-3 py-1 text-[16px] text-[#6b5c4d] hover:bg-[#f2ede4]"
+          aria-label={`More ${label}`}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function ExpGrid({ loading, list, selected, onSelect }) {
-  if (loading)
+  if (loading) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-5">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <SkeletonCard key={i} />
-        ))}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-24" />)}
       </div>
     );
-
-  if (!list.length)
-    return <EmptyState caption="No experiences match your search." />;
-
+  }
+  if (!list.length) {
+    return <p className="py-10 text-center text-[13px] text-[#9a8c7e]">No experiences match.</p>;
+  }
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-5">
-      {list.map((x) => (
-        <button
-          key={x.id}
-          onClick={() => onSelect(x)}
-          className={clsx(
-            "text-left p-6 rounded-2xl border transition-all active:scale-95 duration-100 relative overflow-hidden flex flex-col h-32",
-            x.id === selected?.id
-              ? "border-[#8b6f47] bg-[#fdfaf5] ring-1 ring-[#8b6f47]/30 shadow-md"
-              : "border-[#e0dcd4] bg-white hover:border-[#8b6f47]/40 hover:shadow-sm",
-          )}
-        >
-          {x.id === selected?.id && (
-            <div className="absolute top-0 right-0 border-t-[36px] border-r-[36px] border-t-[#8b6f47] border-r-transparent">
-              <CheckCircle2 className="absolute -top-[32px] right-[4px] h-4 w-4 text-white" />
-            </div>
-          )}
-
-          <h3 className="font-bold text-lg leading-tight mb-auto pr-6 text-[#2a1f18] line-clamp-2">
-            {x.name}
-          </h3>
-
-          <p className="text-sm text-[#8b6f47] font-bold mt-2">
-            {formatCurrency(x.pricing?.priceAdult ?? 0)}{" "}
-            <span className="text-[#a09084] font-medium">/ adult</span>
-          </p>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ItemGrid({ loading, list, cartMap, onInc }) {
-  if (loading)
-    return (
-      <div className="grid grid-cols-3 md:grid-cols-4 gap-5">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <SkeletonCard key={i} />
-        ))}
-      </div>
-    );
-
-  if (!list.length) return <EmptyState caption="No items match your search." />;
-
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-5">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
       {list.map((x) => {
-        const qty = cartMap[x.id]?.qty || 0;
-
+        const active = selected?.id === x.id;
         return (
           <button
             key={x.id}
-            onClick={() => onInc(x)}
-            className={clsx(
-              "flex flex-col text-left p-5 rounded-2xl border transition-all active:scale-95 h-32",
-              qty > 0
-                ? "border-[#8b6f47] bg-[#fdfaf5] shadow-md ring-1 ring-[#8b6f47]/30"
-                : "border-[#e0dcd4] bg-white hover:border-[#8b6f47]/40 hover:shadow-sm",
-            )}
+            onClick={() => onSelect(x)}
+            className={`rounded-2xl border p-3 text-left transition-all ${
+              active
+                ? "border-[#2a211a] bg-[#2a211a] text-white shadow-sm"
+                : "border-[#e6e0d6] bg-white hover:border-[#c9b393] hover:shadow-sm"
+            }`}
           >
-            <div className="flex-1">
-              <h3 className="font-bold text-base line-clamp-2 text-[#2a1f18]">
-                {x.name}
-              </h3>
-
-              {x.sku && (
-                <span className="text-xs text-[#a09084] font-mono mt-1 block bg-[#f4f1ec] w-fit px-1.5 py-0.5 rounded">
-                  {x.sku}
-                </span>
-              )}
-            </div>
-
-            <div className="flex justify-between items-end w-full mt-2">
-              <span className="font-bold text-lg text-[#8b6f47]">
-                {formatCurrency(x.price)}
-              </span>
-
-              {qty > 0 && (
-                <span className="bg-[#8b6f47] text-white text-xs font-bold px-2.5 py-1 rounded-md shadow-sm">
-                  {qty}
-                </span>
-              )}
-            </div>
+            <span className={`block text-[13.5px] font-semibold ${active ? "text-white" : "text-[#2a211a]"}`}>
+              {x.name}
+            </span>
+            <span className={`mt-1 block text-[12px] ${active ? "text-white/70" : "text-[#9a8c7e]"}`}>
+              {formatCurrency(x?.pricing?.priceAdult ?? 0)} adult
+            </span>
           </button>
         );
       })}
@@ -1429,85 +1206,59 @@ function ItemGrid({ loading, list, cartMap, onInc }) {
   );
 }
 
-function Counter({ label, value, onChange, min = 0 }) {
-  return (
-    <div className="bg-[#fdfbf7] border border-[#e0dcd4] rounded-xl p-3 flex flex-col items-center shadow-inner">
-      <span className="text-[10px] font-bold text-[#a09084] uppercase tracking-widest mb-2">
-        {label}
-      </span>
-
-      <div className="flex items-center gap-3 w-full justify-between">
-        <button
-          onClick={() => onChange(Math.max(min, value - 1))}
-          className="w-10 h-10 rounded-lg bg-white border border-[#d8cfc3] flex items-center justify-center text-[#4c4138] active:bg-[#f0e7d9] shadow-sm hover:border-[#8b6f47]/50 transition-colors"
-        >
-          <Minus className="h-5 w-5" />
-        </button>
-
-        <span className="text-xl font-bold font-serif">{value}</span>
-
-        <button
-          onClick={() => onChange(value + 1)}
-          className="w-10 h-10 rounded-lg bg-white border border-[#d8cfc3] flex items-center justify-center text-[#4c4138] active:bg-[#f0e7d9] shadow-sm hover:border-[#8b6f47]/50 transition-colors"
-        >
-          <Plus className="h-5 w-5" />
-        </button>
+function ItemGrid({ loading, list, cartMap, onInc }) {
+  if (loading) {
+    return (
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => <Skeleton key={i} className="h-24" />)}
       </div>
+    );
+  }
+  if (!list.length) {
+    return <p className="py-10 text-center text-[13px] text-[#9a8c7e]">No products match.</p>;
+  }
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+      {list.map((x) => {
+        const inCart = cartMap[x.id]?.qty || 0;
+        const out = typeof x.stock === "number" && x.stock <= 0;
+        const low = typeof x.stock === "number" && x.stock > 0 && x.stock <= 5;
+        return (
+          <button
+            key={x.id}
+            onClick={() => onInc(x)}
+            disabled={out}
+            className={`relative rounded-2xl border p-3 text-left transition-all ${
+              out
+                ? "cursor-not-allowed border-[#eee7dc] bg-[#faf8f4] opacity-60"
+                : inCart
+                  ? "border-[#8b6f47] bg-[#fdfbf7] shadow-sm"
+                  : "border-[#e6e0d6] bg-white hover:border-[#c9b393] hover:shadow-sm"
+            }`}
+          >
+            {inCart ? (
+              <span className="absolute right-2 top-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#8b6f47] px-1 text-[11px] font-bold text-white">
+                {inCart}
+              </span>
+            ) : null}
+            <span className="block pr-6 text-[13px] font-semibold leading-tight text-[#2a211a]">{x.name}</span>
+            {x.sku ? <span className="mt-0.5 block text-[10.5px] text-[#b0a294]">{x.sku}</span> : null}
+            <span className="mt-1.5 block text-[13.5px] font-semibold text-[#8b6f47]">
+              {formatCurrency(x.price)}
+            </span>
+            {out ? (
+              <Badge variant="danger" className="mt-1.5">Out of stock</Badge>
+            ) : low ? (
+              <Badge variant="warning" className="mt-1.5">{x.stock} left</Badge>
+            ) : typeof x.stock === "number" ? (
+              <span className="mt-1.5 block text-[11px] text-[#9a8c7e]">{x.stock} in stock</span>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
-
-function PayBtn({ active, onClick, icon, label }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={clsx(
-        "flex flex-col items-center justify-center p-3 rounded-xl border transition-all h-20",
-        active
-          ? "border-transparent bg-[#1a1a1a] text-white shadow-md scale-105"
-          : "border-[#d8cfc3] bg-white hover:bg-[#fdfaf5] text-[#7a6a5f] hover:border-[#8b6f47]/50",
-      )}
-    >
-      {icon}
-      <span className="text-[10px] font-bold uppercase tracking-wider mt-1">
-        {label}
-      </span>
-    </button>
-  );
-}
-
-function SegmentBtn({ active, onClick, icon, label }) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        "flex items-center gap-2 px-5 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all",
-        active
-          ? "bg-white text-[#4c4138] shadow-sm border border-[#e0dcd4]"
-          : "text-[#8a7b70] hover:text-[#4c4138]",
-      )}
-    >
-      {icon} {label}
-    </button>
-  );
-}
-
-function SkeletonCard() {
-  return (
-    <div className="h-32 rounded-2xl bg-gradient-to-r from-[#eee5da]/40 via-[#f3ede4]/40 to-[#eee5da]/40 animate-pulse border border-[#e0dcd4]" />
-  );
-}
-
-function EmptyState({ caption }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full text-[#a09084] space-y-4 bg-white/50 m-6 rounded-3xl border-2 border-dashed border-[#e8e2d9]">
-      <Search className="h-10 w-10 opacity-30 text-[#8b6f47]" />
-      <p className="font-medium text-sm">{caption}</p>
-    </div>
-  );
-}
-
 function Spinner({ className }) {
   return (
     <svg className={clsx("animate-spin", className)} viewBox="0 0 24 24">
@@ -1527,34 +1278,6 @@ function Spinner({ className }) {
         fill="none"
       />
     </svg>
-  );
-}
-
-function Toast({ type = "success", children, onDismiss }) {
-  return (
-    <div
-      className={clsx(
-        "fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-5 py-3 rounded-full shadow-xl border text-sm font-bold animate-in slide-in-from-top-6",
-        type === "error"
-          ? "bg-red-50 border-red-200 text-red-800"
-          : "bg-[#1a1a1a] border-transparent text-white",
-      )}
-    >
-      {type === "error" ? (
-        <AlertTriangle className="h-5 w-5 text-red-600" />
-      ) : (
-        <CheckCircle2 className="h-5 w-5 text-[#8b6f47]" />
-      )}
-
-      {children}
-
-      <button
-        onClick={onDismiss}
-        className="ml-2 opacity-60 hover:opacity-100 transition-opacity"
-      >
-        <X className="h-4 w-4" />
-      </button>
-    </div>
   );
 }
 

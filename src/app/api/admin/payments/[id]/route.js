@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -40,9 +41,9 @@ async function verifyAccess() {
     .maybeSingle();
 
   const metaRole = user?.app_metadata?.role || user?.user_metadata?.role;
-  const finalRole = dbUser?.role || metaRole || "user";
+  const { role: finalRole, permissions } = await resolveStaffAccess(user);
 
-  if (!ALLOWED_PAYMENT_ROLES.includes(finalRole)) {
+  if (!accessCan(permissions, "payments")) {
     return { authorized: false, res: bad("Forbidden", 403) };
   }
 

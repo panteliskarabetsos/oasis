@@ -8,6 +8,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
 // add near the top with your other imports:
 import Stripe from "stripe";
+import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" })
@@ -317,12 +318,10 @@ async function requireAdmin() {
     data: { user },
   } = await supa.auth.getUser();
   if (!user) return { error: true, response: bad("Unauthorized", 401) };
-  const { data: row, error } = await supa
-    .from("User") // ⬅ if you renamed to lowercase, change to .from("user")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (error || (row?.role ?? "user") !== "admin")
+  // Resolve the role with the service client — the user client is RLS-bound
+  // and was silently downgrading real admins to "user".
+  const role = await resolveStaffRole(user);
+  if (!roleCan(role, "invoices"))
     return { error: true, response: bad("Forbidden", 403) };
   return { error: false };
 }
@@ -526,6 +525,152 @@ export async function POST(req) {
     201,
     { Location: `/api/admin/invoices2/${created.id}` }
   );
+}
+
+/* -------- PATCH (update an existing invoice) --------
+   The admin detail page has always sent PATCH here, but only GET/POST/DELETE
+   existed, so every save returned 405 and silently did nothing.
+
+   Accepts the fields the detail page sends at the top level
+   ({ buyer, notes, due_date, status, lines }) and also the POST-style
+   { invoice: {...} } envelope. Series and number are never reallocated. */
+export async function PATCH(req, ctx) {
+  const gate = await requireAdmin();
+  if (gate?.error) return gate.response;
+
+  const { id: idParam } = await ctx.params;
+  const id = Number(idParam);
+  if (!Number.isFinite(id) || id <= 0) return bad("Invalid invoice id", 400);
+
+  const admin = createSupabaseAdmin();
+  if (!admin) return bad("Server not configured", 500);
+
+  const body = await req.json().catch(() => ({}));
+  const invIn = body?.invoice || body || {};
+
+  // Current state + payments decide what may change
+  const [{ data: current, error: eLoad }, { data: payRows, error: ePay }] =
+    await Promise.all([
+      admin
+        .from("invoice")
+        .select("id, status, currency, total")
+        .eq("id", id)
+        .maybeSingle(),
+      admin.from("payment").select("amount").eq("invoice_id", id),
+    ]);
+
+  if (eLoad) return bad(eLoad.message || "Failed to load invoice", 500);
+  if (!current) return bad("Invoice not found", 404);
+  if (ePay) return bad(ePay.message || "Failed to load payments", 500);
+
+  const currentStatus = String(current.status || "").toLowerCase();
+  if (currentStatus === "void")
+    return bad("A voided invoice can no longer be edited.", 409);
+
+  const paidTotal = (payRows || []).reduce(
+    (sum, p) => sum + Number(p?.amount || 0),
+    0
+  );
+
+  const providedItems =
+    (Array.isArray(body?.items) && body.items) ||
+    (Array.isArray(body?.lines) && body.lines) ||
+    (Array.isArray(invIn?.items) && invIn.items) ||
+    (Array.isArray(invIn?.lines) && invIn.lines) ||
+    null;
+
+  const patch = {};
+
+  // Line items are optional on a PATCH; when present they replace the set.
+  let norm = null;
+  if (providedItems) {
+    if (!providedItems.length)
+      return bad("An invoice needs at least one line item.", 400);
+
+    norm = normalizeLines(providedItems);
+    const totals = summarize(norm);
+    const newTotal = r2(totals.total);
+
+    // Never let an edit drop the total below what has already been collected.
+    if (paidTotal > 0 && newTotal + 0.005 < paidTotal)
+      return bad(
+        `This invoice already has ${paidTotal.toFixed(
+          2
+        )} in payments; the new total (${newTotal.toFixed(
+          2
+        )}) would be lower. Refund first, then edit.`,
+        409
+      );
+
+    patch.items = toCanonicalItems(norm);
+    patch.subtotal = r2(totals.subtotal);
+    patch.tax_total = r2(totals.tax);
+    patch.total = newTotal;
+  }
+
+  if (invIn.buyer !== undefined)
+    patch.buyer = parseJSON(invIn.buyer) ?? invIn.buyer ?? {};
+  if (invIn.seller !== undefined)
+    patch.seller = parseJSON(invIn.seller) ?? invIn.seller ?? {};
+  if (invIn.notes !== undefined) patch.notes = invIn.notes ?? null;
+  if (invIn.due_date !== undefined) patch.due_date = invIn.due_date || null;
+  if (invIn.mark !== undefined) patch.mark = invIn.mark ?? null;
+  if (invIn.currency !== undefined)
+    patch.currency = String(invIn.currency || "EUR").toUpperCase();
+  if (invIn.status !== undefined) {
+    const next = String(invIn.status || "").toLowerCase();
+    // paid/void are reached through mark-paid and void, not a plain edit
+    if (["paid", "void"].includes(next) && next !== currentStatus)
+      return bad(
+        `Use the ${next === "paid" ? "mark-paid" : "void"} action to set this status.`,
+        409
+      );
+    patch.status = invIn.status;
+  }
+
+  if (!Object.keys(patch).length) return bad("Nothing to update.", 400);
+
+  const { data: updated, error: eUpd } = await admin
+    .from("invoice")
+    .update(patch)
+    .eq("id", id)
+    .select("*")
+    .maybeSingle();
+
+  if (eUpd) return bad(eUpd.message || "Update failed", 500);
+  if (!updated) return bad("Invoice not found", 404);
+
+  // Replace the child line rows only once the invoice row is safely updated.
+  let linesSaved = null;
+  if (norm) {
+    const { error: eDel } = await admin
+      .from("invoice_line")
+      .delete()
+      .eq("invoice_id", id);
+    if (eDel) return bad(eDel.message || "Failed to clear old lines", 500);
+
+    const rows = norm.map((l) => ({ ...l, invoice_id: id }));
+    const { error: eIns, count } = await admin
+      .from("invoice_line")
+      .insert(rows)
+      .select("id", { head: false, count: "exact" });
+    if (eIns) return bad(eIns.message || "Failed to save lines", 500);
+    linesSaved = Number(count || rows.length);
+  }
+
+  return ok({
+    message: "Invoice updated.",
+    id: updated.id,
+    number: updated.number,
+    series: updated.series,
+    status: updated.status,
+    totals: {
+      subtotal: updated.subtotal,
+      tax_total: updated.tax_total,
+      total: updated.total,
+    },
+    ...(linesSaved === null ? {} : { linesSaved }),
+  });
 }
 
 export async function DELETE(_req, ctx) {

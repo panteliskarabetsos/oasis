@@ -3,8 +3,11 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function GET(req) {
+  const auth = await requireAdmin("schedule");
+  if (!auth.ok) return auth.response;
   const admin = createSupabaseAdmin();
   if (!admin)
     return NextResponse.json(

@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -60,15 +61,11 @@ async function requireAdmin() {
   if (error || !user)
     return { error: true, response: bad("Unauthorized", 401) };
 
-  // Check role from your User table (consistent with invoices API)
-  const { data: row, error: roleErr } = await supa
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-
-  const role = roleErr ? "user" : row?.role ?? "user";
-  if (role !== "admin") return { error: true, response: bad("Forbidden", 403) };
+  // Resolve the role with the service client — querying User through the
+  // user client is RLS-bound and silently downgraded real admins to "user".
+  const role = await resolveStaffRole(user);
+  if (!roleCan(role, "payments"))
+    return { error: true, response: bad("Forbidden", 403) };
 
   const admin = createSupabaseAdmin();
   if (!admin)

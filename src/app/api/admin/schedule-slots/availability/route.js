@@ -26,7 +26,7 @@ const ymdFromNaive = (ts) => String(ts).slice(0, 10); // "YYYY-MM-DD ..." → "Y
 export async function GET(req) {
   // Admin guard
   const auth = await requireAdmin();
-  if (auth instanceof NextResponse) return auth;
+  if (!auth.ok) return auth.response;
   const { admin } = auth;
 
   // Params

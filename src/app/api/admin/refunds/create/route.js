@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { revalidatePath } from "next/cache";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 /* ---------- helpers ---------- */
 function getStripe() {
@@ -43,6 +44,8 @@ function ok(n) {
 
 /* ---------- route ---------- */
 export async function POST(req) {
+  const auth = await requireAdmin("payments");
+  if (!auth.ok) return auth.response;
   try {
     // Accept JSON or form
     const ctype = req.headers.get("content-type") || "";

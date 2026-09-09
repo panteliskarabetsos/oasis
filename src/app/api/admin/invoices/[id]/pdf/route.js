@@ -4,8 +4,11 @@
 import { NextResponse as NextResponse5 } from "next/server";
 import { getSupabaseAdmin as getSupabaseAdmin5 } from "@/lib/supabaseAdmin";
 import { buildInvoicePdfBuffer as buildInvoicePdfBuffer2 } from "@/lib/pdf/buildInvoicePdf";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function GET(_req, { params }) {
+  const auth = await requireAdmin("invoices");
+  if (!auth.ok) return auth.response;
   const supabase = getSupabaseAdmin5();
   const id = Number(params.id);
   const { data: inv, error } = await supabase

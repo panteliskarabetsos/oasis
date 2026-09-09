@@ -5,6 +5,12 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  ALL_PERMISSIONS,
+  accessCan,
+  normalizePermissions,
+  resolveStaffAccess,
+} from "@/lib/auth/requireAdmin";
 
 const MAX_NOTES_LEN = 2000;
 
@@ -16,12 +22,42 @@ const ALLOWED_ROLES = new Set([
   "marketing",
   "support",
   "partner",
+  "custom", // hand-picked component access
   "admin", // Keep for legacy/fallback
   "user",
 ]);
 
-// Helper to determine if a role has admin-level access to this page
-const isAdminRole = (r) => r && r !== "user";
+// Staff accounts (any role other than "user") may only be created, modified or
+// deleted by roles that hold the "admins" permission — i.e. superadmin. Without
+// this, any staff member (support, partner, marketing…) could mint a superadmin.
+const canManageStaff = (permissions) => accessCan(permissions, "admins");
+const isStaffRole = (r) => typeof r === "string" && r !== "user";
+
+/** Accept only known component keys; anything else is rejected outright so a
+ *  typo can never silently grant nothing (or something unintended). */
+function readPermissions(value) {
+  if (value === undefined || value === null) return { list: null };
+  if (!Array.isArray(value)) return { error: "permissions must be an array" };
+  const unknown = value
+    .map((p) => String(p).trim())
+    .filter((p) => p && !ALL_PERMISSIONS.includes(p));
+  if (unknown.length)
+    return { error: `Unknown permission(s): ${unknown.join(", ")}` };
+  return { list: normalizePermissions(value) };
+}
+
+/** Surface a missing-column error as actionable guidance rather than a 500. */
+function permissionsColumnMissing(e) {
+  const msg = String(e?.message || "");
+  return e?.code === "42703" || /column .*permissions.* does not exist/i.test(msg);
+}
+const migrationNeeded = () =>
+  err(
+    "Custom permissions need the User.permissions column — run dump_sql/20260909_user_permissions.sql.",
+    501,
+  );
+const staffDenied = () =>
+  err("Only a Super Admin can manage staff accounts.", 403);
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const err = (msg, status = 500) =>
@@ -66,31 +102,10 @@ async function requireAdmin() {
 
   const authUser = data.user;
 
-  // Fast path: metadata role
-  const roleMeta =
-    authUser?.app_metadata?.role || authUser?.user_metadata?.role || null;
+  const { role, permissions } = await resolveStaffAccess(authUser);
+  if (!accessCan(permissions)) return { ok: false, res: err("Forbidden", 403) };
 
-  if (isAdminRole(roleMeta)) {
-    return { ok: true, admin, authUser, role: roleMeta };
-  }
-
-  // Fallback: DB role check
-  const { data: dbUser, error: dbErr } = await admin
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", authUser.id)
-    .maybeSingle();
-
-  if (dbErr) {
-    console.error("[admin/users] role lookup error", dbErr);
-    return { ok: false, res: err("Server error", 500) };
-  }
-
-  if (isAdminRole(dbUser?.role)) {
-    return { ok: true, admin, authUser, role: dbUser.role };
-  }
-
-  return { ok: false, res: err("Forbidden", 403) };
+  return { ok: true, admin, authUser, role, permissions };
 }
 
 /* ========================== GET (Admin) ========================== */
@@ -101,15 +116,29 @@ export async function GET() {
   const { admin } = gate;
 
   try {
-    const { data, error } = await admin
+    const COLS =
+      "id,auth_user_id,email,name,surname,phone,role,dateOfBirth,createdAt,notes";
+
+    let { data, error } = await admin
       .from("User")
-      .select(
-        "id,auth_user_id,email,name,surname,phone,role,dateOfBirth,createdAt,notes",
-      )
+      .select(`${COLS},permissions`)
       .order("createdAt", { ascending: false });
 
+    // The permissions column is optional until the migration is applied.
+    if (error && permissionsColumnMissing(error)) {
+      ({ data, error } = await admin
+        .from("User")
+        .select(COLS)
+        .order("createdAt", { ascending: false }));
+    }
+
     if (error) throw error;
-    return ok(Array.isArray(data) ? data : []);
+    return ok(
+      (Array.isArray(data) ? data : []).map((u) => ({
+        ...u,
+        permissions: normalizePermissions(u.permissions),
+      })),
+    );
   } catch (e) {
     console.error("[admin/users] GET failed:", e);
     return err("Failed to fetch users", 500);
@@ -126,6 +155,8 @@ export async function POST(req) {
   const body = await readJson(req);
   if (!body) return err("Invalid JSON", 400);
 
+  if (isStaffRole(body?.role) && !canManageStaff(gate.permissions)) return staffDenied();
+
   let {
     email,
     password,
@@ -133,9 +164,16 @@ export async function POST(req) {
     surname,
     phone,
     role = "user",
+    permissions,
     dateOfBirth,
     notes,
   } = body;
+
+  const perms = readPermissions(permissions);
+  if (perms.error) return err(perms.error, 400);
+  // A custom account with nothing ticked could not open a single screen.
+  if (role === "custom" && !(perms.list && perms.list.length))
+    return err("Pick at least one component for a custom access account", 400);
 
   email = normalizeEmail(email);
 
@@ -215,6 +253,7 @@ export async function POST(req) {
       dateOfBirth: dobTs,
       updatedAt: new Date().toISOString(),
       notes: safeNotes,
+      ...(perms.list ? { permissions: perms.list } : {}),
     };
 
     let upsertRes = await admin
@@ -229,6 +268,11 @@ export async function POST(req) {
         .upsert(payload, { onConflict: "email" })
         .select("id")
         .single();
+    }
+
+    if (upsertRes.error && permissionsColumnMissing(upsertRes.error)) {
+      if (createdAuthUserId) await admin.auth.admin.deleteUser(createdAuthUserId);
+      return migrationNeeded();
     }
 
     if (upsertRes.error) {
@@ -270,7 +314,13 @@ export async function PUT(req) {
   const body = await readJson(req);
   if (!body) return err("Invalid JSON", 400);
 
-  const { id, email, name, surname, phone, role, dateOfBirth, notes } = body;
+  const { id, email, name, surname, phone, role, permissions, dateOfBirth, notes } =
+    body;
+
+  const perms = readPermissions(permissions);
+  if (perms.error) return err(perms.error, 400);
+  if (role === "custom" && perms.list && !perms.list.length)
+    return err("Pick at least one component for a custom access account", 400);
 
   const userId = parseId(id);
   if (!userId) return err("Invalid user id", 400);
@@ -292,6 +342,15 @@ export async function PUT(req) {
 
     if (curErr) throw curErr;
     if (!current) return err("User not found", 404);
+
+    // Guard both directions: promoting someone to staff, and editing someone
+    // who already is staff.
+    if (
+      (isStaffRole(role) || isStaffRole(current.role)) &&
+      !canManageStaff(gate.permissions)
+    ) {
+      return staffDenied();
+    }
 
     // Prevent self-demotion from superadmin
     const isSelf = String(current.auth_user_id) === String(authUser.id);
@@ -317,6 +376,7 @@ export async function PUT(req) {
     if (phone != null) updates.phone = String(phone).trim() || null;
 
     if (typeof role === "string") updates.role = role;
+    if (perms.list) updates.permissions = perms.list;
 
     if (dateOfBirth !== undefined) {
       updates.dateOfBirth = dateOfBirth ? `${dateOfBirth}T00:00:00` : null;
@@ -327,7 +387,7 @@ export async function PUT(req) {
       updates.notes = t ? t.slice(0, MAX_NOTES_LEN) : null;
     }
 
-    const { data: updated, error: upErr } = await admin
+    let { data: updated, error: upErr } = await admin
       .from("User")
       .update(updates)
       .eq("id", userId)
@@ -336,6 +396,9 @@ export async function PUT(req) {
       )
       .single();
 
+    // Writing permissions before the migration has run is a setup problem, not
+    // a server fault — say so plainly instead of returning a 500.
+    if (upErr && permissionsColumnMissing(upErr)) return migrationNeeded();
     if (upErr) throw upErr;
 
     // Best-effort sync to Auth (role/email/metadata)
@@ -394,12 +457,16 @@ export async function DELETE(req) {
     // Load target
     const { data: existing, error: exErr } = await admin
       .from("User")
-      .select("id,auth_user_id")
+      .select("id,auth_user_id,role")
       .eq("id", userId)
       .single();
 
     if (exErr) throw exErr;
     if (!existing) return err("User not found", 404);
+
+    if (isStaffRole(existing.role) && !canManageStaff(gate.permissions)) {
+      return staffDenied();
+    }
 
     // ✅ HARD BLOCK: cannot delete yourself
     if (String(existing.auth_user_id) === String(authUser.id)) {

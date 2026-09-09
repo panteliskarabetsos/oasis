@@ -5,12 +5,15 @@ export const dynamic = "force-dynamic";
 import "server-only";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 /**
  * GET /admin/invoices/:id/download
  * Returns a PDF (invoice) if possible, otherwise redirects to a Stripe receipt.
  */
 export async function GET(_req, { params }) {
+  const auth = await requireAdmin("invoices");
+  if (!auth.ok) return auth.response;
   const p = await params; // in Next 15, params can be a Promise
   const id = Number(p?.id);
   if (!Number.isFinite(id) || id <= 0) {
@@ -21,7 +24,7 @@ export async function GET(_req, { params }) {
   const { createSupabaseAdmin } = await import("@/lib/supabase/admin");
   const admin = createSupabaseAdmin();
   const { data: b, error } = await admin
-    .from("Booking")
+    .from("booking")
     .select(
       "id, status, numberOfPeople, totalPaidAmount, currency, primary_contact, startTime, stripeSessionId, stripePaymentIntentId"
     )

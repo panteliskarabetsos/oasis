@@ -5,11 +5,14 @@ export const dynamic = "force-dynamic";
 import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 export async function POST(req, { params }) {
+  const auth = await requireAdmin("promotions");
+  if (!auth.ok) return auth.response;
   const { id } = await params;
   const idNum = Number(id);
   if (!Number.isFinite(idNum) || idNum <= 0) return bad("Invalid id");
@@ -43,7 +46,10 @@ export async function POST(req, { params }) {
   // fire-and-forget; the worker route will send a batch
   fetch(`${base}/api/admin/promotions/email/worker`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      cookie: req.headers.get("cookie") ?? "",
+    },
     body: JSON.stringify({ campaignId: idNum, batchSize: 200 }),
   }).catch(() => {});
 

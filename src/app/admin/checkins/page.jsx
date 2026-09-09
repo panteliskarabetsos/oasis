@@ -1,29 +1,41 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+export const dynamic = "force-dynamic";
 
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import toast from "react-hot-toast";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  QrCode,
-  Search,
-  CalendarDays,
-  CheckCircle2,
-  XCircle,
-  RotateCcw,
   AlertTriangle,
   Camera,
-  Flashlight,
   Check,
-  User,
-  Users,
+  CheckCircle2,
+  Flashlight,
   Info,
+  QrCode,
+  XCircle,
 } from "lucide-react";
 
-/* ------------------------------------------------------------
-   Utilities
--------------------------------------------------------------*/
-/** Format Date -> YYYY-MM-DD in Europe/Athens */
+import Icon from "../_ui/Icon";
+import {
+  Button,
+  Card,
+  EmptyState,
+  ErrorNote,
+  Muted,
+  Page,
+  PageHeader,
+  Select,
+  Skeleton,
+  StatusBadge as UIStatusBadge,
+  inputClass,
+} from "../_ui";
+
+/* The QR scanner below (ScanModal and friends) is kept exactly as it was —
+   it drives camera hardware, torch and device selection, and there is no
+   device here to re-test it against. It depends on `clsx` and `Badge`. */
+
 function formatDayTZ(d = new Date(), tz = "Europe/Athens") {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
@@ -75,26 +87,6 @@ function Badge({ tone = "slate", children, className = "" }) {
     </span>
   );
 }
-function StatusBadge({ status }) {
-  const s = (status || "").toLowerCase();
-  if (s === "checked_in") return <Badge tone="green">Checked-in</Badge>;
-  if (s === "completed") return <Badge tone="violet">Completed</Badge>;
-  if (s === "approved" || s === "converted")
-    return <Badge tone="sky">Approved</Badge>;
-  if (s === "pending") return <Badge tone="amber">Pending</Badge>;
-  if (s === "no_show" || s === "noshow")
-    return <Badge tone="red">No-show</Badge>;
-  if (s === "cancelled") return <Badge tone="red">Cancelled</Badge>;
-  return <Badge>Confirmed</Badge>;
-}
-function Kbd({ children }) {
-  return (
-    <kbd className="px-1.5 py-0.5 rounded-md border border-slate-300 text-[10px] font-mono bg-white/70">
-      {children}
-    </kbd>
-  );
-}
-
 function partySize(b) {
   if (typeof b?.numberOfPeople === "number" && !Number.isNaN(b.numberOfPeople))
     return b.numberOfPeople;
@@ -112,68 +104,6 @@ function contactName(pc) {
   return "—";
 }
 
-/* ------------------------------------------------------------
-   Toasts (animated)
--------------------------------------------------------------*/
-function useToasts() {
-  const [toasts, setToasts] = useState([]);
-  function pushToast(msg, tone = "default", ms = 2400) {
-    const id = Math.random().toString(36).slice(2);
-    setToasts((t) => [...t, { id, msg, tone }]);
-    if (ms)
-      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ms);
-  }
-  return {
-    toasts,
-    pushToast,
-    remove: (id) => setToasts((t) => t.filter((x) => x.id !== id)),
-  };
-}
-function Toasts({ toasts, remove }) {
-  return (
-    <div className="fixed top-3 right-3 z-[60] space-y-2" aria-live="polite">
-      <AnimatePresence>
-        {toasts.map((t) => (
-          <motion.div
-            key={t.id}
-            initial={{ opacity: 0, y: -8, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{
-              type: "spring",
-              stiffness: 400,
-              damping: 30,
-              mass: 0.6,
-            }}
-            role="status"
-            className={clsx(
-              "rounded-xl px-3 py-2 text-sm shadow border backdrop-blur bg-white/90 flex items-center gap-2 cursor-pointer",
-              t.tone === "ok" && "border-green-200 text-green-800",
-              t.tone === "err" && "border-red-200 text-red-700"
-            )}
-            style={
-              !t.tone || t.tone === "default"
-                ? { borderColor: colors.border, color: colors.text }
-                : undefined
-            }
-            onClick={() => remove(t.id)}
-          >
-            {t.tone === "ok" ? (
-              <Check size={14} />
-            ) : t.tone === "err" ? (
-              <AlertTriangle size={14} />
-            ) : null}
-            <span>{t.msg}</span>
-          </motion.div>
-        ))}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------
-   Scanner Modal (refined UI + safer lifecycle)
--------------------------------------------------------------*/
 function ScanModal({ open, onClose, onDetected }) {
   const videoRef = useRef(null);
   const rafRef = useRef(null);
@@ -863,161 +793,171 @@ function ScanResultPopover({ result, onClose, onUndo, onScroll }) {
 /* ------------------------------------------------------------
    Page
 -------------------------------------------------------------*/
-export default function CheckinsPage() {
-  const router = useRouter();
-  const sp = useSearchParams();
 
-  const [date, setDate] = useState(
-    () => sp.get("date") || formatDayTZ(new Date())
-  );
+/* --------------------------------- page ---------------------------------- */
+
+const STATUS_FILTERS = [
+  { value: "all", label: "Everyone" },
+  { value: "expected", label: "Not arrived" },
+  { value: "checked_in", label: "Arrived" },
+  { value: "no_show", label: "No-show" },
+];
+
+const isArrived = (b) => String(b.status || "").toLowerCase() === "checked_in";
+const isNoShow = (b) => ["no_show", "noshow"].includes(String(b.status || "").toLowerCase());
+const isCancelled = (b) => String(b.status || "").toLowerCase() === "cancelled";
+const isExpected = (b) => !isArrived(b) && !isNoShow(b) && !isCancelled(b);
+
+const slotTime = (d) => {
+  if (!d) return "--:--";
+  const t = new Date(d);
+  return isNaN(t) ? "--:--" : t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+};
+
+export default function CheckinsPage() {
+  const [date, setDate] = useState(() => formatDayTZ(new Date(), "Europe/Athens"));
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(false);
-  const [roster, setRoster] = useState(null); // { slots: [...], totals: {...} }
+  const [roster, setRoster] = useState(null);
   const [error, setError] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
-
-  // scan result + row flash highlight
   const [scanResult, setScanResult] = useState(null);
   const [flashId, setFlashId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
 
   const searchRef = useRef(null);
-  const { toasts, pushToast, remove } = useToasts();
+  const rowRefs = useRef({});
 
-  const jumpToToday = () => setDate(formatDayTZ(new Date()));
+  const isToday = date === formatDayTZ(new Date(), "Europe/Athens");
 
-  // URL sync
-  useEffect(() => {
-    const p = new URLSearchParams(Array.from(sp.entries()));
-    p.set("date", date);
-    router.replace(`/admin/checkins?${p.toString()}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  /* ------------------------------- loading -------------------------------- */
+  const load = useCallback(async (signal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(
+        `/api/admin/checkins?date=${encodeURIComponent(date)}&tz=Europe/Athens`,
+        { cache: "no-store", signal, credentials: "include" }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed to load the roster");
+      setRoster(json);
+    } catch (e) {
+      if (e?.name !== "AbortError") setError(e.message || "Failed to load the roster");
+    } finally {
+      setLoading(false);
+    }
   }, [date]);
 
-  // Keyboard shortcuts
+  useEffect(() => {
+    const ctrl = new AbortController();
+    load(ctrl.signal);
+    return () => ctrl.abort();
+  }, [load]);
+
+  /* ------------------------------- shortcuts ------------------------------ */
   useEffect(() => {
     const onKey = (e) => {
-      const target = e.target;
-      const tag = target?.tagName;
-      const isInput =
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        target?.isContentEditable === true;
-
-      const key = e.key;
-
-      // global shortcuts should not fire while typing
-      if (isInput) {
-        if (key === "Escape" && scanOpen) {
-          e.stopPropagation();
-          setScanOpen(false);
-        }
+      const typing = /input|textarea|select/i.test(e.target?.tagName || "");
+      if (e.key === "Escape") {
+        setScanOpen(false);
+        setScanResult(null);
         return;
       }
-
-      if (key === "/") {
+      if (typing) return;
+      if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
-      }
-
-      if (key.toLowerCase() === "s") {
+      } else if (e.key.toLowerCase() === "s") {
         e.preventDefault();
         setScanOpen(true);
-      }
-
-      if (key.toLowerCase() === "t") {
-        e.preventDefault();
-        jumpToToday();
-      }
-
-      if (key === "Escape") {
-        setScanOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [scanOpen]);
+  }, []);
 
-  // Data loading
-  useEffect(() => {
-    let abort = false;
-    async function load() {
-      setLoading(true);
-      setError("");
-      try {
-        const res = await fetch(
-          `/api/admin/checkins?date=${encodeURIComponent(
-            date
-          )}&tz=Europe/Athens`,
-          {
-            cache: "no-store",
-          }
-        );
-        const json = await res.json();
-        if (!res.ok) throw new Error(json?.error || "Failed to load roster");
-        if (!abort) setRoster(json);
-      } catch (e) {
-        if (!abort) setError(e.message || "Failed to load roster");
-      } finally {
-        if (!abort) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      abort = true;
-    };
-  }, [date]);
+  /* -------------------------------- derived ------------------------------- */
+  const slots = useMemo(() => roster?.slots || [], [roster]);
 
   const filteredSlots = useMemo(() => {
-    if (!roster?.slots) return [];
     const q = query.trim().toLowerCase();
-    if (!q) return roster.slots;
-    return roster.slots
+    return slots
       .map((slot) => {
-        const bookings = (slot.bookings || []).filter((b) => {
-          const hay = [
-            String(b.id),
-            b.primary_contact?.name || "",
-            b.primary_contact?.email || "",
-            b.primary_contact?.phone || "",
-            b.experienceName || "",
-            b.status || "",
-          ]
-            .join(" ")
-            .toLowerCase();
-          return hay.includes(q);
-        });
+        let bookings = slot.bookings || [];
+        if (statusFilter === "expected") bookings = bookings.filter(isExpected);
+        else if (statusFilter === "checked_in") bookings = bookings.filter(isArrived);
+        else if (statusFilter === "no_show") bookings = bookings.filter(isNoShow);
+
+        if (q) {
+          bookings = bookings.filter((b) =>
+            [
+              String(b.id),
+              contactName(b.primary_contact),
+              b.primary_contact?.email || "",
+              b.primary_contact?.phone || "",
+              slot.experienceName || "",
+              b.status || "",
+            ].join(" ").toLowerCase().includes(q)
+          );
+        }
         return { ...slot, bookings };
       })
-      .filter((s) => s.bookings.length);
-  }, [roster, query]);
+      .filter((s) => s.bookings.length || (!query.trim() && statusFilter === "all"));
+  }, [slots, query, statusFilter]);
 
+  const totals = useMemo(() => {
+    const all = slots.flatMap((s) => s.bookings || []);
+    const active = all.filter((b) => !isCancelled(b));
+    return {
+      bookings: active.length,
+      guests: active.reduce((sum, b) => sum + partySize(b), 0),
+      arrived: all.filter(isArrived).length,
+      arrivedGuests: all.filter(isArrived).reduce((sum, b) => sum + partySize(b), 0),
+      noShow: all.filter(isNoShow).length,
+      expected: active.filter(isExpected).length,
+      capacity: slots.reduce((sum, s) => sum + (s.totalSlots || 0), 0),
+      tours: slots.length,
+    };
+  }, [slots]);
+
+  const progress = totals.bookings ? Math.round((totals.arrived / totals.bookings) * 100) : 0;
+
+  /* -------------------------------- actions ------------------------------- */
   async function mutateBooking(bookingId, action) {
+    setBusyId(bookingId);
     try {
       const res = await fetch(`/api/admin/checkins/${bookingId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ action }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Update failed");
 
-      // Optimistic local patch
       setRoster((prev) => {
         if (!prev) return prev;
-        const slots = prev.slots.map((s) => {
-          const books = (s.bookings || []).map((b) =>
-            b.id === bookingId ? { ...b, status: json.status } : b
-          );
-          return { ...s, bookings: books };
-        });
-        return { ...prev, slots };
+        return {
+          ...prev,
+          slots: prev.slots.map((s) => ({
+            ...s,
+            bookings: (s.bookings || []).map((b) =>
+              b.id === bookingId ? { ...b, status: json.status } : b
+            ),
+          })),
+        };
       });
-      pushToast(
-        `Booking #${bookingId} → ${json.status.replace("_", " ")}`,
-        "ok"
-      );
+
+      if (json.already) toast(`Booking #${bookingId} was already ${String(json.status).replace(/_/g, " ")}.`);
+      else toast.success(`#${bookingId} → ${String(json.status).replace(/_/g, " ")}`);
+      return json;
     } catch (e) {
-      pushToast(e.message || "Failed to update", "err");
+      toast.error(e.message || "Could not update this booking.");
+      return null;
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -1032,653 +972,350 @@ export default function CheckinsPage() {
     return mNum ? Number(mNum[1]) : null;
   }
 
-  const totals = useMemo(() => {
-    const s = roster?.slots || [];
-    const all = s.flatMap((x) => x.bookings || []);
-    const count = all.length;
-    const checked = all.filter(
-      (b) => (b.status || "").toLowerCase() === "checked_in"
-    ).length;
-    const noshow = all.filter(
-      (b) =>
-        (b.status || "").toLowerCase() === "no_show" ||
-        (b.status || "").toLowerCase() === "noshow"
-    ).length;
-    const cap = (s || []).reduce((sum, x) => sum + (x.totalSlots || 0), 0);
-    const resv = all
-      .filter((b) => !["cancelled"].includes((b.status || "").toLowerCase()))
-      .reduce((sum, b) => sum + partySize(b), 0);
-    return { count, checked, noshow, capacity: cap, reserved: resv };
-  }, [roster]);
-
-  // helpers for scan result
   function findBookingInRoster(id) {
-    const slots = roster?.slots || [];
     for (const slot of slots) {
       for (const b of slot.bookings || []) {
-        if (b.id === id) {
-          return {
-            slot,
-            booking: b,
-          };
-        }
+        if (b.id === id) return { booking: b, slot };
       }
     }
-    return { slot: null, booking: null };
-  }
-
-  function makeScanResult(mode, id) {
-    const { slot, booking } = findBookingInRoster(id);
-    const info =
-      slot && booking
-        ? {
-            id,
-            booking: {
-              name: contactName(booking.primary_contact),
-              party: partySize(booking),
-              experience: slot.experienceName,
-              time: new Date(slot.date).toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-              }),
-            },
-            mode,
-          }
-        : { id, booking: null, mode };
-    return info;
-  }
-
-  function flashBooking(id) {
-    setFlashId(id);
-    setTimeout(() => setFlashId(null), 2500);
+    return null;
   }
 
   function scrollToBooking(id) {
-    const el =
-      document.querySelector(`[data-booking-id="${id}"]`) ||
-      document.querySelector(`[data-booking-card="${id}"]`);
-    if (el?.scrollIntoView) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-    flashBooking(id);
+    const el = rowRefs.current[id];
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlashId(id);
+    setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 2200);
   }
 
-  // Auto-hide scan result after a few seconds
-  useEffect(() => {
-    if (!scanResult) return;
-    const t = setTimeout(() => setScanResult(null), 5500);
-    return () => clearTimeout(t);
-  }, [scanResult]);
+  async function handleDetected(raw) {
+    const id = extractBookingId(raw);
+    if (!id) return toast.error("That code doesn't contain a booking reference.");
 
-  async function onScan(text) {
-    const id = extractBookingId(text);
-    if (!id) {
-      pushToast("Invalid code", "err");
-      setScanResult({ mode: "invalid", id, booking: null });
-      return { invalid: true };
+    const found = findBookingInRoster(id);
+    if (!found) {
+      toast.error(`Booking #${id} isn't on today's roster.`);
+      setScanResult({ id, mode: "bad", booking: null });
+      return;
     }
 
-    const alreadyLocal = !!(roster?.slots || [])
-      .flatMap((s) => s.bookings || [])
-      .find(
-        (b) => b.id === id && String(b.status).toLowerCase() === "checked_in"
-      );
-    if (alreadyLocal) {
-      const r = makeScanResult("already", id);
-      setScanResult(r);
+    const { booking, slot } = found;
+    const card = {
+      name: contactName(booking.primary_contact),
+      party: partySize(booking),
+      experience: slot.experienceName,
+      time: slotTime(slot.date),
+    };
+
+    if (isArrived(booking)) {
+      setScanResult({ id, mode: "already", booking: card });
       scrollToBooking(id);
-      return { already: true };
+      return;
     }
 
-    const res = await fetch(`/api/admin/checkins/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "checkin" }),
+    const json = await mutateBooking(id, "checkin");
+    setScanResult({
+      id,
+      mode: json ? (json.already ? "already" : "ok") : "bad",
+      booking: card,
     });
-
-    let json = {};
-    try {
-      json = await res.json();
-    } catch {}
-
-    if (!res.ok) {
-      pushToast("Invalid booking or not today", "err");
-      setScanResult({ mode: "invalid", id, booking: null });
-      return { invalid: true };
-    }
-    if (json.already) {
-      pushToast(`Booking #${id} already checked in`, "err");
-      const r = makeScanResult("already", id);
-      setScanResult(r);
-      scrollToBooking(id);
-      return { already: true };
-    }
-
-    // Optimistic roster patch for checked_in
-    setRoster((prev) => {
-      if (!prev) return prev;
-      const slots = prev.slots.map((s) => {
-        const books = (s.bookings || []).map((b) =>
-          b.id === id ? { ...b, status: "checked_in" } : b
-        );
-        return { ...s, bookings: books };
-      });
-      return { ...prev, slots };
-    });
-    pushToast(`Booking #${id} → checked in`, "ok");
-
-    const r = makeScanResult("ok", id);
-    setScanResult(r);
     scrollToBooking(id);
-    return { ok: true };
   }
 
-  return (
-    <div
-      className={clsx("min-h-screen", colors.soft)}
-      style={{ color: colors.text }}
-    >
-      <Toasts toasts={toasts} remove={remove} />
+  const shiftDay = (delta) => {
+    const d = new Date(`${date}T12:00:00`);
+    d.setDate(d.getDate() + delta);
+    setDate(formatDayTZ(d, "Europe/Athens"));
+  };
 
-      {/* Scan result popover */}
+  /* --------------------------------- view --------------------------------- */
+  return (
+    <Page>
+      <PageHeader
+        eyebrow="Operations"
+        title="Check-ins"
+        description={
+          loading
+            ? "Loading today's roster…"
+            : `${totals.tours} tour${totals.tours === 1 ? "" : "s"} · ${totals.guests} guest${totals.guests === 1 ? "" : "s"} expected`
+        }
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => load()} disabled={loading}>
+              <Icon name="clock" size={15} /> Refresh
+            </Button>
+            <Button variant="primary" onClick={() => setScanOpen(true)}>
+              <Icon name="grid" size={15} /> Scan ticket
+            </Button>
+          </>
+        }
+      />
+
+      {/* date bar */}
+      <Card className="mb-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="icon" onClick={() => shiftDay(-1)} aria-label="Previous day">
+            ‹
+          </Button>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className={`${inputClass} h-10 !w-auto`}
+          />
+          <Button variant="secondary" size="icon" onClick={() => shiftDay(1)} aria-label="Next day">
+            ›
+          </Button>
+          <Button
+            variant={isToday ? "dark" : "secondary"}
+            onClick={() => setDate(formatDayTZ(new Date(), "Europe/Athens"))}
+          >
+            Today
+          </Button>
+
+          <div className="ml-auto flex flex-1 flex-wrap items-center justify-end gap-2">
+            <div className="relative min-w-[200px] flex-1 sm:max-w-[320px]">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+                <Icon name="search" size={16} />
+              </span>
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search guest, email, phone or #id"
+                className={`${inputClass} h-10 pl-9 ${query ? "pr-9" : "pr-12"}`}
+              />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                {query ? (
+                  <button onClick={() => setQuery("")} aria-label="Clear search"
+                    className="rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4]">
+                    <Icon name="x" size={14} />
+                  </button>
+                ) : (
+                  <kbd className="hidden rounded border border-[#e6e0d6] bg-[#faf8f4] px-1.5 py-0.5 text-[10px] text-[#b0a294] sm:block">/</kbd>
+                )}
+              </div>
+            </div>
+            <Select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-10 !w-auto min-w-[150px]"
+            >
+              {STATUS_FILTERS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </Select>
+          </div>
+        </div>
+      </Card>
+
+      {/* progress */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Card className="py-3.5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">Arrived</p>
+          <p className="mt-1 font-serif text-[20px] text-[#2a211a]">
+            {totals.arrived}<span className="text-[14px] text-[#9a8c7e]"> / {totals.bookings}</span>
+          </p>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#efe9df]">
+            <div className="h-full rounded-full bg-[#3f6b3f] transition-all duration-500" style={{ width: `${progress}%` }} />
+          </div>
+        </Card>
+        <StatBox label="Still expected" value={totals.expected} accent={totals.expected > 0 ? "warn" : undefined} />
+        <StatBox label="No-shows" value={totals.noShow} accent={totals.noShow > 0 ? "danger" : undefined} />
+        <StatBox label="Guests on site" value={`${totals.arrivedGuests} / ${totals.guests}`} />
+      </div>
+
+      {/* roster */}
+      {error ? (
+        <Card>
+          <ErrorNote>{error}</ErrorNote>
+          <Button className="mt-3" variant="secondary" onClick={() => load()}>Try again</Button>
+        </Card>
+      ) : loading ? (
+        <div className="space-y-4">
+          {[0, 1].map((i) => <Skeleton key={i} className="h-48" />)}
+        </div>
+      ) : !filteredSlots.length ? (
+        <Card>
+          <EmptyState
+            icon={<Icon name="check" size={20} />}
+            title={slots.length ? "Nothing matches" : "No tours scheduled"}
+            description={
+              slots.length
+                ? "No guests on this day match your search or filter."
+                : `Nothing is scheduled for ${date}.`
+            }
+            action={
+              slots.length ? (
+                <Button variant="secondary" onClick={() => { setQuery(""); setStatusFilter("all"); }}>
+                  Clear filters
+                </Button>
+              ) : null
+            }
+          />
+        </Card>
+      ) : (
+        <div className="space-y-5">
+          {filteredSlots.map((slot) => {
+            const all = slot.bookings || [];
+            const active = all.filter((b) => !isCancelled(b));
+            const arrived = all.filter(isArrived).length;
+            const guests = active.reduce((sum, b) => sum + partySize(b), 0);
+            const pct = active.length ? Math.round((arrived / active.length) * 100) : 0;
+            const remaining = active.filter(isExpected);
+
+            return (
+              <Card key={slot.id} padded={false} className="overflow-hidden">
+                <div className="flex flex-wrap items-center gap-3 border-b border-[#e6e0d6] bg-[#fdfbf7] px-5 py-3.5">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-serif text-[18px] text-[#2a211a]">{slotTime(slot.date)}</span>
+                      <span className="truncate text-[14px] font-medium text-[#6b5c4d]">
+                        {slot.experienceName || "Experience"}
+                      </span>
+                      {slot.isCancelled ? <Badge tone="red">Cancelled</Badge> : null}
+                    </div>
+                    <Muted className="mt-0.5 text-[12px]">
+                      {guests} guest{guests === 1 ? "" : "s"} · {active.length} booking
+                      {active.length === 1 ? "" : "s"}
+                      {slot.totalSlots ? ` · capacity ${slot.totalSlots}` : ""}
+                    </Muted>
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-3">
+                    <div className="hidden w-28 sm:block">
+                      <div className="h-1.5 overflow-hidden rounded-full bg-[#efe9df]">
+                        <div className="h-full rounded-full bg-[#3f6b3f] transition-all duration-500" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                    <span className="text-[12.5px] font-semibold text-[#6b5c4d]">
+                      {arrived}/{active.length} in
+                    </span>
+                    {remaining.length ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={async () => {
+                          if (!window.confirm(`Check in all ${remaining.length} remaining guests for this tour?`)) return;
+                          for (const b of remaining) await mutateBooking(b.id, "checkin");
+                        }}
+                      >
+                        <Icon name="check" size={14} /> Check in all
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <ul className="divide-y divide-[#f0ebe2]">
+                  {all.map((b) => {
+                    const arrivedNow = isArrived(b);
+                    const noShow = isNoShow(b);
+                    const cancelled = isCancelled(b);
+                    const pc = b.primary_contact || {};
+                    return (
+                      <li
+                        key={b.id}
+                        ref={(el) => { rowRefs.current[b.id] = el; }}
+                        className={clsx(
+                          "flex flex-wrap items-center gap-3 px-5 py-3 transition-colors",
+                          flashId === b.id && "bg-[#f4f9f4]",
+                          cancelled && "opacity-50"
+                        )}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                              href={`/admin/bookings/${b.id}`}
+                              className="font-semibold text-[#2a211a] hover:text-[#8b6f47] hover:underline"
+                            >
+                              {contactName(pc)}
+                            </Link>
+                            <span className="rounded-full bg-[#f2ede4] px-2 py-0.5 text-[11px] font-semibold text-[#6b5c4d]">
+                              {partySize(b)} pax
+                            </span>
+                            <UIStatusBadge status={b.status} />
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[11.5px] text-[#9a8c7e]">
+                            <span>#{b.id}</span>
+                            {pc.phone ? (
+                              <a href={`tel:${pc.phone}`} className="hover:text-[#8b6f47] hover:underline">{pc.phone}</a>
+                            ) : null}
+                            {pc.email ? (
+                              <a href={`mailto:${pc.email}`} className="truncate hover:text-[#8b6f47] hover:underline">{pc.email}</a>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {cancelled ? null : (
+                          <div className="flex items-center gap-1.5">
+                            {arrivedNow || noShow ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busyId === b.id}
+                                onClick={() => mutateBooking(b.id, "undo")}
+                              >
+                                Undo
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busyId === b.id}
+                                onClick={() => mutateBooking(b.id, "no_show")}
+                                title="Mark as a no-show"
+                              >
+                                No-show
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant={arrivedNow ? "secondary" : "primary"}
+                              disabled={busyId === b.id || arrivedNow}
+                              onClick={() => mutateBooking(b.id, "checkin")}
+                            >
+                              <Icon name="check" size={14} />
+                              {arrivedNow ? "Checked in" : busyId === b.id ? "…" : "Check in"}
+                            </Button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      <Muted className="mt-5 text-center text-[11.5px]">
+        Press <kbd className="rounded border border-[#e6e0d6] bg-white px-1 py-0.5 text-[10px]">S</kbd> to scan ·{" "}
+        <kbd className="rounded border border-[#e6e0d6] bg-white px-1 py-0.5 text-[10px]">/</kbd> to search
+      </Muted>
+
+      <ScanModal open={scanOpen} onClose={() => setScanOpen(false)} onDetected={handleDetected} />
       <ScanResultPopover
         result={scanResult}
         onClose={() => setScanResult(null)}
-        onUndo={() => {
-          if (!scanResult?.id) return;
-          mutateBooking(scanResult.id, "undo");
+        onUndo={async () => {
+          if (!scanResult) return;
+          await mutateBooking(scanResult.id, "undo");
           setScanResult(null);
-          setTimeout(() => scrollToBooking(scanResult.id), 250);
         }}
-        onScroll={() => {
-          if (!scanResult?.id) return;
-          scrollToBooking(scanResult.id);
-        }}
+        onScroll={() => scanResult && scrollToBooking(scanResult.id)}
       />
-
-      <div className="mx-auto max-w-6xl px-6 py-6">
-        {/* Header / Toolbar */}
-        <div
-          className={clsx(
-            "mb-4 -mx-2 sm:-mx-4 px-2 sm:px-4 py-3 rounded-2xl border",
-            "bg-gradient-to-r from-[#f4f1ec] via-[#fff8ef] to-[#f4f1ec]"
-          )}
-          style={{ borderColor: colors.border }}
-        >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-serif tracking-tight">
-                Check-ins
-              </h1>
-              <p className="text-sm" style={{ color: colors.sub }}>
-                Scan or mark arrivals for today’s slots.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div
-                className="flex items-center gap-2 rounded-full border px-3 py-1.5 bg-white/70"
-                style={{ borderColor: colors.border }}
-              >
-                <CalendarDays size={16} className="opacity-70" />
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="bg-transparent text-sm outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={jumpToToday}
-                  className="text-[11px] px-2 py-0.5 rounded-full border hover:bg-white"
-                  style={{ borderColor: colors.border }}
-                  title="Jump to today (T)"
-                >
-                  Today
-                </button>
-              </div>
-
-              <div className="relative">
-                <Search
-                  className="absolute left-3 top-2.5 h-4 w-4"
-                  style={{ color: colors.sub }}
-                  aria-hidden
-                />
-                <input
-                  ref={searchRef}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search guest, booking id, email…"
-                  className="w-64 rounded-full border bg-white/80 backdrop-blur px-9 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2"
-                  style={{
-                    borderColor: colors.border,
-                    boxShadow: "0 0 0 2px transparent",
-                    outlineColor: colors.accent,
-                  }}
-                />
-                {query ? (
-                  <button
-                    onClick={() => setQuery("")}
-                    className="absolute right-2 top-1.5 text-xs px-2 py-0.5 rounded-full border bg-white/70 hover:bg-white"
-                    style={{ borderColor: colors.border }}
-                    title="Clear"
-                  >
-                    Clear
-                  </button>
-                ) : null}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setScanOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-white hover:brightness-110 transition text-xs shadow-sm"
-                style={{
-                  borderColor: colors.border,
-                  backgroundColor: colors.accent,
-                }}
-                title="Open camera scanner (S)"
-              >
-                <QrCode size={14} /> Scan
-              </button>
-            </div>
-          </div>
-          <div className="mt-2 text-xs flex items-center gap-3 opacity-80">
-            <span>
-              Shortcuts: <Kbd>/</Kbd> focus search · <Kbd>S</Kbd> scan ·{" "}
-              <Kbd>T</Kbd> today
-            </span>
-          </div>
-        </div>
-
-        {/* Totals */}
-        <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-          <SummaryCard
-            label="Bookings"
-            value={totals.count}
-            icon={<Users className="w-4 h-4" />}
-          />
-          <SummaryCard
-            label="Checked-in"
-            value={totals.checked}
-            tone="green"
-            icon={<CheckCircle2 className="w-4 h-4" />}
-          />
-          <SummaryCard
-            label="No-shows"
-            value={totals.noshow}
-            tone="red"
-            icon={<XCircle className="w-4 h-4" />}
-          />
-          <SummaryCard
-            label="Reserved / Capacity"
-            value={`${totals.reserved} / ${totals.capacity}`}
-            tone="blue"
-            icon={<User className="w-4 h-4" />}
-          />
-        </div>
-
-        {/* Error */}
-        {error ? (
-          <div
-            className="mb-4 flex items-center gap-2 rounded-xl border bg-red-50 text-red-700 px-3 py-2 text-sm"
-            style={{ borderColor: "#fecaca" }}
-          >
-            <AlertTriangle size={16} /> {error}
-          </div>
-        ) : null}
-
-        {/* Loading */}
-        {loading ? (
-          <div className="grid gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-28 rounded-2xl bg-gradient-to-tr from-[#ebe6df] to-[#f9f6f2] animate-pulse border"
-                style={{ borderColor: colors.border }}
-              />
-            ))}
-          </div>
-        ) : null}
-
-        {/* Empty state */}
-        {!loading && filteredSlots.length === 0 ? (
-          <div
-            className="text-center py-12 rounded-2xl border bg-white/60"
-            style={{ borderColor: colors.border }}
-          >
-            <QrCode className="mx-auto mb-2 opacity-60" />
-            <p className="text-sm" style={{ color: colors.sub }}>
-              No bookings for this date.
-            </p>
-            <div className="mt-3 flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setScanOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-xs text-white hover:brightness-110"
-                style={{
-                  borderColor: colors.border,
-                  backgroundColor: colors.accent,
-                }}
-              >
-                <QrCode size={14} /> Scan code
-              </button>
-              <button
-                type="button"
-                onClick={jumpToToday}
-                className="rounded-full px-3 py-1.5 text-xs border bg-white/80 hover:bg-white"
-                style={{ borderColor: colors.border }}
-              >
-                Today
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Slots list */}
-        <div className="space-y-4">
-          {filteredSlots.map((slot) => (
-            <div
-              key={slot.id}
-              className={clsx("rounded-2xl p-4 shadow-sm", colors.card)}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Badge tone="sky">
-                    {new Date(slot.date).toLocaleTimeString(undefined, {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </Badge>
-                  <span className="font-semibold">
-                    {slot.experienceName || "Experience"}
-                  </span>
-                </div>
-                <div className="text-xs" style={{ color: colors.sub }}>
-                  Capacity {slot.totalSlots ?? 0} · Reserved{" "}
-                  {(slot.bookings || [])
-                    .filter(
-                      (b) => (b.status || "").toLowerCase() !== "cancelled"
-                    )
-                    .reduce((sum, b) => sum + partySize(b), 0)}
-                </div>
-              </div>
-
-              {/* Table (md+) */}
-              <div className="overflow-x-auto hidden md:block">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left" style={{ color: colors.sub }}>
-                      <th className="py-2 pr-4">Booking</th>
-                      <th className="py-2 pr-4">Guest</th>
-                      <th className="py-2 pr-4">Party</th>
-                      <th className="py-2 pr-4">Status</th>
-                      <th className="py-2 pr-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody
-                    className="[&>tr:not(:last-child)]:border-b"
-                    style={{ borderColor: "#eee5da" }}
-                  >
-                    {(slot.bookings || []).map((b) => {
-                      const size = partySize(b);
-                      const s = (b.status || "").toLowerCase();
-                      const canCheckIn = ![
-                        "checked_in",
-                        "cancelled",
-                        "no_show",
-                        "noshow",
-                      ].includes(s);
-                      const canUndo = [
-                        "checked_in",
-                        "no_show",
-                        "noshow",
-                      ].includes(s);
-                      const flashing = flashId === b.id;
-                      return (
-                        <tr
-                          key={b.id}
-                          data-booking-id={b.id}
-                          className={clsx(
-                            "align-middle transition",
-                            flashing &&
-                              "ring-2 ring-green-400/50 bg-green-50/60"
-                          )}
-                        >
-                          <td className="py-2 pr-4 font-medium">#{b.id}</td>
-                          <td className="py-2 pr-4">
-                            <div className="flex flex-col">
-                              <span className="truncate">
-                                {contactName(b.primary_contact)}
-                              </span>
-                              {b.primary_contact?.phone ? (
-                                <span
-                                  className="text-xs"
-                                  style={{ color: colors.sub }}
-                                >
-                                  {b.primary_contact.phone}
-                                </span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="py-2 pr-4">{size}</td>
-                          <td className="py-2 pr-4">
-                            <StatusBadge status={b.status} />
-                          </td>
-                          <td className="py-2 pr-0">
-                            <div className="flex justify-end gap-2">
-                              <ActionButton
-                                tone="green"
-                                disabled={!canCheckIn}
-                                onClick={() => {
-                                  mutateBooking(b.id, "checkin");
-                                  setTimeout(() => scrollToBooking(b.id), 100);
-                                }}
-                                icon={<CheckCircle2 size={14} />}
-                                label="Check-in"
-                                title="Mark as checked-in"
-                              />
-                              <ActionButton
-                                tone="slate"
-                                disabled={!canUndo}
-                                onClick={() => mutateBooking(b.id, "undo")}
-                                icon={<RotateCcw size={14} />}
-                                label="Undo"
-                                title="Undo"
-                              />
-                              <ActionButton
-                                tone="red"
-                                disabled={s === "no_show" || s === "noshow"}
-                                onClick={() => {
-                                  const ok = window.confirm(
-                                    `Mark booking #${b.id} as no-show?`
-                                  );
-                                  if (ok) mutateBooking(b.id, "no_show");
-                                }}
-                                icon={<XCircle size={14} />}
-                                label="No-show"
-                                title="Mark as no-show"
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Cards (mobile) */}
-              <div className="md:hidden space-y-3">
-                {(slot.bookings || []).map((b) => {
-                  const size = partySize(b);
-                  const s = (b.status || "").toLowerCase();
-                  const canCheckIn = ![
-                    "checked_in",
-                    "cancelled",
-                    "no_show",
-                    "noshow",
-                  ].includes(s);
-                  const canUndo = ["checked_in", "no_show", "noshow"].includes(
-                    s
-                  );
-                  const flashing = flashId === b.id;
-                  return (
-                    <div
-                      key={b.id}
-                      data-booking-card={b.id}
-                      className={clsx(
-                        "rounded-xl border p-3 bg-white/80 transition",
-                        flashing && "ring-2 ring-green-400/50 bg-green-50/60"
-                      )}
-                      style={{ borderColor: colors.border }}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="font-medium">#{b.id}</div>
-                        <StatusBadge status={b.status} />
-                      </div>
-                      <div className="mt-1 text-sm">
-                        <div className="font-medium">
-                          {contactName(b.primary_contact)}
-                        </div>
-                        {b.primary_contact?.phone ? (
-                          <div
-                            className="text-xs"
-                            style={{ color: colors.sub }}
-                          >
-                            {b.primary_contact.phone}
-                          </div>
-                        ) : null}
-                        <div
-                          className="mt-1 text-xs flex items-center gap-1"
-                          style={{ color: colors.sub }}
-                        >
-                          Party: <Badge tone="blue">{size}</Badge>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex gap-2">
-                        <ActionButton
-                          tone="green"
-                          block
-                          disabled={!canCheckIn}
-                          onClick={() => {
-                            mutateBooking(b.id, "checkin");
-                            setTimeout(() => scrollToBooking(b.id), 100);
-                          }}
-                          icon={<CheckCircle2 size={14} />}
-                          label="Check-in"
-                        />
-                        <ActionButton
-                          tone="slate"
-                          block
-                          disabled={!canUndo}
-                          onClick={() => mutateBooking(b.id, "undo")}
-                          icon={<RotateCcw size={14} />}
-                          label="Undo"
-                        />
-                        <ActionButton
-                          tone="red"
-                          block
-                          disabled={s === "no_show" || s === "noshow"}
-                          onClick={() => {
-                            const ok = window.confirm(
-                              `Mark booking #${b.id} as no-show?`
-                            );
-                            if (ok) mutateBooking(b.id, "no_show");
-                          }}
-                          icon={<XCircle size={14} />}
-                          label="No-show"
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="h-10" />
-      </div>
-
-      {/* Scanner modal */}
-      <ScanModal
-        open={scanOpen}
-        onClose={() => setScanOpen(false)}
-        onDetected={onScan}
-      />
-    </div>
+    </Page>
   );
 }
 
-function SummaryCard({ label, value, tone, icon }) {
-  const rings = {
-    green: "focus-within:ring-green-600/30",
-    red: "focus-within:ring-red-600/30",
-    blue: "focus-within:ring-sky-600/30",
-    default: "focus-within:ring-[#8b6f47]/30",
-  };
-  const accents = {
-    green: "text-green-700",
-    red: "text-red-700",
-    blue: "text-sky-700",
-    default: "text-slate-700",
-  };
+function StatBox({ label, value, accent }) {
+  const color = accent === "danger" ? "text-[#a33c22]" : accent === "warn" ? "text-[#8a6412]" : "text-[#2a211a]";
   return (
-    <div
-      className={clsx(
-        "rounded-2xl p-4 shadow-sm focus-within:ring-2 outline-none",
-        colors.card,
-        rings[tone] || rings.default
-      )}
-    >
-      <p className="text-xs" style={{ color: colors.sub }}>
-        {label}
-      </p>
-      <div className="mt-1 flex items-end justify-between">
-        <p className="text-2xl font-semibold tracking-tight">{value}</p>
-        {icon ? (
-          <span
-            className={clsx(
-              "ml-3 opacity-70",
-              accents[tone] || accents.default
-            )}
-          >
-            {icon}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function ActionButton({
-  tone = "slate",
-  icon,
-  label,
-  onClick,
-  disabled,
-  title,
-  block,
-}) {
-  const tones = {
-    green: "border-green-600/30 text-green-800 bg-green-50 hover:bg-green-100",
-    red: "border-red-600/30 text-red-700 bg-red-50 hover:bg-red-100",
-    slate: "border-slate-600/30 text-slate-700 bg-white hover:bg-slate-50",
-  };
-  const off =
-    "opacity-40 cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400";
-  return (
-    <button
-      className={clsx(
-        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs border transition",
-        block && "flex-1 justify-center",
-        disabled ? off : tones[tone] || tones.slate
-      )}
-      disabled={disabled}
-      onClick={onClick}
-      title={title}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
+    <Card className="py-3.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">{label}</p>
+      <p className={`mt-1 font-serif text-[20px] ${color}`}>{value}</p>
+    </Card>
   );
 }

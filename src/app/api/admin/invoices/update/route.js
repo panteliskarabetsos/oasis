@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ALLOWED = new Set([
   "fullName",
@@ -34,6 +35,8 @@ function normalize(input) {
 }
 
 export async function POST(req) {
+  const auth = await requireAdmin("invoices");
+  if (!auth.ok) return auth.response;
   try {
     const ctype = req.headers.get("content-type") || "";
     let body;
@@ -59,7 +62,7 @@ export async function POST(req) {
     }
 
     const { data: row, error } = await admin
-      .from("Booking")
+      .from("booking")
       .select("id, primary_contact")
       .eq("id", id)
       .single();
@@ -94,7 +97,7 @@ export async function POST(req) {
     };
 
     await admin
-      .from("Booking")
+      .from("booking")
       .update({ primary_contact: nextPc })
       .eq("id", id);
 

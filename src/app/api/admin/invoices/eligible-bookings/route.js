@@ -4,8 +4,11 @@
 // ==============================================
 import { NextResponse as NextResponse2 } from "next/server";
 import { getSupabaseAdmin as getSupabaseAdmin2 } from "@/lib/supabaseAdmin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function GET() {
+  const auth = await requireAdmin("invoices");
+  if (!auth.ok) return auth.response;
   const supabase = getSupabaseAdmin2();
   // Assuming Booking has totalPaidAmount and currency; and invoices have bookingId FK
   const { data: bookings, error } = await supabase.rpc(
@@ -16,7 +19,7 @@ export async function GET() {
   let result = bookings;
   if (error || !bookings) {
     const { data: paid, error: e1 } = await supabase
-      .from("Booking")
+      .from("booking")
       .select(
         "id, experienceId, startTime, currency, totalPaidAmount, primary_contact"
       )

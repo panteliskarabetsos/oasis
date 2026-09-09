@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import "server-only";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 /* --------------------------- shared helpers --------------------------- */
 
@@ -65,6 +66,8 @@ function getStripe() {
 /* ------------------------------- route -------------------------------- */
 
 export async function POST(req) {
+  const auth = await requireAdmin("invoices");
+  if (!auth.ok) return auth.response;
   const fd = await req.formData();
   const invoiceId = String(fd.get("invoice_id") || "").trim();
 

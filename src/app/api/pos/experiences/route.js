@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -21,6 +22,8 @@ function toMinutes(text) {
 }
 
 export async function GET() {
+  const auth = await requireAdmin("pos");
+  if (!auth.ok) return auth.response;
   try {
     const supa = await createSupabaseAdmin();
 

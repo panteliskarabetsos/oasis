@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { format } from "date-fns";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 /* ------------------------ helpers (Stripe + mail) ------------------------ */
 async function getStripe() {
@@ -440,6 +441,8 @@ function renderInvoiceEmail(b) {
 /* --------------------------------- route --------------------------------- */
 // app/api/admin/invoices/send/route.js
 export async function POST(req) {
+  const auth = await requireAdmin("invoices");
+  if (!auth.ok) return auth.response;
   try {
     // Accept form-encoded or JSON
     const ctype = req.headers.get("content-type") || "";
@@ -496,7 +499,7 @@ export async function POST(req) {
           const adminOpt = createSupabaseAdmin();
           if (adminOpt) {
             await adminOpt
-              .from("Booking")
+              .from("booking")
               .update({ invoiceEmailSentAt: new Date().toISOString() })
               .eq("id", bookingId);
           }
@@ -518,7 +521,7 @@ export async function POST(req) {
     if (!admin) return redirect("?err=no_admin");
 
     const { data: b, error } = await admin
-      .from("Booking")
+      .from("booking")
       .select(
         "id, createdAt, startTime, status, numberOfPeople, totalPaidAmount, currency, primary_contact, duration, stripePaymentIntentId, stripeSessionId, invoiceEmailSentAt"
       )
@@ -547,7 +550,7 @@ export async function POST(req) {
       await stripe.invoices.sendInvoice(inv.id);
 
       await admin
-        .from("Booking")
+        .from("booking")
         .update({ invoiceEmailSentAt: new Date().toISOString() })
         .eq("id", id);
 
@@ -615,7 +618,7 @@ export async function POST(req) {
       await sendMail({ to, subject, html, attachments });
 
       await admin
-        .from("Booking")
+        .from("booking")
         .update({ invoiceEmailSentAt: new Date().toISOString() })
         .eq("id", id);
     } catch (e) {
