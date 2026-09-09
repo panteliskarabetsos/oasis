@@ -168,11 +168,29 @@ export const api = {
       `/api/admin/checkins${qs({ date, tz: "Europe/Athens" })}`
     ),
 
+  /**
+   * Booking details for a scanned reference — a code or a legacy numeric id.
+   * The endpoint resolves either, which /api/admin/reservations cannot.
+   */
+  checkinDetails: (ref: number | string) =>
+    request<{
+      id?: number;
+      code?: string;
+      guestName?: string;
+      pax?: number;
+      experienceName?: string;
+      startTime?: string;
+      status?: string;
+    }>(`/api/admin/checkins/${encodeURIComponent(String(ref))}`),
+
   checkinAction: (bookingId: number | string, action: "checkin" | "undo" | "no_show") =>
-    request<{ already?: boolean; status?: string }>(`/api/admin/checkins/${bookingId}`, {
-      method: "PATCH",
-      body: { action },
-    }),
+    request<{ already?: boolean; status?: string }>(
+      `/api/admin/checkins/${encodeURIComponent(String(bookingId))}`,
+      {
+        method: "PATCH",
+        body: { action },
+      },
+    ),
 
   /* ---------- Change requests ---------- */
   requests: () => request<BookingRequest[]>("/api/admin/requests"),

@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
+import { legacyBookingId, normalizeBookingCode } from "@/lib/bookingCode";
 
 const TBL_BOOKING = "booking";
 const TBL_EXPERIENCE = "Experience";
@@ -85,19 +86,45 @@ async function getAuthedAdmin() {
   return { admin, user };
 }
 
+
+/**
+ * Resolve a scanned or typed reference to a booking id.
+ *
+ * A ticket QR carries the booking's reference, which is now a random code like
+ * BK-WD7A-FR1X. Tickets printed before codes existed carry "BK-" plus the row
+ * id, so both have to resolve — and a code must never be coerced into a number,
+ * which would silently admit a different guest.
+ */
+async function resolveBookingId(admin, raw) {
+  const asId = legacyBookingId(raw) ?? (/^\d+$/.test(String(raw ?? "").trim()) ? Number(raw) : null);
+  if (asId) return asId;
+
+  const code = normalizeBookingCode(raw);
+  if (!code) return null;
+
+  const { data, error } = await admin
+    .from("booking")
+    .select("id")
+    .eq("code", code)
+    .maybeSingle();
+  if (error || !data) return null;
+  return Number(data.id);
+}
+
 /* ---------------------------------------------
    GET /api/admin/checkins/:id
    → Return booking metadata for pop-up (any date)
 ----------------------------------------------*/
 export async function GET(_req, ctx) {
   const { id } = await ctx.params;
-  const bookingId = Number(id);
-  if (!Number.isFinite(bookingId) || bookingId <= 0) {
-    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
-  }
 
   const { admin, errorResponse } = await getAuthedAdmin();
   if (errorResponse) return errorResponse;
+
+  const bookingId = await resolveBookingId(admin, id);
+  if (!bookingId) {
+    return NextResponse.json({ error: "Invalid booking reference" }, { status: 400 });
+  }
 
   // Pull essential fields
   const { data: b, error } = await admin
@@ -105,6 +132,7 @@ export async function GET(_req, ctx) {
     .select(
       [
         "id",
+        "code",
         "status",
         "startTime",
         "duration",
@@ -133,9 +161,12 @@ export async function GET(_req, ctx) {
     experienceName = exp?.name || exp?.title || null;
   }
 
+  const pc = b.primary_contact && typeof b.primary_contact === "object" ? b.primary_contact : {};
+
   return NextResponse.json(
     {
       id: b.id,
+      code: b.code ?? null,
       status: b.status,
       startTime: b.startTime,
       duration: b.duration,
@@ -144,6 +175,11 @@ export async function GET(_req, ctx) {
       adultsCount: b.adultsCount,
       kidsCount: b.kidsCount,
       numberOfPeople: b.numberOfPeople ?? partySize(b),
+      // Flattened for the scanner, which shows a name and a headcount and
+      // should not have to know how primary_contact is shaped.
+      guestName:
+        pc.name || [pc.firstName, pc.lastName].filter(Boolean).join(" ") || null,
+      pax: partySize(b),
       primary_contact: b.primary_contact ?? null,
       day: b.startTime
         ? formatDayTZ(new Date(b.startTime), "Europe/Athens")
@@ -161,10 +197,6 @@ export async function GET(_req, ctx) {
 export async function PATCH(req, ctx) {
   // 👇 IMPORTANT: await params
   const { id } = await ctx.params;
-  const bookingId = Number(id);
-  if (!Number.isFinite(bookingId) || bookingId <= 0) {
-    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
-  }
 
   const body = await req.json().catch(() => ({}));
   const action = String(body?.action || "").toLowerCase();
@@ -177,6 +209,11 @@ export async function PATCH(req, ctx) {
 
   const { admin, errorResponse } = await getAuthedAdmin();
   if (errorResponse) return errorResponse;
+
+  const bookingId = await resolveBookingId(admin, id);
+  if (!bookingId) {
+    return NextResponse.json({ error: "Invalid booking reference" }, { status: 400 });
+  }
 
   // 1) Read current status + startTime first (idempotency + guard rails)
   const { data: current, error: curErr } = await admin

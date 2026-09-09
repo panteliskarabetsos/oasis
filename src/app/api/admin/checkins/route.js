@@ -100,9 +100,11 @@ export async function GET(req) {
     const { data: b, error: bErr } = await admin
       .from(TBL_BOOKING)
       .select(
+        // `code` is what a ticket QR carries, so the scanner can match a scan
+        // against today's manifest without a round trip.
         seesMoney
-        ? "id,status,primary_contact,adultsCount,kidsCount,numberOfPeople,totalPaidAmount,scheduleSlotId"
-        : "id,status,primary_contact,adultsCount,kidsCount,numberOfPeople,scheduleSlotId"
+        ? "id,code,status,primary_contact,adultsCount,kidsCount,numberOfPeople,totalPaidAmount,scheduleSlotId"
+        : "id,code,status,primary_contact,adultsCount,kidsCount,numberOfPeople,scheduleSlotId"
       )
       .in("scheduleSlotId", slotIds)
       .order("id", { ascending: true });
