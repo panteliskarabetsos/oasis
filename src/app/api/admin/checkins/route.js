@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
 
 const TBL_BOOKING = "booking";
 const TBL_SLOT = "ScheduleSlot";
@@ -57,8 +58,8 @@ export async function GET(req) {
   } = await supabase.auth.getUser();
   if (userErr || !user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const role = user.app_metadata?.role || user.user_metadata?.role || "user";
-  if (role !== "admin")
+  const role = await resolveStaffRole(user);
+  if (!roleCan(role, "checkins"))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   // Admin client

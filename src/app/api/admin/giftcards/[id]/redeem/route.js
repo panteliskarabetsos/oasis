@@ -11,7 +11,7 @@ const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 export async function POST(req, ctx) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("giftcards");
   if (!gate.ok) return gate.response;
 
   // ❌ don't await params

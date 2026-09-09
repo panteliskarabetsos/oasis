@@ -7,8 +7,8 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export async function POST(req, { params }) {
   try {
-    const auth = await requireAdmin();
-    if (auth.error) return auth.response;
+    const auth = await requireAdmin("bookings");
+    if (!auth.ok) return auth.response;
     const admin = auth.admin;
 
     const { id } = await params;

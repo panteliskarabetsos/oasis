@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import Stripe from "stripe";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -29,13 +30,9 @@ async function requireAdmin() {
     .eq("auth_user_id", user.id)
     .single();
 
-  const role =
-    profile?.role ||
-    user?.app_metadata?.role ||
-    user?.user_metadata?.role ||
-    "user";
+  const { role, permissions } = await resolveStaffAccess(user);
 
-  if (!["admin", "superadmin"].includes(role))
+  if (!accessCan(permissions, "bookings"))
     return { error: true, response: bad("Forbidden", 403) };
 
   return { error: false, admin };
@@ -337,7 +334,7 @@ export async function GET(req, ctx) {
 
       counts,
       attendees,
-      selected_meetup_point: selected_meetup_point,
+      selected_meetup_point: selectedMeetupPointDraft,
       unitPrices,
       money: {
         totalAmount: isNum(d?.totalAmount) ? d.totalAmount : null,

@@ -1,1127 +1,972 @@
 "use client";
 
-import React from "react";
+export const dynamic = "force-dynamic";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
+
+import Icon from "../_ui/Icon";
 import {
-  FileText,
-  Plus,
-  Download,
-  CheckCircle2,
-  CalendarDays,
-  Users,
-  Loader2,
-  Search,
-  Mail,
-  AlertTriangle,
-  Ban,
-  Trash2,
-  ExternalLink,
-} from "lucide-react";
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorNote,
+  Field,
+  Input,
+  Muted,
+  Page,
+  PageHeader,
+  Select,
+  Skeleton,
+  StatusBadge,
+  Table,
+  Td,
+  Th,
+  Tr,
+  inputClass,
+} from "../_ui";
 
 /**
- * /admin/invoices — Admin-facing invoices list (improved)
- * JS-only (no TS)
+ * /admin/invoices — first-party (v2) invoices plus a read-only Stripe view.
  *
- * API compatibility:
- *  - First-party invoices (v2): /api/admin/invoices2  (defaults to expand=all)
- *  - Stripe-only (via invoices2): add ?includeStripe=1 to return Stripe dataset
+ * API contract (unchanged):
+ *   GET /api/admin/invoices2?q&status&from&to&p&per&expand&overdue&includeStripe
+ *     -> { data[], page, perPage, total, pageTotal, currency }
+ *   GET  same route with &format=csv&ids=…   -> CSV download
+ *   POST /api/admin/invoices2/{id}/send
+ *   POST /api/admin/invoices2/{id}/mark-paid { method, reference }
+ *   POST /api/admin/invoices2/{id}/void
+ *   DELETE /api/admin/invoices2/{id}
+ *   GET  /api/admin/invoices2/{id}/pdf | /download
  */
+
+const API_BASE = "/api/admin/invoices2";
+
+const FP_STATUSES = [
+  "all", "draft", "sent", "paid", "pending", "confirmed",
+  "finalized", "approved", "completed", "rejected", "cancelled", "void",
+];
+const STRIPE_STATUSES = ["all", "draft", "open", "paid", "void", "uncollectible"];
+
+const PAY_METHODS = [
+  { value: "cash", label: "Cash" },
+  { value: "card", label: "Card" },
+  { value: "bank_transfer", label: "Bank transfer" },
+  { value: "stripe", label: "Stripe" },
+  { value: "other", label: "Other" },
+];
+
+const SORTS = [
+  { key: "createdAt", label: "Issued" },
+  { key: "dueDate", label: "Due" },
+  { key: "amount", label: "Amount" },
+  { key: "amountPaid", label: "Paid" },
+  { key: "balance", label: "Balance" },
+  { key: "invoiceNo", label: "Invoice" },
+];
+
+/* -------------------------------- helpers -------------------------------- */
+
+const iso = (d) => d.toISOString().slice(0, 10);
+const today = () => iso(new Date());
+const daysAgo = (n) => iso(new Date(Date.now() - n * 86400000));
+
+function fmtMoney(n, ccy = "EUR") {
+  try {
+    return new Intl.NumberFormat("en-IE", {
+      style: "currency",
+      currency: ccy || "EUR",
+      maximumFractionDigits: 2,
+    }).format(Number(n) || 0);
+  } catch {
+    return `${n} ${ccy}`;
+  }
+}
+
+function fmtDate(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  return isNaN(d) ? String(value) : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+const sumPayments = (arr = []) =>
+  (Array.isArray(arr) ? arr : []).reduce((s, p) => s + (Number(p?.amount) || 0), 0);
+
+/** Prefer the server's computed money columns; fall back to payments & status. */
+function deriveMoney(inv) {
+  const amount = Number(inv.amount ?? inv.total ?? inv.meta?.total ?? inv.totalAmount ?? 0);
+  const paidAmount = Number(
+    (typeof inv.amountPaid === "number" && inv.amountPaid) ??
+      inv.totalPaidAmount ??
+      sumPayments(inv.payments)
+  );
+  const EPS = 0.005;
+  const balanceRaw = typeof inv.balance === "number" ? inv.balance : amount - paidAmount;
+  const balance = balanceRaw > EPS ? balanceRaw : 0;
+
+  const status = String(inv.status || "").toLowerCase();
+  const paid =
+    inv.paid === true || status === "paid" || Boolean(inv?.meta?.paid_at || inv?.paid_at) || balance === 0;
+
+  const dueISO = inv?.meta?.due_date ?? inv?.due_date;
+  const overdue =
+    typeof inv?.meta?.overdue === "boolean"
+      ? inv.meta.overdue && !paid
+      : !paid && dueISO
+        ? new Date(dueISO).getTime() < Date.now()
+        : false;
+
+  return { amount, paidAmount, balance, paid, overdue, dueISO };
+}
+
+function sortRows(data, key, dir) {
+  const d = dir === "asc" ? 1 : -1;
+  const val = (r) => {
+    const m = deriveMoney(r);
+    switch (key) {
+      case "amount": return m.amount;
+      case "amountPaid": return m.paidAmount;
+      case "balance": return m.balance;
+      case "dueDate": return m.dueISO ? new Date(m.dueISO).getTime() : 0;
+      case "invoiceNo": return String(r.invoiceNo || "");
+      default: return r.createdAt ? new Date(r.createdAt).getTime() : 0;
+    }
+  };
+  return [...data].sort((a, b) => {
+    const av = val(a);
+    const bv = val(b);
+    if (typeof av === "string") return av.localeCompare(bv) * d;
+    return (av - bv) * d;
+  });
+}
+
+function stripeLinks(inv) {
+  const stripeId =
+    inv?.meta?.stripe_invoice_id ||
+    (typeof inv?.id === "string" && inv.id.startsWith("in_") ? inv.id : null);
+  return {
+    stripeId,
+    hosted: inv?.meta?.hosted_invoice_url || inv?.hosted_invoice_url || null,
+    pdf: inv?.meta?.invoice_pdf || inv?.invoice_pdf || null,
+    dash: stripeId ? `https://dashboard.stripe.com/invoices/${stripeId}` : null,
+  };
+}
+
+function buildQuery({ q, status, from, to, p, per, expand, overdue, includeStripe, format, ids }) {
+  const s = new URLSearchParams();
+  if (q) s.set("q", q);
+  if (status && status !== "all") s.set("status", status);
+  if (from) s.set("from", from);
+  if (to) s.set("to", to);
+  if (p) s.set("p", String(p));
+  if (per) s.set("per", String(per));
+  if (expand) s.set("expand", expand);
+  if (overdue) s.set("overdue", "1");
+  if (includeStripe) s.set("includeStripe", "1");
+  if (format) s.set("format", format);
+  if (ids) s.set("ids", ids);
+  return s.toString();
+}
+
+/* --------------------------------- page ---------------------------------- */
+
 export default function AdminInvoicesPage() {
   const router = useRouter();
 
-  // --- UI state ---
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState("");
-  const [ok, setOk] = React.useState("");
-
-  const [rows, setRows] = React.useState([]);
-  const [total, setTotal] = React.useState(0);
-  const [pageTotal, setPageTotal] = React.useState(0);
-  const [apiCurrency, setApiCurrency] = React.useState("EUR");
-  const [refreshTick, setRefreshTick] = React.useState(0);
-
-  // Filters
-  const [search, setSearch] = React.useState("");
-  const [status, setStatus] = React.useState("all");
-  const [dateFrom, setDateFrom] = React.useState(""); // yyyy-mm-dd
-  const [dateTo, setDateTo] = React.useState("");
-
-  // Pagination (server-driven)
-  const [page, setPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(25);
-  const [totalPages, setTotalPages] = React.useState(1);
-
-  // Sorting (client-side only)
-  const [sortKey, setSortKey] = React.useState("createdAt");
-  const [sortDir, setSortDir] = React.useState("desc"); // asc|desc
-
-  // Data source tab
-  const [mode, setMode] = React.useState("fp"); // 'fp' | 'stripe'
+  const [mode, setMode] = useState("fp"); // 'fp' | 'stripe'
   const isStripe = mode === "stripe";
 
-  // Per-row busy state
-  const [busy, setBusy] = React.useState({ id: null, type: "" });
+  const [searchInput, setSearchInput] = useState("");
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("all");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
-  // Debounced search
-  const [debouncedSearch, setDebouncedSearch] = React.useState(search);
-  React.useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [sortKey, setSortKey] = useState("createdAt");
+  const [sortDir, setSortDir] = useState("desc");
+
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [pageTotal, setPageTotal] = useState(0);
+  const [apiCurrency, setApiCurrency] = useState("EUR");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  const [selected, setSelected] = useState(() => new Set());
+  const [busy, setBusy] = useState({ id: null, type: "" });
+  const [bulkBusy, setBulkBusy] = useState("");
+  const [payFor, setPayFor] = useState(null); // invoice being marked paid
+  const [payMethod, setPayMethod] = useState("cash");
+  const [payReference, setPayReference] = useState("");
+
+  const searchRef = useRef(null);
+
+  /* debounce search */
+  useEffect(() => {
+    const t = setTimeout(() => setQ(searchInput.trim()), 300);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [searchInput]);
 
-  // Fetch (do NOT re-fetch on sort; sorting is client-only)
-  React.useEffect(() => {
+  /* any filter change resets to page 1 */
+  useEffect(() => {
+    setPage(1);
+  }, [q, status, dateFrom, dateTo, overdueOnly, mode, pageSize]);
+
+  /* switching data source clears things that don't carry over */
+  useEffect(() => {
+    setStatus("all");
+    setOverdueOnly(false);
+    setSelected(new Set());
+  }, [mode]);
+
+  /* fetch */
+  useEffect(() => {
     let cancelled = false;
-    async function run() {
+    (async () => {
+      setLoading(true);
+      setError("");
       try {
-        setLoading(true);
-        setError("");
-
-        const modeParams = isStripe
-          ? { expand: "payments", includeStripe: "1" } // Stripe-only dataset
-          : { expand: "payments" }; // FP view
-
-        const { data, meta } = await fetchInvoices({
-          q: debouncedSearch,
-          status,
-          from: dateFrom,
-          to: dateTo,
-          p: page,
-          per: pageSize,
-          apiBase: "/api/admin/invoices2",
-          ...modeParams,
+        const qs = buildQuery({
+          q, status, from: dateFrom, to: dateTo, p: page, per: pageSize,
+          expand: "payments",
+          overdue: overdueOnly && !isStripe,
+          includeStripe: isStripe,
         });
-
+        const res = await fetch(`${API_BASE}?${qs}`, { cache: "no-store", credentials: "include" });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j?.error || `Failed to load invoices (${res.status})`);
+        }
+        const json = await res.json();
         if (cancelled) return;
-        setRows(sortClient(data)); // initial client sort
-        setTotal(meta.total || 0);
-        setTotalPages(Math.max(1, Math.ceil((meta.total || 0) / meta.perPage)));
-        setPageTotal(meta.pageTotal || 0);
-        setApiCurrency(meta.currency || "EUR");
+        const data = Array.isArray(json?.data) ? json.data : [];
+        setRows(data);
+        setTotal(json?.total ?? data.length);
+        setPageTotal(json?.pageTotal ?? 0);
+        setApiCurrency(json?.currency || "EUR");
       } catch (e) {
-        if (!cancelled) setError(e?.message || "Failed to load invoices.");
+        if (!cancelled) {
+          setError(e?.message || "Failed to load invoices.");
+          setRows([]);
+          setTotal(0);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
-    }
-    run();
-    return () => {
-      cancelled = true;
+    })();
+    return () => { cancelled = true; };
+  }, [q, status, dateFrom, dateTo, page, pageSize, overdueOnly, isStripe, refreshTick]);
+
+  /* "/" focuses search, Escape closes the mark-paid dialog */
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = /input|textarea|select/i.test(e.target?.tagName || "");
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === "Escape") setPayFor(null);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    debouncedSearch,
-    status,
-    dateFrom,
-    dateTo,
-    page,
-    pageSize,
-    mode,
-    refreshTick,
-  ]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  // Reset to page 1 when filters change
-  React.useEffect(() => {
-    setPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, status, dateFrom, dateTo, mode]);
+  const sorted = useMemo(() => sortRows(rows, sortKey, sortDir), [rows, sortKey, sortDir]);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  // --- Metrics (based on current rows) ---
-  const metrics = React.useMemo(() => {
-    let pagePaid = 0;
-    let pageBalance = 0;
-    let paidCount = 0;
+  const metrics = useMemo(() => {
+    let paidSum = 0, outstanding = 0, overdueCount = 0, overdueSum = 0;
     for (const r of rows) {
       const m = deriveMoney(r);
-      pagePaid += m.paidAmount;
-      pageBalance += m.balance;
-      if (m.paid) paidCount++;
+      paidSum += m.paidAmount;
+      outstanding += m.balance;
+      if (m.overdue) { overdueCount += 1; overdueSum += m.balance; }
     }
-    return {
-      totalResults: total,
-      pageAmount: pageTotal,
-      pagePaidAmount: pagePaid,
-      pageOutstanding: pageBalance,
-      paidCount,
-    };
-  }, [rows, total, pageTotal]);
+    return { paidSum, outstanding, overdueCount, overdueSum };
+  }, [rows]);
 
-  // --- Row actions helpers ---
-  function stripeLinks(inv) {
-    const stripeId =
-      inv?.meta?.stripe_invoice_id ||
-      (typeof inv?.id === "string" && inv.id.startsWith("in_") ? inv.id : null);
-    // If backend adds these later, we'll use them; otherwise dashboard fallback.
-    const hosted =
-      inv?.meta?.hosted_invoice_url || inv?.hosted_invoice_url || null;
-    const pdf = inv?.meta?.invoice_pdf || inv?.invoice_pdf || null;
-    const dash = stripeId
-      ? `https://dashboard.stripe.com/invoices/${stripeId}`
-      : null;
-    return { hosted, pdf, dash, stripeId };
+  const activeFilters = useMemo(() => {
+    const out = [];
+    if (q) out.push({ key: "q", prefix: "search", label: q, clear: () => setSearchInput("") });
+    if (status !== "all")
+      out.push({ key: "status", prefix: "status", label: status, clear: () => setStatus("all") });
+    if (overdueOnly)
+      out.push({ key: "overdue", prefix: "only", label: "overdue", clear: () => setOverdueOnly(false) });
+    if (dateFrom || dateTo)
+      out.push({
+        key: "dates", prefix: "issued",
+        label: dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : dateFrom ? `from ${dateFrom}` : `until ${dateTo}`,
+        clear: () => { setDateFrom(""); setDateTo(""); },
+      });
+    return out;
+  }, [q, status, overdueOnly, dateFrom, dateTo]);
+
+  const resetAll = () => {
+    setSearchInput(""); setQ(""); setStatus("all");
+    setOverdueOnly(false); setDateFrom(""); setDateTo(""); setPage(1);
+  };
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir(key === "invoiceNo" ? "asc" : "desc"); }
   }
+
+  /* ------------------------------ selection ------------------------------- */
+  const selectableIds = useMemo(() => sorted.map((r) => r.id), [sorted]);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const someSelected = selected.size > 0;
+
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(selectableIds));
+
+  const toggleOne = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const selectedRows = useMemo(
+    () => sorted.filter((r) => selected.has(r.id)),
+    [sorted, selected]
+  );
+  const selectedTotal = useMemo(
+    () => selectedRows.reduce((s, r) => s + deriveMoney(r).balance, 0),
+    [selectedRows]
+  );
+
+  /* ------------------------------- actions -------------------------------- */
 
   function openInvoice(inv) {
     if (isStripe) {
       const { hosted, dash } = stripeLinks(inv);
-      window.open(
-        hosted || dash || "https://dashboard.stripe.com/invoices",
-        "_blank"
-      );
-    } else {
-      router.push(`/admin/invoices/${inv.id}`);
-    }
+      window.open(hosted || dash || "https://dashboard.stripe.com/invoices", "_blank");
+    } else router.push(`/admin/invoices/${inv.id}`);
   }
 
   function openPdf(inv) {
     if (isStripe) {
       const { pdf, hosted, dash } = stripeLinks(inv);
-      window.open(
-        pdf || hosted || dash || "https://dashboard.stripe.com/invoices",
-        "_blank"
-      );
-    } else {
-      window.open(`/api/admin/invoices2/${inv.id}/pdf`, "_blank");
-    }
+      window.open(pdf || hosted || dash || "https://dashboard.stripe.com/invoices", "_blank");
+    } else window.open(`${API_BASE}/${inv.id}/pdf`, "_blank");
   }
 
   function downloadPdf(inv) {
-    if (isStripe) {
-      const { pdf, hosted, dash } = stripeLinks(inv);
-      window.open(
-        pdf || hosted || dash || "https://dashboard.stripe.com/invoices",
-        "_blank"
-      );
-    } else {
-      window.open(`/api/admin/invoices2/${inv.id}/download`, "_blank");
-    }
+    if (isStripe) return openPdf(inv);
+    window.open(`${API_BASE}/${inv.id}/download`, "_blank");
   }
 
-  async function sendInvoice(id) {
-    if (isStripe) {
-      // For Stripe, we can't safely send via our FP route; open the Stripe invoice instead.
-      return window.open(
-        `https://dashboard.stripe.com/invoices/${id}`,
-        "_blank"
-      );
-    }
+  function exportCsv(ids) {
+    const qs = buildQuery({
+      q, status, from: dateFrom, to: dateTo,
+      expand: "payments", overdue: overdueOnly && !isStripe,
+      includeStripe: isStripe, format: "csv",
+      ids: ids?.length ? ids.join(",") : undefined,
+    });
+    window.open(`${API_BASE}?${qs}`, "_blank");
+  }
+
+  async function runAction(id, type, fn, successFallback) {
+    setBusy({ id, type });
     try {
-      setOk("");
-      setError("");
-      setBusy({ id, type: "send" });
-      const res = await fetch(`/api/admin/invoices2/${id}/send`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fn();
       const json = await res.json().catch(() => ({}));
-      setOk(json?.message || "Invoice email queued.");
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      toast.success(json?.message || successFallback);
+      setRefreshTick((t) => t + 1);
+      return true;
     } catch (e) {
-      setError(e?.message || "Failed to send invoice.");
+      toast.error(e?.message || "Something went wrong.");
+      return false;
     } finally {
       setBusy({ id: null, type: "" });
     }
   }
 
-  async function markPaid(id, opts = {}) {
-    if (isStripe) {
-      // Manage payments in Stripe; open invoice in dashboard.
-      return window.open(
-        `https://dashboard.stripe.com/invoices/${id}`,
-        "_blank"
-      );
-    }
-    try {
-      setOk("");
-      setError("");
-      setBusy({ id, type: "mark" });
-      if (!opts.skipConfirm) {
-        const go = window.confirm("Mark this invoice as paid?");
-        if (!go) return;
-      }
-      const res = await fetch(`/api/admin/invoices2/${id}/mark-paid`, {
+  const sendInvoice = (id) =>
+    runAction(id, "send", () => fetch(`${API_BASE}/${id}/send`, { method: "POST" }), "Invoice email queued.");
+
+  const voidInvoice = (id) => {
+    if (!window.confirm("Void this invoice? Its status will be set to 'void'.")) return;
+    return runAction(id, "void", () => fetch(`${API_BASE}/${id}/void`, { method: "POST" }), "Invoice voided.");
+  };
+
+  const deleteInvoice = (id) => {
+    if (!window.confirm("Delete this invoice permanently? Only drafts and voided invoices without payments can be deleted.")) return;
+    return runAction(id, "delete", () => fetch(`${API_BASE}/${id}`, { method: "DELETE" }), "Invoice deleted.");
+  };
+
+  async function confirmMarkPaid() {
+    if (!payFor) return;
+    const okDone = await runAction(payFor.id, "mark", () =>
+      fetch(`${API_BASE}/${payFor.id}/mark-paid`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          method: opts.method || "cash",
-          reference: opts.reference || undefined,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json().catch(() => ({}));
-      setOk(json?.message || "Invoice marked as paid.");
-      setRefreshTick((t) => t + 1);
-    } catch (e) {
-      setError(e?.message || "Failed to mark invoice as paid.");
-    } finally {
-      setBusy({ id: null, type: "" });
+        body: JSON.stringify({ method: payMethod, reference: payReference || undefined }),
+      }), "Invoice marked as paid.");
+    if (okDone) {
+      setPayFor(null);
+      setPayReference("");
     }
   }
 
-  async function voidInvoice(id) {
-    if (isStripe) {
-      return window.open(
-        `https://dashboard.stripe.com/invoices/${id}`,
-        "_blank"
-      );
+  async function bulkSend() {
+    const targets = selectedRows.filter((r) => !deriveMoney(r).paid);
+    if (!targets.length) return toast.error("Every selected invoice is already paid.");
+    if (!window.confirm(`Email ${targets.length} invoice${targets.length === 1 ? "" : "s"}?`)) return;
+    setBulkBusy("send");
+    let sent = 0, failed = 0;
+    for (const r of targets) {
+      try {
+        const res = await fetch(`${API_BASE}/${r.id}/send`, { method: "POST" });
+        res.ok ? sent++ : failed++;
+      } catch { failed++; }
     }
-    try {
-      setOk("");
-      setError("");
-      const confirm = window.confirm(
-        "Void this invoice? This will set status to 'void'."
-      );
-      if (!confirm) return;
-      setBusy({ id, type: "void" });
-      const res = await fetch(`/api/admin/invoices2/${id}/void`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json().catch(() => ({}));
-      setOk(json?.message || "Invoice voided.");
-      setRefreshTick((t) => t + 1);
-    } catch (e) {
-      setError(e?.message || "Failed to void invoice.");
-    } finally {
-      setBusy({ id: null, type: "" });
-    }
+    setBulkBusy("");
+    if (sent) toast.success(`${sent} invoice${sent === 1 ? "" : "s"} queued.`);
+    if (failed) toast.error(`${failed} failed to send.`);
+    setSelected(new Set());
+    setRefreshTick((t) => t + 1);
   }
 
-  async function deleteInvoice(id) {
-    if (isStripe) {
-      return window.open(
-        `https://dashboard.stripe.com/invoices/${id}`,
-        "_blank"
-      );
-    }
-    try {
-      setOk("");
-      setError("");
-      const confirm = window.confirm(
-        "Delete this invoice permanently? Allowed only for DRAFT or VOID without payments."
-      );
-      if (!confirm) return;
-      setBusy({ id, type: "delete" });
-      const res = await fetch(`/api/admin/invoices2/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const msg = await res.json().catch(() => ({}));
-        throw new Error(msg?.error || `HTTP ${res.status}`);
-      }
-      const json = await res.json().catch(() => ({}));
-      setOk(json?.message || "Invoice deleted.");
-      setRefreshTick((t) => t + 1);
-    } catch (e) {
-      setError(e?.message || "Failed to delete invoice.");
-    } finally {
-      setBusy({ id: null, type: "" });
-    }
-  }
+  const openMarkPaid = useCallback((inv) => {
+    setPayFor(inv);
+    setPayMethod(inv?.meta?.payment_method || "cash");
+    setPayReference("");
+  }, []);
 
-  // Status options (switch per mode)
-  const fpStatuses = [
-    "all",
-    "paid",
-    "pending",
-    "confirmed",
-    "cancelled",
-    "approved",
-    "rejected",
-    "completed",
-    "finalized",
-    "draft",
-    "sent",
-  ];
-  const stripeStatuses = [
-    "all",
-    "draft",
-    "open",
-    "paid",
-    "void",
-    "uncollectible",
-  ];
+  /* --------------------------------- view --------------------------------- */
 
-  // --- Render ---
+  const statuses = isStripe ? STRIPE_STATUSES : FP_STATUSES;
+
   return (
-    <div className="p-6 md:p-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
-            Invoices
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Search, export CSV, and drill into{" "}
-            {isStripe ? "Stripe payments" : "first-party invoices"}.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <Page>
+      <PageHeader
+        eyebrow="Revenue"
+        title="Invoices"
+        description={
+          loading
+            ? "Loading invoices…"
+            : `${total} invoice${total === 1 ? "" : "s"}${isStripe ? " in Stripe" : ""}`
+        }
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setRefreshTick((t) => t + 1)}>
+              <Icon name="clock" size={15} /> Refresh
+            </Button>
+            <Button variant="secondary" onClick={() => exportCsv()} disabled={!rows.length}>
+              <Icon name="download" size={15} /> Export CSV
+            </Button>
+            {!isStripe ? (
+              <Button as={Link} href="/admin/invoices/new" variant="primary">
+                <Icon name="plus" size={15} /> New invoice
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+
+      {/* summary */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <SummaryCard label="Page value" value={fmtMoney(pageTotal, apiCurrency)} hint={`${rows.length} on this page`} />
+        <SummaryCard label="Collected" value={fmtMoney(metrics.paidSum, apiCurrency)} />
+        <SummaryCard
+          label="Outstanding"
+          value={fmtMoney(metrics.outstanding, apiCurrency)}
+          accent={metrics.outstanding > 0 ? "warn" : undefined}
+        />
+        <SummaryCard
+          label="Overdue"
+          value={fmtMoney(metrics.overdueSum, apiCurrency)}
+          hint={metrics.overdueCount ? `${metrics.overdueCount} invoice${metrics.overdueCount === 1 ? "" : "s"}` : "none"}
+          accent={metrics.overdueCount > 0 ? "danger" : undefined}
+          onClick={!isStripe && metrics.overdueCount > 0 ? () => setOverdueOnly(true) : undefined}
+        />
+      </div>
+
+      {/* data source */}
+      <div className="mb-4 inline-flex rounded-xl border border-[#e6e0d6] bg-white p-1">
+        {[
+          ["fp", "Our invoices"],
+          ["stripe", "Stripe"],
+        ].map(([value, label]) => (
           <button
-            onClick={() =>
-              window.open(
-                buildCsvUrl({
-                  q: debouncedSearch,
-                  status,
-                  from: dateFrom,
-                  to: dateTo,
-                  apiBase: "/api/admin/invoices2",
-                  ...(isStripe
-                    ? { expand: "payments", includeStripe: "1" }
-                    : { expand: "payments" }),
-                }),
-                "_blank"
-              )
-            }
-            className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm hover:bg-zinc-50"
+            key={value}
+            onClick={() => setMode(value)}
+            className={`rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+              mode === value ? "bg-[#2a211a] text-white" : "text-[#6b5c4d] hover:bg-[#f2ede4]"
+            }`}
           >
-            <Download className="h-4 w-4" /> Export CSV
+            {label}
           </button>
-          {!isStripe && (
-            <Link
-              href="/admin/invoices/new"
-              className="inline-flex items-center gap-2 rounded-xl bg-black text-white px-3.5 py-2 text-sm hover:bg-zinc-800"
+        ))}
+      </div>
+
+      <Card padded={false} className="overflow-hidden">
+        {/* toolbar */}
+        <div className="border-b border-[#e6e0d6]">
+          <div className="flex flex-wrap items-center gap-2 p-4 pb-3">
+            <div className="relative min-w-[240px] flex-1">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+                <Icon name="search" size={16} />
+              </span>
+              <input
+                ref={searchRef}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search invoice number, customer name, email or VAT"
+                className={`${inputClass} h-11 pl-9 ${searchInput ? "pr-10" : "pr-14"}`}
+              />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                {searchInput ? (
+                  <button
+                    onClick={() => setSearchInput("")}
+                    aria-label="Clear search"
+                    className="rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4] hover:text-[#2a211a]"
+                  >
+                    <Icon name="x" size={14} />
+                  </button>
+                ) : (
+                  <kbd className="hidden rounded border border-[#e6e0d6] bg-[#faf8f4] px-1.5 py-0.5 text-[10px] text-[#b0a294] sm:block">/</kbd>
+                )}
+              </div>
+            </div>
+
+            <Select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="h-11 !w-auto min-w-[160px]"
             >
-              <Plus className="h-4 w-4" /> New Invoice
-            </Link>
-          )}
-        </div>
-      </div>
+              {statuses.map((s) => (
+                <option key={s} value={s}>
+                  {s === "all" ? "All statuses" : s[0].toUpperCase() + s.slice(1)}
+                </option>
+              ))}
+            </Select>
 
-      {/* Source toggle */}
-      <div className="mt-5">
-        <div className="inline-flex rounded-xl border bg-white p-1">
-          <button
-            onClick={() => setMode("fp")}
-            className={`px-3 py-1.5 text-sm rounded-lg ${
-              !isStripe
-                ? "bg-black text-white"
-                : "text-zinc-700 hover:bg-zinc-50"
-            }`}
-          >
-            Invoices
-          </button>
-          <button
-            onClick={() => setMode("stripe")}
-            className={`px-3 py-1.5 text-sm rounded-lg ${
-              isStripe
-                ? "bg-black text-white"
-                : "text-zinc-700 hover:bg-zinc-50"
-            }`}
-          >
-            Stripe payments
-          </button>
-        </div>
-      </div>
+            {!isStripe ? (
+              <Button
+                variant={overdueOnly ? "danger" : "secondary"}
+                className="h-11"
+                onClick={() => setOverdueOnly((v) => !v)}
+                title="Show only invoices past their due date"
+              >
+                <Icon name="warning" size={15} /> Overdue
+              </Button>
+            ) : null}
 
-      {/* Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-6">
-        <MetricCard
-          icon={<FileText className="h-5 w-5" />}
-          label="Total results"
-          value={metrics.totalResults}
-        />
-        <MetricCard
-          icon={<Users className="h-5 w-5" />}
-          label="Paid (count)"
-          value={metrics.paidCount}
-        />
-        <MetricCard
-          icon={<CheckCircle2 className="h-5 w-5" />}
-          label="Amount (this page)"
-          value={formatCurrency(metrics.pageAmount, apiCurrency)}
-        />
-        <MetricCard
-          icon={<CheckCircle2 className="h-5 w-5" />}
-          label="Outstanding (this page)"
-          value={formatCurrency(metrics.pageOutstanding, apiCurrency)}
-        />
-      </div>
-
-      {/* Filters */}
-      <div className="mt-6 grid grid-cols-1 lg:grid-cols-12 gap-3">
-        <div className="lg:col-span-4 flex items-center gap-2 rounded-xl border px-3 py-2 bg-white">
-          <Search className="h-4 w-4 text-zinc-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={
-              isStripe
-                ? "Search number, email, name, Stripe…"
-                : "Search invoice no, customer, email…"
-            }
-            className="w-full bg-transparent outline-none text-sm"
-          />
-        </div>
-
-        <div className="lg:col-span-3">
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="w-full rounded-xl border px-3 py-2 bg-white text-sm"
-          >
-            {(isStripe ? stripeStatuses : fpStatuses).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="lg:col-span-3 grid grid-cols-2 gap-2">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="rounded-xl border px-3 py-2 bg-white text-sm"
-          />
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="rounded-xl border px-3 py-2 bg-white text-sm"
-          />
-        </div>
-
-        <div className="lg:col-span-2 flex items-center justify-end gap-2">
-          <div className="text-sm text-zinc-500">
-            {total} result{total === 1 ? "" : "s"}
+            <Button
+              variant={advancedOpen || dateFrom || dateTo ? "dark" : "secondary"}
+              className="h-11"
+              onClick={() => setAdvancedOpen((v) => !v)}
+            >
+              <Icon name="calendar" size={15} /> Dates
+            </Button>
           </div>
-        </div>
-      </div>
 
-      {/* Table */}
-      <div className="mt-4 overflow-x-auto rounded-2xl border bg-white">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="bg-zinc-50 text-zinc-600">
-              <Th
-                onSort={() => toggleSort("invoiceNo")}
-                active={sortKey === "invoiceNo"}
-                dir={sortDir}
-              >
-                Invoice
-              </Th>
-              <Th>Customer</Th>
-              <Th
-                onSort={() => toggleSort("createdAt")}
-                active={sortKey === "createdAt"}
-                dir={sortDir}
-              >
-                <div className="inline-flex items-center gap-1">
-                  <CalendarDays className="h-4 w-4" /> Created
-                </div>
-              </Th>
-              <Th
-                onSort={() => toggleSort("startTime")}
-                active={sortKey === "startTime"}
-                dir={sortDir}
-              >
-                Start
-              </Th>
-              <Th
-                onSort={() => toggleSort("guests")}
-                active={sortKey === "guests"}
-                dir={sortDir}
-                className="text-right"
-              >
-                Guests
-              </Th>
-              <Th
-                onSort={() => toggleSort("amount")}
-                active={sortKey === "amount"}
-                dir={sortDir}
-                className="text-right"
-              >
-                Amount
-              </Th>
-              <Th
-                onSort={() => toggleSort("amountPaid")}
-                active={sortKey === "amountPaid"}
-                dir={sortDir}
-                className="text-right"
-              >
-                Paid
-              </Th>
-              <Th
-                onSort={() => toggleSort("balance")}
-                active={sortKey === "balance"}
-                dir={sortDir}
-                className="text-right"
-              >
-                Balance
-              </Th>
-              <Th>Status</Th>
-              <Th className="text-right">Actions</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
+          {advancedOpen ? (
+            <div className="flex flex-wrap items-center gap-2 border-t border-[#f0ebe2] bg-[#fdfbf7] px-4 py-3">
+              {[
+                ["Today", today(), today()],
+                ["Last 7 days", daysAgo(7), today()],
+                ["Last 30 days", daysAgo(30), today()],
+                ["This year", `${new Date().getFullYear()}-01-01`, today()],
+                ["All time", "", ""],
+              ].map(([label, f, t]) => (
+                <button
+                  key={label}
+                  onClick={() => { setDateFrom(f); setDateTo(t); }}
+                  className={`rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                    dateFrom === f && dateTo === t
+                      ? "bg-[#2a211a] text-white"
+                      : "bg-white text-[#6b5c4d] ring-1 ring-inset ring-[#e6e0d6] hover:bg-[#f2ede4]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              <span className="mx-1 hidden h-5 w-px bg-[#e6e0d6] sm:block" />
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                className={`${inputClass} h-9 w-[150px] text-[12px]`} />
+              <span className="text-[12px] text-[#9a8c7e]">→</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                className={`${inputClass} h-9 w-[150px] text-[12px]`} />
+            </div>
+          ) : null}
+
+          {activeFilters.length ? (
+            <div className="flex flex-wrap items-center gap-2 border-t border-[#f0ebe2] px-4 py-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">Filtered by</span>
+              {activeFilters.map((f) => (
+                <button
+                  key={f.key}
+                  onClick={f.clear}
+                  className="group inline-flex items-center gap-1.5 rounded-full bg-[#f3ece1] py-1 pl-2.5 pr-1.5 text-[12px] font-medium text-[#8b6f47] ring-1 ring-inset ring-[#e7dcc9] hover:bg-[#ece0cd]"
+                >
+                  <span className="text-[#b0a294]">{f.prefix}</span>
+                  {f.label}
+                  <span className="rounded-full p-0.5 group-hover:bg-[#8b6f47]/15"><Icon name="x" size={11} /></span>
+                </button>
+              ))}
+              <button onClick={resetAll} className="ml-1 text-[12px] font-semibold text-[#9a8c7e] hover:text-[#a33c22] hover:underline">
+                Clear all
+              </button>
+            </div>
+          ) : null}
+
+          {/* bulk bar */}
+          {someSelected && !isStripe ? (
+            <div className="flex flex-wrap items-center gap-2 border-t border-[#f0ebe2] bg-[#f8f4ec] px-4 py-2.5">
+              <span className="text-[12.5px] font-semibold text-[#2a211a]">
+                {selected.size} selected
+              </span>
+              <span className="text-[12px] text-[#7a6a5f]">
+                · {fmtMoney(selectedTotal, apiCurrency)} outstanding
+              </span>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={() => exportCsv([...selected])}>
+                  <Icon name="download" size={14} /> Export
+                </Button>
+                <Button size="sm" variant="secondary" onClick={bulkSend} disabled={!!bulkBusy}>
+                  <Icon name="mail" size={14} /> {bulkBusy === "send" ? "Sending…" : "Send"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+                  Clear
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* table */}
+        {error ? (
+          <div className="p-5">
+            <ErrorNote>{error}</ErrorNote>
+            <Button className="mt-3" variant="secondary" onClick={() => setRefreshTick((t) => t + 1)}>
+              Try again
+            </Button>
+          </div>
+        ) : loading ? (
+          <div className="space-y-2 p-5">
+            {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-11" />)}
+          </div>
+        ) : sorted.length === 0 ? (
+          <EmptyState
+            icon={<Icon name="file" size={20} />}
+            title="No invoices found"
+            description={activeFilters.length ? "Nothing matches these filters." : "Create an invoice to get started."}
+            action={
+              activeFilters.length ? (
+                <Button variant="secondary" onClick={resetAll}>Clear filters</Button>
+              ) : !isStripe ? (
+                <Button as={Link} href="/admin/invoices/new" variant="primary">New invoice</Button>
+              ) : null
+            }
+          />
+        ) : (
+          <Table>
+            <thead>
               <tr>
-                <td colSpan={10} className="py-10 text-center text-zinc-500">
-                  <div className="inline-flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading
-                    invoices…
-                  </div>
-                </td>
+                {!isStripe ? (
+                  <Th className="w-10">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all invoices on this page"
+                      className="h-4 w-4 cursor-pointer accent-[#8b6f47]"
+                    />
+                  </Th>
+                ) : null}
+                <SortableTh label="Invoice" sortKey="invoiceNo" active={sortKey} dir={sortDir} onSort={toggleSort} />
+                <Th>Customer</Th>
+                <SortableTh label="Issued" sortKey="createdAt" active={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Due" sortKey="dueDate" active={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Amount" sortKey="amount" active={sortKey} dir={sortDir} onSort={toggleSort} align="right" />
+                <SortableTh label="Paid" sortKey="amountPaid" active={sortKey} dir={sortDir} onSort={toggleSort} align="right" />
+                <SortableTh label="Balance" sortKey="balance" active={sortKey} dir={sortDir} onSort={toggleSort} align="right" />
+                <Th>Status</Th>
+                <Th className="text-right">Actions</Th>
               </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan={10} className="py-12 text-center text-zinc-500">
-                  No invoices found.
-                </td>
-              </tr>
-            ) : (
-              rows.map((inv) => {
-                const { amount, paidAmount, balance, paid, overdue } =
-                  deriveMoney(inv);
+            </thead>
+            <tbody>
+              {sorted.map((inv) => {
+                const m = deriveMoney(inv);
+                const ccy = inv.currency || apiCurrency;
+                const isBusy = busy.id === inv.id;
+                const canVoid =
+                  !m.paid &&
+                  String(inv.status || "").toLowerCase() !== "void" &&
+                  !(Array.isArray(inv.payments) && inv.payments.length);
+                const canDelete =
+                  ["draft", "void"].includes(String(inv.status || "").toLowerCase()) &&
+                  !(Array.isArray(inv.payments) && inv.payments.length);
+
                 return (
-                  <tr key={inv.id} className="border-t hover:bg-zinc-50/60">
-                    <Td className="font-medium">
+                  <Tr key={inv.id} className={selected.has(inv.id) ? "bg-[#faf6ef]" : ""}>
+                    {!isStripe ? (
+                      <Td>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(inv.id)}
+                          onChange={() => toggleOne(inv.id)}
+                          aria-label={`Select invoice ${inv.invoiceNo || inv.id}`}
+                          className="h-4 w-4 cursor-pointer accent-[#8b6f47]"
+                        />
+                      </Td>
+                    ) : null}
+
+                    <Td>
                       <button
                         onClick={() => openInvoice(inv)}
-                        className="underline underline-offset-4 hover:text-zinc-900"
-                        title={isStripe ? "Open in Stripe" : "Open invoice"}
+                        className="font-semibold text-[#2a211a] hover:text-[#8b6f47] hover:underline"
                       >
-                        {inv.invoiceNo}
+                        {inv.invoiceNo || inv.id}
                       </button>
                       <div className="mt-1 flex flex-wrap items-center gap-1">
-                        {paid && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
-                            <CheckCircle2 className="h-3 w-3" /> Paid
-                          </span>
-                        )}
-                        {!paid && overdue && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">
-                            <AlertTriangle className="h-3 w-3" /> Overdue
-                          </span>
-                        )}
-                        {isStripe && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">
-                            Stripe
-                          </span>
-                        )}
-                      </div>
-                    </Td>
-
-                    {/* Customer */}
-                    <Td>
-                      <div className="leading-tight">
-                        <div className="font-medium">
-                          {inv.customer?.name || "—"}
-                        </div>
-                        <div className="text-xs text-zinc-500">
-                          {inv.customer?.email || ""}
-                          {inv.customer?.phone
-                            ? ` · ${inv.customer.phone}`
-                            : ""}
-                          {inv.customer?.vat
-                            ? ` · VAT: ${inv.customer.vat}`
-                            : ""}
-                        </div>
-                      </div>
-                    </Td>
-
-                    {/* Created */}
-                    <Td className="text-zinc-600">
-                      {formatDate(inv.createdAt)}
-                    </Td>
-
-                    {/* Start */}
-                    <Td className="text-zinc-600">
-                      {formatDateTime(inv.startTime)}
-                    </Td>
-
-                    {/* Guests */}
-                    <Td className="text-right text-zinc-600">
-                      {isStripe
-                        ? "—"
-                        : typeof inv.guests === "number"
-                        ? inv.guests
-                        : "—"}
-                    </Td>
-
-                    {/* Amount / Paid / Balance */}
-                    <Td className="text-right font-medium">
-                      {formatCurrency(amount, inv.currency || apiCurrency)}
-                    </Td>
-                    <Td className="text-right text-zinc-700">
-                      {formatCurrency(paidAmount, inv.currency || apiCurrency)}
-                    </Td>
-                    <Td
-                      className={`text-right ${
-                        balance > 0 ? "text-rose-600" : "text-zinc-700"
-                      }`}
-                    >
-                      {formatCurrency(balance, inv.currency || apiCurrency)}
-                    </Td>
-
-                    {/* Status */}
-                    <Td>{statusBadge(inv.status)}</Td>
-
-                    {/* Actions */}
-                    <Td className="text-right">
-                      <div className="inline-flex items-center gap-1">
-                        {/* Open */}
-                        <button
-                          className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                          onClick={() => openPdf(inv)}
-                          aria-label="Open"
-                          title={isStripe ? "Open invoice" : "Open PDF"}
-                        >
-                          <FileText className="h-4 w-4" />
-                        </button>
-
-                        {/* Download */}
-                        <button
-                          className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                          onClick={() => downloadPdf(inv)}
-                          aria-label="Download"
-                          title="Download PDF"
-                        >
-                          <Download className="h-4 w-4" />
-                        </button>
-
-                        {/* Send / Mark / Void / Delete */}
-                        {!isStripe && (
-                          <>
-                            <button
-                              className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                              onClick={() => sendInvoice(inv.id)}
-                              aria-label="Send invoice"
-                              title="Send invoice"
-                              disabled={
-                                busy.id === inv.id && busy.type === "send"
-                              }
-                            >
-                              {busy.id === inv.id && busy.type === "send" ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Mail className="h-4 w-4" />
-                              )}
-                            </button>
-
-                            {!paid && (
-                              <button
-                                className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                                onClick={() => markPaid(inv.id)}
-                                aria-label="Mark as paid"
-                                title="Mark as paid"
-                                disabled={
-                                  busy.id === inv.id && busy.type === "mark"
-                                }
-                              >
-                                {busy.id === inv.id && busy.type === "mark" ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="h-4 w-4" />
-                                )}
-                              </button>
-                            )}
-
-                            {!deriveMoney(inv).paid &&
-                              String(inv.status || "").toLowerCase() !==
-                                "void" &&
-                              (!Array.isArray(inv.payments) ||
-                                inv.payments.length === 0) && (
-                                <button
-                                  className="px-2 py-1 rounded-lg hover:bg-zinc-100 text-amber-700"
-                                  onClick={() => voidInvoice(inv.id)}
-                                  aria-label="Void invoice"
-                                  title="Void invoice"
-                                  disabled={
-                                    busy.id === inv.id && busy.type === "void"
-                                  }
-                                >
-                                  {busy.id === inv.id &&
-                                  busy.type === "void" ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Ban className="h-4 w-4" />
-                                  )}
-                                </button>
-                              )}
-
-                            {["draft", "void"].includes(
-                              String(inv.status || "").toLowerCase()
-                            ) &&
-                              (!Array.isArray(inv.payments) ||
-                                inv.payments.length === 0) && (
-                                <button
-                                  className="px-2 py-1 rounded-lg hover:bg-zinc-100 text-rose-700"
-                                  onClick={() => deleteInvoice(inv.id)}
-                                  aria-label="Delete invoice"
-                                  title="Delete invoice"
-                                  disabled={
-                                    busy.id === inv.id && busy.type === "delete"
-                                  }
-                                >
-                                  {busy.id === inv.id &&
-                                  busy.type === "delete" ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="h-4 w-4" />
-                                  )}
-                                </button>
-                              )}
-                          </>
-                        )}
-
-                        {/* Stripe-only: quick open in dashboard */}
-                        {isStripe && (
-                          <button
-                            className="px-2 py-1 rounded-lg hover:bg-zinc-100"
-                            onClick={() =>
-                              window.open(
-                                `https://dashboard.stripe.com/invoices/${
-                                  inv?.meta?.stripe_invoice_id || inv.id
-                                }`,
-                                "_blank"
-                              )
-                            }
-                            aria-label="Open in Stripe"
-                            title="Open in Stripe"
+                        {m.overdue ? <Badge variant="danger">Overdue</Badge> : null}
+                        {inv?.meta?.booking_id ? (
+                          <Link
+                            href={`/admin/bookings/${inv.meta.booking_id}`}
+                            className="rounded-full bg-[#f3ece1] px-2 py-0.5 text-[10.5px] font-semibold text-[#8b6f47] ring-1 ring-inset ring-[#e7dcc9] hover:bg-[#ece0cd]"
                           >
-                            <ExternalLink className="h-4 w-4" />
-                          </button>
+                            Booking #{inv.meta.booking_id}
+                          </Link>
+                        ) : null}
+                      </div>
+                    </Td>
+
+                    <Td>
+                      <span className="block font-medium text-[#2a211a]">{inv.customer?.name || "—"}</span>
+                      {inv.customer?.email || inv.customer?.vat ? (
+                        <span className="block text-[11.5px] text-[#9a8c7e]">
+                          {[inv.customer?.email, inv.customer?.vat ? `VAT ${inv.customer.vat}` : null]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      ) : null}
+                    </Td>
+
+                    <Td className="whitespace-nowrap text-[#7a6a5f]">{fmtDate(inv.createdAt)}</Td>
+                    <Td className={`whitespace-nowrap ${m.overdue ? "font-semibold text-[#a33c22]" : "text-[#7a6a5f]"}`}>
+                      {fmtDate(m.dueISO)}
+                    </Td>
+
+                    <Td className="whitespace-nowrap text-right font-semibold">{fmtMoney(m.amount, ccy)}</Td>
+                    <Td className="whitespace-nowrap text-right text-[#7a6a5f]">{fmtMoney(m.paidAmount, ccy)}</Td>
+                    <Td className={`whitespace-nowrap text-right ${m.balance > 0 ? "font-semibold text-[#a33c22]" : "text-[#b0a294]"}`}>
+                      {m.balance > 0 ? fmtMoney(m.balance, ccy) : "—"}
+                    </Td>
+
+                    <Td><StatusBadge status={inv.status} /></Td>
+
+                    <Td className="text-right">
+                      <div className="flex items-center justify-end gap-0.5">
+                        <IconAction title="Open PDF" onClick={() => openPdf(inv)} icon="file" />
+                        <IconAction title="Download PDF" onClick={() => downloadPdf(inv)} icon="download" />
+                        {!isStripe ? (
+                          <>
+                            <IconAction
+                              title="Email this invoice"
+                              onClick={() => sendInvoice(inv.id)}
+                              icon="mail"
+                              busy={isBusy && busy.type === "send"}
+                            />
+                            {!m.paid ? (
+                              <IconAction
+                                title="Record a payment"
+                                onClick={() => openMarkPaid(inv)}
+                                icon="check"
+                                tone="good"
+                                busy={isBusy && busy.type === "mark"}
+                              />
+                            ) : null}
+                            {canVoid ? (
+                              <IconAction
+                                title="Void invoice"
+                                onClick={() => voidInvoice(inv.id)}
+                                icon="ban"
+                                tone="warn"
+                                busy={isBusy && busy.type === "void"}
+                              />
+                            ) : null}
+                            {canDelete ? (
+                              <IconAction
+                                title="Delete invoice"
+                                onClick={() => deleteInvoice(inv.id)}
+                                icon="trash"
+                                tone="bad"
+                                busy={isBusy && busy.type === "delete"}
+                              />
+                            ) : null}
+                          </>
+                        ) : (
+                          <IconAction
+                            title="Open in Stripe"
+                            onClick={() => window.open(stripeLinks(inv).dash || "https://dashboard.stripe.com/invoices", "_blank")}
+                            icon="external"
+                          />
                         )}
                       </div>
                     </Td>
-                  </tr>
+                  </Tr>
                 );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+              })}
+            </tbody>
+          </Table>
+        )}
 
-      {/* Pagination */}
-      <div className="mt-4 flex flex-col md:flex-row md:items-center gap-3 justify-between">
-        <div className="text-sm text-zinc-500">
-          Page {page} of {totalPages}
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="rounded-xl border px-3 py-2 bg-white text-sm"
-          >
-            <option value={10}>10 / page</option>
-            <option value={25}>25 / page</option>
-            <option value={50}>50 / page</option>
-            <option value={100}>100 / page</option>
-          </select>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="rounded-xl border px-3 py-2 text-sm disabled:opacity-50 bg-white"
-            >
-              Prev
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="rounded-xl border px-3 py-2 text-sm disabled:opacity-50 bg-white"
-            >
-              Next
-            </button>
+        {/* pagination */}
+        {!loading && sorted.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e6e0d6] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Muted className="text-[12px]">
+                Page {page} of {totalPages} · {total} total
+              </Muted>
+              <Select
+                value={String(pageSize)}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="h-8 !w-auto text-[12px]"
+                aria-label="Rows per page"
+              >
+                {[25, 50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n} / page</option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                Previous
+              </Button>
+              <Button size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Card>
+
+      {/* ---------------------------- mark paid modal ---------------------------- */}
+      {payFor ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setPayFor(null)} />
+          <div className="relative z-10 w-full max-w-md rounded-t-3xl border border-[#e6e0d6] bg-white p-6 shadow-2xl sm:rounded-3xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-serif text-[19px] text-[#2a211a]">Record payment</h2>
+                <p className="mt-0.5 text-[12px] text-[#9a8c7e]">
+                  {payFor.invoiceNo || payFor.id} · {payFor.customer?.name || "—"}
+                </p>
+              </div>
+              <button onClick={() => setPayFor(null)} aria-label="Close" className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]">
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+
+            <div className="mb-4 rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] px-3 py-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9a8c7e]">Outstanding balance</p>
+              <p className="mt-0.5 font-serif text-[20px] text-[#2a211a]">
+                {fmtMoney(deriveMoney(payFor).balance, payFor.currency || apiCurrency)}
+              </p>
+            </div>
+
+            <Field label="Payment method">
+              <Select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+                {PAY_METHODS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field label="Reference (optional)" hint="Bank reference, receipt number, or Stripe id." className="mt-3">
+              <Input
+                value={payReference}
+                onChange={(e) => setPayReference(e.target.value)}
+                placeholder="e.g. TRX-49182"
+              />
+            </Field>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setPayFor(null)}>Cancel</Button>
+              <Button variant="primary" onClick={confirmMarkPaid} disabled={busy.type === "mark"}>
+                {busy.type === "mark" ? "Saving…" : "Mark as paid"}
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* Banners */}
-      {error && (
-        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </div>
-      )}
-      {ok && (
-        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {ok}
-        </div>
-      )}
-    </div>
-  );
-
-  // --- helpers ---
-  function toggleSort(key) {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
-    setRows((prev) => sortClient([...prev], key));
-  }
-
-  function sortClient(data, key = sortKey, dir = sortDir) {
-    const arr = [...data];
-    const d = dir === "asc" ? 1 : -1;
-
-    // Prefer server fields; fall back to derived
-    if (key === "amount" || key === "amountPaid" || key === "balance") {
-      arr.sort((a, b) => {
-        const av =
-          key === "amount"
-            ? Number(a.amount ?? a.total ?? a.meta?.total ?? 0)
-            : key === "amountPaid"
-            ? Number(
-                typeof a.amountPaid === "number"
-                  ? a.amountPaid
-                  : sumPayments(a.payments)
-              )
-            : Number(
-                typeof a.balance === "number"
-                  ? a.balance
-                  : Math.max(
-                      0,
-                      Number(a.amount ?? a.total ?? a.meta?.total ?? 0) -
-                        (typeof a.amountPaid === "number"
-                          ? a.amountPaid
-                          : sumPayments(a.payments))
-                    )
-              );
-
-        const bv =
-          key === "amount"
-            ? Number(b.amount ?? b.total ?? b.meta?.total ?? 0)
-            : key === "amountPaid"
-            ? Number(
-                typeof b.amountPaid === "number"
-                  ? b.amountPaid
-                  : sumPayments(b.payments)
-              )
-            : Number(
-                typeof b.balance === "number"
-                  ? b.balance
-                  : Math.max(
-                      0,
-                      Number(b.amount ?? b.total ?? b.meta?.total ?? 0) -
-                        (typeof b.amountPaid === "number"
-                          ? b.amountPaid
-                          : sumPayments(b.payments))
-                    )
-              );
-        return (av - bv) * d;
-      });
-      return arr;
-    }
-
-    const numericKeys = new Set(["guests", "numberOfPeople"]);
-    if (numericKeys.has(key)) {
-      arr.sort((a, b) => (Number(a[key] ?? 0) - Number(b[key] ?? 0)) * d);
-      return arr;
-    }
-
-    const time = (v) => Date.parse(v ?? "");
-    arr.sort((a, b) => {
-      const at = time(a[key]);
-      const bt = time(b[key]);
-      if (!Number.isNaN(at) && !Number.isNaN(bt)) return (at - bt) * d;
-      return String(a[key] ?? "").localeCompare(String(b[key] ?? "")) * d;
-    });
-    return arr;
-  }
-}
-
-// --- Tiny presentational atoms ---
-function MetricCard({ icon, label, value }) {
-  return (
-    <div className="rounded-2xl border bg-white p-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-zinc-500">{label}</div>
-        <div className="text-zinc-400">{icon}</div>
-      </div>
-      <div className="mt-2 text-xl font-semibold">{value}</div>
-    </div>
+      ) : null}
+    </Page>
   );
 }
 
-function Th({ children, className = "", onSort, active = false, dir = "asc" }) {
+/* ------------------------------- small parts ------------------------------ */
+
+function SummaryCard({ label, value, hint, accent, onClick }) {
+  const color =
+    accent === "danger" ? "text-[#a33c22]" : accent === "warn" ? "text-[#8a6412]" : "text-[#2a211a]";
+  const body = (
+    <>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">{label}</p>
+      <p className={`mt-1 font-serif text-[20px] ${color}`}>{value}</p>
+      {hint ? <p className="mt-0.5 text-[11.5px] text-[#9a8c7e]">{hint}</p> : null}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        onClick={onClick}
+        className="rounded-2xl border border-[#e6e0d6] bg-white px-5 py-3.5 text-left shadow-[0_1px_2px_rgba(42,33,26,0.04)] transition-colors hover:border-[#c9b393] hover:bg-[#fdfbf7]"
+      >
+        {body}
+      </button>
+    );
+  }
+  return <Card className="py-3.5">{body}</Card>;
+}
+
+function SortableTh({ label, sortKey: key, active, dir, onSort, align }) {
+  const isActive = active === key;
   return (
-    <th
-      className={`px-3 py-3 text-left text-xs font-medium uppercase tracking-wide ${className}`}
+    <Th className={align === "right" ? "text-right" : ""}>
+      <button
+        onClick={() => onSort(key)}
+        className={`inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-[#2a211a] ${
+          isActive ? "text-[#2a211a]" : ""
+        }`}
+      >
+        {label}
+        <span className={isActive ? "opacity-100" : "opacity-0"}>{dir === "asc" ? "▲" : "▼"}</span>
+      </button>
+    </Th>
+  );
+}
+
+function IconAction({ title, onClick, icon, tone, busy }) {
+  const hover =
+    tone === "bad"
+      ? "hover:bg-[#fbeae5] hover:text-[#a33c22]"
+      : tone === "warn"
+        ? "hover:bg-[#fbf1dc] hover:text-[#8a6412]"
+        : tone === "good"
+          ? "hover:bg-[#e9f3ec] hover:text-[#2f6b45]"
+          : "hover:bg-[#f2ede4] hover:text-[#2a211a]";
+  return (
+    <button
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={busy}
+      className={`rounded-lg p-1.5 text-[#7a6a5f] transition-colors disabled:opacity-40 ${hover}`}
     >
-      {onSort ? (
-        <button
-          onClick={onSort}
-          className={`inline-flex items-center gap-1 hover:text-zinc-900 ${
-            active ? "text-zinc-900" : "text-zinc-600"
-          }`}
-        >
-          {children}
-          {active && (
-            <span className="text-[10px]">{dir === "asc" ? "▲" : "▼"}</span>
-          )}
-        </button>
-      ) : (
-        children
-      )}
-    </th>
+      <Icon name={busy ? "clock" : icon} size={15} className={busy ? "animate-spin" : ""} />
+    </button>
   );
-}
-
-function Td({ children, className = "" }) {
-  return <td className={`px-3 py-3 align-middle ${className}`}>{children}</td>;
-}
-
-// --- Fetching & utils ---
-async function fetchInvoices({
-  q,
-  status,
-  from,
-  to,
-  p,
-  per,
-  apiBase,
-  expand,
-  includeStripe,
-}) {
-  const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  if (status) params.set("status", status);
-  if (from) params.set("from", from);
-  if (to) params.set("to", to);
-  if (p) params.set("p", String(p));
-  if (per) params.set("per", String(per));
-  if (expand) params.set("expand", expand);
-  if (includeStripe) params.set("includeStripe", includeStripe);
-
-  const res = await fetch(`${apiBase}?${params.toString()}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  const data = Array.isArray(json?.data) ? json.data : [];
-  const meta = {
-    page: json?.page || 1,
-    perPage: json?.perPage || per || 25,
-    total: json?.total ?? data.length,
-    pageTotal: json?.pageTotal ?? 0,
-    currency: json?.currency || "EUR",
-  };
-  return { data, meta };
-}
-
-function buildCsvUrl({
-  q,
-  status = "all",
-  from,
-  to,
-  ids,
-  apiBase,
-  expand,
-  includeStripe,
-}) {
-  const params = new URLSearchParams();
-  params.set("format", "csv");
-  if (ids) params.set("ids", ids);
-  if (q) params.set("q", q);
-  if (status) params.set("status", status);
-  if (from) params.set("from", from);
-  if (to) params.set("to", to);
-  if (expand) params.set("expand", expand);
-  if (includeStripe) params.set("includeStripe", includeStripe);
-  return `${apiBase}?${params.toString()}`;
-}
-
-function statusBadge(s = "") {
-  const key = String(s || "").toLowerCase();
-  const map = {
-    paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    pending: "bg-amber-50 text-amber-700 border-amber-200",
-    confirmed: "bg-sky-50 text-sky-700 border-sky-200",
-    cancelled: "bg-zinc-50 text-zinc-700 border-zinc-200",
-    approved: "bg-indigo-50 text-indigo-700 border-indigo-200",
-    rejected: "bg-rose-50 text-rose-700 border-rose-200",
-    completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    finalized: "bg-sky-50 text-sky-700 border-sky-200",
-    draft: "bg-zinc-50 text-zinc-700 border-zinc-200",
-    sent: "bg-indigo-50 text-indigo-700 border-indigo-200",
-    open: "bg-sky-50 text-sky-700 border-sky-200",
-    void: "bg-zinc-50 text-zinc-700 border-zinc-200",
-    uncollectible: "bg-amber-50 text-amber-700 border-amber-200",
-  };
-  const cls = map[key] || "bg-zinc-50 text-zinc-700 border-zinc-200";
-  const label = key ? key[0].toUpperCase() + key.slice(1) : "—";
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${cls}`}
-    >
-      {label}
-    </span>
-  );
-}
-
-function formatCurrency(n, curr = "EUR") {
-  try {
-    const num = Number(n || 0);
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: curr,
-      maximumFractionDigits: 2,
-    }).format(num);
-  } catch {
-    return `${n} ${curr}`;
-  }
-}
-
-function formatDate(iso) {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString();
-  } catch {
-    return iso;
-  }
-}
-
-function formatDateTime(iso) {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function sumPayments(arr = []) {
-  return arr.reduce((s, p) => s + (Number(p?.amount) || 0), 0);
-}
-
-/** Prefer server-provided fields; fall back to payments & status. */
-function deriveMoney(inv) {
-  const amount = Number(
-    inv.amount ?? inv.total ?? inv.meta?.total ?? inv.totalAmount ?? 0
-  );
-
-  const paidAmount = Number(
-    (typeof inv.amountPaid === "number" && inv.amountPaid) ??
-      inv.totalPaidAmount ??
-      sumPayments(Array.isArray(inv.payments) ? inv.payments : [])
-  );
-
-  const EPS = 0.005;
-  const balanceRaw = amount - paidAmount;
-  const balance = balanceRaw > EPS ? balanceRaw : 0;
-
-  const status = String(inv.status || "").toLowerCase();
-  const paidByStatus = status === "paid";
-  const paidByTimestamp = Boolean(inv?.meta?.paid_at || inv?.paid_at);
-  const paid =
-    inv.paid === true || paidByStatus || paidByTimestamp || balance === 0;
-
-  const dueISO = inv?.meta?.due_date ?? inv?.due_date;
-  const overdue =
-    !paid && dueISO ? new Date(dueISO).getTime() < Date.now() : false;
-
-  return { amount, paidAmount, balance, paid, overdue };
-}
-
-function isPaid(inv) {
-  return deriveMoney(inv).paid;
 }

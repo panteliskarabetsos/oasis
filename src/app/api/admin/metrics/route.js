@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const TBL_BOOKING = "booking";
 const TBL_SLOT = "ScheduleSlot";
@@ -17,6 +18,68 @@ const COUNT_STATUSES = new Set([
   "converted",
   "approved",
 ]);
+
+
+/* ---------------------------------------------------------------------------
+ * Totals for an arbitrary window, using exactly the same method as the main
+ * handler (slots in range + bookings by slot, merged with bookings whose
+ * startTime falls in range, filtered to COUNT_STATUSES). Used to produce a
+ * real period-over-period delta instead of hardcoded percentages.
+ * ------------------------------------------------------------------------ */
+async function windowTotals(admin, from, to) {
+  const { dayFrom, dayToOpen } = buildDayRange(from, to, "Europe/Athens");
+
+  const { data: slots } = await admin
+    .from(TBL_SLOT)
+    .select("id,totalSlots,isCancelled,date")
+    .gte("date", dayFrom)
+    .lt("date", dayToOpen)
+    .eq("isCancelled", false);
+
+  const slotIds = (slots || []).map((s) => s.id);
+  const slotById = new Map((slots || []).map((s) => [s.id, s]));
+  const COLS =
+    "id,status,totalPaidAmount,numberOfPeople,adultsCount,kidsCount,unitPriceAdult,unitPriceKid,discountAmount,scheduleSlotId,startTime";
+
+  let bySlot = [];
+  if (slotIds.length) {
+    const { data } = await admin.from(TBL_BOOKING).select(COLS).in("scheduleSlotId", slotIds);
+    bySlot = data || [];
+  }
+
+  const { data: byTime } = await admin
+    .from(TBL_BOOKING)
+    .select(COLS)
+    .gte("startTime", from.toISOString())
+    .lt("startTime", to.toISOString());
+
+  const merged = new Map();
+  for (const b of bySlot) merged.set(b.id, b);
+  for (const b of byTime || []) if (!merged.has(b.id)) merged.set(b.id, b);
+
+  const active = Array.from(merged.values()).filter(
+    (b) => b.status && COUNT_STATUSES.has(b.status)
+  );
+
+  const capacity = (slots || []).reduce((sum, s) => sum + (s.totalSlots || 0), 0);
+  const reserved = active
+    .filter((b) => b.scheduleSlotId && slotById.has(b.scheduleSlotId))
+    .reduce((sum, b) => sum + reservedCount(b), 0);
+
+  return {
+    bookings: active.length,
+    revenue: active.reduce((sum, b) => sum + estimateRevenue(b), 0),
+    openSlots: Math.max(0, capacity - reserved),
+    occupancyPct: capacity > 0 ? (reserved / capacity) * 100 : 0,
+  };
+}
+
+/** % change vs a previous value; null when there is no basis for comparison. */
+function pctChange(current, previous) {
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) return null;
+  if (previous === 0) return current === 0 ? 0 : null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
 
 /* ------------------------------ Date helpers ------------------------------ */
 // Format a Date to "YYYY-MM-DD" in a given time zone (Europe/Athens)
@@ -127,8 +190,8 @@ export async function GET(req) {
   } = await supabase.auth.getUser();
   if (userErr || !user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const role = user.app_metadata?.role || user.user_metadata?.role || "user";
-  if (role !== "admin")
+  const { permissions } = await resolveStaffAccess(user);
+  if (!accessCan(permissions))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   // Admin client
@@ -301,9 +364,34 @@ export async function GET(req) {
     })
   );
 
+  /* Previous window of equal length, for real deltas */
+  let deltas = null;
+  let previous = null;
+  try {
+    const spanMs = Math.max(1, to.getTime() - from.getTime());
+    const prevTo = new Date(from.getTime());
+    const prevFrom = new Date(from.getTime() - spanMs);
+    previous = await windowTotals(admin, prevFrom, prevTo);
+    deltas = {
+      bookingsPct: pctChange(bookingsMTD, previous.bookings),
+      revenuePct: pctChange(revenueMTD, previous.revenue),
+      // occupancy compares in percentage points, not percent-of-percent
+      occupancyPoints:
+        Number.isFinite(previous.occupancyPct)
+          ? occupancyMTDPct - previous.occupancyPct
+          : null,
+      from: prevFrom.toISOString(),
+      to: prevTo.toISOString(),
+    };
+  } catch {
+    // a failed comparison must never break the dashboard
+  }
+
   /* Return */
   return NextResponse.json(
     {
+      deltas,
+      previous,
       from: fromISO,
       to: toISO,
       // MTD (or range) metrics

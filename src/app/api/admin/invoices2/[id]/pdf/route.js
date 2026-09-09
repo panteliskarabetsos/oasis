@@ -6,6 +6,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
 import { buildInvoicePdf, formatInv } from "@/lib/pdf/invoice-pdf-v2";
 import { loadInvoiceForPdf } from "@/lib/pdf/load-invoice-for-pdf";
 
@@ -22,12 +23,10 @@ async function requireAdmin() {
     data: { user },
   } = await supa.auth.getUser();
   if (!user) return { error: true, response: bad("Unauthorized", 401) };
-  const { data: row, error } = await supa
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (error || (row?.role ?? "user") !== "admin")
+  // Resolve the role with the service client — the user client is RLS-bound
+  // and was silently downgrading real admins to "user".
+  const role = await resolveStaffRole(user);
+  if (!roleCan(role, "invoices"))
     return { error: true, response: bad("Forbidden", 403) };
   return { error: false };
 }
@@ -41,10 +40,18 @@ export async function GET(req, ctx) {
   if (gate?.error) return gate.response;
 
   const admin = createSupabaseAdmin();
-  const { inv, items, taxesArr, seller } = await loadInvoiceForPdf(admin, id);
 
-  const pdfBytes = await buildInvoicePdf({ inv, items, seller, taxesArr });
-  const filename = `${formatInv(inv.series, inv.number)}.pdf`;
+  // loadInvoiceForPdf throws (rather than returning null) for a missing id
+  let pdfBytes;
+  let filename;
+  try {
+    const { inv, items, taxesArr, seller } = await loadInvoiceForPdf(admin, id);
+    pdfBytes = await buildInvoicePdf({ inv, items, seller, taxesArr });
+    filename = `${formatInv(inv.series, inv.number)}.pdf`;
+  } catch (e) {
+    const msg = e?.message || "Failed to build the invoice PDF";
+    return bad(msg, /not found/i.test(msg) ? 404 : 500);
+  }
 
   const url = new URL(req.url);
   const dl = url.searchParams.get("dl") ?? url.searchParams.get("download");

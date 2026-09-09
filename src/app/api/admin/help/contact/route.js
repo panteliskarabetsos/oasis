@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { transporter } from "@/lib/email/nodemailer";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -15,25 +16,15 @@ async function requireAdmin() {
   if (error || !userData?.user) return { err: bad("Unauthorized", 401) };
 
   const user = userData.user;
-  // quick metadata role check
-  const metaRole =
-    user.app_metadata?.role || user.user_metadata?.role || "user";
-  if (metaRole === "admin") return { user };
 
-  // fallback to DB role
   const admin = createSupabaseAdmin();
   if (!admin) return { err: bad("Server not configured", 500) };
 
-  const { data: row, error: rerr } = await admin
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  // Any staff member may raise a help request.
+  const { permissions } = await resolveStaffAccess(user);
+  if (accessCan(permissions)) return { user };
 
-  if (rerr) return { err: bad("Server error", 500) };
-  if (row?.role === "admin") return { user };
-
-  return { err: bad("Unauthorized", 401) };
+  return { err: bad("Forbidden", 403) };
 }
 
 export async function POST(req) {

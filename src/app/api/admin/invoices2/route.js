@@ -6,6 +6,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
 import Stripe from "stripe";
 
 /* -------------------- Stripe -------------------- */
@@ -39,12 +40,10 @@ async function requireAdmin() {
     data: { user },
   } = await supa.auth.getUser();
   if (!user) return { error: true, response: bad("Unauthorized", 401) };
-  const { data: row, error } = await supa
-    .from("User") // if table renamed, use the correct name
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (error || (row?.role ?? "user") !== "admin")
+  // Resolve the role with the service client — the user client is RLS-bound
+  // and was silently downgrading real admins to "user".
+  const role = await resolveStaffRole(user);
+  if (!roleCan(role, "invoices"))
     return { error: true, response: bad("Forbidden", 403) };
   return { error: false };
 }

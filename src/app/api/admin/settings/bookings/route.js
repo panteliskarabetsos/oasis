@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const err = (m, s = 500, extra = null) =>
@@ -18,18 +19,13 @@ async function requireAdmin() {
   if (error || !data?.user) return { error: err("Unauthorized", 401) };
 
   const user = data.user;
-  const metaRole = user.app_metadata?.role || user.user_metadata?.role;
-  if (metaRole === "admin") return { user };
 
   const admin = createSupabaseAdmin();
-  const { data: dbUser, error: dbErr } = await admin
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  if (!admin) return { error: err("Server not configured", 500) };
 
-  if (dbErr) return { error: err("Role lookup failed", 500, dbErr) };
-  if (dbUser?.role === "admin") return { user };
+  // These settings exist to drive the planner, so they follow its permission.
+  const { permissions } = await resolveStaffAccess(user);
+  if (accessCan(permissions, "planner")) return { user };
 
   return { error: err("Forbidden", 403) };
 }

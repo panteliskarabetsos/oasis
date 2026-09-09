@@ -112,7 +112,7 @@ async function sendConfirmationEmail({
 }) {
   // 1) Load booking (email + amounts)
   const { data: b } = await admin
-    .from("Booking")
+    .from("booking")
     .select("id, primary_contact, totalPaidAmount, currency")
     .eq("id", bookingId)
     .single();
@@ -180,7 +180,7 @@ async function sendConfirmationEmail({
   // 5) Mark sent (best-effort)
   try {
     await admin
-      .from("Booking")
+      .from("booking")
       .update({ confirmationEmailSentAt: new Date().toISOString() })
       .eq("id", b.id);
   } catch {}
@@ -242,7 +242,7 @@ async function ensureConvertedFromDraft({
   // 4) Idempotency: if a Booking already exists with these Stripe ids, use it
   const byPI = stripePaymentIntentId
     ? await admin
-        .from("Booking")
+        .from("booking")
         .select("id")
         .eq("stripePaymentIntentId", stripePaymentIntentId)
         .maybeSingle()
@@ -250,7 +250,7 @@ async function ensureConvertedFromDraft({
 
   const byCS = stripeSessionId
     ? await admin
-        .from("Booking")
+        .from("booking")
         .select("id")
         .eq("stripeSessionId", stripeSessionId)
         .maybeSingle()
@@ -261,7 +261,7 @@ async function ensureConvertedFromDraft({
   // 5) Insert booking if not present
   if (!bookingId) {
     const ins = await admin
-      .from("Booking")
+      .from("booking")
       .insert({
         scheduleSlotId: draft.scheduleSlotId,
         experienceId: draft.experienceId,
@@ -288,7 +288,7 @@ async function ensureConvertedFromDraft({
       // If unique constraints later added on stripe ids, a race can happen:
       // try to fetch again.
       const raceFetch = await admin
-        .from("Booking")
+        .from("booking")
         .select("id")
         .eq("stripePaymentIntentId", stripePaymentIntentId || "")
         .maybeSingle();

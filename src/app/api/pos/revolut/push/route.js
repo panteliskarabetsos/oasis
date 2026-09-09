@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function POST(req) {
+  const auth = await requireAdmin("pos");
+  if (!auth.ok) return auth.response;
   try {
     const body = await req.json();
     const { amount, currency, reference } = body;

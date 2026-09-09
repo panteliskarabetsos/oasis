@@ -8,6 +8,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createTransport } from "@/lib/email/sender";
 import { makeUnsubToken } from "@/lib/newsletter/signing";
 import { computeOrigin } from "@/lib/url/origin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -15,6 +16,8 @@ const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 // naive single-run worker; for large lists, trigger it repeatedly (cron)
 // POST { campaignId, batchSize?: number }
 export async function POST(req) {
+  const auth = await requireAdmin("promotions");
+  if (!auth.ok) return auth.response;
   const body = await req.json().catch(() => ({}));
   const campaignId = Number(body.campaignId || 0);
   const batchSize = Math.max(1, Math.min(500, Number(body.batchSize || 200)));

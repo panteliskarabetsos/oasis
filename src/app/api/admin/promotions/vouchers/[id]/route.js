@@ -4,11 +4,14 @@ export const dynamic = "force-dynamic";
 import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 export async function PATCH(req, ctx) {
+  const auth = await requireAdmin("promotions");
+  if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
   const body = await req.json();
 

@@ -5,55 +5,21 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin as requireAdminAuth } from "@/lib/auth/requireAdmin";
 
 // --- helpers ---
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const bad = (msg, status = 400) =>
   NextResponse.json({ error: msg }, { status });
 
+// Delegates to the shared guard (see @/lib/auth/requireAdmin).
+// Previously this called createSupabaseServer() without awaiting it, so
+// supabase.auth was undefined and every request threw a 500.
 async function requireAdmin() {
-  const supabase = createSupabaseServer();
-  if (!supabase) {
-    return {
-      error: true,
-      response: bad(
-        "Server misconfiguration. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-        500
-      ),
-    };
-  }
-
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession();
-
-  if (error || !session?.user) {
-    return {
-      error: true,
-      response: bad("Unauthorized – No active session", 401),
-    };
-  }
-
-  const role =
-    session.user.app_metadata?.role ||
-    session.user.user_metadata?.role ||
-    "user";
-
-  if (role !== "admin") {
-    return {
-      error: true,
-      response: bad("Unauthorized – Admin access required", 403),
-    };
-  }
-
-  const admin = createSupabaseAdmin();
-  if (!admin)
-    return { error: true, response: bad("Server not configured", 500) };
-
-  return { error: false, admin, user: session.user };
+  const auth = await requireAdminAuth("schedule");
+  if (!auth.ok) return { error: true, response: auth.response };
+  return { error: false, admin: auth.admin, user: auth.user };
 }
-
 // --- PUT /api/admin/schedule/[id] ---
 export async function PUT(req, { params }) {
   const gate = await requireAdmin();

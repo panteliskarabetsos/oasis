@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import slugify from "slugify";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
@@ -20,7 +21,12 @@ const toArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 const cleanStr = (v) =>
   v === null || v === undefined ? null : String(v).trim() || null;
 
-async function requireAdmin() {
+/* The experience list doubles as a picker on the bookings, schedule, promotions
+   and reports screens, so any staff role may read it. Creating, editing and
+   deleting an experience still needs the "experiences" permission.
+   (This guard previously accepted only the literal role "admin", which locked
+   out superadmin and manager entirely.) */
+async function requireAdmin(permission) {
   const supa = await createSupabaseServer();
   if (!supa) return bad("Server not configured", 500);
 
@@ -31,22 +37,14 @@ async function requireAdmin() {
   if (!admin) return bad("Server not configured", 500);
 
   const user = userRes.user;
-  const metaRole = user?.app_metadata?.role || user?.user_metadata?.role;
-  if (metaRole === "admin") return { admin, user };
+  const { role, permissions } = await resolveStaffAccess(user);
 
-  const { data: dbUser, error: dbErr } = await admin
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  // No permission asked for = the list is being used as a picker, so any
+  // staff member (including a custom account with grants) may read it.
+  const allowed = accessCan(permissions, permission);
 
-  if (dbErr) {
-    console.error("[admin/experiences] role lookup error", dbErr);
-    return bad("Server error", 500);
-  }
-  if (dbUser?.role === "admin") return { admin, user };
-
-  return bad("Forbidden", 403);
+  if (!allowed) return bad("Forbidden", 403);
+  return { admin, user, role };
 }
 
 /**
@@ -99,7 +97,7 @@ export async function GET() {
  * Accepts legacy `price` and maps it to `priceAdult`
  */
 export async function POST(req) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("experiences");
   if (gate instanceof Response) return gate;
 
   const { admin } = gate;
@@ -184,7 +182,7 @@ export async function POST(req) {
  * Accepts legacy `price` and maps to priceAdult
  */
 export async function PUT(req) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("experiences");
   if (gate instanceof Response) return gate;
 
   const { admin } = gate;
@@ -276,7 +274,7 @@ export async function PUT(req) {
  * DELETE /api/admin/experiences
  */
 export async function DELETE(req) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("experiences");
   if (gate instanceof Response) return gate;
 
   const { admin } = gate;

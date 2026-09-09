@@ -110,8 +110,17 @@ export default function PaymentSetupPage() {
     setTerminalStatus("discovering");
     setReaders([]);
 
-    // Note: simulated: true is used for testing. Change to false in production!
-    const discoverResult = await terminal.discoverReaders({ simulated: true });
+    // Simulated readers are only for local/dev work. Set
+    // NEXT_PUBLIC_STRIPE_TERMINAL_SIMULATED=true to force the simulator;
+    // otherwise real readers are discovered whenever a live/test key is used
+    // outside development.
+    const useSimulator =
+      process.env.NEXT_PUBLIC_STRIPE_TERMINAL_SIMULATED === "true" ||
+      (process.env.NODE_ENV !== "production" &&
+        process.env.NEXT_PUBLIC_STRIPE_TERMINAL_SIMULATED !== "false");
+    const discoverResult = await terminal.discoverReaders({
+      simulated: useSimulator,
+    });
 
     if (discoverResult.error) {
       toast.error(discoverResult.error.message);

@@ -24,8 +24,7 @@ function toNaiveStartNextDay(ymd) {
 export async function GET(req) {
   // Support both patterns of requireAdmin responses just to be safe
   const auth = await requireAdmin();
-  if (auth instanceof NextResponse) return auth;
-  if (auth && !auth.ok && auth.response) return auth.response;
+  if (!auth.ok) return auth.response;
 
   const admin = auth?.admin || auth;
 

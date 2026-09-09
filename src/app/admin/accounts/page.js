@@ -11,6 +11,11 @@ import {
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/components/SessionWrapper";
 import {
+  ALL_PERMISSIONS,
+  PERMISSION_GROUPS,
+  ROLE_PERMISSIONS,
+} from "@/lib/auth/permissions";
+import {
   ArrowLeft,
   UserPlus,
   Search,
@@ -59,28 +64,11 @@ import {
 
 /* ------------------------------ Roles & Permissions Map ------------------------------ */
 
-const PERMISSIONS = {
-  experiences: "Experiences",
-  bookings: "Bookings",
-  guests: "Guests & CRM",
-  schedule: "Schedule",
-  admins: "Admins",
-  payments: "Payments",
-  invoices: "Invoices",
-  promotions: "Promotions",
-  checkins: "Check-ins",
-  pos: "POS",
-  eshop: "e-Shop",
-  giftcards: "Gift Cards",
-  bundles: "Bundles",
-  waitlist: "Waitlist",
-  loyalty: "Loyalty",
-  addons: "Add-ons",
-  waivers: "Waivers",
-  corporate: "Corporate",
-  integrations: "Integrations",
-  settings: "Settings",
-};
+// Labels come straight from the shared catalogue so this screen can never
+// offer a component the API does not recognise.
+const PERMISSIONS = Object.fromEntries(
+  PERMISSION_GROUPS.flatMap((g) => g.permissions),
+);
 
 const ADMIN_ROLES = [
   {
@@ -163,6 +151,17 @@ const ADMIN_ROLES = [
     description:
       "External guides or affiliates with access to daily schedules and guest check-ins.",
     permissions: ["schedule", "checkins"],
+  },
+  {
+    id: "custom",
+    title: "Custom access",
+    icon: Sparkles,
+    color: "text-amber-700",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    description:
+      "Start from nothing and pick exactly which components this person can open.",
+    permissions: [],
   },
 ];
 
@@ -370,6 +369,89 @@ function MobileAdminCard({
   );
 }
 
+/**
+ * Component-level access picker.
+ *
+ * For a named role the ticks its role already covers are shown locked on, so
+ * it is obvious what is inherited versus what is being granted on top. For
+ * "custom" nothing is inherited and every tick is a deliberate grant.
+ */
+function PermissionPicker({ role, granted, onChange }) {
+  const base = ROLE_PERMISSIONS[role];
+  const inherited = base === "*" ? ALL_PERMISSIONS : base || [];
+  const list = Array.isArray(granted) ? granted : [];
+
+  if (base === "*") {
+    return (
+      <p className="rounded-xl bg-[#f6f3ee] px-4 py-3 text-sm text-[#6b5c4d]">
+        A Super Admin already reaches every component, so there is nothing to pick.
+      </p>
+    );
+  }
+
+  const toggle = (key) => {
+    if (inherited.includes(key)) return; // comes with the role
+    onChange(list.includes(key) ? list.filter((p) => p !== key) : [...list, key]);
+  };
+
+  const selectedCount = new Set([...inherited, ...list]).size;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#8a7a6a]">
+          {selectedCount} of {ALL_PERMISSIONS.length} components
+        </p>
+        {list.length ? (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-xs font-semibold text-[#8a7a6a] hover:text-[#a33c22] hover:underline"
+          >
+            Clear extra grants
+          </button>
+        ) : null}
+      </div>
+
+      {PERMISSION_GROUPS.map((group) => (
+        <div key={group.label}>
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#a2937f]">
+            {group.label}
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {group.permissions.map(([key, label]) => {
+              const isInherited = inherited.includes(key);
+              const isChecked = isInherited || list.includes(key);
+              return (
+                <label
+                  key={key}
+                  title={isInherited ? "Included in this role" : undefined}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                    isInherited
+                      ? "cursor-not-allowed border-[#e3ddd4] bg-[#f6f3ee] text-[#8a7a6a]"
+                      : isChecked
+                        ? "cursor-pointer border-[#8b6f47] bg-white text-[#3f3127]"
+                        : "cursor-pointer border-[#e3ddd4] bg-white/60 text-[#5a4a3f] hover:border-[#d3c9bd]"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    disabled={isInherited}
+                    onChange={() => toggle(key)}
+                    className="h-4 w-4 accent-[#8b6f47]"
+                  />
+                  <span className="truncate">{label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function RoleSelector({ selectedRole, onChange }) {
   return (
     <div className="space-y-3">
@@ -467,6 +549,7 @@ export default function AdminAccountsPage() {
 
   // New Admin Role State
   const [addRole, setAddRole] = useState("manager");
+  const [addPermissions, setAddPermissions] = useState([]);
 
   // success modal
   const [createdAdmin, setCreatedAdmin] = useState(null);
@@ -513,6 +596,7 @@ export default function AdminAccountsPage() {
       setPwJustCopied(false);
       setAddPw("");
       setAddRole("manager");
+      setAddPermissions([]);
 
       setTimeout(() => addEmailRef.current?.focus(), 80);
     }
@@ -809,7 +893,8 @@ export default function AdminAccountsPage() {
       name,
       surname,
       phone,
-      role: addRole, // Use the state variable
+      role: addRole,
+      permissions: addPermissions,
       dateOfBirth,
     };
 
@@ -877,6 +962,7 @@ export default function AdminAccountsPage() {
       surname: form.surname.value,
       phone: form.phone.value,
       role: newRole,
+      permissions: editingUser.permissions || [],
       dateOfBirth: form.dateOfBirth.value || null,
     };
 
@@ -1368,6 +1454,17 @@ export default function AdminAccountsPage() {
                 </div>
               </div>
               <RoleSelector selectedRole={addRole} onChange={setAddRole} />
+
+              <div className="mt-5 border-t border-[#e3ddd4] pt-5">
+                <p className="mb-3 text-sm font-semibold text-[#3f3127]">
+                  {addRole === "custom" ? "Components" : "Extra components"}
+                </p>
+                <PermissionPicker
+                  role={addRole}
+                  granted={addPermissions}
+                  onChange={setAddPermissions}
+                />
+              </div>
             </div>
 
             {/* Account */}
@@ -1544,6 +1641,19 @@ export default function AdminAccountsPage() {
                       Note: You cannot remove your own Super Admin access.
                     </p>
                   )}
+
+                <div className="mt-5 border-t border-[#e3ddd4] pt-5">
+                  <p className="mb-3 text-sm font-semibold text-[#3f3127]">
+                    {editingUser.role === "custom" ? "Components" : "Extra components"}
+                  </p>
+                  <PermissionPicker
+                    role={editingUser.role || "manager"}
+                    granted={editingUser.permissions || []}
+                    onChange={(permissions) =>
+                      setEditingUser((prev) => ({ ...prev, permissions }))
+                    }
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6 border-t border-[#efe9e1]">

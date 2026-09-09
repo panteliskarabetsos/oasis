@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function POST(req, { params }) {
-  const r = await requireAdmin();
+  const r = await requireAdmin("corporate");
   if (!r.ok) return r.response;
 
   const id = params?.id;

@@ -2,6 +2,7 @@
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20",
@@ -122,6 +123,8 @@ function canRedeemGiftCard(gc, currency) {
    Route
 ------------------------------------------------------------- */
 export async function POST(req) {
+  const auth = await requireAdmin("pos");
+  if (!auth.ok) return auth.response;
   try {
     const body = await req.json();
 

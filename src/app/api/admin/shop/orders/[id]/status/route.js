@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok8 = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad8 = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -10,6 +11,8 @@ const bad8 = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 const ALLOWED = new Set(["pending", "paid", "fulfilled", "cancelled"]);
 
 export async function POST(req, { params }) {
+  const auth = await requireAdmin("eshop");
+  if (!auth.ok) return auth.response;
   const supabase = createSupabaseAdmin();
   const id = Number(params?.id);
   if (!Number.isFinite(id) || id <= 0) return bad8("Invalid id");

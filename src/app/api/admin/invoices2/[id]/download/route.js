@@ -6,7 +6,9 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
-import buildInvoicePdf from "@/lib/pdf/buildInvoicePdf";
+import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
+import { buildInvoicePdf, formatInv } from "@/lib/pdf/invoice-pdf-v2";
+import { loadInvoiceForPdf } from "@/lib/pdf/load-invoice-for-pdf";
 
 const bad = (m, s = 400) =>
   new NextResponse(JSON.stringify({ error: m }), {
@@ -20,12 +22,10 @@ async function requireAdmin() {
     data: { user },
   } = await supa.auth.getUser();
   if (!user) return { error: true, response: bad("Unauthorized", 401) };
-  const { data: row, error } = await supa
-    .from("User")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (error || (row?.role ?? "user") !== "admin")
+  // Resolve the role with the service client — the user client is RLS-bound
+  // and was silently downgrading real admins to "user".
+  const role = await resolveStaffRole(user);
+  if (!roleCan(role, "invoices"))
     return { error: true, response: bad("Forbidden", 403) };
   return { error: false };
 }
@@ -42,38 +42,18 @@ export async function GET(req, ctx) {
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
 
-  // Load invoice
-  const { data: inv, error: e1 } = await admin
-    .from("invoice")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (e1) return bad(e1.message || "Load failed", 500);
-  if (!inv) return bad("Not found", 404);
-
-  // Load lines using schema field names; map aliases for builder compatibility
-  const { data: lines, error: e2 } = await admin
-    .from("invoice_line")
-    .select(
-      "id, description, quantity, unit_price, vat_rate, discount_percent, line_subtotal, line_tax, line_total"
-    )
-    .eq("invoice_id", id)
-    .order("id");
-  if (e2) return bad(e2.message || "Load lines failed", 500);
-
-  const mappedLines = (lines || []).map((l) => ({
-    ...l,
-    // Aliases some builders expect
-    base_amount: Number(l.line_subtotal ?? 0),
-    tax_amount: Number(l.line_tax ?? 0),
-    total_amount: Number(l.line_total ?? 0),
-  }));
-
-  const buf = await buildInvoicePdf({ invoice: inv, lines: mappedLines });
-
-  const filename = `${String(inv.series || "A").toUpperCase()}-${String(
-    inv.number
-  ).padStart(5, "0")}.pdf`;
+  // loadInvoiceForPdf throws (rather than returning null) for a missing id
+  let buf;
+  let filename;
+  try {
+    const { inv, items, taxesArr, seller } = await loadInvoiceForPdf(admin, id);
+    const pdfBytes = await buildInvoicePdf({ inv, items, seller, taxesArr });
+    buf = Buffer.from(pdfBytes);
+    filename = `${formatInv(inv.series, inv.number)}.pdf`;
+  } catch (e) {
+    const msg = e?.message || "Failed to build the invoice PDF";
+    return bad(msg, /not found/i.test(msg) ? 404 : 500);
+  }
 
   return new NextResponse(buf, {
     status: 200,

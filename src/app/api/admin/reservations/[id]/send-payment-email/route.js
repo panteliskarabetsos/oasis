@@ -3,7 +3,7 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 import sendPaymentRequest from "@/lib/email/sendPaymentRequest";
 
 export async function POST(req, { params }) {
-  const auth = await requireAdmin();
+  const auth = await requireAdmin("bookings");
   if (!auth.ok) return auth.response;
   const { admin } = auth;
 

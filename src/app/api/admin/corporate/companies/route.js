@@ -9,7 +9,7 @@ const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 export async function GET() {
-  const r = await requireAdmin();
+  const r = await requireAdmin("corporate");
   if (!r.ok) return r.response;
 
   const { admin } = r;
@@ -38,7 +38,7 @@ export async function GET() {
 }
 
 export async function POST(req) {
-  const r = await requireAdmin();
+  const r = await requireAdmin("corporate");
   if (!r.ok) return r.response;
 
   const body = await req.json().catch(() => ({}));

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 export async function GET(req, context) {
+  const auth = await requireAdmin("invoices");
+  if (!auth.ok) return auth.response;
   const params = await context.params;
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
 

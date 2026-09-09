@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe/server";
 import crypto from "node:crypto";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -13,6 +14,8 @@ const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 const toCents = (n) => Math.round(Number(n || 0) * 100);
 
 export async function POST(req) {
+  const auth = await requireAdmin("pos");
+  if (!auth.ok) return auth.response;
   try {
     const body = await req.json();
     const {

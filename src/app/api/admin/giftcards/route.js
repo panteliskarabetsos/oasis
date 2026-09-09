@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 export async function GET(req) {
-  const r = await requireAdmin();
+  const r = await requireAdmin("giftcards");
   if (!r.ok) return r.response;
   const admin = r.admin;
 
@@ -53,7 +53,7 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  const r = await requireAdmin();
+  const r = await requireAdmin("giftcards");
   if (!r.ok) return r.response;
   const admin = r.admin;
 

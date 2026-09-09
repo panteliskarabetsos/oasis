@@ -7,7 +7,7 @@ import { NextResponse as NR } from "next/server";
 import { requireAdmin as reqAdmin } from "@/lib/auth/requireAdmin";
 
 export async function GET() {
-  const r = await reqAdmin();
+  const r = await reqAdmin("giftcards");
   if (!r.ok) return r.response;
   const admin = r.admin;
 

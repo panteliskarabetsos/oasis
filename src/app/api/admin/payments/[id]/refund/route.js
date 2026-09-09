@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import Stripe from "stripe";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -33,13 +34,9 @@ async function verifyAccess() {
     .eq("auth_user_id", user.id)
     .single();
 
-  const role =
-    profile?.role ||
-    user?.app_metadata?.role ||
-    user?.user_metadata?.role ||
-    "user";
+  const { role, permissions } = await resolveStaffAccess(user);
 
-  if (!ALLOWED_REFUND_ROLES.includes(role)) {
+  if (!accessCan(permissions, "payments")) {
     return {
       error: true,
       response: bad(

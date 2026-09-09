@@ -6,7 +6,7 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { sendGiftcardEmail } from "@/lib/email/sendGiftcardEmail";
 
 export async function POST(req, ctx) {
-  const r = await requireAdmin();
+  const r = await requireAdmin("giftcards");
   if (!r.ok) return r.response;
   const admin = r.admin;
 

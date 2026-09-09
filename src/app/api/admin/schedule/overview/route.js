@@ -2,6 +2,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createSupabaseAdmin } from "@/lib/supabase/admin"; // Adjust path if needed
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
@@ -16,6 +17,8 @@ const ACTIVE_STATUSES = new Set([
 ]);
 
 export async function GET(req) {
+  const auth = await requireAdmin("schedule");
+  if (!auth.ok) return auth.response;
   const admin = createSupabaseAdmin();
   if (!admin) return bad("Server not configured", 500);
 

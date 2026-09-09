@@ -3,11 +3,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
 
 const ok5 = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad5 = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 export async function PATCH(req, { params }) {
+  const auth = await requireAdmin("eshop");
+  if (!auth.ok) return auth.response;
   const supabase = createSupabaseAdmin();
   const id = Number(params?.id);
   if (!Number.isFinite(id) || id <= 0) return bad5("Invalid id");
@@ -30,6 +33,8 @@ export async function PATCH(req, { params }) {
 }
 
 export async function DELETE(_req, { params }) {
+  const auth = await requireAdmin("eshop");
+  if (!auth.ok) return auth.response;
   const supabase = createSupabaseAdmin();
   const id = Number(params?.id);
   if (!Number.isFinite(id) || id <= 0) return bad5("Invalid id");

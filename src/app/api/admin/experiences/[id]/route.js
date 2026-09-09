@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const bad = (msg, status = 400) =>
@@ -23,9 +24,10 @@ async function requireAdmin() {
   if (error || !user)
     return { error: true, response: bad("Unauthorized", 401) };
 
-  const role = user.app_metadata?.role ?? user.user_metadata?.role ?? "user";
+  // Resolve against the User row so DB-only roles and per-user grants apply.
+  const { permissions } = await resolveStaffAccess(user);
 
-  if (role !== "admin") return { error: true, response: bad("Forbidden", 403) };
+  if (!accessCan(permissions, "experiences")) return { error: true, response: bad("Forbidden", 403) };
 
   const admin = createSupabaseAdmin();
   if (!admin)
