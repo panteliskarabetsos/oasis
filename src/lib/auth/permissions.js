@@ -33,6 +33,7 @@ export const PERMISSION_GROUPS = [
       ["giftcards", "Gift cards"],
       ["corporate", "Corporate"],
       ["zreport", "Z-report"],
+      ["financials", "Revenue figures"],
     ],
   },
   {
@@ -70,9 +71,12 @@ export const ROLE_PERMISSIONS = {
   superadmin: "*",
   manager: [
     "experiences", "bookings", "requests", "guests", "planner", "schedule",
-    "checkins", "pos", "waitlist", "addons", "waivers",
+    "checkins", "pos", "waitlist", "addons", "waivers", "financials",
   ],
-  finance: ["payments", "invoices", "corporate", "giftcards", "pos", "zreport"],
+  finance: [
+    "payments", "invoices", "corporate", "giftcards", "pos", "zreport",
+    "financials",
+  ],
   marketing: [
     "guests", "promotions", "eshop", "bundles", "loyalty", "integrations",
     "settings",

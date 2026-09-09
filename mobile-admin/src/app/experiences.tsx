@@ -18,8 +18,9 @@ import { Badge, Button, EmptyState, Muted } from "@/components/ui";
 import { colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
+import { PermissionGate } from "@/components/access";
 
-export default function ExperiencesScreen() {
+function ExperiencesScreenContent() {
   const { data, loading, error, refresh } = useApi(() => api.adminExperiences());
 
   useFocusEffect(
@@ -135,3 +136,11 @@ const styles = StyleSheet.create({
   name: { fontFamily: fonts.serif, fontSize: 16, lineHeight: 20, color: colors.text },
   price: { fontFamily: fonts.sansBold, fontSize: 13, color: colors.gold },
 });
+
+export default function ExperiencesScreen() {
+  return (
+    <PermissionGate permission="experiences">
+      <ExperiencesScreenContent />
+    </PermissionGate>
+  );
+}

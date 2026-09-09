@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -12,9 +13,19 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PressableScale } from "@/components/premium";
-import { Badge, Chip, EmptyState, Eyebrow, Muted, Serif } from "@/components/ui";
+import {
+  Badge,
+  Chip,
+  EmptyState,
+  ErrorState,
+  Eyebrow,
+  ListSkeleton,
+  Muted,
+  Serif,
+} from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
+import { useDebounced } from "@/hooks/useDebounced";
 import { api } from "@/lib/api";
 import type { Reservation } from "@/lib/types";
 
@@ -42,6 +53,7 @@ export function statusTone(status?: string): "success" | "warning" | "danger" | 
 export default function BookingsScreen() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
+  const debouncedQuery = useDebounced(query);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("all");
   const [page, setPage] = useState(1);
 
@@ -50,10 +62,10 @@ export default function BookingsScreen() {
       api.reservations({
         page,
         pageSize: 25,
-        q: query.trim() || undefined,
+        q: debouncedQuery.trim() || undefined,
         status: status === "all" ? undefined : status,
       }),
-    [page, status]
+    [page, status, debouncedQuery]
   );
 
   useFocusEffect(
@@ -61,6 +73,10 @@ export default function BookingsScreen() {
       refresh();
     }, [refresh])
   );
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQuery]);
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -83,10 +99,6 @@ export default function BookingsScreen() {
           placeholderTextColor={colors.faint}
           value={query}
           onChangeText={setQuery}
-          onSubmitEditing={() => {
-            setPage(1);
-            refresh();
-          }}
           returnKeyType="search"
           style={styles.searchInput}
           autoCapitalize="none"
@@ -96,11 +108,7 @@ export default function BookingsScreen() {
             name="close-circle"
             size={16}
             color={colors.muted}
-            onPress={() => {
-              setQuery("");
-              setPage(1);
-              setTimeout(refresh, 0);
-            }}
+            onPress={() => setQuery("")}
           />
         ) : null}
       </View>
@@ -125,16 +133,21 @@ export default function BookingsScreen() {
         />
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.gold} />
-        </View>
-      ) : error ? (
-        <EmptyState title="Couldn't load bookings" subtitle={error} />
+      {loading && !data ? (
+        <ListSkeleton />
+      ) : error && !items.length ? (
+        <ErrorState title="Couldn't load bookings" message={error} onRetry={refresh} />
       ) : items.length === 0 ? (
         <EmptyState title="No bookings found" subtitle="Try a different search or filter." />
       ) : (
         <FlatList
+          refreshControl={
+            <RefreshControl
+              refreshing={loading && !!data}
+              onRefresh={refresh}
+              tintColor={colors.gold}
+            />
+          }
           data={items}
           keyExtractor={(b) => `${b.source}-${b.id}`}
           contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: 90 }}

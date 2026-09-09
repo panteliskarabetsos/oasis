@@ -12,11 +12,12 @@ import {
   View,
 } from "react-native";
 
-import { Badge, Button, Card, Chip, EmptyState, Field, Muted, Serif, StatTile } from "@/components/ui";
+import { Badge, Button, Card, Chip, EmptyState, ErrorState, Field, Muted, Serif, StatTile } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { GiftCard } from "@/lib/types";
+import { PermissionGate } from "@/components/access";
 
 function cents(n?: number): string {
   return `€${((n ?? 0) / 100).toFixed(2)}`;
@@ -29,7 +30,7 @@ function randomCode(): string {
   return out;
 }
 
-export default function GiftcardsScreen() {
+function GiftcardsScreenContent() {
   const { data: cards, loading, error, refresh } = useApi(() => api.giftcards());
   const { data: metrics, refresh: refreshMetrics } = useApi(() => api.giftcardMetrics());
   const [createOpen, setCreateOpen] = useState(false);
@@ -102,7 +103,7 @@ export default function GiftcardsScreen() {
         {loading ? (
           <ActivityIndicator color={colors.gold} style={{ marginTop: spacing.xl }} />
         ) : error ? (
-          <EmptyState title="Couldn't load gift cards" subtitle={error} />
+          <ErrorState title="Couldn't load gift cards" message={error} onRetry={refresh} />
         ) : (cards ?? []).length === 0 ? (
           <EmptyState title="No gift cards yet" />
         ) : (
@@ -280,3 +281,11 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl + 8,
   },
 });
+
+export default function GiftcardsScreen() {
+  return (
+    <PermissionGate permission="giftcards">
+      <GiftcardsScreenContent />
+    </PermissionGate>
+  );
+}

@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const TBL_BOOKING = "booking";
 const TBL_SLOT = "ScheduleSlot";
@@ -58,9 +58,12 @@ export async function GET(req) {
   } = await supabase.auth.getUser();
   if (userErr || !user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const role = await resolveStaffRole(user);
-  if (!roleCan(role, "checkins"))
+  const { permissions } = await resolveStaffAccess(user);
+  if (!accessCan(permissions, "checkins"))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  // Guides and other partners run check-in but must never see what a guest paid.
+  const seesMoney = accessCan(permissions, "financials");
 
   // Admin client
   const SUPABASE_URL =
@@ -97,7 +100,9 @@ export async function GET(req) {
     const { data: b, error: bErr } = await admin
       .from(TBL_BOOKING)
       .select(
-        "id,status,primary_contact,adultsCount,kidsCount,numberOfPeople,totalPaidAmount,scheduleSlotId"
+        seesMoney
+        ? "id,status,primary_contact,adultsCount,kidsCount,numberOfPeople,totalPaidAmount,scheduleSlotId"
+        : "id,status,primary_contact,adultsCount,kidsCount,numberOfPeople,scheduleSlotId"
       )
       .in("scheduleSlotId", slotIds)
       .order("id", { ascending: true });

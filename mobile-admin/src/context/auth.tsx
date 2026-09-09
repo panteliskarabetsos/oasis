@@ -10,7 +10,7 @@ import React, {
 } from "react";
 
 import { api, registerSessionGetter } from "@/lib/api";
-import { can, toAccess, type Access } from "@/lib/permissions";
+import { accessFrom, can, type Access } from "@/lib/permissions";
 import { getSupabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 
@@ -102,7 +102,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   }, []);
 
-  const access = useMemo(() => toAccess(profile?.permissions), [profile?.permissions]);
+  const access = useMemo(
+    () => accessFrom(profile?.role, profile?.permissions),
+    [profile?.role, profile?.permissions],
+  );
   const canDo = useCallback((permission?: string) => can(access, permission), [access]);
 
   return (

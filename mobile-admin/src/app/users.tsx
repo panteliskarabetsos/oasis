@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  RefreshControl,
   Linking,
   StyleSheet,
   Text,
@@ -10,12 +11,13 @@ import {
   View,
 } from "react-native";
 
-import { Badge, Card, EmptyState, Muted } from "@/components/ui";
+import { Badge, Card, EmptyState, ErrorState, ListSkeleton, Muted } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
+import { PermissionGate } from "@/components/access";
 
-export default function UsersScreen() {
+function UsersScreenContent() {
   const { data, loading, error, refresh } = useApi(() => api.users());
   const [query, setQuery] = useState("");
 
@@ -46,9 +48,16 @@ export default function UsersScreen() {
           <ActivityIndicator color={colors.gold} />
         </View>
       ) : error ? (
-        <EmptyState title="Couldn't load users" subtitle={error} />
+        <ErrorState title="Couldn't load users" message={error} onRetry={refresh} />
       ) : (
         <FlatList
+          refreshControl={
+            <RefreshControl
+              refreshing={loading && !!data}
+              onRefresh={refresh}
+              tintColor={colors.gold}
+            />
+          }
           data={filtered}
           keyExtractor={(u) => String(u.id)}
           refreshing={false}
@@ -123,3 +132,11 @@ const styles = StyleSheet.create({
   avatarText: { fontFamily: fonts.serif, fontSize: 15, color: colors.gold },
   name: { fontFamily: fonts.sansSemiBold, fontSize: 14, color: colors.text },
 });
+
+export default function UsersScreen() {
+  return (
+    <PermissionGate permission="guests">
+      <UsersScreenContent />
+    </PermissionGate>
+  );
+}

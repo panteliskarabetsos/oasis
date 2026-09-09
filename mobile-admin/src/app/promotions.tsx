@@ -13,10 +13,11 @@ import {
   View,
 } from "react-native";
 
-import { Badge, Button, Card, Chip, EmptyState, Field, Muted, Serif } from "@/components/ui";
+import { Badge, Button, Card, Chip, EmptyState, ErrorState, Field, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
+import { PermissionGate } from "@/components/access";
 
 type Tab = "codes" | "campaigns" | "vouchers";
 
@@ -28,7 +29,7 @@ function windowLabel(startsAt?: string | null, endsAt?: string | null): string {
   return "always on";
 }
 
-export default function PromotionsScreen() {
+function PromotionsScreenContent() {
   const [tab, setTab] = useState<Tab>("codes");
   const codesQ = useApi(() => api.discountCodes());
   const campaignsQ = useApi(() => api.campaigns());
@@ -158,7 +159,7 @@ export default function PromotionsScreen() {
         {loading ? (
           <ActivityIndicator color={colors.gold} style={{ marginTop: spacing.xl }} />
         ) : error ? (
-          <EmptyState title="Couldn't load" subtitle={error} />
+          <ErrorState title="Couldn't load" message={error} onRetry={refreshAll} />
         ) : tab === "codes" ? (
           (codesQ.data ?? []).length === 0 ? (
             <EmptyState title="No discount codes" subtitle="Create one to run a promotion." />
@@ -370,3 +371,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
 });
+
+export default function PromotionsScreen() {
+  return (
+    <PermissionGate permission="promotions">
+      <PromotionsScreenContent />
+    </PermissionGate>
+  );
+}

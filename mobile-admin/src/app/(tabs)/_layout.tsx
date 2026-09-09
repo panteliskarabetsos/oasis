@@ -2,8 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { Redirect, Tabs } from "expo-router";
 import { ActivityIndicator, View } from "react-native";
 
-import { Button, EmptyState } from "@/components/ui";
-import { colors, fonts } from "@/constants/theme";
+import { Button, EmptyState, Muted } from "@/components/ui";
+import { colors, fonts, spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
 
 export default function TabsLayout() {
@@ -23,9 +23,16 @@ export default function TabsLayout() {
       <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: "center" }}>
         <EmptyState
           title="Staff access only"
-          subtitle="This account doesn't have admin permissions."
+          subtitle={
+            profile?.role && profile.role !== "user"
+              ? `The ${profile.role} role has no components assigned yet. Ask a Super Admin to grant access.`
+              : "This account isn't a staff account."
+          }
         >
-          <Button title="Sign Out" variant="ghost" onPress={signOut} />
+          <View style={{ gap: spacing.sm, alignItems: "center" }}>
+            <Muted style={{ fontSize: 12 }}>Signed in as {profile?.email ?? "—"}</Muted>
+            <Button title="Sign Out" variant="ghost" onPress={signOut} />
+          </View>
         </EmptyState>
       </View>
     );

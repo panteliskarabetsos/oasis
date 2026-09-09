@@ -15,51 +15,33 @@ import {
   PERMISSION_GROUPS,
   ROLE_PERMISSIONS,
 } from "@/lib/auth/permissions";
+
+import { effectiveAccess } from "../_ui/nav";
+import Icon from "../_ui/Icon";
 import {
-  ArrowLeft,
-  UserPlus,
-  Search,
-  Edit3,
-  Trash2,
-  Shield,
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
-  Check,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
-  Eye,
-  EyeOff,
-  Copy,
-  Sparkles,
-  X,
-  BadgeCheck,
-  Lock,
-  Briefcase,
-  Megaphone,
-  Headset,
-  Calculator,
-  UserCheck, // Added icon for External Partner
-} from "lucide-react";
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorNote,
+  Field,
+  Muted,
+  Page,
+  PageHeader,
+  Select,
+  Skeleton,
+  Table,
+  Td,
+  Th,
+  Tr,
+  inputClass,
+} from "../_ui";
+import { Search, Shield, Check, Copy, Sparkles, Lock, Briefcase, Megaphone, Headset, Calculator, UserCheck } from "lucide-react";
 
 import {
-  StatCard,
-  Select,
-  Avatar,
-  TextInput,
-  Th,
-  Td,
-  SideDrawer,
-  Modal,
-  ConfirmDialog,
   ToastHost,
-  TableSkeleton,
-  EmptyState,
   useDebouncedValue,
   useToasts,
-  formatDate,
-  toYMD,
 } from "@/app/admin/_components/ui";
 
 /* ------------------------------ Roles & Permissions Map ------------------------------ */
@@ -244,138 +226,6 @@ async function copyToClipboard(text) {
 
 /* ------------------------------ Subcomponents ------------------------------ */
 
-function AdminRoleBadge({ role }) {
-  const config = getRoleConfig(role);
-  const Icon = config.icon;
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${config.bg} ${config.border} ${config.color}`}
-    >
-      <Icon size={12} />
-      {config.title}
-    </span>
-  );
-}
-
-function SortTh({ label, k, activeKey, dir, onSort, className = "" }) {
-  const isActive = activeKey === k;
-  const nextDir = !isActive ? "asc" : dir === "asc" ? "desc" : "asc";
-  return (
-    <th className={`p-3 font-semibold text-xs ${className}`}>
-      <button
-        type="button"
-        onClick={() => onSort(k, nextDir)}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition ${
-          isActive
-            ? "bg-white/95 border-[#ded6cb] text-[#2f261f] shadow-sm"
-            : "bg-transparent border-transparent text-[#4f4137] hover:bg-white/70 hover:border-[#e7e0d6]"
-        }`}
-      >
-        <span className="uppercase tracking-wide">{label}</span>
-        {isActive ? (
-          dir === "asc" ? (
-            <ArrowUp size={14} />
-          ) : (
-            <ArrowDown size={14} />
-          )
-        ) : (
-          <ArrowUpDown size={14} />
-        )}
-      </button>
-    </th>
-  );
-}
-
-function MobileAdminCard({
-  u,
-  isMe,
-  selected,
-  onToggleSelect,
-  onEdit,
-  onDelete,
-  toast,
-}) {
-  const fullName = `${u.name ?? "—"} ${u.surname ?? ""}`.trim();
-  return (
-    <div className="rounded-3xl border border-[#efe9e1] bg-white/80 p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <input
-          aria-label={`Select ${u.email}`}
-          type="checkbox"
-          checked={selected}
-          onChange={onToggleSelect}
-          className="mt-1.5 h-4 w-4 rounded border-[#d7cec2] text-[#8b6f47] focus:ring-[#8b6f47]"
-        />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3">
-            <Avatar name={u.name} surname={u.surname} email={u.email} />
-            <div className="min-w-0">
-              <div className="font-medium text-[#2f261f] truncate">
-                {fullName}
-              </div>
-              <button
-                type="button"
-                className="mt-0.5 text-sm text-[#4f4137] hover:underline underline-offset-2 truncate"
-                onClick={async () => {
-                  const ok = await copyToClipboard(u.email);
-                  toast({
-                    title: ok ? "Email copied" : "Copy failed",
-                    type: ok ? undefined : "error",
-                  });
-                }}
-              >
-                {u.email}
-              </button>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <AdminRoleBadge role={u.role} />
-                {u.phone ? (
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-full border border-[#e7e0d6] bg-white px-2.5 py-1 text-xs text-[#4f4137] hover:bg-[#f5f1ea]"
-                    onClick={async () => {
-                      await copyToClipboard(u.phone);
-                      toast({ title: "Phone copied" });
-                    }}
-                  >
-                    {u.phone}
-                  </button>
-                ) : null}
-                <span className="inline-flex items-center gap-1 rounded-full border border-[#e7e0d6] bg-white px-2.5 py-1 text-xs text-[#7c6d62]">
-                  Joined {formatDate(u.createdAt)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-3 flex items-center justify-end gap-2">
-            <button onClick={onEdit} className={ui.btn.icon} aria-label="Edit">
-              <Edit3 size={16} className="text-[#7a5b33]" />
-            </button>
-            <button
-              onClick={onDelete}
-              disabled={isMe}
-              className={ui.btn.icon}
-              title={isMe ? "You can’t delete your own account" : "Delete"}
-            >
-              <Trash2
-                size={16}
-                className={isMe ? "text-[#b6aaa0]" : "text-red-600"}
-              />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Component-level access picker.
- *
- * For a named role the ticks its role already covers are shown locked on, so
- * it is obvious what is inherited versus what is being granted on top. For
- * "custom" nothing is inherited and every tick is a deliberate grant.
- */
 function PermissionPicker({ role, granted, onChange }) {
   const base = ROLE_PERMISSIONS[role];
   const inherited = base === "*" ? ALL_PERMISSIONS : base || [];
@@ -991,773 +841,561 @@ export default function AdminAccountsPage() {
   const from = filteredAdmins.length ? (page - 1) * pageSize + 1 : 0;
   const to = Math.min(page * pageSize, filteredAdmins.length);
 
+  /* --------------------------------- view --------------------------------- */
+
+  const onSort = (k) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(k);
+      setSortDir(k === "createdAt" ? "desc" : "asc");
+    }
+    setPage(1);
+  };
+
+  const roleMeta = (r) => getRoleConfig(r);
+  const accessOf = (u) => effectiveAccess(u.role, u.permissions);
+  const seesMoney = (u) => {
+    const a = accessOf(u);
+    return a === "*" || a.includes("financials");
+  };
+
   return (
-    <div className={ui.page}>
-      {/* Ambient backdrop */}
-      <div className="pointer-events-none absolute -top-44 -left-36 h-[32rem] w-[32rem] rounded-full bg-[#efe8de] blur-3xl opacity-70" />
-      <div className="pointer-events-none absolute -bottom-52 -right-36 h-[34rem] w-[34rem] rounded-full bg-[#fff1da] blur-3xl opacity-70" />
-      <div className="pointer-events-none absolute inset-0 opacity-[0.06] [background-image:radial-gradient(#000_1px,transparent_1px)] [background-size:26px_26px]" />
+    <Page>
+      <PageHeader
+        eyebrow="People & system"
+        title="Staff accounts"
+        description={
+          loadingUsers
+            ? "Loading accounts…"
+            : `${admins.length} staff account${admins.length === 1 ? "" : "s"}${
+                newThisMonth ? ` · ${newThisMonth} added this month` : ""
+              }`
+        }
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => startTransition(fetchUsers)}
+              disabled={refreshing || isPending}
+            >
+              <Icon name="clock" size={15} /> {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button variant="primary" onClick={() => setShowAddDrawer(true)}>
+              <Icon name="plus" size={15} /> New staff account
+            </Button>
+          </>
+        }
+      />
 
-      <div className={ui.shell}>
-        {/* Top header */}
-        <div className="mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
-            <div className="min-w-0">
-              <div className="flex items-center gap-3">
-                <div className="h-11 w-11 rounded-2xl bg-white/85 border border-[#e7e0d6] shadow-sm flex items-center justify-center">
-                  <Shield className="text-[#7a5b33]" size={18} />
-                </div>
-                <div className="min-w-0">
-                  <div
-                    className={`text-xs uppercase tracking-widest ${ui.text.faint}`}
-                  >
-                    Admin • Access Control
-                  </div>
-                  <h1 className="mt-1 text-3xl md:text-4xl font-serif text-[#4f4137] truncate">
-                    Administrator Accounts
-                  </h1>
-                </div>
-              </div>
+      {errorMessage ? <ErrorNote className="mb-5">{errorMessage}</ErrorNote> : null}
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span className={ui.btn.chip}>
-                  Search <span className={ui.kbd}>/</span>
-                </span>
-                <span className={ui.btn.chip}>
-                  Add <span className={ui.kbd}>A</span>
-                </span>
-                <span className={ui.btn.chip}>
-                  Refresh <span className={ui.kbd}>R</span>
-                </span>
-              </div>
-            </div>
+      {/* who holds what */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <SummaryCard label="Staff accounts" value={admins.length} />
+        <SummaryCard
+          label="Super Admins"
+          value={admins.filter((u) => ROLE_PERMISSIONS[u.role] === "*").length}
+          hint="Unrestricted"
+        />
+        <SummaryCard
+          label="See revenue"
+          value={admins.filter(seesMoney).length}
+          hint="Hold financials"
+        />
+        <SummaryCard label="Added this month" value={newThisMonth} />
+      </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => router.push("/admin/")}
-                className={`${ui.btn.base} ${ui.btn.ghost}`}
-              >
-                <ArrowLeft size={16} /> Back
-              </button>
-
-              <button
-                onClick={() => setShowAddDrawer(true)}
-                className={`${ui.btn.base} ${ui.btn.primary}`}
-              >
-                <UserPlus size={16} /> Add Admin
-              </button>
-            </div>
-          </div>
-
-          {/* Stats */}
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <StatCard label="Total Admins" value={totalAdmins} tone="green" />
-            <StatCard
-              label="New this month"
-              value={newThisMonth}
-              tone="amber"
+      <Card padded={false} className="overflow-hidden">
+        {/* toolbar */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#e6e0d6] p-4">
+          <div className="relative min-w-[220px] flex-1">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+              <Icon name="search" size={16} />
+            </span>
+            <input
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search name, email or role"
+              className={`${inputClass} h-11 pl-9 ${searchTerm ? "pr-9" : ""}`}
             />
-          </div>
-        </div>
-
-        {/* Toolbar */}
-        <div className={`${ui.soft} p-4 sm:p-5 mb-6`}>
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-            {/* Search */}
-            <div className="relative w-full lg:w-[34rem]">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-[#7c6d62]">
-                <Search size={18} />
-              </span>
-              <input
-                ref={searchRef}
-                type="text"
-                placeholder="Search by name, email or phone…"
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setPage(1);
-                }}
-                className="w-full pl-10 pr-10 py-2.5 rounded-full border border-[#e3ddd4] bg-[#fbfaf7] text-[#4f4137] placeholder-[#b6aaa0] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/35 shadow-sm"
-              />
-              {searchTerm ? (
-                <button
-                  onClick={() => setSearchTerm("")}
-                  className="absolute inset-y-0 right-0 pr-3 text-[#7c6d62] hover:text-[#4f4137]"
-                >
-                  <X size={16} />
-                </button>
-              ) : null}
-            </div>
-
-            <div className="flex-1" />
-
-            {/* Controls */}
-            <div className="flex flex-wrap items-end gap-2">
-              <Select
-                label="Sort"
-                value={`${sortKey}:${sortDir}`}
-                onChange={(v) => {
-                  const [k, d] = v.split(":");
-                  setSortKey(k);
-                  setSortDir(d);
-                  setPage(1);
-                }}
-                options={[
-                  { value: "createdAt:desc", label: "Joined (newest)" },
-                  { value: "createdAt:asc", label: "Joined (oldest)" },
-                  { value: "name:asc", label: "Name (A→Z)" },
-                  { value: "name:desc", label: "Name (Z→A)" },
-                  { value: "email:asc", label: "Email (A→Z)" },
-                  { value: "email:desc", label: "Email (Z→A)" },
-                ]}
-              />
-
-              <Select
-                label="Rows"
-                value={String(pageSize)}
-                onChange={(v) => {
-                  setPageSize(Number(v));
-                  setPage(1);
-                }}
-                options={[
-                  { value: "10", label: "10" },
-                  { value: "20", label: "20" },
-                  { value: "50", label: "50" },
-                ]}
-              />
-
+            {searchTerm ? (
               <button
-                onClick={fetchUsers}
-                className={`${ui.btn.base} ${ui.btn.subtle}`}
-                disabled={refreshing}
+                onClick={() => setSearchTerm("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4]"
               >
-                <RefreshCw
-                  className={refreshing ? "animate-spin" : ""}
-                  size={16}
-                />
-                Refresh
+                <Icon name="x" size={14} />
               </button>
-            </div>
+            ) : null}
           </div>
 
-          {/* Selection bar */}
-          {selectedIds.size > 0 ? (
-            <div className="mt-4 rounded-3xl border border-[#eadfcf] bg-[#fff6e8] px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="text-sm text-[#4f4137]">
-                <b>{selectedIds.size}</b> selected{" "}
-                <span className="ml-2 text-xs text-[#8b6f47]">
-                  ({deletableSelectedCount} deletable)
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setSelectedIds(new Set())}
-                  className={`${ui.btn.base} ${ui.btn.subtle} !py-2 !px-3`}
-                >
-                  Clear
-                </button>
-                <button
-                  onClick={handleBulkDelete}
-                  disabled={deletableSelectedCount === 0}
-                  className={`${ui.btn.base} ${ui.btn.danger} !py-2 !px-3`}
-                >
-                  Delete selected
-                </button>
-              </div>
-            </div>
+          {selectedIds.size ? (
+            <Button variant="danger" onClick={handleBulkDelete} disabled={!deletableSelectedCount}>
+              <Icon name="trash" size={15} /> Delete {deletableSelectedCount}
+            </Button>
           ) : null}
+
+          <Select
+            value={String(pageSize)}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+            className="h-11 !w-auto"
+            aria-label="Rows per page"
+          >
+            {[10, 25, 50].map((n) => (
+              <option key={n} value={n}>
+                {n} / page
+              </option>
+            ))}
+          </Select>
         </div>
 
-        {/* Content */}
-        <div className={ui.card}>
-          <div className={ui.cardHeader}>
-            <div className="min-w-0">
-              <div className="text-xs uppercase tracking-widest text-[#a79a8f]">
-                Admins list
-              </div>
-              <div className="mt-1 text-sm text-[#4f4137]">
-                Manage who can access your admin modules.
-              </div>
-            </div>
-            <div className="hidden sm:flex items-center gap-2">
-              <span className={ui.btn.chip}>
-                <BadgeCheck size={14} className="text-[#7a5b33]" />
-                Secure roles
-              </span>
-            </div>
+        {/* list */}
+        {loadingUsers ? (
+          <div className="space-y-2 p-5">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-14" />
+            ))}
           </div>
-
-          {loadingUsers ? (
-            <div className="px-2 sm:px-0">
-              <TableSkeleton rows={8} />
-            </div>
-          ) : filteredAdmins.length === 0 ? (
-            <div className={ui.cardBody}>
-              <EmptyState
-                onAdd={() => setShowAddDrawer(true)}
-                onClear={() => setSearchTerm("")}
-                title="No admins found"
-                subtitle="Try a different search, or create a new admin account."
-              />
-            </div>
-          ) : (
-            <div className="p-4 sm:p-6">
-              {/* Mobile cards */}
-              <div className="grid grid-cols-1 gap-3 md:hidden">
-                {pagedAdmins.map((u) => (
-                  <MobileAdminCard
-                    key={u.id}
-                    u={u}
-                    isMe={u.id === currentAdminId}
-                    selected={selectedIds.has(u.id)}
-                    onToggleSelect={() => toggleSelect(u.id)}
-                    onEdit={() => setEditingUser(u)}
-                    onDelete={() => setConfirmDeleteId(u.id)}
-                    toast={toast}
+        ) : !filteredAdmins.length ? (
+          <EmptyState
+            icon={<Icon name="shield" size={20} />}
+            title={admins.length ? "No matches" : "No staff accounts yet"}
+            description={
+              admins.length
+                ? "No account matches that search."
+                : "Create the first staff account to give someone access to the console."
+            }
+            action={
+              admins.length ? (
+                <Button variant="secondary" onClick={() => setSearchTerm("")}>
+                  Clear search
+                </Button>
+              ) : (
+                <Button variant="primary" onClick={() => setShowAddDrawer(true)}>
+                  New staff account
+                </Button>
+              )
+            }
+          />
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th className="w-10">
+                  <input
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={() => toggleSelectAll(pagedAdmins)}
+                    aria-label="Select all on this page"
+                    className="h-4 w-4 cursor-pointer accent-[#8b6f47]"
                   />
-                ))}
-              </div>
+                </Th>
+                <SortableTh label="Name" k="name" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+                <SortableTh label="Role" k="role" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+                <Th>Access</Th>
+                <SortableTh label="Added" k="createdAt" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+                <Th className="text-right">Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {pagedAdmins.map((u) => {
+                const meta = roleMeta(u.role);
+                const access = accessOf(u);
+                const count = access === "*" ? ALL_PERMISSIONS.length : access.length;
+                return (
+                  <Tr key={u.id} className={selectedIds.has(u.id) ? "bg-[#faf6ef]" : ""}>
+                    <Td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(u.id)}
+                        onChange={() => toggleSelect(u.id)}
+                        disabled={isSelf(u.id)}
+                        aria-label={`Select ${u.email}`}
+                        className="h-4 w-4 cursor-pointer accent-[#8b6f47] disabled:opacity-30"
+                      />
+                    </Td>
 
-              {/* Desktop table */}
-              <div className="hidden md:block">
-                <div className="overflow-hidden rounded-3xl border border-[#e7e0d6] bg-white/75 backdrop-blur shadow-[0_18px_55px_-28px_rgba(0,0,0,0.22)]">
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1050px] text-left">
-                      <colgroup>
-                        <col className="w-12" />
-                        <col className="w-[30%]" />
-                        <col className="w-[24%]" />
-                        <col className="w-[14%]" />
-                        <col className="w-[18%]" />
-                        <col className="w-[14%]" />
-                        <col className="w-[160px]" />
-                      </colgroup>
+                    <Td>
+                      <span className="block font-semibold text-[#2a211a]">
+                        {[u.name, u.surname].filter(Boolean).join(" ") || "—"}
+                        {isSelf(u.id) ? (
+                          <span className="ml-2 text-[11px] font-medium text-[#9a8c7e]">you</span>
+                        ) : null}
+                      </span>
+                      <span className="block text-[11.5px] text-[#9a8c7e]">{u.email}</span>
+                    </Td>
 
-                      <thead className="sticky top-0 z-10 bg-[#f4f1ec]/90 backdrop-blur border-b border-[#efe9e1]">
-                        <tr className="text-[11px] uppercase tracking-widest text-[#7c6d62]">
-                          <th className="px-4 py-4">
-                            <input
-                              type="checkbox"
-                              checked={allOnPageSelected}
-                              onChange={() => toggleSelectAll(pagedAdmins)}
-                              className="h-4 w-4 rounded border-[#d7cec2] text-[#8b6f47] focus:ring-[#8b6f47]"
-                            />
-                          </th>
-                          <SortTh
-                            label="Name"
-                            activeKey={sortKey}
-                            dir={sortDir}
-                            k="name"
-                            onSort={(k, d) => {
-                              setSortKey(k);
-                              setSortDir(d);
-                              setPage(1);
-                            }}
-                            className="px-4 py-4"
-                          />
-                          <SortTh
-                            label="Email"
-                            activeKey={sortKey}
-                            dir={sortDir}
-                            k="email"
-                            onSort={(k, d) => {
-                              setSortKey(k);
-                              setSortDir(d);
-                              setPage(1);
-                            }}
-                            className="px-4 py-4"
-                          />
-                          <th className="px-4 py-4">Phone</th>
-                          <th className="px-4 py-4">Role / Access</th>
-                          <SortTh
-                            label="Joined"
-                            activeKey={sortKey}
-                            dir={sortDir}
-                            k="createdAt"
-                            onSort={(k, d) => {
-                              setSortKey(k);
-                              setSortDir(d);
-                              setPage(1);
-                            }}
-                            className="px-4 py-4"
-                          />
-                          <th className="px-4 py-4 text-right">Actions</th>
-                        </tr>
-                      </thead>
+                    <Td>
+                      <Badge variant={ROLE_PERMISSIONS[u.role] === "*" ? "brand" : "neutral"}>
+                        {meta?.title ?? u.role}
+                      </Badge>
+                    </Td>
 
-                      <tbody className="divide-y divide-[#efe9e1]">
-                        {pagedAdmins.map((u) => {
-                          const fullName =
-                            `${u.name ?? "—"} ${u.surname ?? ""}`.trim();
-                          const isMe = u.id === currentAdminId;
+                    <Td>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[12.5px] text-[#7a6a5f]">
+                          {access === "*" ? "Everything" : `${count} component${count === 1 ? "" : "s"}`}
+                        </span>
+                        {seesMoney(u) ? (
+                          <Badge variant="warning">revenue</Badge>
+                        ) : (
+                          <span className="text-[11px] text-[#b0a294]">no revenue</span>
+                        )}
+                      </div>
+                    </Td>
 
-                          return (
-                            <tr
-                              key={u.id}
-                              className="group bg-white/60 hover:bg-[#fbf7ef] transition"
-                            >
-                              <td className="px-4 py-4 align-middle">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedIds.has(u.id)}
-                                  disabled={isMe}
-                                  onChange={() => toggleSelect(u.id)}
-                                  className="h-4 w-4 rounded border-[#d7cec2] text-[#8b6f47] focus:ring-[#8b6f47] disabled:opacity-40"
-                                />
-                              </td>
-                              <td className="px-4 py-4 align-middle">
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <Avatar
-                                    name={u.name}
-                                    surname={u.surname}
-                                    email={u.email}
-                                  />
-                                  <div className="min-w-0">
-                                    <div className="text-[15px] font-semibold text-[#2f261f] truncate">
-                                      {fullName}
-                                      {isMe && (
-                                        <span className="ml-2 inline-flex items-center rounded-full border border-[#efe9e1] bg-white px-2 py-0.5 text-[11px] text-[#8b6f47]">
-                                          you
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-4 py-4 align-middle">
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    const ok = await copyToClipboard(u.email);
-                                    toast({
-                                      title: ok
-                                        ? "Email copied"
-                                        : "Copy failed",
-                                      type: ok ? undefined : "error",
-                                    });
-                                  }}
-                                  className="inline-flex items-center gap-2 text-sm text-[#4f4137] hover:underline underline-offset-2 truncate group"
-                                >
-                                  <span className="truncate">{u.email}</span>
-                                  <span className="opacity-0 group-hover:opacity-100 transition text-[#a79a8f]">
-                                    <Copy size={14} />
-                                  </span>
-                                </button>
-                              </td>
-                              <td className="px-4 py-4 align-middle">
-                                {u.phone ? (
-                                  <span className="text-sm text-[#4f4137]">
-                                    {u.phone}
-                                  </span>
-                                ) : (
-                                  <span className="text-[#a79a8f]">—</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-4 align-middle">
-                                <AdminRoleBadge role={u.role} />
-                              </td>
-                              <td className="px-4 py-4 align-middle text-sm text-[#6f6258]">
-                                {formatDate(u.createdAt)}
-                              </td>
-                              <td className="px-4 py-4 align-middle">
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    onClick={() => setEditingUser(u)}
-                                    className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 transition"
-                                  >
-                                    <Edit3 size={16} /> Edit
-                                  </button>
-                                  <button
-                                    onClick={() => setConfirmDeleteId(u.id)}
-                                    disabled={isMe}
-                                    className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${isMe ? "border-[#efe9e1] bg-white text-[#b6aaa0] cursor-not-allowed" : "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"}`}
-                                  >
-                                    <Trash2
-                                      size={16}
-                                      className={
-                                        isMe ? "text-[#b6aaa0]" : "text-red-600"
-                                      }
-                                    />{" "}
-                                    Delete
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+                    <Td className="whitespace-nowrap text-[#7a6a5f]">
+                      {u.createdAt
+                        ? new Date(u.createdAt).toLocaleDateString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : "—"}
+                    </Td>
 
-        {/* Pagination */}
-        {filteredAdmins.length > 0 ? (
-          <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-[#7c6d62]">
-            <div className={`${ui.soft} px-4 py-3`}>
-              Showing <b>{from}</b>–<b>{to}</b> of{" "}
-              <b>{filteredAdmins.length}</b>
-            </div>
-            <div className={`${ui.soft} px-3 py-2 flex items-center gap-2`}>
-              <button
-                className={`${ui.btn.base} ${ui.btn.subtle} !px-3 !py-2`}
+                    <Td className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          title="Edit account"
+                          aria-label={`Edit ${u.email}`}
+                          onClick={() => setEditingUser(u)}
+                          className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4] hover:text-[#2a211a]"
+                        >
+                          <Icon name="file" size={15} />
+                        </button>
+                        <button
+                          title={isSelf(u.id) ? "You cannot delete your own account" : "Delete account"}
+                          aria-label={`Delete ${u.email}`}
+                          disabled={isSelf(u.id)}
+                          onClick={() => setConfirmDeleteId(u.id)}
+                          className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#fbeae5] hover:text-[#a33c22] disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <Icon name="trash" size={15} />
+                        </button>
+                      </div>
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        )}
+
+        {/* pagination */}
+        {!loadingUsers && filteredAdmins.length ? (
+          <div className="flex items-center justify-between gap-3 border-t border-[#e6e0d6] px-4 py-3">
+            <Muted className="text-[12px]">
+              {from}–{to} of {filteredAdmins.length}
+            </Muted>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
               >
-                <ChevronLeft size={16} />
-              </button>
-              <div className="px-2 text-[#4f4137]">
-                Page <b>{page}</b> of <b>{pageCount}</b>
-              </div>
-              <button
-                className={`${ui.btn.base} ${ui.btn.subtle} !px-3 !py-2`}
-                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                disabled={page === pageCount}
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={to >= filteredAdmins.length}
+                onClick={() => setPage((p) => p + 1)}
               >
-                <ChevronRight size={16} />
-              </button>
+                Next
+              </Button>
             </div>
           </div>
         ) : null}
-      </div>
+      </Card>
 
-      {/* Drawer: Add Admin */}
+      {/* ------------------------------ create ------------------------------ */}
       {showAddDrawer ? (
-        <SideDrawer
-          title="Create Admin Account"
+        <Sheet
+          title="New staff account"
+          subtitle="They sign in with this email and password."
           onClose={() => setShowAddDrawer(false)}
         >
-          {errorMessage && (
-            <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {errorMessage}
-            </div>
-          )}
-          {addFormError && (
-            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              {addFormError}
-            </div>
-          )}
+          <form onSubmit={handleAddAdmin} className="space-y-4">
+            <Field label="Email" error={addEmail && !emailOk ? "Enter a valid email address." : null}>
+              <input
+                type="email"
+                value={addEmail}
+                onChange={(e) => setAddEmail(e.target.value)}
+                placeholder="name@youroasis.gr"
+                className={inputClass}
+                autoComplete="off"
+              />
+            </Field>
 
-          <form onSubmit={handleAddAdmin} className="space-y-6">
-            {/* Role Access Control Section */}
-            <div className="rounded-3xl border border-[#efe9e1] bg-white/75 p-5 shadow-sm">
-              <div className="mb-4">
-                <div className="text-xs uppercase tracking-widest text-[#a79a8f]">
-                  Security
-                </div>
-                <div className="text-sm font-semibold text-[#4f4137]">
-                  Admin Role & Permissions
-                </div>
-              </div>
-              <RoleSelector selectedRole={addRole} onChange={setAddRole} />
-
-              <div className="mt-5 border-t border-[#e3ddd4] pt-5">
-                <p className="mb-3 text-sm font-semibold text-[#3f3127]">
-                  {addRole === "custom" ? "Components" : "Extra components"}
-                </p>
-                <PermissionPicker
-                  role={addRole}
-                  granted={addPermissions}
-                  onChange={setAddPermissions}
+            <Field label="Temporary password" hint="Share it with them; they can change it later.">
+              <div className="flex gap-2">
+                <input
+                  type={pwVisible ? "text" : "password"}
+                  value={addPw}
+                  onChange={(e) => setAddPw(e.target.value)}
+                  className={`${inputClass} font-mono`}
+                  autoComplete="new-password"
                 />
+                <Button type="button" variant="secondary" onClick={() => setPwVisible((v) => !v)}>
+                  {pwVisible ? "Hide" : "Show"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => setAddPw(generatePassword())}>
+                  Generate
+                </Button>
               </div>
+              <PasswordMeter value={addPw} requirements={pwReq} />
+            </Field>
+
+            <div className="border-t border-[#f0ebe2] pt-4">
+              <p className="mb-3 text-[13px] font-semibold text-[#2a211a]">Role</p>
+              <RoleSelector selectedRole={addRole} onChange={setAddRole} />
             </div>
 
-            {/* Account */}
-            <div className="rounded-3xl border border-[#efe9e1] bg-white/75 p-5 shadow-sm">
-              <div className="mb-4">
-                <div className="text-xs uppercase tracking-widest text-[#a79a8f]">
-                  Account
-                </div>
-                <div className="text-sm font-semibold text-[#4f4137]">
-                  Login Credentials
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[#6f6258] mb-1.5">
-                    Email Address
-                  </label>
-                  <input
-                    ref={addEmailRef}
-                    name="email"
-                    type="email"
-                    placeholder="admin@company.com"
-                    required
-                    value={addEmail}
-                    onChange={(e) => {
-                      setAddEmail(e.target.value);
-                      setAddFormError("");
-                    }}
-                    className={ui.input}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-[#6f6258] mb-1.5">
-                    Password
-                  </label>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      name="password"
-                      type={pwVisible ? "text" : "password"}
-                      placeholder="Minimum 8 characters"
-                      required
-                      className={`${ui.input} flex-1`}
-                      value={addPw}
-                      onChange={(e) => {
-                        setAddPw(e.target.value);
-                        setAddFormError("");
-                      }}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPwVisible((v) => !v)}
-                        className={ui.btn.icon}
-                      >
-                        {pwVisible ? <EyeOff size={18} /> : <Eye size={18} />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAddPw(generatePassword());
-                          toast({ title: "Generated", icon: Sparkles });
-                        }}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-[#e7e0d6] bg-white px-4 text-sm font-medium text-[#4f4137] hover:bg-[#f5f1ea] shadow-sm"
-                      >
-                        <Sparkles size={18} /> Generate
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <div className="border-t border-[#f0ebe2] pt-4">
+              <p className="mb-3 text-[13px] font-semibold text-[#2a211a]">
+                {addRole === "custom" ? "Components" : "Extra components"}
+              </p>
+              <PermissionPicker role={addRole} granted={addPermissions} onChange={setAddPermissions} />
             </div>
 
-            {/* Profile */}
-            <div className="rounded-3xl border border-[#efe9e1] bg-white/75 p-5 shadow-sm">
-              <div className="mb-4">
-                <div className="text-xs uppercase tracking-widest text-[#a79a8f]">
-                  Profile
-                </div>
-                <div className="text-sm font-semibold text-[#4f4137]">
-                  Personal Details
-                </div>
-              </div>
+            {addFormError ? <ErrorNote>{addFormError}</ErrorNote> : null}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[#6f6258] mb-1.5">
-                    First name
-                  </label>
-                  <input
-                    name="name"
-                    placeholder="e.g. Maria"
-                    className={ui.input}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#6f6258] mb-1.5">
-                    Last name
-                  </label>
-                  <input
-                    name="surname"
-                    placeholder="e.g. Papadopoulou"
-                    className={ui.input}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#6f6258] mb-1.5">
-                    Phone
-                  </label>
-                  <input
-                    name="phone"
-                    placeholder="+30 69…"
-                    className={ui.input}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#6f6258] mb-1.5">
-                    Date of birth
-                  </label>
-                  <input name="dateOfBirth" type="date" className={ui.input} />
-                </div>
-              </div>
-            </div>
-
-            {/* Footer actions */}
-            <div className="sticky bottom-0 -mx-5 mt-6 border-t border-[#efe9e1] bg-white/85 backdrop-blur px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddDrawer(false)}
-                  className={`${ui.btn.base} ${ui.btn.ghost} sm:min-w-[140px]`}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className={`${ui.btn.base} ${ui.btn.primary} sm:min-w-[180px]`}
-                  disabled={isPending || !emailOk || addPw.length < 8}
-                >
-                  <Check size={16} /> Create Admin
-                </button>
-              </div>
+            <div className="flex justify-end gap-2 border-t border-[#f0ebe2] pt-4">
+              <Button type="button" variant="secondary" onClick={() => setShowAddDrawer(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" disabled={isPending}>
+                {isPending ? "Creating…" : "Create account"}
+              </Button>
             </div>
           </form>
-        </SideDrawer>
+        </Sheet>
       ) : null}
 
-      {/* Edit modal */}
+      {/* ------------------------------- edit ------------------------------- */}
       {editingUser ? (
-        <Modal title="Edit Administrator" onClose={() => setEditingUser(null)}>
-          <form
-            onSubmit={handleEditAdmin}
-            className="flex flex-col max-h-[85vh] sm:max-h-[80vh]"
-          >
-            {/* Scrollable Area */}
-            <div className="flex-1 overflow-y-auto pr-1 sm:pr-2 pb-4 space-y-6 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#e1dbd2] [&::-webkit-scrollbar-thumb]:rounded-full">
-              {/* Interactive Role Selector for Edit Mode */}
-              <div>
-                <div className="mb-3">
-                  <label className="block text-xs font-medium text-[#6f6258] uppercase tracking-widest">
-                    Assigned Role
-                  </label>
-                </div>
-                <RoleSelector
-                  selectedRole={editingUser.role || "manager"}
-                  onChange={(newRole) =>
-                    setEditingUser((prev) => ({ ...prev, role: newRole }))
-                  }
-                />
-                {editingUser.id === currentAdminId &&
-                  editingUser.role !== "superadmin" && (
-                    <p className="mt-3 text-xs text-[#8b6f47]">
-                      Note: You cannot remove your own Super Admin access.
-                    </p>
-                  )}
-
-                <div className="mt-5 border-t border-[#e3ddd4] pt-5">
-                  <p className="mb-3 text-sm font-semibold text-[#3f3127]">
-                    {editingUser.role === "custom" ? "Components" : "Extra components"}
-                  </p>
-                  <PermissionPicker
-                    role={editingUser.role || "manager"}
-                    granted={editingUser.permissions || []}
-                    onChange={(permissions) =>
-                      setEditingUser((prev) => ({ ...prev, permissions }))
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6 border-t border-[#efe9e1]">
-                <div className="md:col-span-2">
-                  <TextInput
-                    name="email"
-                    placeholder="Email Address"
-                    defaultValue={editingUser.email}
-                    required
-                  />
-                </div>
-                <TextInput
-                  name="name"
-                  placeholder="First Name"
-                  defaultValue={editingUser.name ?? ""}
-                />
-                <TextInput
-                  name="surname"
-                  placeholder="Last Name"
-                  defaultValue={editingUser.surname ?? ""}
-                />
-                <TextInput
-                  name="phone"
-                  placeholder="Phone Number"
-                  defaultValue={editingUser.phone ?? ""}
-                />
-                <TextInput
+        <Sheet
+          title="Edit staff account"
+          subtitle={editingUser.email}
+          onClose={() => setEditingUser(null)}
+        >
+          <form onSubmit={handleEditAdmin} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="First name">
+                <input name="name" defaultValue={editingUser.name ?? ""} className={inputClass} />
+              </Field>
+              <Field label="Surname">
+                <input name="surname" defaultValue={editingUser.surname ?? ""} className={inputClass} />
+              </Field>
+            </div>
+            <Field label="Email">
+              <input name="email" type="email" defaultValue={editingUser.email ?? ""} className={inputClass} />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Phone">
+                <input name="phone" defaultValue={editingUser.phone ?? ""} className={inputClass} />
+              </Field>
+              <Field label="Date of birth">
+                <input
                   name="dateOfBirth"
                   type="date"
-                  placeholder="Date of Birth"
-                  defaultValue={
-                    editingUser.dateOfBirth
-                      ? toYMD(editingUser.dateOfBirth)
-                      : ""
-                  }
+                  defaultValue={editingUser.dateOfBirth ? String(editingUser.dateOfBirth).slice(0, 10) : ""}
+                  className={inputClass}
                 />
-              </div>
+              </Field>
             </div>
 
-            {/* Sticky Footer Area */}
-            <div className="flex flex-col sm:flex-row sm:justify-end gap-2 pt-4 mt-2 border-t border-[#efe9e1] shrink-0 bg-white">
-              <button
-                type="button"
-                onClick={() => setEditingUser(null)}
-                className={`${ui.btn.base} ${ui.btn.subtle}`}
-              >
+            <div className="border-t border-[#f0ebe2] pt-4">
+              <p className="mb-3 text-[13px] font-semibold text-[#2a211a]">Role</p>
+              <RoleSelector
+                selectedRole={editingUser.role || "manager"}
+                onChange={(newRole) => setEditingUser((prev) => ({ ...prev, role: newRole }))}
+              />
+              {isSelf(editingUser.id) && editingUser.role !== "superadmin" ? (
+                <p className="mt-3 text-[12px] text-[#8a6412]">
+                  You cannot remove your own Super Admin access.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="border-t border-[#f0ebe2] pt-4">
+              <p className="mb-3 text-[13px] font-semibold text-[#2a211a]">
+                {editingUser.role === "custom" ? "Components" : "Extra components"}
+              </p>
+              <PermissionPicker
+                role={editingUser.role || "manager"}
+                granted={editingUser.permissions || []}
+                onChange={(permissions) => setEditingUser((prev) => ({ ...prev, permissions }))}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-[#f0ebe2] pt-4">
+              <Button type="button" variant="secondary" onClick={() => setEditingUser(null)}>
                 Cancel
-              </button>
-              <button
-                type="submit"
-                className={`${ui.btn.base} ${ui.btn.primary}`}
-                disabled={isPending}
-              >
-                <Check size={16} /> Save Changes
-              </button>
+              </Button>
+              <Button type="submit" variant="primary" disabled={isPending}>
+                {isPending ? "Saving…" : "Save changes"}
+              </Button>
             </div>
           </form>
-        </Modal>
+        </Sheet>
       ) : null}
 
-      {/* Confirm delete */}
-      {confirmDeleteId ? (
-        <ConfirmDialog
-          title="Delete admin?"
-          description="This action cannot be undone. The admin will be permanently removed."
-          confirmLabel="Delete"
-          onCancel={() => setConfirmDeleteId(null)}
-          onConfirm={() => handleDelete(confirmDeleteId)}
-        />
-      ) : null}
-
+      {/* --------------------------- created summary --------------------------- */}
       {createdAdmin ? (
-        <Modal
-          title="Admin created successfully"
+        <Sheet
+          title="Account created"
+          subtitle="Share these details once — the password is not shown again."
           onClose={() => setCreatedAdmin(null)}
         >
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-              The admin account has been successfully created.
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">Email</p>
+              <p className="mt-0.5 font-mono text-[14px] text-[#2a211a]">{createdAdmin.email}</p>
+              <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">
+                Temporary password
+              </p>
+              <p className="mt-0.5 font-mono text-[14px] text-[#2a211a]">{createdAdmin.password}</p>
             </div>
-            <div className="flex flex-col sm:flex-row sm:justify-end gap-2 pt-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setCreatedAdmin(null);
-                  setShowAddDrawer(true);
-                }}
-                className={`${ui.btn.base} ${ui.btn.subtle}`}
-              >
-                Create another
-              </button>
-              <button
-                type="button"
-                onClick={() => setCreatedAdmin(null)}
-                className={`${ui.btn.base} ${ui.btn.primary}`}
-              >
-                <Check size={16} /> Done
-              </button>
-            </div>
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                navigator.clipboard
+                  ?.writeText(`${createdAdmin.email} / ${createdAdmin.password}`)
+                  .then(() => {
+                    setPwJustCopied(true);
+                    setTimeout(() => setPwJustCopied(false), 2000);
+                  })
+                  .catch(() => {});
+              }}
+            >
+              <Icon name="copy" size={15} /> {pwJustCopied ? "Copied" : "Copy email and password"}
+            </Button>
+            <Button variant="primary" className="w-full" onClick={() => setCreatedAdmin(null)}>
+              Done
+            </Button>
           </div>
-        </Modal>
+        </Sheet>
       ) : null}
 
+      {/* ------------------------------ delete ------------------------------ */}
+      {confirmDeleteId ? (
+        <Sheet
+          title="Delete staff account"
+          subtitle="This removes their sign-in and console access immediately."
+          onClose={() => setConfirmDeleteId(null)}
+        >
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmDeleteId(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={() => handleDelete(confirmDeleteId)}>
+              Delete account
+            </Button>
+          </div>
+        </Sheet>
+      ) : null}
       <ToastHost toasts={toasts} />
+    </Page>
+  );
+}
+
+/* ------------------------------- small parts ------------------------------ */
+
+function SummaryCard({ label, value, hint }) {
+  return (
+    <Card className="py-3.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">{label}</p>
+      <p className="mt-1 font-serif text-[20px] text-[#2a211a]">{value}</p>
+      {hint ? <p className="mt-0.5 text-[11.5px] text-[#9a8c7e]">{hint}</p> : null}
+    </Card>
+  );
+}
+
+function SortableTh({ label, k, activeKey, dir, onSort }) {
+  const active = activeKey === k;
+  return (
+    <Th>
+      <button
+        onClick={() => onSort(k)}
+        className={`inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-[#2a211a] ${
+          active ? "text-[#2a211a]" : ""
+        }`}
+      >
+        {label}
+        <span className={active ? "opacity-100" : "opacity-0"}>{dir === "asc" ? "▲" : "▼"}</span>
+      </button>
+    </Th>
+  );
+}
+
+/** Slide-over used by every dialog on this page. */
+function Sheet({ title, subtitle, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-[#e6e0d6] bg-white p-6 shadow-2xl sm:rounded-3xl">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-serif text-[19px] text-[#2a211a]">{title}</h2>
+            {subtitle ? <p className="mt-0.5 text-[12px] text-[#9a8c7e]">{subtitle}</p> : null}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]"
+          >
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const PW_REQ_LABELS = {
+  len: "8+ characters",
+  upper: "an uppercase letter",
+  lower: "a lowercase letter",
+  num: "a number",
+  special: "a symbol",
+};
+
+function PasswordMeter({ value, requirements }) {
+  // requirements is an object of booleans, not a list.
+  const unmet = Object.entries(requirements ?? {})
+    .filter(([, met]) => !met)
+    .map(([k]) => PW_REQ_LABELS[k] ?? k);
+  const score = scorePassword(value || "");
+  const tone = score >= 4 ? "#3f6b3f" : score >= 3 ? "#8a6412" : "#a33c22";
+  const label = score >= 4 ? "Strong" : score >= 3 ? "Fair" : "Weak";
+  if (!value) return null;
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#efe9df]">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: `${(score / 5) * 100}%`, background: tone }}
+          />
+        </div>
+        <span className="text-[11.5px] font-semibold" style={{ color: tone }}>
+          {label}
+        </span>
+      </div>
+      {unmet.length ? (
+        <p className="mt-1 text-[11.5px] text-[#9a8c7e]">Still needed: {unmet.join(", ")}</p>
+      ) : null}
     </div>
   );
 }

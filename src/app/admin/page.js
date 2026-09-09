@@ -7,7 +7,7 @@ import Link from "next/link";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 
 import Icon from "./_ui/Icon";
-import { can } from "./_ui/nav";
+import { can, effectiveAccess } from "./_ui/nav";
 import {
   Badge,
   Button,
@@ -81,7 +81,10 @@ export default function AdminDashboard() {
   const { data: me } = useJson("/api/me");
   const role = me?.role || null;
 
-  const canSee = (perm) => (role ? can(role, perm) : false);
+  // can() takes effective permissions, not a role name. Passing the role here
+  // silently hid every gated section — including from a superadmin.
+  const access = effectiveAccess(role, me?.permissions);
+  const canSee = (perm) => (role ? can(access, perm) : false);
 
   const metrics = useJson("/api/admin/metrics?group=day&tz=Europe/Athens", {
     enabled: Boolean(role),
@@ -168,16 +171,18 @@ export default function AdminDashboard() {
             >
               <Spark data={trend} k="bookings" />
             </StatCard>
-            <StatCard
-              label="Revenue"
-              value={eur(m.revenue)}
-              delta={formatDelta(m.deltas?.revenuePct)}
-              hint="Month to date"
-              accent="success"
-              icon={<Icon name="chart" size={16} />}
-            >
-              <Spark data={trend} k="revenue" tone="#3f6b3f" />
-            </StatCard>
+            {canSee("financials") ? (
+              <StatCard
+                label="Revenue"
+                value={eur(m.revenue)}
+                delta={formatDelta(m.deltas?.revenuePct)}
+                hint="Month to date"
+                accent="success"
+                icon={<Icon name="chart" size={16} />}
+              >
+                <Spark data={trend} k="revenue" tone="#3f6b3f" />
+              </StatCard>
+            ) : null}
             <StatCard
               label="Occupancy"
               value={pct(m.occupancyPct)}

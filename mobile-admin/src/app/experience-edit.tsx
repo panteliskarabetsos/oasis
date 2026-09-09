@@ -21,11 +21,12 @@ import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { AdminExperience, MeetupPoint } from "@/lib/types";
+import { PermissionGate } from "@/components/access";
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const POLICIES = ["flexible", "moderate", "strict"] as const;
 
-export default function ExperienceEditScreen() {
+function ExperienceEditScreenContent() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const isNew = !id;
   const { data: all, loading } = useApi(() => api.adminExperiences());
@@ -432,3 +433,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
 });
+
+export default function ExperienceEditScreen() {
+  return (
+    <PermissionGate permission="experiences">
+      <ExperienceEditScreenContent />
+    </PermissionGate>
+  );
+}
