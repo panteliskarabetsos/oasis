@@ -17,8 +17,7 @@ import {
   History,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
-const Playfair_Display = () => ({ variable: "", className: "" });
-const DM_Sans = () => ({ variable: "", className: "" });
+import { Playfair_Display, DM_Sans } from "next/font/google";
 
 // ---- Fonts ----
 const fontSerif = Playfair_Display({

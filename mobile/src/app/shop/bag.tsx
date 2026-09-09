@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -26,7 +27,8 @@ import { useAuth } from "@/context/auth";
 import { api } from "@/lib/api";
 import { config } from "@/lib/config";
 import { moneyCents } from "@/lib/format";
-import type { ShopShippingQuote } from "@/lib/types";
+import { COUNTRIES, findCountry } from "@/lib/countries";
+import type { ShopDestination, ShopShippingQuote } from "@/lib/types";
 
 const INK = "#26201a";
 const DETAILS_KEY = "oasis.shop.details.v1";
@@ -69,6 +71,7 @@ export default function BagScreen() {
   const [quote, setQuote] = useState<ShopShippingQuote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [notices, setNotices] = useState<string[]>([]);
+  const [countryPicker, setCountryPicker] = useState(false);
 
   // Prefill from the last order, then from the signed-in profile — whichever
   // fills a field first wins, so a stored address is never overwritten.
@@ -101,6 +104,11 @@ export default function BagScreen() {
       alive = false;
     };
   }, [profile?.name, profile?.surname, profile?.email, profile?.phone]);
+
+  const basketKey = useMemo(
+    () => bag.lines.map((l) => `${l.productId}x${l.quantity}`).join(","),
+    [bag.lines],
+  );
 
   // Re-price delivery whenever the bag, the destination or the method changes.
   // Debounced because the country field is typed into.
@@ -142,7 +150,9 @@ export default function BagScreen() {
       alive = false;
       clearTimeout(t);
     };
-  }, [bag.lines, details.country, method]);
+    // Keyed on the contents rather than the array's identity: a re-created but
+    // equal `lines` must not trigger another round trip.
+  }, [basketKey, details.country, method]);
 
   function set<K extends keyof Details>(key: K, value: Details[K]) {
     setDetails((d) => ({ ...d, [key]: value }));
@@ -160,6 +170,22 @@ export default function BagScreen() {
     }
     return e;
   }, [details, method]);
+
+  // The shop's own list when it sends one — those are the countries it will
+  // actually deliver to. Otherwise the bundled list, so the customer still
+  // picks rather than types; the quote below then says whether we can ship.
+  const serverDestinations: ShopDestination[] = quote?.destinations ?? [];
+  const usingServerList = serverDestinations.length > 0;
+  const destinations: ShopDestination[] = usingServerList
+    ? serverDestinations
+    : COUNTRIES.map((c) => ({ code: c.code, label: c.label, flag: c.flag }));
+
+  const selectedDestination =
+    destinations.find(
+      (d) =>
+        d.code.toUpperCase() === details.country.trim().toUpperCase() ||
+        d.label.toLowerCase() === details.country.trim().toLowerCase(),
+    ) ?? findCountry(details.country);
 
   const deliverable = quote ? quote.available : true;
   const valid = Object.keys(errors).length === 0 && deliverable;
@@ -456,11 +482,34 @@ export default function BagScreen() {
                 error={touched ? errors.postalCode : null}
               />
             </View>
-            <Field
-              label="Country"
-              value={details.country}
-              onChangeText={(t) => set("country", t)}
-            />
+            <View>
+              <Text style={styles.fieldLabel}>Country</Text>
+              <Pressable
+                onPress={() => setCountryPicker(true)}
+                style={[
+                  styles.countryButton,
+                  quote && !quote.available ? styles.countryButtonBad : null,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Choose the delivery country"
+              >
+                <Text style={styles.countryText}>
+                  {selectedDestination
+                    ? `${selectedDestination.flag ?? ""} ${selectedDestination.label}`.trim()
+                    : details.country || "Choose a country"}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={colors.mutedWarm} />
+              </Pressable>
+              {quote && !quote.available ? (
+                <Text style={styles.countryError}>{quote.reason}</Text>
+              ) : usingServerList ? (
+                <Muted style={{ fontSize: 11.5, marginTop: 4 }}>
+                  We deliver to {destinations.length} countr
+                  {destinations.length === 1 ? "y" : "ies"}
+                  {quote?.shipsAnywhere ? " and elsewhere on request" : ""}.
+                </Muted>
+              ) : null}
+            </View>
             <Field
               label="Delivery notes (optional)"
               value={details.notes}
@@ -479,6 +528,64 @@ export default function BagScreen() {
           </Muted>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={countryPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setCountryPicker(false)}
+      >
+        <View style={styles.screen}>
+          <View style={styles.pickerHead}>
+            <View style={{ flex: 1 }}>
+              <Eyebrow>Delivery</Eyebrow>
+              <Serif style={{ fontSize: 22 }}>Where to?</Serif>
+            </View>
+            <Pressable onPress={() => setCountryPicker(false)} hitSlop={10}>
+              <Ionicons name="close" size={20} color={colors.brownDeep} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: spacing.md, paddingBottom: 40 }}>
+            {usingServerList ? (
+              <Muted style={{ marginBottom: spacing.md, fontSize: 12.5 }}>
+                These are the countries we deliver to.
+              </Muted>
+            ) : null}
+            {!destinations.length ? (
+              <Muted>
+                No delivery countries are set up yet. Please contact us to arrange it.
+              </Muted>
+            ) : (
+              destinations.map((d) => {
+                const active =
+                  d.code.toUpperCase() === details.country.toUpperCase() ||
+                  d.label.toLowerCase() === details.country.trim().toLowerCase();
+                return (
+                  <Pressable
+                    key={d.code}
+                    onPress={() => {
+                      set("country", d.label);
+                      setCountryPicker(false);
+                    }}
+                    style={[styles.countryRow, active && styles.countryRowOn]}
+                  >
+                    <Text style={styles.countryFlag}>{d.flag}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.countryName}>{d.label}</Text>
+                      {d.zoneLabel && d.zoneLabel !== d.label ? (
+                        <Muted style={{ fontSize: 11.5 }}>{d.zoneLabel}</Muted>
+                      ) : null}
+                    </View>
+                    {active ? (
+                      <Ionicons name="checkmark" size={17} color={colors.brand} />
+                    ) : null}
+                  </Pressable>
+                );
+              })
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
 
       <View style={[styles.stickyWrap, { paddingBottom: insets.bottom + 8 }]}>
         <View style={styles.sticky}>
@@ -571,6 +678,43 @@ function Row({ label, value, muted }: { label: string; value: string; muted?: bo
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.cream },
 
+  fieldLabel: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.brownDeep, marginBottom: 6 },
+  countryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  countryText: { flex: 1, fontFamily: fonts.sans, fontSize: 15, color: colors.ink },
+  countryButtonBad: { borderColor: colors.danger },
+  countryError: { fontFamily: fonts.sans, fontSize: 12, color: colors.danger, marginTop: 4 },
+  pickerHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+  },
+  countryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: 13,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.creamSoft,
+    marginBottom: 6,
+  },
+  countryRowOn: { borderColor: colors.brand, backgroundColor: colors.creamChip },
+  countryFlag: { fontSize: 20 },
+  countryName: { fontFamily: fonts.sansMedium, fontSize: 15, color: colors.ink },
   noticeCard: {
     flexDirection: "row",
     alignItems: "flex-start",

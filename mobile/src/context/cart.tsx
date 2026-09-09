@@ -196,6 +196,11 @@ export function BagProvider({ children }: { children: React.ReactNode }) {
     const byId = new Map(updates.map((u) => [u.productId, u]));
     setLines((prev) => {
       const next: BagLine[] = [];
+      // `changed` matters as much as the corrections themselves: returning a
+      // fresh array every time gave `lines` a new identity on each quote, which
+      // re-ran the quote effect, which reconciled again — a loop that never let
+      // a quote settle, so the bag showed a dash where the price belongs.
+      let changed = false;
       for (const line of prev) {
         const u = byId.get(line.productId);
         if (!u) {
@@ -204,6 +209,7 @@ export function BagProvider({ children }: { children: React.ReactNode }) {
         }
         if (!u.available) {
           notes.push(`${line.title} is no longer available and was removed.`);
+          changed = true;
           continue;
         }
         let updated = line;
@@ -211,16 +217,17 @@ export function BagProvider({ children }: { children: React.ReactNode }) {
           notes.push(`${line.title} is now priced differently.`);
           updated = { ...updated, priceCents: u.priceCents };
         }
-        if (typeof u.stockQty === "number") {
+        if (typeof u.stockQty === "number" && u.stockQty !== line.stockQty) {
           updated = { ...updated, stockQty: u.stockQty };
-          if (line.quantity > u.stockQty) {
-            notes.push(`Only ${u.stockQty} × ${line.title} left — your bag was adjusted.`);
-            updated = { ...updated, quantity: u.stockQty };
-          }
         }
+        if (typeof u.stockQty === "number" && line.quantity > u.stockQty) {
+          notes.push(`Only ${u.stockQty} × ${line.title} left — your bag was adjusted.`);
+          updated = { ...updated, quantity: u.stockQty };
+        }
+        if (updated !== line) changed = true;
         next.push(updated);
       }
-      return next;
+      return changed ? next : prev;
     });
     return notes;
   }, []);

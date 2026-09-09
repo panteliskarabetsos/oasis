@@ -10,6 +10,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { SHIPPING_COLUMNS, getShippingSettings } from "@/lib/shop/server";
 import { isMissingSchema } from "@/lib/shop/schema";
 import { quoteShipping } from "@/lib/shop/shipping";
+import { COUNTRY_CODES } from "@/lib/phone";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -97,8 +98,34 @@ export async function POST(req) {
       subtotalCents,
     });
 
+    // Where this shop will actually deliver, so the storefront can offer a
+    // choice instead of a free-text box that silently fails at checkout.
+    const named = new Map(COUNTRY_CODES.map((c) => [c.iso, c]));
+    const destinations = [];
+    let shipsAnywhere = false;
+    for (const zone of settings.zones || []) {
+      for (const code of zone.countries || []) {
+        if (code === "*") {
+          shipsAnywhere = true;
+          continue;
+        }
+        if (destinations.some((d) => d.code === code)) continue;
+        const known = named.get(code);
+        destinations.push({
+          code,
+          label: known?.name || code,
+          flag: known?.flag || "",
+          zone: zone.id ?? null,
+          zoneLabel: zone.label || "",
+        });
+      }
+    }
+    destinations.sort((a, b) => a.label.localeCompare(b.label));
+
     return ok({
       ...quote,
+      destinations,
+      shipsAnywhere,
       lines,
       subtotalCents,
       totalCents: subtotalCents + (quote.available ? quote.cents : 0),
