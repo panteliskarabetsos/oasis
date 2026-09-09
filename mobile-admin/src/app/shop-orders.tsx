@@ -291,6 +291,18 @@ function OrderSheet({
                 </View>
               ))}
               <Divider style={{ marginVertical: 10 }} />
+              {order.shipping_cents != null ? (
+                <View style={styles.splitRow}>
+                  <Muted style={{ fontSize: 13 }}>
+                    {order.shipping_method === "pickup" ? "Collection" : "Delivery"}
+                  </Muted>
+                  <Muted style={{ fontSize: 13 }}>
+                    {Number(order.shipping_cents) === 0
+                      ? "Free"
+                      : moneyCents(order.shipping_cents, order.currency)}
+                  </Muted>
+                </View>
+              ) : null}
               <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                 <Text style={styles.cardTitle}>Total</Text>
                 <Text style={styles.totalBig}>
@@ -305,7 +317,18 @@ function OrderSheet({
             </View>
 
             {/* delivery */}
-            {order.shipping_address?.line1 ? (
+            {order.shipping_method === "pickup" ? (
+              <View style={styles.card}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                  <Ionicons name="storefront-outline" size={16} color={colors.info} />
+                  <Text style={styles.cardTitle}>Collecting in person</Text>
+                </View>
+                <Muted style={{ fontSize: 12.5, marginTop: 4 }}>
+                  Do not post this one — the customer is picking it up.
+                </Muted>
+              </View>
+            ) : null}
+            {order.shipping_method !== "pickup" && order.shipping_address?.line1 ? (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Delivering to</Text>
                 <Text style={styles.address}>
@@ -438,6 +461,7 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   cardTitle: { fontFamily: fonts.sansSemiBold, fontSize: 14, color: colors.text },
+  splitRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
   link: { fontFamily: fonts.sans, fontSize: 13, color: colors.gold, marginTop: 2 },
   itemTitle: { fontFamily: fonts.sansMedium, fontSize: 14, color: colors.text },
   itemTotal: { fontFamily: fonts.sansMedium, fontSize: 14, color: colors.text },

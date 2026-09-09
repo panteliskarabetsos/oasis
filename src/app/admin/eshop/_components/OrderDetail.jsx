@@ -364,6 +364,18 @@ export default function OrderDetail({ orderId }) {
                 <span className="text-[#7a6a5f]">Line total</span>
                 <span>{money(subtotal, currency)}</span>
               </div>
+              {order.shipping_cents != null ? (
+                <div className="flex justify-between">
+                  <span className="text-[#7a6a5f]">
+                    {order.shipping_method === "pickup" ? "Collection" : "Delivery"}
+                  </span>
+                  <span>
+                    {Number(order.shipping_cents) === 0
+                      ? "Free"
+                      : money(order.shipping_cents, currency)}
+                  </span>
+                </div>
+              ) : null}
               {subtotal !== Number(order.total_cents) ? (
                 <div className="flex justify-between">
                   <span className="text-[#7a6a5f]">Order total</span>
@@ -493,7 +505,14 @@ export default function OrderDetail({ orderId }) {
           </Card>
 
           <Card>
-            <CardHeader title="Delivery" />
+            <CardHeader
+              title={order.shipping_method === "pickup" ? "Collection" : "Delivery"}
+              actions={
+                order.shipping_method === "pickup" ? (
+                  <Badge variant="info">Not to be posted</Badge>
+                ) : null
+              }
+            />
             {addressLines(shipping).length ? (
               <p className="whitespace-pre-line text-[13px] leading-relaxed text-[#3f3127]">
                 {addressLines(shipping).join("\n")}

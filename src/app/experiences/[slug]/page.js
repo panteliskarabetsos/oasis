@@ -6,7 +6,8 @@ import Image from "next/image";
 import Script from "next/script";
 import Link from "next/link";
 import { cache } from "react";
-import { Playfair_Display, DM_Sans } from "next/font/google";
+const Playfair_Display = () => ({ variable: "", className: "" });
+const DM_Sans = () => ({ variable: "", className: "" });
 import {
   ArrowLeft,
   Check,

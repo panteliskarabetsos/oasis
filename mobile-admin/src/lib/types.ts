@@ -347,6 +347,11 @@ export type ShopProductRow = {
   sku_code?: string | null;
   /** Absent on deployments without the barcode migration. */
   barcode?: string | null;
+  /** Absent on deployments without the shipping migration. */
+  shipping_weight_grams?: number | null;
+  shipping_length_cm?: number | null;
+  shipping_width_cm?: number | null;
+  shipping_height_cm?: number | null;
   category?: string | null;
   description?: string | null;
   updated_at?: string | null;
@@ -369,6 +374,10 @@ export type ShopOrderRow = {
   placed_at?: string | null;
   created_at?: string | null;
   stripe_payment_intent_id?: string | null;
+  /** Present once the shipping migration has run. */
+  shipping_cents?: number | null;
+  shipping_method?: "courier" | "pickup" | "free" | null;
+  refunded_cents?: number | null;
 };
 
 export type ShopOrderItemRow = {

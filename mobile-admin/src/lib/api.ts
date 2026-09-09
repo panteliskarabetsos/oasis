@@ -406,6 +406,13 @@ export const api = {
       body: { stock_qty },
     }),
 
+  /** Set what a product weighs, for courier pricing. */
+  shopSetWeight: (id: number | string, shipping_weight_grams: number) =>
+    request<ShopProductRow>(`/api/admin/shop/products/${id}`, {
+      method: "PATCH",
+      body: { shipping_weight_grams },
+    }),
+
   shopSetActive: (id: number | string, active: boolean) =>
     request<ShopProductRow>(`/api/admin/shop/products/${id}`, {
       method: "PATCH",

@@ -1,12 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
+  Modal,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -37,6 +40,7 @@ function ShopProducts() {
   const query = useDebounced(search, 350);
   const [filter, setFilter] = useState<"all" | "live" | "low">("all");
   const [saving, setSaving] = useState<number | null>(null);
+  const [editing, setEditing] = useState<ShopProductRow | null>(null);
 
   const { data, loading, error, refresh, setData } = useApi(
     () => api.shopProducts(query || undefined),
@@ -156,7 +160,12 @@ function ShopProducts() {
           }
           renderItem={({ item }) => (
             <View style={styles.row}>
-              <View style={{ flex: 1, minWidth: 0 }}>
+              <Pressable
+                style={{ flex: 1, minWidth: 0 }}
+                onPress={() => setEditing(item)}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${item.title}`}
+              >
                 <Text style={styles.title} numberOfLines={1}>
                   {item.title}
                 </Text>
@@ -172,8 +181,11 @@ function ShopProducts() {
                   ) : item.stock_qty <= 5 ? (
                     <Badge label={`Only ${item.stock_qty}`} tone="warning" />
                   ) : null}
+                  {item.shipping_weight_grams === 0 ? (
+                    <Badge label="No weight" tone="warning" />
+                  ) : null}
                 </View>
-              </View>
+              </Pressable>
 
               <View style={styles.stepper}>
                 <Pressable
@@ -203,7 +215,121 @@ function ShopProducts() {
           )}
         />
       )}
+      <ProductSheet
+        product={editing}
+        onClose={() => setEditing(null)}
+        onSaved={(updated) => {
+          setData((prev) => (prev ?? []).map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
+          setEditing(null);
+        }}
+      />
     </View>
+  );
+}
+
+/* --------------------------- stock & weight sheet ------------------------- */
+
+function ProductSheet({
+  product,
+  onClose,
+  onSaved,
+}: {
+  product: ShopProductRow | null;
+  onClose: () => void;
+  onSaved: (p: ShopProductRow) => void;
+}) {
+  const [stock, setStock] = useState("");
+  const [weight, setWeight] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!product) return;
+    setStock(String(product.stock_qty ?? 0));
+    setWeight(product.shipping_weight_grams ? String(product.shipping_weight_grams) : "");
+  }, [product]);
+
+  async function save() {
+    if (!product) return;
+    setBusy(true);
+    try {
+      let updated = product;
+      const nextStock = Number(stock) || 0;
+      if (nextStock !== product.stock_qty) {
+        updated = { ...updated, ...(await api.shopSetStock(product.id, nextStock)) };
+      }
+      const nextWeight = weight === "" ? 0 : Number(weight);
+      if (nextWeight !== (product.shipping_weight_grams ?? 0)) {
+        updated = { ...updated, ...(await api.shopSetWeight(product.id, nextWeight)) };
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      onSaved({ ...updated, stock_qty: nextStock, shipping_weight_grams: nextWeight });
+    } catch (e) {
+      Alert.alert("Product", e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      visible={product != null}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <View style={styles.sheet}>
+        <View style={styles.sheetHead}>
+          <View style={{ flex: 1 }}>
+            <Eyebrow>Product</Eyebrow>
+            <Serif style={{ fontSize: 21 }} numberOfLines={2}>
+              {product?.title ?? ""}
+            </Serif>
+          </View>
+          <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
+            <Ionicons name="close" size={19} color={colors.text} />
+          </Pressable>
+        </View>
+
+        <ScrollView contentContainerStyle={{ padding: spacing.md, gap: spacing.md }}>
+          <View>
+            <Text style={styles.label}>Stock on hand</Text>
+            <TextInput
+              value={stock}
+              onChangeText={(t) => setStock(t.replace(/[^0-9]/g, ""))}
+              keyboardType="number-pad"
+              style={styles.input}
+              accessibilityLabel="Stock on hand"
+            />
+          </View>
+
+          <View>
+            <Text style={styles.label}>Shipping weight (grams)</Text>
+            <TextInput
+              value={weight}
+              onChangeText={(t) => setWeight(t.replace(/[^0-9]/g, ""))}
+              keyboardType="number-pad"
+              placeholder="e.g. 800"
+              placeholderTextColor={colors.faint}
+              style={styles.input}
+              accessibilityLabel="Shipping weight in grams"
+            />
+            <Muted style={{ fontSize: 11.5, marginTop: 6 }}>
+              What the courier bills on. Without it, delivery for this product prices at
+              the base rate only. Packed dimensions are set in the web console.
+            </Muted>
+          </View>
+
+          {product?.barcode ? (
+            <View>
+              <Text style={styles.label}>Barcode</Text>
+              <Text style={styles.mono}>{product.barcode}</Text>
+            </View>
+          ) : null}
+
+          <Button title={busy ? "Saving…" : "Save"} disabled={busy} onPress={save} />
+        </ScrollView>
+      </View>
+    </Modal>
   );
 }
 
@@ -274,4 +400,34 @@ const styles = StyleSheet.create({
   stepBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
   stockCell: { minWidth: 34, alignItems: "center" },
   stockNum: { fontFamily: fonts.sansSemiBold, fontSize: 15, color: colors.text },
+
+  sheet: { flex: 1, backgroundColor: colors.bg },
+  sheetHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+  },
+  closeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.chip,
+  },
+  label: { fontFamily: fonts.sansMedium, fontSize: 12.5, color: colors.muted, marginBottom: 6 },
+  input: {
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 13,
+    fontFamily: fonts.sansSemiBold,
+    fontSize: 17,
+    color: colors.text,
+  },
+  mono: { fontFamily: "Courier", fontSize: 14, color: colors.textSoft },
 });
