@@ -14,6 +14,7 @@ import {
   isMissingSchema,
   logEvent,
 } from "@/lib/shop/orders";
+import { selectWithFallback } from "@/lib/shop/schema";
 
 const ok7 = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad7 = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -21,6 +22,7 @@ const bad7 = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 const BASE_COLUMNS =
   "id, user_id, status, total_cents, currency, stripe_session_id, stripe_payment_intent_id, billing_address, shipping_address, placed_at, created_at";
 const OPS_COLUMNS = ", refunded_cents, tracking_number, tracking_url, internal_note";
+const SHIP_COLUMNS = ", shipping_cents, shipping_method";
 
 export async function GET(_req, { params }) {
   const auth = await requireAdmin("eshop");
@@ -30,23 +32,24 @@ export async function GET(_req, { params }) {
   if (!Number.isFinite(id) || id <= 0) return bad7("Invalid id");
 
   try {
-    // Fall back to the pre-migration column set rather than failing outright.
-    let migrated = true;
-    let { data: order, error: oErr } = await supabase
-      .from("shop_order")
-      .select(BASE_COLUMNS + OPS_COLUMNS)
-      .eq("id", id)
-      .maybeSingle();
-    if (oErr && isMissingSchema(oErr)) {
-      migrated = false;
-      ({ data: order, error: oErr } = await supabase
-        .from("shop_order")
-        .select(BASE_COLUMNS)
-        .eq("id", id)
-        .maybeSingle());
-    }
+    // The order-operations and shipping columns arrive with separate
+    // migrations, so walk from richest to poorest rather than dropping straight
+    // to the minimum and hiding columns that do exist.
+    const {
+      data: order,
+      error: oErr,
+      columns,
+    } = await selectWithFallback(
+      (cols) => supabase.from("shop_order").select(cols).eq("id", id).maybeSingle(),
+      [
+        BASE_COLUMNS + OPS_COLUMNS + SHIP_COLUMNS,
+        BASE_COLUMNS + OPS_COLUMNS,
+        BASE_COLUMNS,
+      ]
+    );
     if (oErr) throw oErr;
     if (!order) return bad7("Order not found", 404);
+    const migrated = Boolean(columns && columns.includes("refunded_cents"));
 
     const { data: items, error: iErr } = await supabase
       .from("shop_order_item")
