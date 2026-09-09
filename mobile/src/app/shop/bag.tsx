@@ -328,7 +328,11 @@ export default function BagScreen() {
         <View style={styles.card}>
           <Row label="Subtotal" value={moneyCents(bag.subtotalCents, bag.currency)} />
           <Row
-            label={quote?.label || (method === "pickup" ? "Collection" : "Delivery")}
+            label={
+              quote?.method === "free"
+                ? "Delivery"
+                : quote?.label || (method === "pickup" ? "Collection" : "Delivery")
+            }
             value={
               quoting
                 ? "…"
@@ -337,7 +341,9 @@ export default function BagScreen() {
                   : !quote.available
                     ? "Unavailable"
                     : quote.cents === 0
-                      ? "Free"
+                      ? quote.method === "free"
+                        ? "Included"
+                        : "Free"
                       : moneyCents(quote.cents, bag.currency)
             }
             muted

@@ -178,15 +178,17 @@ export async function getShippingSettings(admin) {
       .eq("key", "shop")
       .maybeSingle();
     if (error) {
-      if (isMissingSchema(error)) return { ...DEFAULT_SHIPPING, available: false };
+      if (isMissingSchema(error)) return { ...DEFAULT_SHIPPING, available: false, configured: false };
       throw error;
     }
     const shipping = data?.settings?.shipping;
     if (!shipping || typeof shipping !== "object") {
-      return { ...DEFAULT_SHIPPING, available: true };
+      // Never configured: ships free, and the admin editor uses this to know it
+      // should open with charging switched on rather than off.
+      return { ...DEFAULT_SHIPPING, available: true, configured: false };
     }
-    return { ...DEFAULT_SHIPPING, ...shipping, available: true };
+    return { ...DEFAULT_SHIPPING, ...shipping, available: true, configured: true };
   } catch {
-    return { ...DEFAULT_SHIPPING, available: false };
+    return { ...DEFAULT_SHIPPING, available: false, configured: false };
   }
 }
