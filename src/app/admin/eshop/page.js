@@ -1236,7 +1236,11 @@ function SettingsSection() {
         setMessage(data?.message || "");
         setAutomations(data?.automations || {});
         setEmails(data?.emails || null);
-        setShipping(data?.shipping || null);
+        // The server default is "off" so an unconfigured shop ships free.
+        // In the editor that read as a contradiction: an off switch above a
+        // filled-in rate table, which then saved as off.
+        const sh = data?.shipping || null;
+        setShipping(sh ? { ...sh, enabled: sh.configured === false ? true : sh.enabled } : null);
         if (data?.emails && data.emails.available === false) {
           setEmailNotice(
             "Switches are showing their defaults — run dump_sql/20260909_shop_emails.sql to save changes."
@@ -1470,6 +1474,13 @@ function ShippingSettings({ value, onChange, onSave, saving }) {
         </ErrorNote>
       ) : null}
 
+      {value.enabled === false && value.zones?.length ? (
+        <ErrorNote className="mt-4">
+          These rates are set up but <strong>not being charged</strong> — every order ships
+          free. Tick “Charging for delivery” above and save.
+        </ErrorNote>
+      ) : null}
+
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <Field label="Free over" hint="0 turns the threshold off.">
           <input
@@ -1479,7 +1490,15 @@ function ShippingSettings({ value, onChange, onSave, saving }) {
             className={inputClass}
           />
         </Field>
-        <Field label="Handling fee" hint="Added to every courier order.">
+        <Field
+          label="Handling fee"
+          hint="Added to every courier order, on top of the zone rate."
+          error={
+            Number(value.handlingCents) > 1000
+              ? `€${toEuro(value.handlingCents)} is added to every order — is that right?`
+              : null
+          }
+        >
           <input
             value={toEuro(value.handlingCents)}
             onChange={(e) => set({ handlingCents: fromEuro(e.target.value) })}
@@ -1594,14 +1613,23 @@ function ShippingSettings({ value, onChange, onSave, saving }) {
 
                 <div className="mt-3 flex items-center justify-between border-t border-[#eee8de] pt-3">
                   <Muted className="text-[11.5px]">
-                    A 3 kg parcel here costs{" "}
-                    {toEuro(
-                      (Number(z.baseCents) || 0) +
-                        Math.ceil(
-                          Math.max(0, 3000 - (Number(z.baseGrams) || 0)) / 1000
-                        ) *
-                          (Number(z.extraCentsPerKg) || 0) +
-                        (Number(value.handlingCents) || 0)
+                    {value.enabled === false ? (
+                      <>Not charged — delivery is switched off.</>
+                    ) : (
+                      <>
+                        A 3 kg parcel here costs €
+                        {toEuro(
+                          (Number(z.baseCents) || 0) +
+                            Math.ceil(
+                              Math.max(0, 3000 - (Number(z.baseGrams) || 0)) / 1000
+                            ) *
+                              (Number(z.extraCentsPerKg) || 0) +
+                            (Number(value.handlingCents) || 0)
+                        )}
+                        {Number(value.handlingCents) > 0
+                          ? ` (includes €${toEuro(value.handlingCents)} handling)`
+                          : ""}
+                      </>
                     )}
                   </Muted>
                   <UIButton
