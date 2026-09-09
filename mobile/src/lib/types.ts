@@ -290,8 +290,18 @@ export type ShopQuoteLine = {
   quantity: number;
 };
 
+export type ShopDestination = {
+  code: string;
+  label: string;
+  flag?: string;
+  zone?: string | null;
+  zoneLabel?: string;
+};
+
 export type ShopShippingQuote = {
   lines?: ShopQuoteLine[];
+  destinations?: ShopDestination[];
+  shipsAnywhere?: boolean;
   cents: number;
   method: "courier" | "pickup" | "free";
   label: string;
