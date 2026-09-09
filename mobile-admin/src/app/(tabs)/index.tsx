@@ -28,7 +28,18 @@ function greeting(): string {
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
+
+  const quickActions = [
+    { perm: "checkins", icon: "qr-code-outline", label: "Check-in", href: "/checkins" },
+    { perm: "bookings", icon: "calendar-outline", label: "Bookings", href: "/bookings" },
+    { perm: "requests", icon: "mail-unread-outline", label: "Requests", href: "/requests" },
+    { perm: "payments", icon: "card-outline", label: "Payments", href: "/payments" },
+    { perm: "experiences", icon: "leaf-outline", label: "Catalog", href: "/experiences" },
+    { perm: "giftcards", icon: "gift-outline", label: "Gift cards", href: "/giftcards" },
+    { perm: "promotions", icon: "pricetags-outline", label: "Promos", href: "/promotions" },
+    { perm: "zreport", icon: "stats-chart-outline", label: "Reports", href: "/reports" },
+  ].filter((a) => can(a.perm));
   const { data: metrics, loading, refresh, error } = useApi(() => api.metrics());
   const { data: activity, refresh: refreshActivity } = useApi(() => api.activity(10));
 
@@ -60,7 +71,7 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      {(metrics?.pendingApprovals ?? 0) > 0 ? (
+      {can("requests") && (metrics?.pendingApprovals ?? 0) > 0 ? (
         <PressableScale style={styles.alert} onPress={() => router.push("/requests")}>
           <Ionicons name="notifications" size={16} color={colors.warning} />
           <Text style={styles.alertText}>
@@ -115,18 +126,22 @@ export default function DashboardScreen() {
         </>
       )}
 
-      {/* Quick actions */}
-      <Eyebrow style={styles.sectionTitle}>Quick Actions</Eyebrow>
-      <View style={styles.quickGrid}>
-        <QuickAction icon="qr-code-outline" label="Check-in" onPress={() => router.push("/checkins")} />
-        <QuickAction icon="calendar-outline" label="Bookings" onPress={() => router.push("/bookings")} />
-        <QuickAction icon="mail-unread-outline" label="Requests" onPress={() => router.push("/requests")} />
-        <QuickAction icon="card-outline" label="Payments" onPress={() => router.push("/payments")} />
-        <QuickAction icon="leaf-outline" label="Catalog" onPress={() => router.push("/experiences")} />
-        <QuickAction icon="gift-outline" label="Gift cards" onPress={() => router.push("/giftcards")} />
-        <QuickAction icon="pricetags-outline" label="Promos" onPress={() => router.push("/promotions")} />
-        <QuickAction icon="stats-chart-outline" label="Reports" onPress={() => router.push("/reports")} />
-      </View>
+      {/* Quick actions — only what this account can actually open */}
+      {quickActions.length > 0 ? (
+        <>
+          <Eyebrow style={styles.sectionTitle}>Quick Actions</Eyebrow>
+          <View style={styles.quickGrid}>
+            {quickActions.map((a) => (
+              <QuickAction
+                key={a.href}
+                icon={a.icon as React.ComponentProps<typeof Ionicons>["name"]}
+                label={a.label}
+                onPress={() => router.push(a.href as never)}
+              />
+            ))}
+          </View>
+        </>
+      ) : null}
 
       {/* Activity */}
       <Eyebrow style={styles.sectionTitle}>Recent Activity</Eyebrow>

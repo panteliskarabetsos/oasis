@@ -6,18 +6,8 @@ import { Button, EmptyState } from "@/components/ui";
 import { colors, fonts } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
 
-const ADMIN_ROLES = [
-  "superadmin",
-  "manager",
-  "finance",
-  "marketing",
-  "support",
-  "partner",
-  "admin",
-];
-
 export default function TabsLayout() {
-  const { session, profile, loading, signOut } = useAuth();
+  const { session, profile, loading, signOut, can } = useAuth();
 
   if (loading) {
     return (
@@ -27,7 +17,8 @@ export default function TabsLayout() {
     );
   }
   if (!session) return <Redirect href="/login" />;
-  if (profile && !ADMIN_ROLES.includes(profile.role ?? "user")) {
+  // A staff member with no components granted has nothing to open.
+  if (profile && !can()) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: "center" }}>
         <EmptyState
@@ -66,6 +57,7 @@ export default function TabsLayout() {
         name="bookings"
         options={{
           title: "Bookings",
+          href: can("bookings") ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar-outline" size={size} color={color} />
           ),
@@ -75,6 +67,7 @@ export default function TabsLayout() {
         name="checkins"
         options={{
           title: "Check-in",
+          href: can("checkins") ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="qr-code-outline" size={size} color={color} />
           ),
@@ -84,6 +77,7 @@ export default function TabsLayout() {
         name="schedule"
         options={{
           title: "Schedule",
+          href: can("schedule") ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="time-outline" size={size} color={color} />
           ),

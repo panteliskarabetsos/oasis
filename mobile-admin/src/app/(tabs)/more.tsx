@@ -10,7 +10,42 @@ import { config } from "@/lib/config";
 
 export default function MoreScreen() {
   const insets = useSafeAreaInsets();
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, can } = useAuth();
+
+  // Only offer what this account can actually open — every row below maps to
+  // an API guarded by the same permission, so an ungated row is just a 403.
+  const sections = [
+    {
+      title: "Money",
+      rows: [
+        { perm: "payments", icon: "card-outline", label: "Payments & refunds", href: "/payments" },
+        { perm: "giftcards", icon: "gift-outline", label: "Gift cards", href: "/giftcards" },
+        { perm: "promotions", icon: "pricetags-outline", label: "Discount codes", href: "/promotions" },
+        { perm: "zreport", icon: "stats-chart-outline", label: "Reports & Z-report", href: "/reports" },
+      ],
+    },
+    {
+      title: "Catalog",
+      rows: [
+        { perm: "experiences", icon: "leaf-outline", label: "Manage experiences", href: "/experiences" },
+      ],
+    },
+    {
+      title: "Guests",
+      rows: [
+        { perm: "requests", icon: "mail-unread-outline", label: "Change requests", href: "/requests" },
+        { perm: "guests", icon: "people-outline", label: "Guest accounts", href: "/users" },
+      ],
+    },
+    {
+      title: "System",
+      rows: [
+        { perm: "planner", icon: "settings-outline", label: "Booking settings", href: "/settings" },
+      ],
+    },
+  ]
+    .map((section) => ({ ...section, rows: section.rows.filter((r) => can(r.perm)) }))
+    .filter((section) => section.rows.length > 0);
 
   return (
     <ScrollView
@@ -25,24 +60,20 @@ export default function MoreScreen() {
         {profile?.role ? <Badge label={profile.role} tone="info" /> : null}
       </View>
 
-      <Section title="Money">
-        <Row icon="card-outline" label="Payments & refunds" onPress={() => router.push("/payments")} />
-        <Row icon="gift-outline" label="Gift cards" onPress={() => router.push("/giftcards")} />
-        <Row icon="pricetags-outline" label="Discount codes" onPress={() => router.push("/promotions")} />
-        <Row icon="stats-chart-outline" label="Reports & Z-report" onPress={() => router.push("/reports")} />
-      </Section>
-
-      <Section title="Catalog">
-        <Row icon="leaf-outline" label="Manage experiences" onPress={() => router.push("/experiences")} />
-      </Section>
-
-      <Section title="Guests">
-        <Row icon="mail-unread-outline" label="Change requests" onPress={() => router.push("/requests")} />
-        <Row icon="people-outline" label="Guest accounts" onPress={() => router.push("/users")} />
-      </Section>
+      {sections.map((section) => (
+        <Section key={section.title} title={section.title}>
+          {section.rows.map((row) => (
+            <Row
+              key={row.href}
+              icon={row.icon as React.ComponentProps<typeof Ionicons>["name"]}
+              label={row.label}
+              onPress={() => router.push(row.href as never)}
+            />
+          ))}
+        </Section>
+      ))}
 
       <Section title="System">
-        <Row icon="settings-outline" label="Booking settings" onPress={() => router.push("/settings")} />
         <Row
           icon="globe-outline"
           label="Open web console"

@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 export async function GET() {
   try {
@@ -24,6 +25,7 @@ export async function GET() {
           surname: "",
           phone: "",
           role: "user",
+          permissions: [],
           dateOfBirth: null,
           createdAt: null,
         },
@@ -48,12 +50,17 @@ export async function GET() {
           surname: "",
           phone: "",
           role: "user",
+          permissions: [],
           dateOfBirth: null,
           createdAt: null,
         },
         { headers: { "Cache-Control": "private, no-store" } }
       );
     }
+
+    // Resolve role + per-user grants with the service client. The select above
+    // goes through the RLS-bound client, which can report "user" for real staff.
+    const { role, permissions } = await resolveStaffAccess(user);
 
     const payload = row
       ? {
@@ -62,7 +69,8 @@ export async function GET() {
           name: row.name ?? "",
           surname: row.surname ?? "",
           phone: row.phone ?? "",
-          role: row.role ?? "user",
+          role,
+          permissions,
           dateOfBirth: row.dateOfBirth ?? null,
           createdAt: row.createdAt ?? null,
         }
@@ -72,7 +80,8 @@ export async function GET() {
           name: "",
           surname: "",
           phone: "",
-          role: "user",
+          role,
+          permissions,
           dateOfBirth: null,
           createdAt: null,
         };
