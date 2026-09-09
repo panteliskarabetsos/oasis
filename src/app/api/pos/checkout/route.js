@@ -2,7 +2,7 @@
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { requireAdmin } from "@/lib/auth/requireAdmin";
+import { accessCan, requireAdmin } from "@/lib/auth/requireAdmin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20",
@@ -140,9 +140,22 @@ export async function POST(req) {
     const giftCode = (body?.giftCode || "").trim() || null;
     const customer = body?.customer || null;
     const startTime = body?.startTime || null;
+    // Without a slot the booking never reaches the daily manifest and does not
+    // count against capacity, so the till can quietly overbook a tour.
+    const scheduleSlotId = Number(body?.scheduleSlotId) || null;
     const clientCurrency = toCurrency(body?.currency || "eur");
     const method = body?.payment?.method || "cash";
     const reference = (body?.payment?.reference || "").trim() || null;
+
+    // A comp writes off the whole sale, so it is deliberately not part of any
+    // named role — only a Super Admin (or an account explicitly granted "comps")
+    // may take one. Enforced here because the till is just a client.
+    if (method === "comp" && !accessCan(auth.permissions, "comps")) {
+      return NextResponse.json(
+        { error: "Only a Super Admin can record a complimentary sale." },
+        { status: 403 },
+      );
+    }
 
     /* -------------------------------
        Server-side pricing
@@ -388,6 +401,30 @@ export async function POST(req) {
       }
 
       responseId = { receiptId: createdReceipt.id };
+
+      // Reduce stock for real catalogue lines. Nothing decremented stock before,
+      // so the number shown in the shop admin and the POS drifted from reality
+      // the moment anything sold. Custom charges have non-numeric ids and are
+      // skipped. Best-effort: a stock slip must never void a completed sale.
+      for (const line of items) {
+        const productId = Number(line?.id);
+        const qty = Number(line?.quantity || 0);
+        if (!Number.isFinite(productId) || productId <= 0 || qty <= 0) continue;
+        try {
+          const { data: prod } = await supabase
+            .from("shop_product")
+            .select("stock_qty")
+            .eq("id", productId)
+            .maybeSingle();
+          if (!prod || typeof prod.stock_qty !== "number") continue;
+          await supabase
+            .from("shop_product")
+            .update({ stock_qty: Math.max(0, prod.stock_qty - qty) })
+            .eq("id", productId);
+        } catch (e) {
+          console.error("[pos/checkout] stock decrement failed", productId, e);
+        }
+      }
     } else {
       // 2. Create a Booking
       const numberOfPeople =
@@ -446,6 +483,7 @@ export async function POST(req) {
 
       const insertPayload = {
         experienceId: experienceId ?? null,
+        scheduleSlotId,
         startTime: startTime ?? null,
         counts: counts ?? null,
         adultsCount: experienceId ? adults : null,

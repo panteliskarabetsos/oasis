@@ -34,6 +34,7 @@ export const PERMISSION_GROUPS = [
       ["corporate", "Corporate"],
       ["zreport", "Z-report"],
       ["financials", "Revenue figures"],
+      ["comps", "Complimentary sales"],
     ],
   },
   {

@@ -19,6 +19,7 @@ export default function MoreScreen() {
     {
       title: "Money",
       rows: [
+        { perm: "pos", icon: "calculator-outline", label: "Point of sale", href: "/pos" },
         { perm: "payments", icon: "card-outline", label: "Payments & refunds", href: "/payments" },
         { perm: "giftcards", icon: "gift-outline", label: "Gift cards", href: "/giftcards" },
         { perm: "promotions", icon: "pricetags-outline", label: "Discount codes", href: "/promotions" },

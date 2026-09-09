@@ -22,6 +22,7 @@ export const NAV_GROUPS = [
     items: [
       { href: "/admin/pos", label: "POS", icon: "register", perm: "pos" },
       { href: "/admin/payments", label: "Payments", icon: "card", perm: "payments" },
+      { href: "/admin/receipts", label: "Receipts", icon: "file", perm: "payments" },
       { href: "/admin/invoices", label: "Invoices", icon: "file", perm: "invoices" },
       { href: "/admin/giftcards", label: "Gift cards", icon: "gift", perm: "giftcards" },
       { href: "/admin/corporate", label: "Corporate", icon: "briefcase", perm: "corporate" },

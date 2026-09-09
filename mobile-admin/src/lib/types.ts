@@ -298,3 +298,37 @@ export type ManifestSlot = {
   isCancelled: boolean;
   bookings: ManifestBooking[];
 };
+
+/* ---------------------------------- POS ---------------------------------- */
+
+export type PosItem = {
+  id: number;
+  name: string;
+  sku: string | null;
+  price: number;
+  currency: string;
+  stock: number | null;
+  category: string;
+};
+
+export type PosExperience = {
+  id: number;
+  name: string;
+  slug?: string;
+  pricing?: { priceAdult: number; priceKid: number };
+};
+
+export type PosCartLine = {
+  id: number | string;
+  name: string;
+  sku: string | null;
+  unitPrice: number;
+  quantity: number;
+  vatRate: number;
+  stock: number | null;
+};
+
+export type PosCheckoutResult = {
+  bookingId?: number;
+  receiptId?: number;
+};

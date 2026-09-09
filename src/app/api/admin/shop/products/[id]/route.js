@@ -24,6 +24,29 @@ export async function PATCH(req, { params }) {
     if (body.currency !== undefined)
       patch.currency = String(body.currency || "EUR");
     if (body.active !== undefined) patch.active = !!body.active;
+    // Stock was write-once at creation: the list never returned it and this
+    // route never accepted it, so it went stale the moment anything sold.
+    if (body.stock_qty !== undefined) {
+      const n = Number(body.stock_qty);
+      if (!Number.isInteger(n) || n < 0) {
+        return NextResponse.json(
+          { error: "Stock must be a whole number of 0 or more" },
+          { status: 400 },
+        );
+      }
+      patch.stock_qty = n;
+    }
+    if (body.sku_code !== undefined) {
+      patch.sku_code = String(body.sku_code || "").trim() || null;
+    }
+    if (body.category !== undefined) {
+      const allowed = ["clothing", "food", "other"];
+      const c = String(body.category || "other");
+      if (!allowed.includes(c)) {
+        return NextResponse.json({ error: "Unknown category" }, { status: 400 });
+      }
+      patch.category = c;
+    }
     if (body.price_cents !== undefined) {
       const price = Number(body.price_cents);
       if (!Number.isFinite(price) || price < 0)
