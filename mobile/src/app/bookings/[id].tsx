@@ -55,7 +55,9 @@ export default function BookingDetailScreen() {
   const name = booking.experience?.name ?? booking.experienceName ?? "Oasis Experience";
   const when = booking.startTime ?? booking.scheduleSlot?.date;
   const reference = bookingRef(booking);
-  const qrValue = booking.qrValue ?? `BOOKING-CHECKIN:${booking.id}`;
+  // Encode the same reference the ticket displays. A numeric id still scans,
+  // but the two should not drift — and the id form is the one we would retire.
+  const qrValue = booking.qrValue ?? `BOOKING-CHECKIN:${reference}`;
   const guests = (booking.counts?.adults ?? 0) + (booking.counts?.kids ?? 0);
   const location = booking.experience?.location ?? "Chania, Crete";
 
