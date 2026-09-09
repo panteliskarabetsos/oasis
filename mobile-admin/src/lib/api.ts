@@ -18,6 +18,9 @@ import type {
   Metrics,
   PaymentDetail,
   PaymentRow,
+  PosCheckoutResult,
+  PosExperience,
+  PosItem,
   Profile,
   ReportKpis,
   Reservation,
@@ -213,6 +216,21 @@ export const api = {
       .map((f: any) => f.secure_url || f.url)
       .filter(Boolean);
   },
+
+  /* ---------------------------------- POS --------------------------------- */
+
+  posItems: () => request<PosItem[]>("/api/pos/items"),
+  posExperiences: () => request<PosExperience[]>("/api/pos/experiences"),
+
+  /** Creates a Stripe PaymentIntent for the cart; returns a client secret. */
+  posPaymentIntent: (payload: unknown) =>
+    request<{ intentId: string | null; clientSecret: string | null; quote?: { amountCents?: number } }>(
+      "/api/pos/payments/intent",
+      { method: "POST", body: payload },
+    ),
+
+  posCheckout: (payload: unknown) =>
+    request<PosCheckoutResult>("/api/pos/checkout", { method: "POST", body: payload }),
 
   /** Read-only daily manifest: tours for a range with their guest lists. */
   manifest: (from: string, to: string, experienceId?: number | "all") =>

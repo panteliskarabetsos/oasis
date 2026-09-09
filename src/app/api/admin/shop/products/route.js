@@ -18,7 +18,7 @@ export async function GET(req) {
     let query = supabase
       .from("shop_product")
       .select(
-        "id, slug, title, description, price_cents, currency, active, created_at, updated_at"
+        "id, slug, title, description, price_cents, currency, active, stock_qty, sku_code, category, created_at, updated_at"
       )
       .order("updated_at", { ascending: false })
       .limit(200);

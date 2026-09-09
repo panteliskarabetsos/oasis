@@ -26,16 +26,20 @@ const lock = readFileSync(lockPath, "utf8");
  * EXConstants, expo-updates ships EXUpdates.
  */
 function podNames(dep) {
-  const dir = `node_modules/${dep}/ios`;
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".podspec"))
-    .map((f) => f.replace(/\.podspec$/, ""));
+  // A podspec can sit in the package root or in ios/ — check both, and accept
+  // any dependency (not just expo-*): @stripe/stripe-react-native ships one too.
+  for (const dir of [`node_modules/${dep}/ios`, `node_modules/${dep}`]) {
+    if (!existsSync(dir)) continue;
+    const specs = readdirSync(dir)
+      .filter((f) => f.endsWith(".podspec"))
+      .map((f) => f.replace(/\.podspec$/, ""));
+    if (specs.length) return specs;
+  }
+  return [];
 }
 
 const missing = [];
 for (const dep of Object.keys(pkg.dependencies ?? {})) {
-  if (!dep.startsWith("expo-")) continue;
   const pods = podNames(dep);
   if (!pods.length) continue; // JS-only package, nothing to link
   if (!pods.some((p) => lock.includes(`${p} (`) || lock.includes(`${p}:`)))
@@ -49,5 +53,5 @@ if (missing.length) {
   process.exit(1);
 }
 console.log(
-  `All native Expo modules are in Podfile.lock (${Object.keys(pkg.dependencies ?? {}).filter((d) => d.startsWith("expo-")).length} expo packages checked).`,
+  `All native modules are in Podfile.lock (${Object.keys(pkg.dependencies ?? {}).length} dependencies checked).`,
 );

@@ -17,6 +17,9 @@ import { useEffect } from "react";
 
 import { colors, fonts } from "@/constants/theme";
 import { AuthProvider } from "@/context/auth";
+import { StripeProvider } from "@stripe/stripe-react-native";
+
+import { config } from "@/lib/config";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -38,7 +41,10 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <AuthProvider>
+    <StripeProvider
+      publishableKey={config.stripePublishableKey}
+    >
+      <AuthProvider>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -64,5 +70,6 @@ export default function RootLayout() {
         <Stack.Screen name="users" options={{ title: "Guests" }} />
       </Stack>
     </AuthProvider>
+    </StripeProvider>
   );
 }

@@ -53,7 +53,13 @@
           "imageWidth": 96
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      [
+        "@stripe/stripe-react-native",
+        {
+          "enableGooglePay": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

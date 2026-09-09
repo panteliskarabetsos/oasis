@@ -684,6 +684,13 @@ function ProductsSection() {
                   >
                     Price
                   </ThSort>
+                  <ThSort
+                    onClick={() => sortBy("stock_qty")}
+                    active={sort.key === "stock_qty"}
+                    dir={sort.dir}
+                  >
+                    Stock
+                  </ThSort>
                   <th className="px-4 py-3 text-left">State</th>
                   <ThSort
                     onClick={() => sortBy("updated_at")}
@@ -698,11 +705,11 @@ function ProductsSection() {
 
               <tbody>
                 {loading ? (
-                  <SkeletonRows cols={6} />
+                  <SkeletonRows cols={7} />
                 ) : error ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-10 text-center text-red-600"
                     >
                       {error}
@@ -710,7 +717,7 @@ function ProductsSection() {
                   </tr>
                 ) : pageRows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12">
+                    <td colSpan={7} className="px-4 py-12">
                       <EmptyState
                         title="No products found"
                         subtitle="Try a different search, or create your first product."
@@ -755,6 +762,9 @@ function ProductsSection() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-zinc-600">{p.slug}</td>
+                      <td className="px-4 py-3">
+                        <StockCell product={p} onSaved={fetchProducts} />
+                      </td>
                       <td className="px-4 py-3 font-medium">
                         {formatCents(p.price_cents, p.currency)}
                       </td>
@@ -821,7 +831,7 @@ function ProductsSection() {
               {!loading && !error && prepared.length > size ? (
                 <tfoot>
                   <tr>
-                    <td colSpan={6} className="px-4 py-3">
+                    <td colSpan={7} className="px-4 py-3">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <span className="text-xs text-zinc-600">
                           {prepared.length} items • page {page} of {maxPage}
@@ -867,6 +877,104 @@ function ProductsSection() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Stock, editable in place.
+ *
+ * Restocking is the routine job, and until now stock could only be set once at
+ * product creation — the list never returned it and the update route never
+ * accepted it, so the figure the POS enforces went stale immediately.
+ */
+function StockCell({ product, onSaved }) {
+  const [editing, setEditing] = React.useState(false);
+  const [value, setValue] = React.useState(String(product.stock_qty ?? 0));
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    setValue(String(product.stock_qty ?? 0));
+  }, [product.stock_qty]);
+
+  const qty = Number(product.stock_qty);
+  const known = Number.isFinite(qty);
+
+  async function save() {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 0) {
+      setValue(String(product.stock_qty ?? 0));
+      setEditing(false);
+      return;
+    }
+    if (n === product.stock_qty) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/shop/products/${product.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ stock_qty: n }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Could not update stock");
+      }
+      onSaved?.();
+    } catch (e) {
+      window.alert(e.message || "Could not update stock");
+      setValue(String(product.stock_qty ?? 0));
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        min="0"
+        step="1"
+        value={value}
+        disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") {
+            setValue(String(product.stock_qty ?? 0));
+            setEditing(false);
+          }
+        }}
+        className="w-20 rounded-lg border border-zinc-300 px-2 py-1 text-sm focus:border-zinc-900 focus:outline-none"
+      />
+    );
+  }
+
+  const tone = !known
+    ? "text-zinc-400"
+    : qty === 0
+      ? "bg-red-50 text-red-700 ring-red-200"
+      : qty <= 5
+        ? "bg-amber-50 text-amber-800 ring-amber-200"
+        : "bg-zinc-50 text-zinc-700 ring-zinc-200";
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      title="Click to change stock"
+      className={cx(
+        "inline-flex min-w-[54px] items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset transition-colors hover:brightness-95",
+        tone,
+      )}
+    >
+      {!known ? "—" : qty === 0 ? "Out" : qty}
+    </button>
   );
 }
 
@@ -950,6 +1058,9 @@ function ProductModal({ existing, onClose, onSaved }) {
     existing?.description || ""
   );
   const [active, setActive] = React.useState(!!existing?.active);
+  const [stock, setStock] = React.useState(String(existing?.stock_qty ?? 0));
+  const [sku, setSku] = React.useState(existing?.sku_code || "");
+  const [category, setCategory] = React.useState(existing?.category || "other");
 
   const [saving, setSaving] = React.useState(false);
   const [err, setErr] = React.useState("");
@@ -959,6 +1070,13 @@ function ProductModal({ existing, onClose, onSaved }) {
       setSaving(true);
       setErr("");
 
+      const stockValue = Number(stock);
+      if (!Number.isInteger(stockValue) || stockValue < 0) {
+        setErr("Stock must be a whole number of 0 or more.");
+        setSaving(false);
+        return;
+      }
+
       const payload = {
         title,
         slug,
@@ -966,6 +1084,9 @@ function ProductModal({ existing, onClose, onSaved }) {
         currency,
         description,
         active,
+        stock_qty: stockValue,
+        sku_code: sku.trim() || null,
+        category,
       };
 
       const res = await fetch(`/api/admin/shop/products/${existing.id}`, {
@@ -1049,6 +1170,35 @@ function ProductModal({ existing, onClose, onSaved }) {
                 onChange={setPrice}
                 placeholder="0.00"
               />
+              <LabeledInput
+                label="Stock"
+                helper="Units on hand. The POS blocks a sale at zero."
+                type="number"
+                min="0"
+                step="1"
+                value={stock}
+                onChange={setStock}
+              />
+              <LabeledInput
+                label="SKU"
+                helper="Scanned at the till. Optional."
+                value={sku}
+                onChange={setSku}
+              />
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-zinc-700">
+                  Category
+                </span>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
+                >
+                  <option value="clothing">Clothing</option>
+                  <option value="food">Food</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
               <div className="space-y-1">
                 <div className="text-sm font-medium text-zinc-900">
                   Currency
