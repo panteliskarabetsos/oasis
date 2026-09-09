@@ -17,6 +17,7 @@ import {
   History,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
+import { bookingRef } from "@/lib/bookingCode";
 import { Playfair_Display, DM_Sans } from "next/font/google";
 
 // ---- Fonts ----
@@ -302,7 +303,7 @@ function BookingCard({ booking, isUpcoming }) {
         {/* Footer */}
         <div className="mt-auto pt-6 flex items-center justify-between border-t border-[#f4f1ec]">
           <span className="text-xs font-mono text-[#b0a090] uppercase">
-            #{booking.id.toString().slice(-6)}
+            {bookingRef(booking)}
           </span>
           <div className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-[#4d3e33] group-hover:translate-x-1 transition-transform">
             View Details <ChevronRight size={14} />
@@ -466,9 +467,20 @@ function peopleOf(b) {
 function applySearch(arr, q) {
   if (!q) return arr;
   const s = q.trim().toLowerCase();
+  // References are now random, so the code is the thing a customer has to hand
+  // from their confirmation email — match it as well as the experience, and
+  // ignore the dashes and prefix they may or may not type.
+  const loose = s.replace(/[\s-]/g, "").replace(/^bk/, "");
   return arr.filter((b) => {
     const name = (b?._exp?.name || "").toLowerCase();
     const loc = (b?._exp?.location || "").toLowerCase();
-    return name.includes(s) || loc.includes(s);
+    const ref = bookingRef(b).toLowerCase();
+    const looseRef = ref.replace(/[\s-]/g, "").replace(/^bk/, "");
+    return (
+      name.includes(s) ||
+      loc.includes(s) ||
+      ref.includes(s) ||
+      (loose.length >= 3 && looseRef.includes(loose))
+    );
   });
 }

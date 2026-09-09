@@ -12,6 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { bookingRef as refFor } from "@/lib/bookingCode";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { accessCan, requireAdmin } from "@/lib/auth/requireAdmin";
 
@@ -125,7 +126,7 @@ export async function GET(req) {
     let qy = admin
       .from("booking")
       .select(
-        'id, "createdAt", "totalPaidAmount", currency, "stripePaymentIntentId", primary_contact, status',
+        'id, code, "createdAt", "totalPaidAmount", currency, "stripePaymentIntentId", primary_contact, status',
       )
       .not("stripePaymentIntentId", "is", null)
       .order("createdAt", { ascending: false })
@@ -142,7 +143,7 @@ export async function GET(req) {
         key: `booking-${b.id}`,
         id: b.id,
         source: "booking",
-        reference: `BK-${String(b.id).padStart(6, "0")}`,
+        reference: refFor(b),
         at: b.createdAt,
         customerName: pc.name || [pc.firstName, pc.lastName].filter(Boolean).join(" ") || null,
         customerEmail: pc.email || null,

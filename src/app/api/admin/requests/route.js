@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { bookingRef as refFor } from "@/lib/bookingCode";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 
@@ -30,6 +31,7 @@ export async function GET(req) {
         booking_id,
         booking:booking_id (
           id,
+          code,
           status,
           primary_contact,
           numberOfPeople,
@@ -148,7 +150,7 @@ export async function GET(req) {
       return {
         id: req.id,
         bookingId: req.booking_id,
-        reference: `BK-${String(req.booking_id).padStart(6, "0")}`,
+        reference: refFor(b ?? { id: req.booking_id }),
         type: req.type,
         status: req.status,
         reason: req.reason,

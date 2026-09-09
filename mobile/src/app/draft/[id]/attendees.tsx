@@ -6,7 +6,9 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -23,6 +25,14 @@ import { colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
+import {
+  COUNTRIES,
+  DEFAULT_COUNTRY,
+  countryByCode,
+  formatPhone,
+  isValidNational,
+  splitPhone,
+} from "@/lib/countries";
 import { formatDateTime, money } from "@/lib/format";
 
 const DIETARY = ["Vegetarian", "Vegan", "Gluten-Free", "Dairy-Free", "Nut Allergy"];
@@ -57,6 +67,8 @@ export default function AttendeesScreen() {
   const [pcName, setPcName] = useState("");
   const [pcEmail, setPcEmail] = useState("");
   const [pcPhone, setPcPhone] = useState("");
+  const [pcCountry, setPcCountry] = useState(DEFAULT_COUNTRY);
+  const [dialPicker, setDialPicker] = useState(false);
   const [autoPc, setAutoPc] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -88,11 +100,19 @@ export default function AttendeesScreen() {
     if (pc) {
       setPcName([pc.firstName, pc.lastName].filter(Boolean).join(" "));
       setPcEmail(pc.email ?? "");
-      setPcPhone(pc.phone ?? "");
+      {
+        const { code, national } = splitPhone(pc.phone);
+        setPcCountry(code);
+        setPcPhone(national);
+      }
     } else if (profile) {
       setPcName([profile.name, profile.surname].filter(Boolean).join(" "));
       setPcEmail(profile.email ?? "");
-      setPcPhone(profile.phone ?? "");
+      {
+        const { code, national } = splitPhone(profile.phone);
+        setPcCountry(code);
+        setPcPhone(national);
+      }
     }
   }, [envelope?.draft, id, token, profile]);
 
@@ -147,7 +167,9 @@ export default function AttendeesScreen() {
           firstName,
           lastName: rest.join(" ") || firstName,
           email: pcEmail.trim(),
-          phone: pcPhone.trim(),
+          // "+30 6912345678" — the form the server validates and the
+          // manifest dials. A bare national number was assumed Greek.
+          phone: formatPhone(pcCountry, pcPhone),
         },
         attendees: attendees.map((a) => ({
           firstName: a.firstName.trim(),
@@ -346,15 +368,74 @@ export default function AttendeesScreen() {
             keyboardType="email-address"
             style={{ marginTop: spacing.sm }}
           />
-          <Field
-            label="Phone"
-            value={pcPhone}
-            onChangeText={setPcPhone}
-            keyboardType="phone-pad"
-            style={{ marginTop: spacing.sm }}
-          />
+          <View style={{ marginTop: spacing.sm }}>
+            <Text style={styles.phoneLabel}>Phone</Text>
+            <View style={styles.phoneRow}>
+              <Pressable
+                onPress={() => setDialPicker(true)}
+                style={styles.dialButton}
+                accessibilityRole="button"
+                accessibilityLabel="Choose the country dialling code"
+              >
+                <Text style={styles.dialText}>
+                  {countryByCode(pcCountry).flag} +{countryByCode(pcCountry).dial}
+                </Text>
+                <Ionicons name="chevron-down" size={14} color={colors.mutedWarm} />
+              </Pressable>
+              <Field
+                value={pcPhone}
+                onChangeText={setPcPhone}
+                keyboardType="phone-pad"
+                placeholder="691 234 5678"
+                style={{ flex: 1 }}
+                error={
+                  pcPhone.trim() && !isValidNational(pcPhone)
+                    ? "Check this number"
+                    : null
+                }
+              />
+            </View>
+          </View>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={dialPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setDialPicker(false)}
+      >
+        <View style={styles.screen}>
+          <View style={styles.dialHead}>
+            <View style={{ flex: 1 }}>
+              <Eyebrow>Phone</Eyebrow>
+              <Serif style={{ fontSize: 22 }}>Country code</Serif>
+            </View>
+            <Pressable onPress={() => setDialPicker(false)} hitSlop={10}>
+              <Ionicons name="close" size={20} color={colors.brownDeep} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: spacing.md, paddingBottom: 40 }}>
+            {COUNTRIES.map((c) => (
+              <Pressable
+                key={c.code}
+                onPress={() => {
+                  setPcCountry(c.code);
+                  setDialPicker(false);
+                }}
+                style={[styles.dialRow, c.code === pcCountry && styles.dialRowOn]}
+              >
+                <Text style={{ fontSize: 20 }}>{c.flag}</Text>
+                <Text style={styles.dialName}>{c.label}</Text>
+                <Text style={styles.dialCode}>+{c.dial}</Text>
+                {c.code === pcCountry ? (
+                  <Ionicons name="checkmark" size={17} color={colors.brand} />
+                ) : null}
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
 
       {/* Frosted continue bar */}
       <View style={[styles.stickyWrap, { paddingBottom: insets.bottom + 8 }]}>
@@ -393,6 +474,47 @@ export function StepDots({ step }: { step: 1 | 2 | 3 }) {
 }
 
 const styles = StyleSheet.create({
+  phoneLabel: {
+    fontFamily: fonts.sansMedium,
+    fontSize: 13,
+    color: colors.brownDeep,
+    marginBottom: 6,
+  },
+  phoneRow: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
+  dialButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+  },
+  dialText: { fontFamily: fonts.sansMedium, fontSize: 15, color: colors.ink },
+  dialHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+  },
+  dialRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.creamSoft,
+    marginBottom: 6,
+  },
+  dialRowOn: { borderColor: colors.brand, backgroundColor: colors.creamChip },
+  dialName: { flex: 1, fontFamily: fonts.sansMedium, fontSize: 15, color: colors.ink },
+  dialCode: { fontFamily: fonts.sans, fontSize: 14, color: colors.mutedWarm },
   screen: { flex: 1, backgroundColor: colors.cream },
   center: { justifyContent: "center", alignItems: "center" },
   stepDots: { flexDirection: "row", gap: 6 },

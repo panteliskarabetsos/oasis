@@ -425,7 +425,7 @@ export default function ManageBookingPage() {
                       icon={<Ticket size={18} />}
                       value={reference}
                       onChange={setReference}
-                      placeholder="e.g. BK-000123"
+                      placeholder="e.g. BK-4K7M-Q2XR"
                     />
 
                     <InputField

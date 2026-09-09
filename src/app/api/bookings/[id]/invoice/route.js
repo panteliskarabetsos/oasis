@@ -1,5 +1,6 @@
 // src/app/api/bookings/[id]/invoice/route.js
 import { NextResponse } from "next/server";
+import { bookingRef as refFor } from "@/lib/bookingCode";
 import buildTicketPdfBuffer from "@/lib/pdf/buildTicket"; // ⬅️ use your real PDF builder
 import { getBookingById } from "@/lib/bookings/getBookingById";
 
@@ -73,7 +74,7 @@ export async function GET(_req, ctx) {
 
   const currency = (booking.currency || "EUR").toUpperCase();
 
-  const bookingRef = `BK-${String(booking.id || bookingId).padStart(6, "0")}`;
+  const bookingRef = refFor(booking.code ? booking : { id: booking.id || bookingId });
 
   // You can customize these or pull from env
   const supportEmail = "info@example.com";
