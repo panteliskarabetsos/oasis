@@ -16,7 +16,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
-import { PressableScale } from "@/components/premium";
+import { PressableScale, Shimmer } from "@/components/premium";
 import { colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 
 /* ---------- Typography ---------- */
@@ -183,6 +183,39 @@ export function EmptyState({
   );
 }
 
+/**
+ * Failure state with a way out.
+ *
+ * Every list in this app can fail on a flaky signal at the retreat; without a
+ * retry the only recovery was leaving the screen and coming back.
+ */
+export function ErrorState({
+  title = "Couldn't load",
+  message,
+  onRetry,
+}: {
+  title?: string;
+  message?: string | null;
+  onRetry?: () => void;
+}) {
+  return (
+    <EmptyState title={title} subtitle={message ?? undefined}>
+      {onRetry ? <Button title="Try again" variant="ghost" onPress={onRetry} /> : null}
+    </EmptyState>
+  );
+}
+
+/** Placeholder rows so a refetch does not blank the screen. */
+export function ListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <View style={{ paddingHorizontal: spacing.md, gap: spacing.sm, paddingTop: spacing.sm }}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <Shimmer key={i} style={styles.skeletonRow} />
+      ))}
+    </View>
+  );
+}
+
 export function StatTile({
   label,
   value,
@@ -276,6 +309,13 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   empty: { alignItems: "center", paddingVertical: 56, paddingHorizontal: 32 },
+  skeletonRow: {
+    height: 76,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
   statTile: {
     flex: 1,
     backgroundColor: colors.surface,

@@ -12,8 +12,9 @@ import { Button, Card, Chip, Eyebrow, Field, Muted, Serif } from "@/components/u
 import { colors, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
+import { PermissionGate } from "@/components/access";
 
-export default function SettingsScreen() {
+function SettingsScreenContent() {
   const { data, loading, refresh } = useApi(() => api.bookingSettings());
   const [paused, setPaused] = useState(false);
   const [message, setMessage] = useState("");
@@ -114,3 +115,11 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: { justifyContent: "center", alignItems: "center" },
 });
+
+export default function SettingsScreen() {
+  return (
+    <PermissionGate permission="planner">
+      <SettingsScreenContent />
+    </PermissionGate>
+  );
+}

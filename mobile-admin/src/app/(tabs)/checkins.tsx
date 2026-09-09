@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
+import { useKeepAwake } from "expo-keep-awake";
+import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -16,7 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PressableScale } from "@/components/premium";
-import { Badge, Button, EmptyState, Eyebrow, Muted, Serif } from "@/components/ui";
+import { Badge, Button, EmptyState, ErrorState, Eyebrow, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
@@ -37,8 +39,25 @@ function extractBookingId(raw: string): number | null {
   return null;
 }
 
+/** Reject rather than leave an operator staring at a spinner on a dead signal. */
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 type ScanCard = {
-  kind: "success" | "already" | "error";
+  kind: "pending" | "success" | "already" | "error";
   id?: number;
   guestName?: string;
   code?: string;
@@ -75,6 +94,43 @@ function bookingCode(b: CheckinBooking): string {
 }
 
 export default function CheckinsScreen() {
+  // Scanning a queue of guests means long stretches without touching the
+  // screen; letting it auto-lock mid-queue is the single biggest field annoyance.
+  useKeepAwake();
+
+  // Admission tones. A check-in desk is noisy and the phone is often held at
+  // arm's length, so each outcome gets its own sound as well as its own haptic.
+  const okSound = useAudioPlayer(require("../../../assets/sounds/checkin-success.wav"));
+  const dupSound = useAudioPlayer(require("../../../assets/sounds/checkin-duplicate.wav"));
+  const errSound = useAudioPlayer(require("../../../assets/sounds/checkin-error.wav"));
+  const [soundOn, setSoundOn] = useState(true);
+  const [torchOn, setTorchOn] = useState(false);
+
+  useEffect(() => {
+    // Staff usually keep the phone on silent; admission tones still need to play.
+    // Doing this on mount also activates the audio session up front, so the
+    // first tone of a shift isn't the one that pays for session start-up.
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+  }, []);
+
+  const playTone = useCallback(
+    (kind: "success" | "already" | "error") => {
+      if (!soundOn) return;
+      const player = kind === "success" ? okSound : kind === "already" ? dupSound : errSound;
+      // seekTo is async. Firing it and calling play() on the next line leaves the
+      // player parked at the end of the previous play, so every scan after the
+      // first was silent. Always rewind, and wait for it to land.
+      void (async () => {
+        try {
+          await player.seekTo(0);
+          player.play();
+        } catch {
+          // never let audio break a check-in
+        }
+      })();
+    },
+    [soundOn, okSound, dupSound, errSound],
+  );
   const insets = useSafeAreaInsets();
   const [date, setDate] = useState(() => dayKey(new Date()));
   const { data, loading, error, refresh } = useApi(() => api.checkins(date), [date]);
@@ -133,6 +189,26 @@ export default function CheckinsScreen() {
 
   /** Enrich a scanned booking id with guest details — from today's manifest
    *  first, then the reservations API as a fallback. */
+  /** Manifest-only lookup. Synchronous, so scan feedback never waits on the network. */
+  function lookupLocal(id: number): Partial<ScanCard> | null {
+    for (const slot of data?.slots ?? []) {
+      const hit = (slot.bookings ?? []).find((b) => b.id === id);
+      if (hit) {
+        return {
+          guestName: bookingName(hit),
+          code: bookingCode(hit),
+          pax: bookingPax(hit),
+          experienceName: slot.experienceName,
+          time: new Date(slot.date).toLocaleTimeString("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        };
+      }
+    }
+    return null;
+  }
+
   async function lookupBooking(id: number): Promise<Partial<ScanCard>> {
     for (const slot of data?.slots ?? []) {
       const hit = (slot.bookings ?? []).find((b) => b.id === id);
@@ -172,6 +248,14 @@ export default function CheckinsScreen() {
   function showCard(card: ScanCard) {
     setScanCard(card);
     setScanPaused(true);
+
+    // A pending card is only an acknowledgement — no colour flash, and it must
+    // not time out before the server has answered.
+    if (card.kind === "pending") {
+      if (resumeTimer.current) clearTimeout(resumeTimer.current);
+      return;
+    }
+
     setFlash(card.kind === "error" ? "bad" : "ok");
     setTimeout(() => setFlash(null), 350);
     if (resumeTimer.current) clearTimeout(resumeTimer.current);
@@ -197,23 +281,38 @@ export default function CheckinsScreen() {
     const id = extractBookingId(raw);
     if (!id) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      playTone("error");
       showCard({ kind: "error", message: "Not a valid Oasis ticket code." });
       return;
     }
+    // Acknowledge the scan immediately. The guest's name comes straight from
+    // today's manifest, so the operator sees who was scanned without waiting
+    // for the round-trip that decides whether they're admitted.
+    const local = lookupLocal(id);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    showCard({ kind: "pending", id, ...(local ?? {}) });
+
     try {
-      const res = await api.checkinAction(id, "checkin");
-      const details = await lookupBooking(id);
+      const res = await withTimeout(
+        api.checkinAction(id, "checkin"),
+        8000,
+        "No answer from the server. Check the signal and scan again.",
+      );
+      const details = local ?? (await lookupBooking(id));
       if (res.already) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        playTone("already");
         showCard({ kind: "already", id, ...details });
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        playTone("success");
         showCard({ kind: "success", id, ...details });
       }
       refresh();
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      const details = await lookupBooking(id);
+      playTone("error");
+      const details = local ?? (await lookupBooking(id));
       showCard({
         kind: "error",
         id,
@@ -318,7 +417,7 @@ export default function CheckinsScreen() {
           <ActivityIndicator color={colors.gold} />
         </View>
       ) : error ? (
-        <EmptyState title="Couldn't load arrivals" subtitle={error} />
+        <ErrorState title="Couldn't load arrivals" message={error} onRetry={refresh} />
       ) : slots.length === 0 ? (
         <EmptyState title="A quiet day" subtitle="No departures scheduled for this date." />
       ) : (
@@ -367,6 +466,7 @@ export default function CheckinsScreen() {
         <View style={styles.scanScreen}>
           <CameraView
             style={StyleSheet.absoluteFill}
+            enableTorch={torchOn}
             barcodeScannerSettings={{ barcodeTypes: ["qr", "code128", "ean13"] }}
             onBarcodeScanned={({ data }) => onScanned(data)}
           />
@@ -389,15 +489,52 @@ export default function CheckinsScreen() {
                 {checkedIn} of {allBookings.length} arrived today
               </Text>
             </View>
-            <Pressable
-              style={styles.scanClose}
-              onPress={() => {
-                resumeScanning();
-                setScanOpen(false);
-              }}
-            >
-              <Ionicons name="close" size={22} color={colors.white} />
-            </Pressable>
+            <View style={styles.scanActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={torchOn ? "Turn flashlight off" : "Turn flashlight on"}
+                style={[styles.scanIconBtn, torchOn && styles.scanIconBtnOn]}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setTorchOn((v) => !v);
+                }}
+              >
+                <Ionicons
+                  name={torchOn ? "flashlight" : "flashlight-outline"}
+                  size={20}
+                  color={torchOn ? colors.bg : colors.white}
+                />
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={soundOn ? "Mute admission sounds" : "Unmute admission sounds"}
+                style={styles.scanIconBtn}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setSoundOn((v) => !v);
+                }}
+              >
+                <Ionicons
+                  name={soundOn ? "volume-high" : "volume-mute"}
+                  size={20}
+                  color={colors.white}
+                />
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close scanner"
+                style={styles.scanClose}
+                onPress={() => {
+                  setTorchOn(false);
+                  resumeScanning();
+                  setScanOpen(false);
+                }}
+              >
+                <Ionicons name="close" size={22} color={colors.white} />
+              </Pressable>
+            </View>
           </View>
 
           {!scanCard ? (
@@ -418,28 +555,40 @@ export default function CheckinsScreen() {
               <View
                 style={[
                   styles.resultHeader,
+                  scanCard.kind === "pending" && { backgroundColor: colors.chip },
                   scanCard.kind === "success" && { backgroundColor: colors.success },
                   scanCard.kind === "already" && { backgroundColor: colors.warning },
                   scanCard.kind === "error" && { backgroundColor: colors.danger },
                 ]}
               >
-                <Ionicons
-                  name={
-                    scanCard.kind === "success"
-                      ? "checkmark-circle"
+                {scanCard.kind === "pending" ? (
+                  <ActivityIndicator size="small" color={colors.gold} />
+                ) : (
+                  <Ionicons
+                    name={
+                      scanCard.kind === "success"
+                        ? "checkmark-circle"
+                        : scanCard.kind === "already"
+                          ? "alert-circle"
+                          : "close-circle"
+                    }
+                    size={20}
+                    color="#17120d"
+                  />
+                )}
+                <Text
+                  style={[
+                    styles.resultHeaderText,
+                    scanCard.kind === "pending" && { color: colors.text },
+                  ]}
+                >
+                  {scanCard.kind === "pending"
+                    ? "Checking…"
+                    : scanCard.kind === "success"
+                      ? "Checked in"
                       : scanCard.kind === "already"
-                        ? "alert-circle"
-                        : "close-circle"
-                  }
-                  size={20}
-                  color="#17120d"
-                />
-                <Text style={styles.resultHeaderText}>
-                  {scanCard.kind === "success"
-                    ? "Checked in"
-                    : scanCard.kind === "already"
-                      ? "Already checked in"
-                      : "Not admitted"}
+                        ? "Already checked in"
+                        : "Not admitted"}
                 </Text>
                 {scanCard.code ? <Text style={styles.resultCode}>{scanCard.code}</Text> : null}
               </View>
@@ -703,6 +852,18 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   scanTitle: { fontFamily: fonts.sansSemiBold, fontSize: 16, color: colors.white },
+  scanActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+  scanIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.45)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.25)",
+  },
+  scanIconBtnOn: { backgroundColor: colors.gold, borderColor: colors.gold },
   scanClose: {
     width: 38,
     height: 38,

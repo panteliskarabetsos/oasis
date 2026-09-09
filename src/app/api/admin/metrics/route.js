@@ -388,8 +388,33 @@ export async function GET(req) {
   }
 
   /* Return */
+  // Partners and support run operations but must not see revenue. Strip it from
+  // the payload rather than relying on the dashboard to hide it — the response
+  // is readable in the browser's network tab either way.
+  const seesMoney = accessCan(permissions, "financials");
+  const scrub = (payload) => {
+    if (seesMoney) return payload;
+    const {
+      revenueMTD: _a,
+      revenue: _b,
+      revenueToday: _c,
+      ...rest
+    } = payload;
+    return {
+      ...rest,
+      trend: (rest.trend ?? []).map(({ revenue, ...d }) => d),
+      byDay: (rest.byDay ?? []).map(({ revenue, ...d }) => d),
+      deltas: rest.deltas
+        ? (({ revenuePct, ...d }) => d)(rest.deltas)
+        : rest.deltas,
+      previous: rest.previous
+        ? (({ revenue, ...p }) => p)(rest.previous)
+        : rest.previous,
+    };
+  };
+
   return NextResponse.json(
-    {
+    scrub({
       deltas,
       previous,
       from: fromISO,
@@ -424,7 +449,7 @@ export async function GET(req) {
         capacity,
         reservedPeople,
       },
-    },
+    }),
     { headers: { "cache-control": "no-store" } }
   );
 }

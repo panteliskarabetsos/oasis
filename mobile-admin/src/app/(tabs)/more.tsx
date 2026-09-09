@@ -6,11 +6,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Badge, Button, Eyebrow, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
+import { PERMISSION_LABELS } from "@/lib/permissions";
 import { config } from "@/lib/config";
 
 export default function MoreScreen() {
   const insets = useSafeAreaInsets();
-  const { profile, signOut, can } = useAuth();
+  const { profile, signOut, can, access } = useAuth();
 
   // Only offer what this account can actually open — every row below maps to
   // an API guarded by the same permission, so an ungated row is just a 403.
@@ -81,6 +82,25 @@ export default function MoreScreen() {
         />
       </Section>
 
+      <Section title="Your access">
+        <View style={styles.accessCard}>
+          <View style={styles.accessHead}>
+            <Ionicons name="shield-checkmark-outline" size={16} color={colors.gold} />
+            <Text style={styles.accessRole}>
+              {access === "*" ? "Full access" : `${access.length} component${access.length === 1 ? "" : "s"}`}
+            </Text>
+            {profile?.role ? <Badge label={profile.role} tone="info" /> : null}
+          </View>
+          <Text style={styles.accessBody}>
+            {access === "*"
+              ? "This account can open every section of the console."
+              : access.length
+                ? access.map((p) => PERMISSION_LABELS[p] ?? p).sort().join(" · ")
+                : "No components granted yet."}
+          </Text>
+        </View>
+      </Section>
+
       <View style={{ paddingHorizontal: spacing.md, marginTop: spacing.xl, gap: spacing.sm }}>
         <Muted style={{ fontSize: 12 }}>
           Signed in as {profile?.email ?? "—"}
@@ -147,5 +167,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  accessCard: {
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  accessHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  accessRole: { flex: 1, fontFamily: fonts.sansMedium, fontSize: 14, color: colors.text },
+  accessBody: { fontFamily: fonts.sans, fontSize: 12.5, lineHeight: 19, color: colors.muted },
   rowLabel: { flex: 1, fontFamily: fonts.sansMedium, fontSize: 14, color: colors.text },
 });

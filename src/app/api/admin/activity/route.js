@@ -76,7 +76,7 @@ export async function GET(req) {
   const { data: rows, error } = await admin
     .from(TBL_BOOKING)
     .select(
-      "id,status,startTime,totalPaidAmount,numberOfPeople,adultsCount,kidsCount"
+      "id,status,startTime,numberOfPeople,adultsCount,kidsCount"
     )
     .order("startTime", { ascending: false, nullsFirst: true })
     .limit(limit);

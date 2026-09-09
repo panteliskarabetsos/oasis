@@ -8,10 +8,11 @@ import {
   View,
 } from "react-native";
 
-import { Badge, Card, Chip, Divider, EmptyState, Eyebrow, Muted, Serif, StatTile } from "@/components/ui";
+import { Badge, Card, Chip, Divider, EmptyState, ErrorState, Eyebrow, Muted, Serif, StatTile } from "@/components/ui";
 import { colors, fonts, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
+import { PermissionGate } from "@/components/access";
 
 const EUR = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 
@@ -26,7 +27,7 @@ const RANGES = [
   { key: "ytd", label: "Year", days: 365 },
 ] as const;
 
-export default function ReportsScreen() {
+function ReportsScreenContent() {
   const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[0]);
   const from = dayKey(new Date(Date.now() - range.days * 86400000));
   const to = dayKey(new Date());
@@ -53,7 +54,7 @@ export default function ReportsScreen() {
       {loading ? (
         <ActivityIndicator color={colors.gold} style={{ marginTop: spacing.xl }} />
       ) : error ? (
-        <EmptyState title="Couldn't load reports" subtitle={error} />
+        <ErrorState title="Couldn't load reports" message={error} onRetry={refresh} />
       ) : (
         <>
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
@@ -161,3 +162,11 @@ const styles = StyleSheet.create({
   zLabel: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.muted },
   zValue: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.text },
 });
+
+export default function ReportsScreen() {
+  return (
+    <PermissionGate permission="zreport">
+      <ReportsScreenContent />
+    </PermissionGate>
+  );
+}

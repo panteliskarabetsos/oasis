@@ -15,8 +15,9 @@ import { colors, fonts, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { BookingRequest } from "@/lib/types";
+import { PermissionGate } from "@/components/access";
 
-export default function RequestsScreen() {
+function RequestsScreenContent() {
   const { data, loading, error, refresh } = useApi(() => api.requests());
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -136,3 +137,11 @@ const styles = StyleSheet.create({
   ref: { fontFamily: fonts.sansMedium, fontSize: 12, color: colors.gold },
   reason: { flexDirection: "row", gap: 6, marginTop: 8, alignItems: "flex-start" },
 });
+
+export default function RequestsScreen() {
+  return (
+    <PermissionGate permission="requests">
+      <RequestsScreenContent />
+    </PermissionGate>
+  );
+}

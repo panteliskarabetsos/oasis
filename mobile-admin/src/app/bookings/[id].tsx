@@ -21,13 +21,14 @@ import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { AdminSlot } from "@/lib/types";
+import { PermissionGate } from "@/components/access";
 
 type ModalKind = "cancel" | "reschedule" | "payment" | "status" | null;
 
 const STATUSES = ["confirmed", "pending", "checked_in", "no_show", "completed", "cancelled"];
 const PAY_METHODS = ["cash", "bank_transfer", "other"];
 
-export default function ReservationDetailScreen() {
+function ReservationDetailScreenContent() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, loading, error, refresh } = useApi(() => api.reservation(String(id)), [id]);
   const item = data?.item;
@@ -445,3 +446,11 @@ const styles = StyleSheet.create({
   slotRowActive: {},
   slotText: { flex: 1, fontFamily: fonts.sansSemiBold, fontSize: 14, color: colors.text },
 });
+
+export default function ReservationDetailScreen() {
+  return (
+    <PermissionGate permission="bookings">
+      <ReservationDetailScreenContent />
+    </PermissionGate>
+  );
+}

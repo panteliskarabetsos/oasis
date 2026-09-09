@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  RefreshControl,
   Modal,
   Pressable,
   StyleSheet,
@@ -17,6 +18,7 @@ import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { PaymentDetail, PaymentRow } from "@/lib/types";
+import { PermissionGate } from "@/components/access";
 
 function cents(n?: number, currency = "eur"): string {
   return new Intl.NumberFormat("en-IE", { style: "currency", currency: currency.toUpperCase() }).format(
@@ -40,7 +42,7 @@ function payTone(status?: string): "success" | "warning" | "danger" | "neutral" 
   }
 }
 
-export default function PaymentsScreen() {
+function PaymentsScreenContent() {
   const { data, loading, error, refresh } = useApi(() =>
     api.payments({ limit: 40 })
   );
@@ -105,6 +107,13 @@ export default function PaymentsScreen() {
         </EmptyState>
       ) : (
         <FlatList
+          refreshControl={
+            <RefreshControl
+              refreshing={loading && !!data}
+              onRefresh={refresh}
+              tintColor={colors.gold}
+            />
+          }
           data={items}
           keyExtractor={(p) => p.id}
           contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: 48 }}
@@ -244,3 +253,11 @@ const styles = StyleSheet.create({
   rowLabel: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.muted },
   rowValue: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.text },
 });
+
+export default function PaymentsScreen() {
+  return (
+    <PermissionGate permission="payments">
+      <PaymentsScreenContent />
+    </PermissionGate>
+  );
+}
