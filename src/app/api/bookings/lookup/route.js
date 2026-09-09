@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "../../../../lib/supabase/admin";
-import { legacyBookingId, normalizeBookingCode } from "@/lib/bookingCode";
+import { bookingRef, legacyBookingId, normalizeBookingCode } from "@/lib/bookingCode";
 import { isMissingSchema } from "@/lib/shop/schema";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
@@ -253,7 +253,11 @@ export async function GET(req) {
     return ok({
       id: booking.id,
       experienceId: booking.experienceId,
-      reference: `BK-${String(booking.id).padStart(6, "0")}`,
+      // The booking's own code when it has one; the legacy id form only for
+      // bookings that predate codes. Selecting `code` and then ignoring it here
+      // is what made the portal answer a BK-XXXX-XXXX search with BK-000379.
+      reference: bookingRef(booking),
+      code: booking.code ?? null,
 
       guestName: dbGuestName,
       email: contactEmail,

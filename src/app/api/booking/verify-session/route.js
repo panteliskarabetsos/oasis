@@ -2,6 +2,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { bookingRef as refFor } from "@/lib/bookingCode";
 import Stripe from "stripe";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -40,6 +41,7 @@ export async function GET(req) {
       .select(
         `
         id, 
+        code,
         startTime, 
         customExperienceName,
         totalPaidAmount,
@@ -47,7 +49,7 @@ export async function GET(req) {
         primary_contact,
         Experience(name, location)
       `,
-      ) // Removed 'code' from here because it doesn't exist in DB
+      )
       .eq("id", bookingId)
       .single();
 
@@ -59,8 +61,8 @@ export async function GET(req) {
       );
     }
 
-    // 3. Generate the booking code on the fly (BK-000XXX)
-    const derivedCode = `BK-${String(booking.id).padStart(6, "0")}`;
+    // 3. The booking's own code, falling back to the legacy id form.
+    const derivedCode = refFor(booking);
 
     // 4. Return clean data for the UI
     return NextResponse.json({

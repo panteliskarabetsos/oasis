@@ -395,7 +395,7 @@ export default function Contact() {
                               label="Booking Reference"
                               value={formData.bookingRef}
                               onChange={handleChange}
-                              placeholder="e.g. BK-12345"
+                              placeholder="e.g. BK-4K7M-Q2XR"
                             />
                           </motion.div>
                         )}

@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { bookingRef as refFor } from "@/lib/bookingCode";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import sendRequestUpdateEmail from "@/lib/email/sendRequestUpdateEmail";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
@@ -36,6 +37,7 @@ export async function PATCH(req, { params }) {
         *, 
         booking:booking_id ( 
           id, 
+          code,
           totalPaidAmount, 
           currency,
           primary_contact,
@@ -174,7 +176,7 @@ export async function PATCH(req, { params }) {
     const guestEmail = b?.primary_contact?.email || b?.User?.email;
     const guestName = b?.primary_contact?.firstName || b?.User?.name || "Guest";
     const experienceName = b?.Experience?.name || "Your Experience";
-    const bookingRef = `BK-${String(request.booking_id).padStart(6, "0")}`;
+    const bookingRef = refFor(request.booking ?? { id: request.booking_id });
 
     if (guestEmail) {
       // Determine if there are new details for the PDF generator
