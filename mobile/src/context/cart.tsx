@@ -38,6 +38,13 @@ type BagContextValue = {
   remove: (key: string) => void;
   clear: () => void;
   quantityOf: (productId: number, option?: string | null) => number;
+  /** Apply the shop's current view of these products to the bag. */
+  reconcile: (updates: {
+    productId: number;
+    available: boolean;
+    priceCents?: number;
+    stockQty?: number;
+  }[]) => string[];
 };
 
 /** A bag line is identified by product + chosen option, not product alone. */
@@ -56,6 +63,7 @@ const BagContext = createContext<BagContextValue>({
   remove: () => {},
   clear: () => {},
   quantityOf: () => 0,
+  reconcile: () => [],
 });
 
 function sanitize(raw: unknown): BagLine[] {
@@ -178,6 +186,45 @@ export function BagProvider({ children }: { children: React.ReactNode }) {
 
   const clear = useCallback(() => setLines([]), []);
 
+  /**
+   * Bring the bag in line with what the shop now says: drop what is gone, cap
+   * what is short, and adopt a new price. Returns a note per correction so the
+   * customer is told rather than quietly charged something else.
+   */
+  const reconcile = useCallback<BagContextValue["reconcile"]>((updates) => {
+    const notes: string[] = [];
+    const byId = new Map(updates.map((u) => [u.productId, u]));
+    setLines((prev) => {
+      const next: BagLine[] = [];
+      for (const line of prev) {
+        const u = byId.get(line.productId);
+        if (!u) {
+          next.push(line);
+          continue;
+        }
+        if (!u.available) {
+          notes.push(`${line.title} is no longer available and was removed.`);
+          continue;
+        }
+        let updated = line;
+        if (typeof u.priceCents === "number" && u.priceCents !== line.priceCents) {
+          notes.push(`${line.title} is now priced differently.`);
+          updated = { ...updated, priceCents: u.priceCents };
+        }
+        if (typeof u.stockQty === "number") {
+          updated = { ...updated, stockQty: u.stockQty };
+          if (line.quantity > u.stockQty) {
+            notes.push(`Only ${u.stockQty} × ${line.title} left — your bag was adjusted.`);
+            updated = { ...updated, quantity: u.stockQty };
+          }
+        }
+        next.push(updated);
+      }
+      return next;
+    });
+    return notes;
+  }, []);
+
   const value = useMemo<BagContextValue>(() => {
     const count = lines.reduce((n, l) => n + l.quantity, 0);
     const subtotalCents = lines.reduce((n, l) => n + l.priceCents * l.quantity, 0);
@@ -191,11 +238,12 @@ export function BagProvider({ children }: { children: React.ReactNode }) {
       setQuantity,
       remove,
       clear,
+      reconcile,
       quantityOf: (productId, option = null) =>
         lines.find((l) => lineKey(l.productId, l.option) === lineKey(productId, option))
           ?.quantity ?? 0,
     };
-  }, [lines, ready, add, setQuantity, remove, clear]);
+  }, [lines, ready, add, setQuantity, remove, clear, reconcile]);
 
   return <BagContext.Provider value={value}>{children}</BagContext.Provider>;
 }

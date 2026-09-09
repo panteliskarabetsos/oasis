@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { selectWithFallback } from "@/lib/shop/schema";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -28,12 +29,17 @@ export async function GET() {
   }
   if (!authUserId) return ok({ items: [] });
 
-  const { data: orders, error } = await admin
-    .from("shop_order")
-    .select("id, status, total_cents, currency, placed_at, created_at")
-    .eq("user_id", authUserId)
-    .order("created_at", { ascending: false })
-    .limit(50);
+  const BASE = "id, status, total_cents, currency, placed_at, created_at";
+  const { data: orders, error } = await selectWithFallback(
+    (columns) =>
+      admin
+        .from("shop_order")
+        .select(columns)
+        .eq("user_id", authUserId)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    [`${BASE}, shipping_cents, tracking_number`, BASE]
+  );
   if (error) return bad(error.message, 500);
 
   const ids = (orders || []).map((o) => o.id);

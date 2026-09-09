@@ -25,6 +25,10 @@ import type {
   ReportKpis,
   Reservation,
   ReservationDetail,
+  ShopLookupResult,
+  ShopOrderDetail,
+  ShopOrderRow,
+  ShopProductRow,
   Voucher,
 } from "@/lib/types";
 
@@ -385,4 +389,47 @@ export const api = {
 
   /* ---------- Users ---------- */
   users: () => request<AdminUser[]>(`/api/admin/users`),
+  /* ------------------------------- E-shop ------------------------------- */
+
+  /** Resolve a scanned barcode, a SKU, an id or part of a name. */
+  shopLookup: (code: string) =>
+    request<ShopLookupResult>(`/api/admin/shop/lookup?code=${encodeURIComponent(code)}`),
+
+  shopProducts: (search?: string) =>
+    request<ShopProductRow[]>(
+      `/api/admin/shop/products${search ? `?search=${encodeURIComponent(search)}` : ""}`
+    ),
+
+  shopSetStock: (id: number | string, stock_qty: number) =>
+    request<ShopProductRow>(`/api/admin/shop/products/${id}`, {
+      method: "PATCH",
+      body: { stock_qty },
+    }),
+
+  shopSetActive: (id: number | string, active: boolean) =>
+    request<ShopProductRow>(`/api/admin/shop/products/${id}`, {
+      method: "PATCH",
+      body: { active },
+    }),
+
+  shopOrders: (status = "all", search = "") =>
+    request<ShopOrderRow[]>(
+      `/api/admin/shop/orders${qs({ status, q: search || undefined, limit: 50 })}`
+    ),
+
+  shopOrder: (id: number | string) =>
+    request<ShopOrderDetail>(`/api/admin/shop/orders/${id}`),
+
+  shopOrderStatus: (id: number | string, status: string) =>
+    request<{ order: ShopOrderRow }>(`/api/admin/shop/orders/${id}/status`, {
+      method: "POST",
+      body: { status },
+    }),
+
+  shopOrderTracking: (id: number | string, tracking_number: string, tracking_url?: string) =>
+    request<{ order: unknown }>(`/api/admin/shop/orders/${id}`, {
+      method: "PATCH",
+      body: { tracking_number, tracking_url: tracking_url ?? "" },
+    }),
+
 };

@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Ornament } from "@/components/premium";
 import { Badge, Button, Divider, Eyebrow, Muted, Serif } from "@/components/ui";
@@ -163,6 +163,37 @@ export default function OrderScreen() {
             </View>
           ))}
           <Divider />
+          {Number(order.shipping_cents ?? 0) >= 0 && order.shipping_cents != null ? (
+            <>
+              <View style={styles.breakdownRow}>
+                <Muted style={{ fontSize: 13 }}>Goods</Muted>
+                <Muted style={{ fontSize: 13 }}>
+                  {moneyCents(
+                    Number(order.total_cents) - Number(order.shipping_cents || 0),
+                    order.currency,
+                  )}
+                </Muted>
+              </View>
+              <View style={styles.breakdownRow}>
+                <Muted style={{ fontSize: 13 }}>
+                  {order.shipping_method === "pickup" ? "Collection" : "Delivery"}
+                </Muted>
+                <Muted style={{ fontSize: 13 }}>
+                  {Number(order.shipping_cents) === 0
+                    ? "Free"
+                    : moneyCents(order.shipping_cents, order.currency)}
+                </Muted>
+              </View>
+            </>
+          ) : null}
+          {Number(order.refunded_cents ?? 0) > 0 ? (
+            <View style={styles.breakdownRow}>
+              <Muted style={{ fontSize: 13, color: colors.danger }}>Refunded</Muted>
+              <Muted style={{ fontSize: 13, color: colors.danger }}>
+                −{moneyCents(order.refunded_cents, order.currency)}
+              </Muted>
+            </View>
+          ) : null}
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
             <Text style={styles.totalValue}>
@@ -173,6 +204,24 @@ export default function OrderScreen() {
             Placed {formatDateTime(order.placed_at || order.created_at)}
           </Muted>
         </View>
+
+        {order.tracking_number ? (
+          <View style={styles.card}>
+            <View style={styles.cardHead}>
+              <Ionicons name="navigate-outline" size={15} color={colors.gold} />
+              <Text style={styles.cardTitle}>On its way</Text>
+            </View>
+            <Text style={styles.tracking}>{order.tracking_number}</Text>
+            {order.tracking_url ? (
+              <Button
+                title="Track your parcel"
+                variant="ghost"
+                onPress={() => Linking.openURL(order.tracking_url as string)}
+                style={{ marginTop: spacing.sm }}
+              />
+            ) : null}
+          </View>
+        ) : null}
 
         {address.line1 ? (
           <View style={styles.card}>
@@ -242,7 +291,25 @@ const styles = StyleSheet.create({
   itemTitle: { fontFamily: fonts.serifRegular, fontSize: 16, lineHeight: 21, color: INK },
   itemTotal: { fontFamily: fonts.sansMedium, fontSize: 14, color: colors.ink },
 
-  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  breakdownRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  tracking: {
+    fontFamily: fonts.sansSemiBold,
+    fontSize: 16,
+    letterSpacing: 1,
+    color: INK,
+    marginTop: spacing.sm,
+  },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: spacing.sm,
+  },
   totalLabel: { fontFamily: fonts.sansBold, fontSize: 15, color: colors.brownDeep },
   totalValue: { fontFamily: fonts.serif, fontSize: 24, color: colors.brand },
 

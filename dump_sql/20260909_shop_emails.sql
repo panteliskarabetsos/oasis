@@ -8,3 +8,7 @@ alter table public."AppSetting"
 insert into public."AppSetting" (key)
 select 'shop'
 where not exists (select 1 from public."AppSetting" where key = 'shop');
+
+-- PostgREST caches the schema: without this the app keeps reporting the
+-- new tables and columns as missing until its cache happens to refresh.
+notify pgrst, 'reload schema';

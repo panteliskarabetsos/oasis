@@ -19,5 +19,31 @@ export function isMissingSchema(error) {
   );
 }
 
+/** Columns the shipping calculator needs from a product. */
+export const SHIPPING_COLUMNS =
+  "shipping_weight_grams, shipping_length_cm, shipping_width_cm, shipping_height_cm";
+
 export const BARCODE_MIGRATION_HINT =
   "Barcodes are unavailable until dump_sql/20260909_shop_barcodes.sql has been run.";
+
+/**
+ * Run a query against the first column set the database actually has.
+ *
+ * Optional columns arrive with migrations that may not have been run yet, and
+ * they arrive separately — barcodes before shipping, say. Trying one "everything"
+ * set and falling straight back to the minimum would hide columns that do exist,
+ * so walk the sets from richest to poorest and keep the first that works.
+ *
+ * @param {(columns: string) => Promise<{data:any,error:any}>} run
+ * @param {string[]} columnSets richest first
+ */
+export async function selectWithFallback(run, columnSets) {
+  let lastError = null;
+  for (const columns of columnSets) {
+    const { data, error } = await run(columns);
+    if (!error) return { data, error: null, columns };
+    if (!isMissingSchema(error)) return { data: null, error, columns };
+    lastError = error;
+  }
+  return { data: null, error: lastError, columns: null };
+}

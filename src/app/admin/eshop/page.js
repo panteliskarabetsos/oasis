@@ -1221,6 +1221,7 @@ function SettingsSection() {
   const [emails, setEmails] = React.useState(null);
   const [automations, setAutomations] = React.useState({});
   const [emailNotice, setEmailNotice] = React.useState("");
+  const [shipping, setShipping] = React.useState(null);
 
   // Without this the toggle always reads "open" — even while the storefront
   // is refusing checkout — and saving would silently unpause the shop.
@@ -1235,6 +1236,7 @@ function SettingsSection() {
         setMessage(data?.message || "");
         setAutomations(data?.automations || {});
         setEmails(data?.emails || null);
+        setShipping(data?.shipping || null);
         if (data?.emails && data.emails.available === false) {
           setEmailNotice(
             "Switches are showing their defaults — run dump_sql/20260909_shop_emails.sql to save changes."
@@ -1257,7 +1259,12 @@ function SettingsSection() {
       const res = await fetch("/api/admin/shop/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paused, message, emails: emails || undefined }),
+        body: JSON.stringify({
+          paused,
+          message,
+          emails: emails || undefined,
+          shipping: shipping || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to save settings");
@@ -1391,7 +1398,280 @@ function SettingsSection() {
           </UIButton>
         </div>
       </UICard>
+      <div className="lg:col-span-2">
+        <ShippingSettings value={shipping} onChange={setShipping} onSave={save} saving={saving} />
+      </div>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------
+   Courier rates
+------------------------------------------------------------- */
+
+const EMPTY_ZONE = {
+  id: "",
+  label: "",
+  countries: [],
+  baseCents: 0,
+  baseGrams: 2000,
+  extraCentsPerKg: 0,
+  maxGrams: 0,
+};
+
+/** cents <-> a euro string the admin actually types. */
+const toEuro = (cents) => ((Number(cents) || 0) / 100).toFixed(2);
+const fromEuro = (v) => Math.round(Number(String(v).replace(",", ".")) * 100) || 0;
+const toKg = (grams) => ((Number(grams) || 0) / 1000).toString();
+const fromKg = (v) => Math.round(Number(String(v).replace(",", ".")) * 1000) || 0;
+
+function ShippingSettings({ value, onChange, onSave, saving }) {
+  if (!value) {
+    return (
+      <UICard>
+        <h2 className="font-serif text-[17px] text-[#2a211a]">Courier shipping</h2>
+        <Muted className="mt-0.5 text-[12px]">Loading…</Muted>
+      </UICard>
+    );
+  }
+
+  const set = (patch) => onChange({ ...value, ...patch });
+  const setZone = (i, patch) =>
+    onChange({
+      ...value,
+      zones: (value.zones || []).map((z, k) => (k === i ? { ...z, ...patch } : z)),
+    });
+
+  return (
+    <UICard>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="font-serif text-[17px] text-[#2a211a]">Courier shipping</h2>
+          <Muted className="mt-0.5 text-[12px]">
+            Priced on the greater of a parcel&rsquo;s weight and its volume, per destination.
+          </Muted>
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] px-3 py-2">
+          <input
+            type="checkbox"
+            checked={value.enabled !== false}
+            onChange={(e) => set({ enabled: e.target.checked })}
+            className="h-4 w-4 accent-[#8b6f47]"
+          />
+          <span className="text-[13px] font-semibold text-[#2a211a]">
+            {value.enabled !== false ? "Charging for delivery" : "Delivery is free"}
+          </span>
+        </label>
+      </div>
+
+      {value.available === false ? (
+        <ErrorNote className="mt-4">
+          These rates cannot be saved until dump_sql/20260909_shop_emails.sql has been run.
+        </ErrorNote>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <Field label="Free over" hint="0 turns the threshold off.">
+          <input
+            value={toEuro(value.freeOverCents)}
+            onChange={(e) => set({ freeOverCents: fromEuro(e.target.value) })}
+            inputMode="decimal"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Handling fee" hint="Added to every courier order.">
+          <input
+            value={toEuro(value.handlingCents)}
+            onChange={(e) => set({ handlingCents: fromEuro(e.target.value) })}
+            inputMode="decimal"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Volumetric divisor" hint="5000 is the usual courier figure.">
+          <input
+            value={String(value.volumetricDivisor ?? 5000)}
+            onChange={(e) =>
+              set({ volumetricDivisor: Number(e.target.value.replace(/[^0-9]/g, "")) || 5000 })
+            }
+            inputMode="numeric"
+            className={inputClass}
+          />
+        </Field>
+      </div>
+
+      {/* zones */}
+      <div className="mt-5">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[12px] font-semibold text-[#3f3127]">Destinations</span>
+          <UIButton
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              onChange({
+                ...value,
+                zones: [
+                  ...(value.zones || []),
+                  { ...EMPTY_ZONE, id: `zone${(value.zones?.length || 0) + 1}` },
+                ],
+              })
+            }
+          >
+            <Icon name="plus" size={14} /> Add a destination
+          </UIButton>
+        </div>
+
+        {!value.zones?.length ? (
+          <Muted className="text-[12.5px]">
+            No destinations yet — add one, or switch shipping off to send everything free.
+          </Muted>
+        ) : (
+          <div className="space-y-3">
+            {value.zones.map((z, i) => (
+              <div key={i} className="rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Name">
+                    <input
+                      value={z.label || ""}
+                      onChange={(e) => setZone(i, { label: e.target.value })}
+                      placeholder="Greece — mainland"
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field
+                    label="Countries"
+                    hint="Two-letter codes, comma separated. Use * for everywhere else."
+                  >
+                    <input
+                      value={(z.countries || []).join(", ")}
+                      onChange={(e) =>
+                        setZone(i, {
+                          countries: e.target.value
+                            .split(",")
+                            .map((c) => c.trim().toUpperCase())
+                            .filter(Boolean),
+                        })
+                      }
+                      placeholder="GR"
+                      className={`${inputClass} font-mono`}
+                    />
+                  </Field>
+                </div>
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                  <Field label="Base price">
+                    <input
+                      value={toEuro(z.baseCents)}
+                      onChange={(e) => setZone(i, { baseCents: fromEuro(e.target.value) })}
+                      inputMode="decimal"
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="Covers up to (kg)">
+                    <input
+                      value={toKg(z.baseGrams)}
+                      onChange={(e) => setZone(i, { baseGrams: fromKg(e.target.value) })}
+                      inputMode="decimal"
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="Each extra kg">
+                    <input
+                      value={toEuro(z.extraCentsPerKg)}
+                      onChange={(e) => setZone(i, { extraCentsPerKg: fromEuro(e.target.value) })}
+                      inputMode="decimal"
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="Refuse over (kg)" hint="0 for no limit.">
+                    <input
+                      value={toKg(z.maxGrams)}
+                      onChange={(e) => setZone(i, { maxGrams: fromKg(e.target.value) })}
+                      inputMode="decimal"
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between border-t border-[#eee8de] pt-3">
+                  <Muted className="text-[11.5px]">
+                    A 3 kg parcel here costs{" "}
+                    {toEuro(
+                      (Number(z.baseCents) || 0) +
+                        Math.ceil(
+                          Math.max(0, 3000 - (Number(z.baseGrams) || 0)) / 1000
+                        ) *
+                          (Number(z.extraCentsPerKg) || 0) +
+                        (Number(value.handlingCents) || 0)
+                    )}
+                  </Muted>
+                  <UIButton
+                    size="sm"
+                    variant="ghost"
+                    className="text-[#a33c22] hover:bg-[#fbeae5]"
+                    onClick={() =>
+                      onChange({ ...value, zones: value.zones.filter((_, k) => k !== i) })
+                    }
+                  >
+                    Remove
+                  </UIButton>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* collection */}
+      <div className="mt-5 rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] p-4">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={value.pickup?.enabled !== false}
+            onChange={(e) => set({ pickup: { ...(value.pickup || {}), enabled: e.target.checked } })}
+            className="mt-0.5 h-4 w-4 accent-[#8b6f47]"
+          />
+          <span>
+            <span className="block text-[13px] font-semibold text-[#2a211a]">
+              Offer collection
+            </span>
+            <span className="mt-0.5 block text-[12px] text-[#7a6a5f]">
+              Customers can choose to pick the order up instead of paying a courier.
+            </span>
+          </span>
+        </label>
+        {value.pickup?.enabled !== false ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <Field label="What to call it">
+              <input
+                value={value.pickup?.label || ""}
+                onChange={(e) => set({ pickup: { ...(value.pickup || {}), label: e.target.value } })}
+                placeholder="Collect from us in Chania"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Collection fee" hint="Usually nothing.">
+              <input
+                value={toEuro(value.pickup?.cents)}
+                onChange={(e) =>
+                  set({ pickup: { ...(value.pickup || {}), cents: fromEuro(e.target.value) } })
+                }
+                inputMode="decimal"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex items-center gap-2 border-t border-[#f0ebe2] pt-4">
+        <UIButton variant="primary" onClick={onSave} disabled={saving}>
+          {saving ? "Saving…" : "Save shipping"}
+        </UIButton>
+        <Muted className="text-[11.5px]">
+          Products need a weight for this to price correctly.
+        </Muted>
+      </div>
+    </UICard>
   );
 }
 

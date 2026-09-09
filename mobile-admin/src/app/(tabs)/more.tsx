@@ -33,6 +33,14 @@ export default function MoreScreen() {
       ],
     },
     {
+      title: "Shop",
+      rows: [
+        { perm: "eshop", icon: "barcode-outline", label: "Scan a product", href: "/shop-scan" },
+        { perm: "eshop", icon: "cube-outline", label: "Products & stock", href: "/shop-products" },
+        { perm: "eshop", icon: "receipt-outline", label: "Shop orders", href: "/shop-orders" },
+      ],
+    },
+    {
       title: "Guests",
       rows: [
         { perm: "requests", icon: "mail-unread-outline", label: "Change requests", href: "/requests" },

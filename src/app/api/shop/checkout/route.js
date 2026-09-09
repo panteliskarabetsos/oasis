@@ -14,8 +14,12 @@ import {
   ADDRESS_FIELDS,
   CONTACT_FIELDS,
   ORDER_PENDING,
+  SHIPPING_COLUMNS,
   cleanBlob,
+  getShippingSettings,
 } from "@/lib/shop/server";
+import { isMissingSchema } from "@/lib/shop/schema";
+import { quoteShipping } from "@/lib/shop/shipping";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -101,20 +105,30 @@ export async function POST(req) {
   if (!contact.email || !EMAIL_RE.test(contact.email))
     return bad("Please enter a valid email address");
 
+  const wantsPickup = body?.shippingMethod === "pickup";
   const shipping = cleanBlob(
     { ...(body?.shipping || {}), name: body?.shipping?.name || contact.name },
     ADDRESS_FIELDS
   );
-  if (!shipping.line1 || !shipping.city || !shipping.postalCode) {
+  // Collection needs no address; anything going on a courier does.
+  if (!wantsPickup && (!shipping.line1 || !shipping.city || !shipping.postalCode)) {
     return bad("Please complete your delivery address");
   }
   if (!shipping.country) shipping.country = "GR";
 
   /* ------------------------- price from the database --------------------- */
-  const { data: products, error: prodErr } = await admin
+  const PRODUCT_BASE = "id, slug, title, price_cents, currency, active, stock_qty";
+  let { data: products, error: prodErr } = await admin
     .from("shop_product")
-    .select("id, slug, title, price_cents, currency, active, stock_qty")
+    .select(`${PRODUCT_BASE}, ${SHIPPING_COLUMNS}`)
     .in("id", productIds);
+  if (prodErr && isMissingSchema(prodErr)) {
+    // Pre-migration: nothing has dimensions, so delivery prices at zero.
+    ({ data: products, error: prodErr } = await admin
+      .from("shop_product")
+      .select(PRODUCT_BASE)
+      .in("id", productIds));
+  }
   if (prodErr) return bad(prodErr.message || "Could not price your bag", 500);
 
   const byId = new Map((products || []).map((p) => [Number(p.id), p]));
@@ -169,23 +183,58 @@ export async function POST(req) {
   if (totalCents <= 0) return bad("This order has no payable total", 409);
   currency = currency || "EUR";
 
+  /* ------------------------------- delivery ------------------------------ */
+  // Priced here rather than trusted from the client, with the same function the
+  // storefront quoted with.
+  const goodsCents = totalCents;
+  const shippingMethod = wantsPickup ? "pickup" : "courier";
+  const shippingSettings = await getShippingSettings(admin);
+  const shipQuote = quoteShipping({
+    lines: [...wanted.values()].map((l) => {
+      const p = byId.get(l.productId) || {};
+      return {
+        quantity: l.quantity,
+        shipping_weight_grams: p.shipping_weight_grams,
+        shipping_length_cm: p.shipping_length_cm,
+        shipping_width_cm: p.shipping_width_cm,
+        shipping_height_cm: p.shipping_height_cm,
+      };
+    }),
+    settings: shippingSettings,
+    country: shipping.country,
+    method: shippingMethod,
+    subtotalCents: goodsCents,
+  });
+
+  if (!shipQuote.available) {
+    return bad(shipQuote.reason || "We cannot deliver to that address.", 409);
+  }
+  const shippingCents = Math.max(0, Number(shipQuote.cents) || 0);
+  totalCents = goodsCents + shippingCents;
+
   /* ----------------------------- persist order --------------------------- */
   const userId = await currentAuthUserId();
 
-  const { data: order, error: orderErr } = await admin
+  const orderRow = {
+    user_id: userId,
+    status: ORDER_PENDING,
+    total_cents: totalCents,
+    currency,
+    billing_address: contact,
+    shipping_address: shipping,
+  };
+  let { data: order, error: orderErr } = await admin
     .from("shop_order")
-    .insert([
-      {
-        user_id: userId,
-        status: ORDER_PENDING,
-        total_cents: totalCents,
-        currency,
-        billing_address: contact,
-        shipping_address: shipping,
-      },
-    ])
+    .insert([{ ...orderRow, shipping_cents: shippingCents, shipping_method: shipQuote.method }])
     .select("id")
     .single();
+  if (orderErr && isMissingSchema(orderErr)) {
+    ({ data: order, error: orderErr } = await admin
+      .from("shop_order")
+      .insert([orderRow])
+      .select("id")
+      .single());
+  }
   if (orderErr) return bad(orderErr.message || "Could not open your order", 500);
 
   const { error: itemsErr } = await admin
@@ -217,14 +266,28 @@ export async function POST(req) {
         client_reference_id: `shop-${order.id}`,
         metadata,
         payment_intent_data: { metadata },
-        line_items: lines.map((l) => ({
-          quantity: l.quantity,
-          price_data: {
-            currency: currency.toLowerCase(),
-            unit_amount: l.unit_price_cents,
-            product_data: { name: l.title_snapshot },
-          },
-        })),
+        line_items: [
+          ...lines.map((l) => ({
+            quantity: l.quantity,
+            price_data: {
+              currency: currency.toLowerCase(),
+              unit_amount: l.unit_price_cents,
+              product_data: { name: l.title_snapshot },
+            },
+          })),
+          ...(shippingCents > 0
+            ? [
+                {
+                  quantity: 1,
+                  price_data: {
+                    currency: currency.toLowerCase(),
+                    unit_amount: shippingCents,
+                    product_data: { name: shipQuote.label || "Delivery" },
+                  },
+                },
+              ]
+            : []),
+        ],
         success_url: `${origin}/shop/thank-you?order=${order.id}`,
         cancel_url: `${origin}/shop`,
       });
@@ -239,6 +302,9 @@ export async function POST(req) {
         orderId: order.id,
         url: session.url,
         amountCents: totalCents,
+        goodsCents,
+        shippingCents,
+        shippingLabel: shipQuote.label,
         currency,
       });
     }
@@ -262,6 +328,9 @@ export async function POST(req) {
       clientSecret: intent.client_secret,
       paymentIntentId: intent.id,
       amountCents: totalCents,
+      goodsCents,
+      shippingCents,
+      shippingLabel: shipQuote.label,
       currency,
     });
   } catch (e) {

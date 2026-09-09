@@ -26,6 +26,7 @@ import { useAuth } from "@/context/auth";
 import { api } from "@/lib/api";
 import { config } from "@/lib/config";
 import { moneyCents } from "@/lib/format";
+import type { ShopShippingQuote } from "@/lib/types";
 
 const INK = "#26201a";
 const DETAILS_KEY = "oasis.shop.details.v1";
@@ -64,6 +65,10 @@ export default function BagScreen() {
   const [details, setDetails] = useState<Details>(EMPTY);
   const [touched, setTouched] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [method, setMethod] = useState<"courier" | "pickup">("courier");
+  const [quote, setQuote] = useState<ShopShippingQuote | null>(null);
+  const [quoting, setQuoting] = useState(false);
+  const [notices, setNotices] = useState<string[]>([]);
 
   // Prefill from the last order, then from the signed-in profile — whichever
   // fills a field first wins, so a stored address is never overwritten.
@@ -97,6 +102,48 @@ export default function BagScreen() {
     };
   }, [profile?.name, profile?.surname, profile?.email, profile?.phone]);
 
+  // Re-price delivery whenever the bag, the destination or the method changes.
+  // Debounced because the country field is typed into.
+  useEffect(() => {
+    if (!bag.lines.length) {
+      setQuote(null);
+      return;
+    }
+    let alive = true;
+    setQuoting(true);
+    const t = setTimeout(() => {
+      api
+        .shopQuote({
+          items: bag.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+          country: details.country,
+          method,
+        })
+        .then((q) => {
+          if (!alive) return;
+          setQuote(q);
+          // The quote carries the shop's current view of every line, so a bag
+          // that has gone stale corrects itself here rather than at payment.
+          if (q.lines?.length) {
+            const notes = bag.reconcile(
+              q.lines.map((l) => ({
+                productId: l.productId,
+                available: l.available,
+                priceCents: l.priceCents,
+                stockQty: l.stockQty,
+              })),
+            );
+            if (notes.length) setNotices(notes);
+          }
+        })
+        .catch(() => alive && setQuote(null))
+        .finally(() => alive && setQuoting(false));
+    }, 400);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [bag.lines, details.country, method]);
+
   function set<K extends keyof Details>(key: K, value: Details[K]) {
     setDetails((d) => ({ ...d, [key]: value }));
   }
@@ -105,14 +152,18 @@ export default function BagScreen() {
     const e: Partial<Record<keyof Details, string>> = {};
     if (!details.name.trim()) e.name = "Required";
     if (!EMAIL_RE.test(details.email.trim())) e.email = "Enter a valid email";
-    if (!details.line1.trim()) e.line1 = "Required";
-    if (!details.city.trim()) e.city = "Required";
-    if (!details.postalCode.trim()) e.postalCode = "Required";
+    // Collecting in person needs no address.
+    if (method === "courier") {
+      if (!details.line1.trim()) e.line1 = "Required";
+      if (!details.city.trim()) e.city = "Required";
+      if (!details.postalCode.trim()) e.postalCode = "Required";
+    }
     return e;
-  }, [details]);
+  }, [details, method]);
 
-  const valid = Object.keys(errors).length === 0;
-  const shipping = 0; // included, like the website
+  const deliverable = quote ? quote.available : true;
+  const valid = Object.keys(errors).length === 0 && deliverable;
+  const shipping = quote?.available ? quote.cents : 0;
   const total = bag.subtotalCents + shipping;
 
   async function pay() {
@@ -146,7 +197,7 @@ export default function BagScreen() {
       await AsyncStorage.setItem(DETAILS_KEY, JSON.stringify(details)).catch(() => {});
 
       if (!config.stripePublishableKey) {
-        const res = await api.shopCheckout({ ...payload, mode: "checkout" });
+        const res = await api.shopCheckout({ ...payload, mode: "checkout", shippingMethod: method });
         if (!res.url) throw new Error("Could not start the payment.");
         await WebBrowser.openBrowserAsync(res.url, { dismissButtonStyle: "close" });
         // The webhook settles the order; the receipt screen polls for it.
@@ -158,7 +209,7 @@ export default function BagScreen() {
         return;
       }
 
-      const res = await api.shopCheckout({ ...payload, mode: "elements" });
+      const res = await api.shopCheckout({ ...payload, mode: "elements", shippingMethod: method });
       if (!res.clientSecret) throw new Error("Could not start the payment.");
 
       const init = await initPaymentSheet({
@@ -251,6 +302,22 @@ export default function BagScreen() {
         <Eyebrow>Your selection</Eyebrow>
         <Serif style={{ fontSize: 27 }}>The Bag</Serif>
 
+        {notices.length ? (
+          <View style={styles.noticeCard}>
+            <Ionicons name="information-circle-outline" size={16} color={colors.warning} />
+            <View style={{ flex: 1, gap: 3 }}>
+              {notices.map((n, i) => (
+                <Text key={i} style={styles.noticeText}>
+                  {n}
+                </Text>
+              ))}
+            </View>
+            <Pressable hitSlop={8} onPress={() => setNotices([])}>
+              <Ionicons name="close" size={15} color={colors.mutedWarm} />
+            </Pressable>
+          </View>
+        ) : null}
+
         <View style={{ marginTop: spacing.md, gap: spacing.md }}>
           {bag.lines.map((line) => (
             <BagRow key={lineKey(line.productId, line.option)} line={line} />
@@ -260,13 +327,65 @@ export default function BagScreen() {
         {/* Totals */}
         <View style={styles.card}>
           <Row label="Subtotal" value={moneyCents(bag.subtotalCents, bag.currency)} />
-          <Row label="Shipping" value="Included" muted />
+          <Row
+            label={quote?.label || (method === "pickup" ? "Collection" : "Delivery")}
+            value={
+              quoting
+                ? "…"
+                : !quote
+                  ? "—"
+                  : !quote.available
+                    ? "Unavailable"
+                    : quote.cents === 0
+                      ? "Free"
+                      : moneyCents(quote.cents, bag.currency)
+            }
+            muted
+          />
+          {quote && !quote.available ? (
+            <Muted style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>
+              {quote.reason}
+            </Muted>
+          ) : quote?.freeOverCents && !quote.free && quote.available && method === "courier" ? (
+            <Muted style={{ fontSize: 12, marginTop: 4 }}>
+              Spend {moneyCents(quote.freeOverCents - bag.subtotalCents, bag.currency)} more for
+              free delivery.
+            </Muted>
+          ) : null}
           <Divider />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
             <Text style={styles.totalValue}>{moneyCents(total, bag.currency)}</Text>
           </View>
         </View>
+
+        {/* How it gets there */}
+        {quote?.pickupOffered ? (
+          <View style={styles.card}>
+            <View style={styles.cardHead}>
+              <Ionicons name="navigate-outline" size={15} color={colors.gold} />
+              <Text style={styles.cardTitle}>How would you like it?</Text>
+            </View>
+            <View style={styles.methodRow}>
+              {(
+                [
+                  ["courier", "Courier"],
+                  ["pickup", quote.pickupLabel || "Collect"],
+                ] as const
+              ).map(([key, label]) => (
+                <Pressable
+                  key={key}
+                  onPress={() => setMethod(key)}
+                  style={[styles.methodBtn, method === key && styles.methodBtnOn]}
+                >
+                  <Text style={[styles.methodText, method === key && styles.methodTextOn]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         {/* Details */}
         <View style={styles.card}>
@@ -298,7 +417,7 @@ export default function BagScreen() {
           </View>
         </View>
 
-        <View style={styles.card}>
+        <View style={[styles.card, method === "pickup" && { display: "none" }]}>
           <View style={styles.cardHead}>
             <Ionicons name="cube-outline" size={15} color={colors.gold} />
             <Text style={styles.cardTitle}>Where should it go?</Text>
@@ -446,6 +565,16 @@ function Row({ label, value, muted }: { label: string; value: string; muted?: bo
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.cream },
 
+  noticeCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    backgroundColor: colors.warningSoft,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginTop: spacing.md,
+  },
+  noticeText: { fontFamily: fonts.sans, fontSize: 12.5, lineHeight: 18, color: colors.warning },
   bagRow: { flexDirection: "row", gap: spacing.md },
   thumb: { width: 78, height: 96, borderRadius: radii.md, backgroundColor: colors.creamChip },
   thumbFallback: { alignItems: "center", justifyContent: "center" },
@@ -486,6 +615,19 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
   },
   cardHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  methodRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
+  methodBtn: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 11,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSand,
+    backgroundColor: colors.white,
+  },
+  methodBtnOn: { backgroundColor: INK, borderColor: INK },
+  methodText: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.brownDeep },
+  methodTextOn: { color: colors.creamSoft },
   cardTitle: { fontFamily: fonts.sansBold, fontSize: 14, color: colors.brownDeep },
 
   row: { flexDirection: "row", justifyContent: "space-between", marginTop: 6 },

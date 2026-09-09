@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { isMissingSchema, selectWithFallback } from "@/lib/shop/schema";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -22,13 +23,15 @@ export async function GET(req, { params }) {
 
   const email = (new URL(req.url).searchParams.get("email") || "").trim().toLowerCase();
 
-  const { data: order, error } = await admin
-    .from("shop_order")
-    .select(
-      "id, user_id, status, total_cents, currency, billing_address, shipping_address, placed_at, created_at"
-    )
-    .eq("id", orderId)
-    .maybeSingle();
+  // Delivery and tracking arrive with migrations; a customer on a database
+  // without them still gets their order, just without those lines.
+  const BASE =
+    "id, user_id, status, total_cents, currency, billing_address, shipping_address, placed_at, created_at";
+  const FULL = `${BASE}, shipping_cents, shipping_method, tracking_number, tracking_url, refunded_cents`;
+  const { data: order, error } = await selectWithFallback(
+    (columns) => admin.from("shop_order").select(columns).eq("id", orderId).maybeSingle(),
+    [FULL, BASE]
+  );
   if (error) return bad(error.message, 500);
   if (!order) return bad("Order not found", 404);
 
