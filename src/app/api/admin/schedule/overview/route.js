@@ -40,7 +40,7 @@ export async function GET(req) {
       id, date, totalSlots, isCancelled,
       Experience!inner(id, name),
       booking(
-        id, status, numberOfPeople, primary_contact, selected_meetup_point
+        id, status, numberOfPeople, primary_contact, selected_meetup_point, notes
       )
     `,
     ) // <--- Removed "code" from the booking() select
@@ -89,6 +89,15 @@ export async function GET(req) {
             .join(" ") ||
           "Unknown Guest",
         meetupPoint: b.selected_meetup_point?.name || "No pickup set",
+        // Guides need to reach a guest who hasn't shown up. primary_contact is
+        // jsonb written by several checkout paths, so accept the variants.
+        email: b.primary_contact?.email || b.primary_contact?.mail || null,
+        phone:
+          b.primary_contact?.phone ||
+          b.primary_contact?.phoneNumber ||
+          b.primary_contact?.tel ||
+          null,
+        notes: b.notes || null,
       })),
     };
   });

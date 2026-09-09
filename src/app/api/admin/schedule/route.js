@@ -84,7 +84,12 @@ async function computeUsage(admin, slotIds) {
   return usage;
 }
 
-async function requireAdmin() {
+/**
+ * @param {string} permission "schedule" to read the day, "experiences" to change
+ *   it. External partners hold "schedule" so they can see their guests, but must
+ *   not be able to add, resize, cancel or delete availability.
+ */
+async function requireAdmin(permission = "schedule") {
   const supa = await createSupabaseServer().catch(() => null);
   if (!supa?.auth?.getSession) {
     console.error("[admin/schedule] Supabase server client unavailable");
@@ -107,7 +112,7 @@ async function requireAdmin() {
   if (!admin) return bad("Server not configured", 500);
 
   const { permissions } = await resolveStaffAccess(user);
-  if (accessCan(permissions, "schedule")) return { user, admin };
+  if (accessCan(permissions, permission)) return { user, admin };
 
   return bad("Forbidden", 403);
 }
@@ -172,7 +177,7 @@ export async function GET(req) {
 /* ------------------------------ POST ----------------------------- */
 // POST: create a slot (prevents duplicates on exact same datetime per experience)
 export async function POST(req) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("experiences");
   if (isResponse(gate)) return gate;
 
   const { admin } = gate;
@@ -233,7 +238,7 @@ export async function POST(req) {
 /* ------------------------------- PUT ----------------------------- */
 // PUT: update totalSlots (ensure >= current booked + active holds)
 export async function PUT(req) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("experiences");
   if (isResponse(gate)) return gate;
 
   const { admin } = gate;
@@ -298,7 +303,7 @@ export async function PUT(req) {
 /* ------------------------------ PATCH ---------------------------- */
 // PATCH: toggle cancel/un-cancel a slot (body: { id, isCancelled })
 export async function PATCH(req) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("experiences");
   if (isResponse(gate)) return gate;
 
   const { admin } = gate;
@@ -330,7 +335,7 @@ export async function PATCH(req) {
 /* ----------------------------- DELETE ---------------------------- */
 // DELETE: remove a slot; if bookings or active holds exist, soft-cancel instead
 export async function DELETE(req) {
-  const gate = await requireAdmin();
+  const gate = await requireAdmin("experiences");
   if (isResponse(gate)) return gate;
 
   const { admin } = gate;

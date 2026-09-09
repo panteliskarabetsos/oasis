@@ -20,6 +20,7 @@ import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { AdminSlot } from "@/lib/types";
+import { PermissionGate } from "@/components/access";
 
 function dayKey(iso: string | Date): string {
   const d = new Date(iso);
@@ -27,7 +28,7 @@ function dayKey(iso: string | Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-export default function ScheduleScreen() {
+function ScheduleScreenContent() {
   const insets = useSafeAreaInsets();
   const { data: experiences, loading: expLoading } = useApi(() => api.adminExperiences());
   const [expId, setExpId] = useState<number | null>(null);
@@ -353,3 +354,11 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
 });
+
+export default function ScheduleScreen() {
+  return (
+    <PermissionGate permission="experiences">
+      <ScheduleScreenContent />
+    </PermissionGate>
+  );
+}

@@ -14,13 +14,14 @@ import type {
   DailyReport,
   DiscountCode,
   GiftCard,
+  ManifestSlot,
   Metrics,
   PaymentDetail,
   PaymentRow,
   Profile,
+  ReportKpis,
   Reservation,
   ReservationDetail,
-  ReportKpis,
   Voucher,
 } from "@/lib/types";
 
@@ -212,6 +213,16 @@ export const api = {
       .map((f: any) => f.secure_url || f.url)
       .filter(Boolean);
   },
+
+  /** Read-only daily manifest: tours for a range with their guest lists. */
+  manifest: (from: string, to: string, experienceId?: number | "all") =>
+    request<{ items: ManifestSlot[] }>(
+      `/api/admin/schedule/overview${qs({
+        from,
+        to,
+        ...(experienceId && experienceId !== "all" ? { experienceId } : {}),
+      })}`,
+    ),
 
   schedule: (experienceId: number, from?: string, to?: string) =>
     request<AdminSlot[]>(

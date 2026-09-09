@@ -28,6 +28,7 @@ import { useApi } from "@/hooks/useApi";
 import { useDebounced } from "@/hooks/useDebounced";
 import { api } from "@/lib/api";
 import type { Reservation } from "@/lib/types";
+import { PermissionGate } from "@/components/access";
 
 const STATUSES = ["all", "confirmed", "pending", "checked_in", "no_show", "cancelled"] as const;
 
@@ -50,7 +51,7 @@ export function statusTone(status?: string): "success" | "warning" | "danger" | 
   }
 }
 
-export default function BookingsScreen() {
+function BookingsScreenContent() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounced(query);
@@ -256,3 +257,11 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
 });
+
+export default function BookingsScreen() {
+  return (
+    <PermissionGate permission="bookings">
+      <BookingsScreenContent />
+    </PermissionGate>
+  );
+}

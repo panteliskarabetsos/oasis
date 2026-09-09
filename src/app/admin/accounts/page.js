@@ -764,6 +764,8 @@ export default function AdminAccountsPage() {
         return;
       }
 
+      const issuedPassword = addPw;
+
       form.reset();
       setAddEmail("");
       setAddPw("");
@@ -778,8 +780,12 @@ export default function AdminAccountsPage() {
       setSelectedIds(new Set());
 
       await fetchUsers();
-      setCreatedAdmin({ email, name, surname });
-      toast({ title: "Admin created", icon: Check });
+      setCreatedAdmin({ email, name, surname, password: issuedPassword });
+      toast(
+        data?.warning
+          ? { title: data.warning, type: "warning" }
+          : { title: "Admin created", icon: Check },
+      );
     } catch {
       setErrorMessage("Network error. Please try again.");
       setTimeout(() => setErrorMessage(""), 6000);
@@ -824,12 +830,20 @@ export default function AdminAccountsPage() {
         body: JSON.stringify(body),
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (res.ok) {
         setEditingUser(null);
-        toast({ title: "Admin updated", icon: Check });
+        // The API reports when per-user components could not be stored.
+        toast(
+          data?.warning
+            ? { title: data.warning, type: "warning" }
+            : { title: "Admin updated", icon: Check },
+        );
         startTransition(fetchUsers);
       } else {
-        toast({ title: "Update failed", type: "error" });
+        // Surface why. "Update failed" alone left no way to act on it.
+        toast({ title: data?.error || `Update failed (${res.status})`, type: "error" });
       }
     } catch {
       toast({ title: "Network error on update", type: "error" });

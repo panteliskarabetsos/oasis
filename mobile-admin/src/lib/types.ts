@@ -276,3 +276,25 @@ export type Profile = {
   phone?: string | null;
   dateOfBirth?: string | null;
 };
+
+/** A tour on the daily manifest, with the guests booked onto it. */
+export type ManifestBooking = {
+  id: number;
+  code: string;
+  pax: number | null;
+  guestName: string;
+  meetupPoint: string;
+  email?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+};
+
+export type ManifestSlot = {
+  id: number;
+  date: string;
+  experienceName: string;
+  totalSlots: number | null;
+  totalBooked: number;
+  isCancelled: boolean;
+  bookings: ManifestBooking[];
+};

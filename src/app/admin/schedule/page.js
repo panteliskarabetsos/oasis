@@ -11,6 +11,7 @@ import {
 } from "date-fns";
 
 import Icon from "../_ui/Icon";
+import { can, effectiveAccess } from "../_ui/nav";
 import {
   Badge,
   Button,
@@ -44,6 +45,17 @@ const groupSlotsByDay = (slots) =>
 const NO_PICKUP = /^no pickup set$/i;
 
 export default function SchedulePage() {
+  // Partners hold "schedule" but not "bookings", so the booking link has to be
+  // conditional or it is a dead end for exactly the people using this screen.
+  const [access, setAccess] = useState([]);
+  useEffect(() => {
+    fetch("/api/me", { cache: "no-store", credentials: "include" })
+      .then((r) => r.json())
+      .then((me) => setAccess(effectiveAccess(me?.role, me?.permissions)))
+      .catch(() => {});
+  }, []);
+  const canOpenBooking = can(access, "bookings");
+
   const [view, setView] = useState("day"); // 'day' | 'week'
   const [currentDate, setCurrentDate] = useState(new Date());
   const [experienceId, setExperienceId] = useState("all");
@@ -362,7 +374,9 @@ export default function SchedulePage() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 print:grid-cols-1 print:gap-5">
-                  {daySlots.map((slot) => <SlotCard key={slot.id} slot={slot} />)}
+                  {daySlots.map((slot) => (
+                    <SlotCard key={slot.id} slot={slot} canOpenBooking={canOpenBooking} />
+                  ))}
                 </div>
               </section>
             );
@@ -386,7 +400,7 @@ function Stat({ label, value, hint, accent }) {
   );
 }
 
-function SlotCard({ slot }) {
+function SlotCard({ slot, canOpenBooking }) {
   const booked = slot.totalBooked || 0;
   const cap = slot.totalSlots || 0;
   const pct = cap > 0 ? Math.min(100, (booked / cap) * 100) : 0;
@@ -424,37 +438,9 @@ function SlotCard({ slot }) {
 
       {slot.bookings?.length ? (
         <ul className="divide-y divide-[#f0ebe2] print:divide-dashed print:divide-gray-400">
-          {slot.bookings.map((b) => {
-            const noPickup = NO_PICKUP.test(b.meetupPoint || "");
-            return (
-              <li key={b.id} className="px-4 py-2.5">
-                <Link
-                  href={`/admin/bookings/${b.id}`}
-                  className="group flex items-center justify-between gap-3 print:pointer-events-none"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-[13.5px] font-semibold text-[#2a211a] group-hover:text-[#8b6f47]">
-                        {b.guestName}
-                      </span>
-                      <span className="shrink-0 rounded-full bg-[#f2ede4] px-2 py-0.5 text-[11px] font-semibold text-[#6b5c4d] print:border print:border-black print:bg-transparent">
-                        {b.pax} pax
-                      </span>
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px]">
-                      <Icon name="leaf" size={12} className={noPickup ? "text-[#c9a227]" : "text-[#6b8f6b]"} />
-                      <span className={`truncate ${noPickup ? "font-medium text-[#8a6412]" : "text-[#7a6a5f]"}`}>
-                        {b.meetupPoint}
-                      </span>
-                    </div>
-                  </div>
-                  <span className="shrink-0 font-mono text-[10.5px] text-[#9a8c7e] print:text-black">
-                    {b.code}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
+          {slot.bookings.map((b) => (
+            <GuestRow key={b.id} booking={b} canOpenBooking={canOpenBooking} />
+          ))}
         </ul>
       ) : (
         <p className="px-4 py-5 text-center text-[13px] italic text-[#9a8c7e] print:text-left">
@@ -469,6 +455,111 @@ function SlotCard({ slot }) {
         </div>
       ) : null}
     </Card>
+  );
+}
+
+/**
+ * One guest on the manifest. Tapping opens their contact details inline —
+ * a guide needs to phone a no-show, and the booking page they used to link to
+ * needs the "bookings" permission, which partners do not have.
+ */
+function GuestRow({ booking: b, canOpenBooking }) {
+  const [open, setOpen] = useState(false);
+  const noPickup = NO_PICKUP.test(b.meetupPoint || "");
+  const hasContact = Boolean(b.email || b.phone || b.notes);
+
+  return (
+    <li className="px-4 py-2.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="group flex w-full items-center justify-between gap-3 text-left print:pointer-events-none"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[13.5px] font-semibold text-[#2a211a] group-hover:text-[#8b6f47]">
+              {b.guestName}
+            </span>
+            <span className="shrink-0 rounded-full bg-[#f2ede4] px-2 py-0.5 text-[11px] font-semibold text-[#6b5c4d] print:border print:border-black print:bg-transparent">
+              {b.pax} pax
+            </span>
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px]">
+            <Icon name="leaf" size={12} className={noPickup ? "text-[#c9a227]" : "text-[#6b8f6b]"} />
+            <span className={`truncate ${noPickup ? "font-medium text-[#8a6412]" : "text-[#7a6a5f]"}`}>
+              {b.meetupPoint}
+            </span>
+          </div>
+        </div>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="font-mono text-[10.5px] text-[#9a8c7e] print:text-black">{b.code}</span>
+          <span className={`text-[#b0a294] transition-transform print:hidden ${open ? "rotate-90" : ""}`}>
+            <Icon name="external" size={12} />
+          </span>
+        </span>
+      </button>
+
+      {open ? (
+        <div className="mt-2.5 rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] p-3 print:hidden">
+          {hasContact ? (
+            <dl className="space-y-2 text-[12.5px]">
+              {b.phone ? (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-[#9a8c7e]">Phone</dt>
+                  <dd>
+                    <a href={`tel:${b.phone}`} className="font-medium text-[#8b6f47] hover:underline">
+                      {b.phone}
+                    </a>
+                  </dd>
+                </div>
+              ) : null}
+              {b.email ? (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="shrink-0 text-[#9a8c7e]">Email</dt>
+                  <dd className="min-w-0">
+                    <a
+                      href={`mailto:${b.email}`}
+                      className="block truncate font-medium text-[#8b6f47] hover:underline"
+                    >
+                      {b.email}
+                    </a>
+                  </dd>
+                </div>
+              ) : null}
+              {b.notes ? (
+                <div>
+                  <dt className="text-[#9a8c7e]">Notes</dt>
+                  <dd className="mt-0.5 whitespace-pre-wrap text-[#3f3127]">{b.notes}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : (
+            <p className="text-[12.5px] text-[#9a8c7e]">
+              No contact details on this booking.
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-[#f0ebe2] pt-2.5">
+            {b.phone ? (
+              <Button as="a" href={`tel:${b.phone}`} size="sm" variant="secondary">
+                Call
+              </Button>
+            ) : null}
+            {b.email ? (
+              <Button as="a" href={`mailto:${b.email}`} size="sm" variant="secondary">
+                Email
+              </Button>
+            ) : null}
+            {canOpenBooking ? (
+              <Button as={Link} href={`/admin/bookings/${b.id}`} size="sm" variant="ghost">
+                Open booking
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </li>
   );
 }
 

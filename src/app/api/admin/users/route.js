@@ -48,14 +48,18 @@ function readPermissions(value) {
 
 /** Surface a missing-column error as actionable guidance rather than a 500. */
 function permissionsColumnMissing(e) {
-  const msg = String(e?.message || "");
-  return e?.code === "42703" || /column .*permissions.* does not exist/i.test(msg);
-}
-const migrationNeeded = () =>
-  err(
-    "Custom permissions need the User.permissions column — run dump_sql/20260909_user_permissions.sql.",
-    501,
+  // Postgres reports 42703 (undefined_column), but PostgREST rejects an unknown
+  // column on a write with PGRST204 and "Could not find the 'permissions'
+  // column of 'User' in the schema cache" — which the old pattern missed, so an
+  // ordinary role change surfaced as a bare 500.
+  const code = String(e?.code || "");
+  const msg = [e?.message, e?.details, e?.hint].filter(Boolean).join(" ");
+  if (code === "42703" || code === "PGRST204") return true;
+  return (
+    /permissions/i.test(msg) &&
+    /(does not exist|could not find|schema cache|unknown column|no such column)/i.test(msg)
   );
+}
 const staffDenied = () =>
   err("Only a Super Admin can manage staff accounts.", 403);
 
@@ -270,9 +274,21 @@ export async function POST(req) {
         .single();
     }
 
-    if (upsertRes.error && permissionsColumnMissing(upsertRes.error)) {
-      if (createdAuthUserId) await admin.auth.admin.deleteUser(createdAuthUserId);
-      return migrationNeeded();
+    // Same as the update path: a missing permissions column must not block
+    // creating an ordinary staff account. Retry without the grants.
+    let permissionsSkipped = false;
+    if (
+      upsertRes.error &&
+      permissionsColumnMissing(upsertRes.error) &&
+      "permissions" in payload
+    ) {
+      const { permissions: _dropped, ...withoutPermissions } = payload;
+      permissionsSkipped = true;
+      upsertRes = await admin
+        .from("User")
+        .upsert(withoutPermissions, { onConflict: "auth_user_id" })
+        .select("id")
+        .single();
     }
 
     if (upsertRes.error) {
@@ -288,7 +304,19 @@ export async function POST(req) {
       return err("Failed to save profile", 500);
     }
 
-    return ok({ id: upsertRes.data?.id, authUserId: createdAuthUserId }, 201);
+    return ok(
+      {
+        id: upsertRes.data?.id,
+        authUserId: createdAuthUserId,
+        ...(permissionsSkipped
+          ? {
+              warning:
+                "Account created with its role. Per-user components were not saved — run dump_sql/20260909_user_permissions.sql to enable them.",
+            }
+          : {}),
+      },
+      201,
+    );
   } catch (e) {
     console.error("[admin/users] POST failed:", e);
 
@@ -396,9 +424,22 @@ export async function PUT(req) {
       )
       .single();
 
-    // Writing permissions before the migration has run is a setup problem, not
-    // a server fault — say so plainly instead of returning a 500.
-    if (upErr && permissionsColumnMissing(upErr)) return migrationNeeded();
+    // The permissions column is optional until the migration is applied. Rather
+    // than failing an ordinary role change, retry without it and report that the
+    // per-user grants were not saved.
+    let permissionsSkipped = false;
+    if (upErr && permissionsColumnMissing(upErr) && "permissions" in updates) {
+      const { permissions: _dropped, ...withoutPermissions } = updates;
+      permissionsSkipped = true;
+      ({ data: updated, error: upErr } = await admin
+        .from("User")
+        .update(withoutPermissions)
+        .eq("id", userId)
+        .select(
+          "id,auth_user_id,role,email,name,surname,phone,dateOfBirth,createdAt,notes",
+        )
+        .single());
+    }
     if (upErr) throw upErr;
 
     // Best-effort sync to Auth (role/email/metadata)
@@ -435,10 +476,21 @@ export async function PUT(req) {
       }
     }
 
-    return ok(updated);
+    return ok({
+      ...updated,
+      permissions: perms.list ?? normalizePermissions(updated?.permissions),
+      ...(permissionsSkipped
+        ? {
+            warning:
+              "Role saved. Per-user components were not — run dump_sql/20260909_user_permissions.sql to enable them.",
+          }
+        : {}),
+    });
   } catch (e) {
     console.error("[admin/users] PUT failed:", e);
-    return err("Failed to update user", 500);
+    // Staff-account management is Super Admin only, so the underlying reason is
+    // safe to show and saves guessing from a generic failure.
+    return err(e?.message ? `Failed to update user: ${e.message}` : "Failed to update user", 500);
   }
 }
 
