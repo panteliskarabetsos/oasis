@@ -1,4 +1,6 @@
 // src/components/ErrorMessage.js
+import LinkWithLoader from "@/app/components/LinkWithLoader";
+
 export default function ErrorMessage({ title, description, backHref }) {
     return (
       <main className="min-h-screen flex items-center justify-center text-center px-6 bg-[#f4f1ec] text-[#5a4a3f]">
