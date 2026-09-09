@@ -31,12 +31,32 @@ function dayKey(d: Date): string {
 }
 
 /** The guest QR encodes ".../bookings/BK-000123" (or a ticket ref) — pull the id. */
-function extractBookingId(raw: string): number | null {
-  const patterns = [/bookings?\/BK-?0*(\d{1,10})/i, /BK-?0*(\d{1,10})/i, /BOOKING-CHECKIN:0*(\d{1,10})/i, /(\d{1,10})/];
-  for (const p of patterns) {
-    const m = raw.match(p);
-    if (m) return Number(m[1]);
-  }
+/**
+ * Pull a booking reference out of whatever the QR contained.
+ *
+ * References are now random codes (BK-WD7A-FR1X), so this returns the reference
+ * as a string and lets the server resolve it. It deliberately does NOT fall
+ * back to "any digits anywhere": that rule turned BK-WD7A-FR1X into booking 7
+ * and would have admitted a different guest.
+ */
+function extractBookingRef(raw: string): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+
+  // Random code, with or without a URL around it.
+  const code = s.match(/BK[-\s]?([0-9A-Z]{4})[-\s]?([0-9A-Z]{4})\b/i);
+  if (code) return `BK-${code[1].toUpperCase()}-${code[2].toUpperCase()}`;
+
+  // Legacy "BK-000123" tickets, in a URL or on their own.
+  const legacy = s.match(/BK[-\s]?0*(\d{1,10})\b/i);
+  if (legacy) return legacy[1];
+
+  const explicit = s.match(/BOOKING-CHECKIN:0*(\d{1,10})/i);
+  if (explicit) return explicit[1];
+
+  // A bare number is a booking id — but only if that is all there is.
+  if (/^\d{1,10}$/.test(s)) return s;
+
   return null;
 }
 
@@ -59,7 +79,8 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 
 type ScanCard = {
   kind: "pending" | "success" | "already" | "error";
-  id?: number;
+  /** The scanned reference — a code like BK-WD7A-FR1X, or a legacy numeric id. */
+  id?: string;
   guestName?: string;
   code?: string;
   pax?: number;
@@ -191,9 +212,12 @@ function CheckinsScreenContent() {
   /** Enrich a scanned booking id with guest details — from today's manifest
    *  first, then the reservations API as a fallback. */
   /** Manifest-only lookup. Synchronous, so scan feedback never waits on the network. */
-  function lookupLocal(id: number): Partial<ScanCard> | null {
+  function lookupLocal(ref: string): Partial<ScanCard> | null {
+    const wanted = String(ref).toUpperCase();
     for (const slot of data?.slots ?? []) {
-      const hit = (slot.bookings ?? []).find((b) => b.id === id);
+      const hit = (slot.bookings ?? []).find(
+        (b) => String(b.code ?? "").toUpperCase() === wanted || String(b.id) === wanted,
+      );
       if (hit) {
         return {
           guestName: bookingName(hit),
@@ -210,9 +234,12 @@ function CheckinsScreenContent() {
     return null;
   }
 
-  async function lookupBooking(id: number): Promise<Partial<ScanCard>> {
+  async function lookupBooking(ref: string): Promise<Partial<ScanCard>> {
+    const wanted = String(ref).toUpperCase();
     for (const slot of data?.slots ?? []) {
-      const hit = (slot.bookings ?? []).find((b) => b.id === id);
+      const hit = (slot.bookings ?? []).find(
+        (b) => String(b.code ?? "").toUpperCase() === wanted || String(b.id) === wanted,
+      );
       if (hit) {
         return {
           guestName: bookingName(hit),
@@ -223,14 +250,15 @@ function CheckinsScreenContent() {
         };
       }
     }
+    // Not on today's manifest — ask the server, which resolves a code as well
+    // as a numeric id. (The reservations endpoint only understands ids.)
     try {
-      const res = await api.reservation(id);
-      const item = res.item;
+      const item = await api.checkinDetails(ref);
       return {
-        guestName: item.guest?.name ?? item.guestName ?? undefined,
-        code: item.code ?? `#${id}`,
-        pax: (item.counts?.adults ?? item.adults ?? 0) + (item.counts?.kids ?? item.kids ?? 0),
-        experienceName: item.experienceName ?? item.experience?.name ?? undefined,
+        guestName: item.guestName ?? undefined,
+        code: item.code ?? ref,
+        pax: item.pax ?? undefined,
+        experienceName: item.experienceName ?? undefined,
         time: item.startTime
           ? new Date(item.startTime).toLocaleString("en-GB", {
               day: "numeric",
@@ -242,7 +270,7 @@ function CheckinsScreenContent() {
         offManifest: true,
       };
     } catch {
-      return { code: `#${id}` };
+      return { code: ref };
     }
   }
 
@@ -279,8 +307,8 @@ function CheckinsScreenContent() {
     if (now - cooldownRef.current < 2000) return;
     cooldownRef.current = now;
 
-    const id = extractBookingId(raw);
-    if (!id) {
+    const ref = extractBookingRef(raw);
+    if (!ref) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
       playTone("error");
       showCard({ kind: "error", message: "Not a valid Oasis ticket code." });
@@ -289,34 +317,34 @@ function CheckinsScreenContent() {
     // Acknowledge the scan immediately. The guest's name comes straight from
     // today's manifest, so the operator sees who was scanned without waiting
     // for the round-trip that decides whether they're admitted.
-    const local = lookupLocal(id);
+    const local = lookupLocal(ref);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    showCard({ kind: "pending", id, ...(local ?? {}) });
+    showCard({ kind: "pending", id: ref, ...(local ?? {}) });
 
     try {
       const res = await withTimeout(
-        api.checkinAction(id, "checkin"),
+        api.checkinAction(ref, "checkin"),
         8000,
         "No answer from the server. Check the signal and scan again.",
       );
-      const details = local ?? (await lookupBooking(id));
+      const details = local ?? (await lookupBooking(ref));
       if (res.already) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
         playTone("already");
-        showCard({ kind: "already", id, ...details });
+        showCard({ kind: "already", id: ref, ...details });
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         playTone("success");
-        showCard({ kind: "success", id, ...details });
+        showCard({ kind: "success", id: ref, ...details });
       }
       refresh();
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
       playTone("error");
-      const details = local ?? (await lookupBooking(id));
+      const details = local ?? (await lookupBooking(ref));
       showCard({
         kind: "error",
-        id,
+        id: ref,
         ...details,
         message: e instanceof Error ? e.message : "Check-in failed.",
       });
