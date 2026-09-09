@@ -81,10 +81,21 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="manifest"
+        options={{
+          title: "Manifest",
+          href: can("schedule") ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="list-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="schedule"
         options={{
-          title: "Schedule",
-          href: can("schedule") ? undefined : null,
+          title: "Availability",
+          // Editing availability is a different privilege from reading the day.
+          href: can("experiences") ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="time-outline" size={size} color={color} />
           ),

@@ -23,6 +23,7 @@ import { colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { CheckinBooking } from "@/lib/types";
+import { PermissionGate } from "@/components/access";
 
 function dayKey(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -93,7 +94,7 @@ function bookingCode(b: CheckinBooking): string {
   return b.code ?? `BK-${String(b.id).padStart(6, "0")}`;
 }
 
-export default function CheckinsScreen() {
+function CheckinsScreenContent() {
   // Scanning a queue of guests means long stretches without touching the
   // screen; letting it auto-lock mid-queue is the single biggest field annoyance.
   useKeepAwake();
@@ -974,3 +975,11 @@ const styles = StyleSheet.create({
   },
   resultPrimaryText: { fontFamily: fonts.sansBold, fontSize: 13, color: "#1d160f" },
 });
+
+export default function CheckinsScreen() {
+  return (
+    <PermissionGate permission="checkins">
+      <CheckinsScreenContent />
+    </PermissionGate>
+  );
+}

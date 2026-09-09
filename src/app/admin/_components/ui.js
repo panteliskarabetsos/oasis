@@ -265,7 +265,9 @@ export function ToastHost({ toasts }) {
             "flex items-center gap-2 px-4 py-2 rounded-xl shadow border text-sm",
             type === "error"
               ? "bg-red-50 text-red-700 border-red-200"
-              : "bg-white text-[#3d3227] border-[#e0dcd4]"
+              : type === "warning"
+                ? "bg-[#fbf1dc] text-[#8a6412] border-[#f0e0bb]"
+                : "bg-white text-[#3d3227] border-[#e0dcd4]"
           )}
         >
           {Icon ? <Icon size={16} /> : null}

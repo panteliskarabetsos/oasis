@@ -312,6 +312,23 @@ const ok = (d, s = 200, headers = {}) =>
 const bad = (m, s = 400) => ok({ error: m }, s);
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+/**
+ * True when a write failed only because the column does not exist.
+ * PostgREST answers PGRST204 ("could not find the 'x' column ... in the schema
+ * cache"); raw Postgres answers 42703. `invoice.items` is a denormalised copy
+ * of invoice_line and is absent on some deployments, so a write must not depend
+ * on it.
+ */
+function unknownColumn(e, column) {
+  const code = String(e?.code || "");
+  const msg = [e?.message, e?.details, e?.hint].filter(Boolean).join(" ");
+  if (code === "42703" || code === "PGRST204") return true;
+  return (
+    new RegExp(column, "i").test(msg) &&
+    /(does not exist|could not find|schema cache|unknown column)/i.test(msg)
+  );
+}
+
 async function requireAdmin() {
   const supa = await createSupabaseServer();
   const {
@@ -630,12 +647,23 @@ export async function PATCH(req, ctx) {
 
   if (!Object.keys(patch).length) return bad("Nothing to update.", 400);
 
-  const { data: updated, error: eUpd } = await admin
+  let { data: updated, error: eUpd } = await admin
     .from("invoice")
     .update(patch)
     .eq("id", id)
     .select("*")
     .maybeSingle();
+
+  // invoice.items is optional; invoice_line below is the source of truth.
+  if (eUpd && "items" in patch && unknownColumn(eUpd, "items")) {
+    const { items: _dropped, ...withoutItems } = patch;
+    ({ data: updated, error: eUpd } = await admin
+      .from("invoice")
+      .update(withoutItems)
+      .eq("id", id)
+      .select("*")
+      .maybeSingle());
+  }
 
   if (eUpd) return bad(eUpd.message || "Update failed", 500);
   if (!updated) return bad("Invoice not found", 404);
