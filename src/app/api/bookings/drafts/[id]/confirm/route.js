@@ -706,34 +706,6 @@ async function ensureDraftUserId(admin, draft, session) {
     return data || null;
   }
 
-  /**
-   * Stamp BookingDraft.promoJson so we don't increment twice.
-   */
-  async function stampDraftRedeemed(admin, draftId, payload) {
-    const { data: prev } = await admin
-      .from("BookingDraft")
-      .select("promoJson")
-      .eq("id", draftId)
-      .maybeSingle();
-
-    const merged = {
-      ...(prev?.promoJson && typeof prev.promoJson === "object"
-        ? prev.promoJson
-        : {}),
-      redeemedAt: payload.at,
-      redeemedOnTable: payload.table,
-      redeemedCode: payload.code,
-      redeemedBookingId: payload.bookingId ?? null,
-      skipped: !!payload.skipped,
-      reason: payload.reason || null,
-      newCount: payload.newCount ?? null,
-    };
-
-    await admin
-      .from("BookingDraft")
-      .update({ promoJson: merged })
-      .eq("id", draftId);
-  }
 
   async function getUserByEmail(email) {
     const { data } = await admin
@@ -814,6 +786,40 @@ async function ensureDraftUserId(admin, draft, session) {
 
   const pc = await getUserById(pcId);
   return pc?.id ?? null;
+}
+
+/**
+ * NOTE: this used to be declared inside ensureDraftUserId(), which put it out
+ * of scope at every call site below — each one threw a ReferenceError. It only
+ * uses its own arguments, so it lives at module scope now.
+ */
+/**
+ * Stamp BookingDraft.promoJson so we don't increment twice.
+ */
+async function stampDraftRedeemed(admin, draftId, payload) {
+  const { data: prev } = await admin
+    .from("BookingDraft")
+    .select("promoJson")
+    .eq("id", draftId)
+    .maybeSingle();
+
+  const merged = {
+    ...(prev?.promoJson && typeof prev.promoJson === "object"
+      ? prev.promoJson
+      : {}),
+    redeemedAt: payload.at,
+    redeemedOnTable: payload.table,
+    redeemedCode: payload.code,
+    redeemedBookingId: payload.bookingId ?? null,
+    skipped: !!payload.skipped,
+    reason: payload.reason || null,
+    newCount: payload.newCount ?? null,
+  };
+
+  await admin
+    .from("BookingDraft")
+    .update({ promoJson: merged })
+    .eq("id", draftId);
 }
 /**
  * Increment redemptionCount for a promo code in DiscountCode or Voucher
