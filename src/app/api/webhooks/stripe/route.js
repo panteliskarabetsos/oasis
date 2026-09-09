@@ -112,11 +112,20 @@ async function sendConfirmationEmail({
   invoiceId,
 }) {
   // 1) Load booking (email + amounts)
-  const { data: b } = await admin
+  // `code` is the random reference the customer quotes back to us; without it
+  // the email falls back to "BK-" plus the row id, which is guessable.
+  let { data: b } = await admin
     .from("booking")
-    .select("id, primary_contact, totalPaidAmount, currency")
+    .select("id, code, primary_contact, totalPaidAmount, currency")
     .eq("id", bookingId)
     .single();
+  if (!b) {
+    ({ data: b } = await admin
+      .from("booking")
+      .select("id, primary_contact, totalPaidAmount, currency")
+      .eq("id", bookingId)
+      .single());
+  }
   if (!b?.primary_contact?.email) return;
   const to = b.primary_contact.email;
 

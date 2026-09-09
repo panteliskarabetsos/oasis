@@ -19,7 +19,8 @@ import {
   Skeleton,
   inputClass,
 } from "@/app/admin/_ui";
-import { ScaledNumberInput, TextListInput } from "@/app/admin/_ui/client";
+import { ScaledNumberInput } from "@/app/admin/_ui/client";
+import { COUNTRY_CODES } from "@/lib/phone";
 import { quoteShipping } from "@/lib/shop/shipping";
 
 /* -------------------------------- helpers -------------------------------- */
@@ -314,6 +315,17 @@ function DeliveryCard({ value, onChange, noWeight, weightsUnknown }) {
 
   const charging = value.enabled !== false;
 
+  // A country listed in two zones is ambiguous — the first zone wins — so the
+  // picker greys it out and says which zone already has it.
+  const claimedBy = (zoneIndex) => {
+    const map = new Map();
+    (value.zones || []).forEach((z, k) => {
+      if (k === zoneIndex) return;
+      for (const c of z.countries || []) map.set(c, z.label || `Zone ${k + 1}`);
+    });
+    return map;
+  };
+
   // Priced with the very function the storefront and checkout use, so what is
   // shown here is what a customer will actually be charged.
   const preview = quoteShipping({
@@ -484,18 +496,16 @@ function DeliveryCard({ value, onChange, noWeight, weightsUnknown }) {
                       className={inputClass}
                     />
                   </Field>
-                  <Field
-                    label="Countries"
-                    hint="Two-letter codes, comma separated. * means everywhere else."
-                  >
-                    <TextListInput
-                      values={z.countries}
+                  <div>
+                    <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">
+                      Countries
+                    </span>
+                    <ZoneCountries
+                      codes={z.countries}
                       onChange={(countries) => setZone(i, { countries })}
-                      transform={(c) => c.toUpperCase()}
-                      placeholder="GR, CY"
-                      className="font-mono"
+                      claimedElsewhere={claimedBy(i)}
                     />
-                  </Field>
+                  </div>
                 </div>
 
                 <div className="mt-3 grid gap-3 sm:grid-cols-4">
@@ -695,5 +705,92 @@ function EmailCard({
         </div>
       </div>
     </Card>
+  );
+}
+
+/* ---------------------------- zone country picker ------------------------- */
+
+const ANYWHERE = "*";
+
+function ZoneCountries({ codes, onChange, claimedElsewhere }) {
+  const selected = Array.isArray(codes) ? codes : [];
+  const known = new Map(COUNTRY_CODES.map((c) => [c.iso, c]));
+
+  const add = (code) => {
+    if (!code || selected.includes(code)) return;
+    onChange([...selected, code]);
+  };
+  const remove = (code) => onChange(selected.filter((c) => c !== code));
+
+  const available = COUNTRY_CODES.filter((c) => !selected.includes(c.iso));
+
+  return (
+    <div>
+      {selected.length ? (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {selected.map((code) => {
+            const country = known.get(code);
+            const claimed = claimedElsewhere.get(code);
+            const unknown = code !== ANYWHERE && !country;
+            return (
+              <span
+                key={code}
+                title={
+                  claimed
+                    ? `Already covered by “${claimed}” — that zone wins`
+                    : unknown
+                      ? "Not a country code we recognise"
+                      : undefined
+                }
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] ${
+                  claimed || unknown
+                    ? "border-[#e8d9b0] bg-[#fdf7e8] text-[#8a6412]"
+                    : "border-[#e6e0d6] bg-white text-[#3f3127]"
+                }`}
+              >
+                {code === ANYWHERE ? (
+                  <>🌍 Everywhere else</>
+                ) : (
+                  <>
+                    {country?.flag ?? ""} {country?.name ?? code}
+                  </>
+                )}
+                {claimed || unknown ? <Icon name="warning" size={11} /> : null}
+                <button
+                  type="button"
+                  onClick={() => remove(code)}
+                  aria-label={`Remove ${country?.name ?? code}`}
+                  className="rounded-full p-0.5 text-[#9a8c7e] hover:bg-[#f2ede4] hover:text-[#a33c22]"
+                >
+                  <Icon name="x" size={11} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <Select
+        value=""
+        onChange={(e) => add(e.target.value)}
+        aria-label="Add a country to this destination"
+      >
+        <option value="">Add a country…</option>
+        {!selected.includes(ANYWHERE) ? (
+          <option value={ANYWHERE}>🌍 Everywhere else</option>
+        ) : null}
+        {available.map((c) => (
+          <option key={c.iso} value={c.iso}>
+            {c.flag} {c.name}
+          </option>
+        ))}
+      </Select>
+
+      {!selected.length ? (
+        <Muted className="mt-1 text-[11px]">
+          Pick at least one, or this destination will never match.
+        </Muted>
+      ) : null}
+    </div>
   );
 }

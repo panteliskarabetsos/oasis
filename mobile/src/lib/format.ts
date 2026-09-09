@@ -44,10 +44,20 @@ export function formatDateTime(iso?: string | null): string {
   return `${formatDate(iso)} · ${formatTime(iso)}`;
 }
 
-/** BK-000123 style reference from a numeric booking id. */
-export function bookingRef(id?: number | string | null): string {
-  const n = Number(id ?? 0);
-  return `BK-${String(n).padStart(6, "0")}`;
+/**
+ * The reference to show for a booking.
+ *
+ * New bookings carry a random `code` (BK-XXXX-XXXX) so one reference cannot be
+ * used to guess the next. Anything booked before that falls back to the old
+ * "BK-" plus row id, which is still what its confirmation email says.
+ */
+export function bookingRef(
+  booking?: { id?: number | string | null; code?: string | null } | number | string | null,
+): string {
+  if (typeof booking === "string") return booking;
+  if (booking && typeof booking === "object" && booking.code) return booking.code;
+  const id = typeof booking === "number" ? booking : (booking as { id?: number })?.id;
+  return `BK-${String(Number(id ?? 0)).padStart(6, "0")}`;
 }
 
 /** yyyy-mm-dd in local time (for calendar keys). */

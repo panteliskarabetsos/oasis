@@ -115,6 +115,8 @@ export type PromoValidation = {
 
 export type MyBooking = {
   id: number;
+  /** Random reference; absent on bookings made before codes existed. */
+  code?: string | null;
   status?: string;
   createdAt?: string;
   startTime?: string;
