@@ -4,30 +4,31 @@ import React from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Store,
-  LayoutDashboard,
-  PackageSearch,
-  ListOrdered,
-  Image as ImageIcon,
-  Mail,
-  Settings,
-  RefreshCw,
-  Search,
-  Plus,
-  Eye,
-  Trash2,
-  Edit,
+  ArrowDown,
+  ArrowUp,
   ArrowUpDown,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Loader2,
+  Edit,
   Euro,
+  ExternalLink,
+  Eye,
+  Image as ImageIcon,
+  LayoutDashboard,
+  ListOrdered,
+  Loader2,
+  Mail,
+  PackageSearch,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  Store,
   ToggleLeft,
   ToggleRight,
-  ArrowUp,
-  ArrowDown,
+  Trash2,
   X,
-  CheckCircle2,
 } from "lucide-react";
 
 // shadcn/ui
@@ -86,19 +87,20 @@ function inputFromCents(cents) {
    Visual tokens
 ------------------------------------------------------------- */
 const ui = {
-  page: "min-h-screen bg-gradient-to-b from-zinc-50 via-stone-50 to-amber-50/40 text-zinc-900",
-  container: "mx-auto max-w-7xl px-4 sm:px-6 py-8",
+  page: "min-h-screen bg-[#f7f4ef] text-[#2a211a]",
+  container: "mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8",
   panel:
-    "rounded-2xl border border-zinc-200/70 bg-white/70 backdrop-blur shadow-sm",
-  card: "rounded-2xl border border-zinc-200/70 bg-white shadow-sm",
+    "rounded-2xl border border-[#e6e0d6] bg-white shadow-[0_1px_2px_rgba(42,33,26,0.04)]",
+  card:
+    "rounded-2xl border border-[#e6e0d6] bg-white shadow-[0_1px_2px_rgba(42,33,26,0.04)]",
   softCard:
-    "rounded-2xl border border-zinc-200/70 bg-white/70 backdrop-blur shadow-sm",
-  muted: "text-zinc-600",
-  brand: "text-zinc-900",
-  accent: "text-amber-700",
-  outlineBtn: "border-zinc-200 bg-white hover:bg-zinc-50",
-  dangerBtn: "border-red-200 text-red-600 hover:bg-red-50",
-  primaryBtn: "bg-zinc-900 text-white hover:bg-zinc-800",
+    "rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] shadow-[0_1px_2px_rgba(42,33,26,0.04)]",
+  muted: "text-[#7a6a5f]",
+  brand: "text-[#2a211a]",
+  accent: "text-[#8b6f47]",
+  outlineBtn: "border-[#e6e0d6] bg-white hover:border-[#c9b393] hover:bg-[#fdfbf7]",
+  dangerBtn: "border-[#f3d5cb] text-[#a33c22] hover:bg-[#fbeae5]",
+  primaryBtn: "bg-[#8b6f47] text-white hover:bg-[#7a6039]",
 };
 
 /* -------------------------------------------------------------
@@ -149,57 +151,39 @@ export default function AdminEshopManagePage() {
   return (
     <div className={ui.page}>
       <div className={ui.container}>
-        {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
-              <Store className="h-5 w-5 text-zinc-900" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-semibold tracking-tight">
-                  E-shop Manager
-                </h1>
-                <Badge className="rounded-full bg-amber-100 text-amber-800 hover:bg-amber-100">
-                  Admin
-                </Badge>
-              </div>
-              <p className={cx("text-sm", ui.muted)}>
-                Manage products, orders, images, subscribers and shop
-                availability.
-              </p>
-            </div>
+        <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#b89a6b]">
+              Growth
+            </p>
+            <h1 className="font-serif text-[26px] leading-tight text-[#2a211a]">e-Shop</h1>
+            <p className="mt-1.5 text-[13px] text-[#7a6a5f]">
+              Products, orders, images, subscribers and shop availability.
+            </p>
           </div>
-
           <div className="flex flex-wrap items-center gap-2">
             <Link
               href="/admin/eshop/new-product"
-              className={cx(
-                "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm shadow-sm transition",
-                ui.primaryBtn
-              )}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#8b6f47] px-4 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-[#7a6039]"
             >
-              <Plus className="h-4 w-4" />
-              New product
+              <Plus className="h-4 w-4" /> New product
             </Link>
-
-            <div className="hidden items-center gap-2 text-xs text-zinc-500 md:flex">
-              <kbd className="rounded-md border border-zinc-200 bg-white px-2 py-1">
-                g
-              </kbd>
-              <span>then</span>
-              <kbd className="rounded-md border border-zinc-200 bg-white px-2 py-1">
-                o/p/r/i/s/t
-              </kbd>
-            </div>
+            <a
+              href="/shop"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#e6e0d6] bg-white px-4 text-[13px] font-semibold text-[#3f3127] transition-colors hover:border-[#c9b393] hover:bg-[#fdfbf7]"
+            >
+              <ExternalLink className="h-4 w-4" /> Storefront
+            </a>
           </div>
-        </div>
+        </header>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[260px_1fr]">
           {/* Sidebar (desktop) */}
           <aside className={cx("hidden lg:block", ui.panel)}>
             <div className="p-3">
-              <div className="px-2 pb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <div className="px-2 pb-2 text-xs font-medium uppercase tracking-wide text-[#9a8c7e]">
                 Navigation
               </div>
               <div className="space-y-1">
@@ -214,9 +198,9 @@ export default function AdminEshopManagePage() {
                 ))}
               </div>
 
-              <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-3">
-                <div className="text-sm font-medium text-zinc-900">Tips</div>
-                <div className="mt-1 text-xs text-zinc-600">
+              <div className="mt-4 rounded-2xl border border-[#e6e0d6] bg-white p-3">
+                <div className="text-sm font-medium text-[#2a211a]">Tips</div>
+                <div className="mt-1 text-xs text-[#7a6a5f]">
                   Use quick keys: <span className="font-mono">g</span> then{" "}
                   <span className="font-mono">o/p/r/i/s/t</span>.
                 </div>
@@ -235,8 +219,8 @@ export default function AdminEshopManagePage() {
                     className={cx(
                       "inline-flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm transition",
                       tab === it.key
-                        ? "bg-zinc-900 text-white shadow-sm"
-                        : "bg-white hover:bg-zinc-50 border border-zinc-200 text-zinc-700"
+                        ? "bg-[#2a211a] text-white shadow-sm"
+                        : "bg-white hover:bg-[#faf8f4] border border-[#e6e0d6] text-[#6b5c4d]"
                     )}
                   >
                     <it.icon className="h-4 w-4" />
@@ -281,18 +265,18 @@ function NavItem({ active, onClick, icon: Icon, label }) {
       className={cx(
         "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition",
         active
-          ? "bg-zinc-900 text-white shadow-sm"
-          : "hover:bg-white/70 text-zinc-700"
+          ? "bg-[#2a211a] text-white shadow-sm"
+          : "hover:bg-white/70 text-[#6b5c4d]"
       )}
     >
       <span
         className={cx(
           "grid h-9 w-9 place-items-center rounded-xl border",
-          active ? "border-white/15 bg-white/10" : "border-zinc-200 bg-white"
+          active ? "border-white/15 bg-white/10" : "border-[#e6e0d6] bg-white"
         )}
       >
         <Icon
-          className={cx("h-4 w-4", active ? "text-white" : "text-zinc-800")}
+          className={cx("h-4 w-4", active ? "text-white" : "text-[#3a2f25]")}
         />
       </span>
       <span className="font-medium">{label}</span>
@@ -336,16 +320,16 @@ function OverviewSection() {
         <CardContent className="p-5 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="text-sm text-zinc-600">Dashboard</div>
-              <div className="text-xl font-semibold tracking-tight text-zinc-900">
+              <div className="text-sm text-[#7a6a5f]">Dashboard</div>
+              <div className="text-xl font-semibold tracking-tight text-[#2a211a]">
                 Store health at a glance
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="rounded-full bg-white text-zinc-700 border border-zinc-200 hover:bg-white">
+              <Badge className="rounded-full bg-white text-[#6b5c4d] border border-[#e6e0d6] hover:bg-white">
                 Live data
               </Badge>
-              <Badge className="rounded-full bg-white text-zinc-700 border border-zinc-200 hover:bg-white">
+              <Badge className="rounded-full bg-white text-[#6b5c4d] border border-[#e6e0d6] hover:bg-white">
                 Cache: no-store
               </Badge>
             </div>
@@ -388,22 +372,22 @@ function KpiCard({ title, value, icon, loading, error }) {
   return (
     <Card className={ui.card}>
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-zinc-600">
+        <CardTitle className="text-sm font-medium text-[#7a6a5f]">
           {title}
         </CardTitle>
-        <div className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-800">
+        <div className="grid h-9 w-9 place-items-center rounded-xl border border-[#e6e0d6] bg-[#faf8f4] text-[#3a2f25]">
           {icon}
         </div>
       </CardHeader>
       <CardContent>
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-zinc-500">
+          <div className="flex items-center gap-2 text-sm text-[#9a8c7e]">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : error ? (
-          <div className="text-sm text-red-600">{error}</div>
+          <div className="text-sm text-[#a33c22]">{error}</div>
         ) : (
-          <div className="text-2xl font-semibold tracking-tight text-zinc-900">
+          <div className="text-2xl font-semibold tracking-tight text-[#2a211a]">
             {value}
           </div>
         )}
@@ -555,13 +539,13 @@ function ProductsSection() {
                 <div className="text-lg font-semibold tracking-tight">
                   Products
                 </div>
-                <Badge className="rounded-full bg-white text-zinc-700 border border-zinc-200 hover:bg-white">
+                <Badge className="rounded-full bg-white text-[#6b5c4d] border border-[#e6e0d6] hover:bg-white">
                   {totals.total} total
                 </Badge>
                 <Badge className="rounded-full bg-green-50 text-green-700 border border-green-200 hover:bg-green-50">
                   {totals.active} active
                 </Badge>
-                <Badge className="rounded-full bg-zinc-50 text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+                <Badge className="rounded-full bg-[#faf8f4] text-[#6b5c4d] border border-[#e6e0d6] hover:bg-[#faf8f4]">
                   {totals.inactive} inactive
                 </Badge>
               </div>
@@ -589,7 +573,7 @@ function ProductsSection() {
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9a8c7e]" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -608,7 +592,7 @@ function ProductsSection() {
               </Button>
 
               <select
-                className="h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm"
+                className="h-10 rounded-xl border border-[#e6e0d6] bg-white px-3 text-sm"
                 value={`${sort.key}:${sort.dir}`}
                 onChange={(e) => {
                   const [k, d] = e.target.value.split(":");
@@ -627,7 +611,7 @@ function ProductsSection() {
               </select>
 
               <select
-                className="h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm"
+                className="h-10 rounded-xl border border-[#e6e0d6] bg-white px-3 text-sm"
                 value={size}
                 onChange={(e) => {
                   setSize(Number(e.target.value || 10));
@@ -661,8 +645,8 @@ function ProductsSection() {
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-zinc-50 text-zinc-600">
-                <tr className="border-b border-zinc-200">
+              <thead className="bg-[#faf8f4] text-[#7a6a5f]">
+                <tr className="border-b border-[#e6e0d6]">
                   <ThSort
                     onClick={() => sortBy("title")}
                     active={sort.key === "title"}
@@ -710,7 +694,7 @@ function ProductsSection() {
                   <tr>
                     <td
                       colSpan={7}
-                      className="px-4 py-10 text-center text-red-600"
+                      className="px-4 py-10 text-center text-[#a33c22]"
                     >
                       {error}
                     </td>
@@ -740,28 +724,28 @@ function ProductsSection() {
                   pageRows.map((p) => (
                     <tr
                       key={p.id}
-                      className="border-b border-zinc-100 hover:bg-zinc-50/60 transition"
+                      className="border-b border-[#f2ede4] hover:bg-[#faf8f4]/60 transition"
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-200 bg-white">
-                            <span className="text-xs font-semibold text-zinc-700">
+                          <div className="grid h-9 w-9 place-items-center rounded-xl border border-[#e6e0d6] bg-white">
+                            <span className="text-xs font-semibold text-[#6b5c4d]">
                               {String(p.title || "P")
                                 .slice(0, 1)
                                 .toUpperCase()}
                             </span>
                           </div>
                           <div className="min-w-0">
-                            <div className="truncate font-medium text-zinc-900">
+                            <div className="truncate font-medium text-[#2a211a]">
                               {p.title}
                             </div>
-                            <div className="text-xs text-zinc-500">
+                            <div className="text-xs text-[#9a8c7e]">
                               ID: {p.id}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-zinc-600">{p.slug}</td>
+                      <td className="px-4 py-3 text-[#7a6a5f]">{p.slug}</td>
                       <td className="px-4 py-3">
                         <StockCell product={p} onSaved={fetchProducts} />
                       </td>
@@ -775,7 +759,7 @@ function ProductsSection() {
                             "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition",
                             p.active
                               ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
-                              : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                              : "border-[#e6e0d6] bg-white text-[#6b5c4d] hover:bg-[#faf8f4]"
                           )}
                           title="Toggle active"
                         >
@@ -791,7 +775,7 @@ function ProductsSection() {
                           {p.active ? "Active" : "Inactive"}
                         </button>
                       </td>
-                      <td className="px-4 py-3 text-zinc-600">
+                      <td className="px-4 py-3 text-[#7a6a5f]">
                         {formatDate(p.updated_at || p.updatedAt)}
                       </td>
                       <td className="px-4 py-3">
@@ -807,7 +791,7 @@ function ProductsSection() {
 
                           <Link
                             href={`/admin/eshop/products/${p.id}/images`}
-                            className="inline-flex items-center rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                            className="inline-flex items-center rounded-xl border border-[#e6e0d6] bg-white px-3 py-2 text-sm hover:bg-[#faf8f4]"
                           >
                             <ImageIcon className="mr-2 h-4 w-4" />
                             Images
@@ -833,7 +817,7 @@ function ProductsSection() {
                   <tr>
                     <td colSpan={7} className="px-4 py-3">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <span className="text-xs text-zinc-600">
+                        <span className="text-xs text-[#7a6a5f]">
                           {prepared.length} items • page {page} of {maxPage}
                         </span>
                         <div className="flex items-center gap-2">
@@ -950,18 +934,18 @@ function StockCell({ product, onSaved }) {
             setEditing(false);
           }
         }}
-        className="w-20 rounded-lg border border-zinc-300 px-2 py-1 text-sm focus:border-zinc-900 focus:outline-none"
+        className="w-20 rounded-lg border border-[#d9d0c3] px-2 py-1 text-sm focus:border-[#2a211a] focus:outline-none"
       />
     );
   }
 
   const tone = !known
-    ? "text-zinc-400"
+    ? "text-[#b0a294]"
     : qty === 0
-      ? "bg-red-50 text-red-700 ring-red-200"
+      ? "bg-[#fbeae5] text-[#a33c22] ring-[#f3d5cb]"
       : qty <= 5
-        ? "bg-amber-50 text-amber-800 ring-amber-200"
-        : "bg-zinc-50 text-zinc-700 ring-zinc-200";
+        ? "bg-[#fbf1dc] text-[#8a6412] ring-[#f0e0bb]"
+        : "bg-[#faf8f4] text-[#6b5c4d] ring-[#e6e0d6]";
 
   return (
     <button
@@ -985,8 +969,8 @@ function FilterPill({ active, children, onClick }) {
       className={cx(
         "rounded-full px-3 py-1.5 text-xs font-medium transition border",
         active
-          ? "bg-zinc-900 text-white border-zinc-900"
-          : "bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50"
+          ? "bg-[#2a211a] text-white border-[#2a211a]"
+          : "bg-white text-[#6b5c4d] border-[#e6e0d6] hover:bg-[#faf8f4]"
       )}
     >
       {children}
@@ -999,14 +983,14 @@ function ThSort({ children, onClick, active, dir }) {
     <th className="px-4 py-3 text-left">
       <button
         onClick={onClick}
-        className="inline-flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-zinc-100 transition"
+        className="inline-flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-[#f2ede4] transition"
       >
         <span>{children}</span>
-        <span className="text-zinc-400">
+        <span className="text-[#b0a294]">
           <ArrowUpDown className="h-4 w-4" />
         </span>
         {active ? (
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-[#9a8c7e]">
             {dir === "asc" ? "↑" : "↓"}
           </span>
         ) : null}
@@ -1019,9 +1003,9 @@ function SkeletonRows({ cols }) {
   return (
     <>
       {Array.from({ length: 7 }).map((_, i) => (
-        <tr key={i} className="border-b border-zinc-100">
+        <tr key={i} className="border-b border-[#f2ede4]">
           <td colSpan={cols} className="px-4 py-4">
-            <div className="h-4 w-full animate-pulse rounded bg-zinc-200/60" />
+            <div className="h-4 w-full animate-pulse rounded bg-[#e6e0d6]/60" />
           </td>
         </tr>
       ))}
@@ -1031,12 +1015,12 @@ function SkeletonRows({ cols }) {
 
 function EmptyState({ title, subtitle, action }) {
   return (
-    <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-8 text-center">
-      <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-2xl border border-zinc-200 bg-zinc-50">
-        <PackageSearch className="h-5 w-5 text-zinc-700" />
+    <div className="rounded-2xl border border-dashed border-[#e6e0d6] bg-white p-8 text-center">
+      <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-2xl border border-[#e6e0d6] bg-[#faf8f4]">
+        <PackageSearch className="h-5 w-5 text-[#6b5c4d]" />
       </div>
-      <div className="text-base font-semibold text-zinc-900">{title}</div>
-      <div className="mx-auto mt-1 max-w-md text-sm text-zinc-600">
+      <div className="text-base font-semibold text-[#2a211a]">{title}</div>
+      <div className="mx-auto mt-1 max-w-md text-sm text-[#7a6a5f]">
         {subtitle}
       </div>
       {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
@@ -1125,11 +1109,11 @@ function ProductModal({ existing, onClose, onSaved }) {
         className="relative w-full max-w-2xl"
       >
         <Card className={cx(ui.card, "overflow-hidden")}>
-          <CardHeader className="border-b border-zinc-200 bg-zinc-50">
+          <CardHeader className="border-b border-[#e6e0d6] bg-[#faf8f4]">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <CardTitle className="text-lg">Edit product</CardTitle>
-                <div className="mt-1 text-sm text-zinc-600">
+                <div className="mt-1 text-sm text-[#7a6a5f]">
                   ID: {existing.id}
                 </div>
               </div>
@@ -1145,7 +1129,7 @@ function ProductModal({ existing, onClose, onSaved }) {
 
           <CardContent className="p-5 sm:p-6 space-y-4">
             {err ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <div className="rounded-xl border border-[#f3d5cb] bg-[#fbeae5] px-3 py-2 text-sm text-[#a33c22]">
                 {err}
               </div>
             ) : null}
@@ -1186,13 +1170,13 @@ function ProductModal({ existing, onClose, onSaved }) {
                 onChange={setSku}
               />
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-zinc-700">
+                <span className="mb-1 block text-xs font-medium text-[#6b5c4d]">
                   Category
                 </span>
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
+                  className="w-full rounded-lg border border-[#d9d0c3] px-3 py-2 text-sm focus:border-[#2a211a] focus:outline-none"
                 >
                   <option value="clothing">Clothing</option>
                   <option value="food">Food</option>
@@ -1200,11 +1184,11 @@ function ProductModal({ existing, onClose, onSaved }) {
                 </select>
               </label>
               <div className="space-y-1">
-                <div className="text-sm font-medium text-zinc-900">
+                <div className="text-sm font-medium text-[#2a211a]">
                   Currency
                 </div>
                 <select
-                  className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm"
+                  className="h-10 w-full rounded-xl border border-[#e6e0d6] bg-white px-3 text-sm"
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
                 >
@@ -1212,7 +1196,7 @@ function ProductModal({ existing, onClose, onSaved }) {
                   <option value="USD">USD</option>
                   <option value="GBP">GBP</option>
                 </select>
-                <div className="text-xs text-zinc-500">
+                <div className="text-xs text-[#9a8c7e]">
                   Must match how you charge customers.
                 </div>
               </div>
@@ -1225,10 +1209,10 @@ function ProductModal({ existing, onClose, onSaved }) {
               placeholder="Short description for the storefront…"
             />
 
-            <div className="flex items-center justify-between rounded-2xl border border-zinc-200 bg-white p-4">
+            <div className="flex items-center justify-between rounded-2xl border border-[#e6e0d6] bg-white p-4">
               <div>
-                <div className="text-sm font-medium text-zinc-900">Active</div>
-                <div className="text-xs text-zinc-600">
+                <div className="text-sm font-medium text-[#2a211a]">Active</div>
+                <div className="text-xs text-[#7a6a5f]">
                   Visible and purchasable in the store.
                 </div>
               </div>
@@ -1302,7 +1286,7 @@ function OrdersSection() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-lg font-semibold tracking-tight">Orders</div>
-              <div className="text-sm text-zinc-600">
+              <div className="text-sm text-[#7a6a5f]">
                 Review payments and fulfillment status.
               </div>
             </div>
@@ -1310,7 +1294,7 @@ function OrdersSection() {
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
-                className="h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm"
+                className="h-10 rounded-xl border border-[#e6e0d6] bg-white px-3 text-sm"
               >
                 <option value="all">All statuses</option>
                 <option value="pending">Pending</option>
@@ -1320,7 +1304,7 @@ function OrdersSection() {
               </select>
 
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9a8c7e]" />
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
@@ -1346,8 +1330,8 @@ function OrdersSection() {
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-zinc-50 text-zinc-600">
-                <tr className="border-b border-zinc-200">
+              <thead className="bg-[#faf8f4] text-[#7a6a5f]">
+                <tr className="border-b border-[#e6e0d6]">
                   <th className="px-4 py-3 text-left">Order #</th>
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Total</th>
@@ -1372,9 +1356,9 @@ function OrdersSection() {
                   orders.map((o) => (
                     <tr
                       key={o.id}
-                      className="border-b border-zinc-100 hover:bg-zinc-50/60 transition"
+                      className="border-b border-[#f2ede4] hover:bg-[#faf8f4]/60 transition"
                     >
-                      <td className="px-4 py-3 font-medium text-zinc-900">
+                      <td className="px-4 py-3 font-medium text-[#2a211a]">
                         {o.id}
                       </td>
                       <td className="px-4 py-3">
@@ -1383,10 +1367,10 @@ function OrdersSection() {
                       <td className="px-4 py-3 font-medium">
                         {formatCents(o.total_cents, o.currency)}
                       </td>
-                      <td className="px-4 py-3 text-zinc-600">
+                      <td className="px-4 py-3 text-[#7a6a5f]">
                         {formatDate(o.placed_at || o.created_at)}
                       </td>
-                      <td className="px-4 py-3 text-zinc-600">
+                      <td className="px-4 py-3 text-[#7a6a5f]">
                         {o.stripe_payment_intent_id ? "Stripe" : "—"}
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -1417,16 +1401,16 @@ function OrdersSection() {
 
 function StatusBadge({ status }) {
   const map = {
-    pending: "bg-amber-50 text-amber-700 border-amber-200",
+    pending: "bg-[#fbf1dc] text-[#8a6412] border-amber-200",
     paid: "bg-green-50 text-green-700 border-green-200",
     fulfilled: "bg-blue-50 text-blue-700 border-blue-200",
-    cancelled: "bg-red-50 text-red-700 border-red-200",
+    cancelled: "bg-[#fbeae5] text-[#a33c22] border-[#f3d5cb]",
   };
   return (
     <span
       className={cx(
         "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
-        map[status] || "bg-zinc-50 text-zinc-700 border-zinc-200"
+        map[status] || "bg-[#faf8f4] text-[#6b5c4d] border-[#e6e0d6]"
       )}
     >
       {status}
@@ -1495,14 +1479,14 @@ function OrderDrawer({ orderId, onClose }) {
         transition={{ duration: 0.18 }}
         className="h-full w-full max-w-xl overflow-auto bg-white shadow-2xl"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-200 bg-white px-5 py-4">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#e6e0d6] bg-white px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-2xl border border-zinc-200 bg-zinc-50">
-              <ListOrdered className="h-5 w-5 text-zinc-800" />
+            <div className="grid h-10 w-10 place-items-center rounded-2xl border border-[#e6e0d6] bg-[#faf8f4]">
+              <ListOrdered className="h-5 w-5 text-[#3a2f25]" />
             </div>
             <div>
-              <div className="text-sm text-zinc-600">Order</div>
-              <div className="font-semibold tracking-tight text-zinc-900">
+              <div className="text-sm text-[#7a6a5f]">Order</div>
+              <div className="font-semibold tracking-tight text-[#2a211a]">
                 #{orderId}
               </div>
             </div>
@@ -1514,11 +1498,11 @@ function OrderDrawer({ orderId, onClose }) {
 
         <div className="p-5 space-y-5">
           {loading ? (
-            <div className="text-zinc-500">
+            <div className="text-[#9a8c7e]">
               <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : err ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="rounded-xl border border-[#f3d5cb] bg-[#fbeae5] px-3 py-2 text-sm text-[#a33c22]">
               {err}
             </div>
           ) : (
@@ -1554,8 +1538,8 @@ function OrderDrawer({ orderId, onClose }) {
                 <CardContent className="p-0">
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-sm">
-                      <thead className="bg-zinc-50 text-zinc-600">
-                        <tr className="border-b border-zinc-200">
+                      <thead className="bg-[#faf8f4] text-[#7a6a5f]">
+                        <tr className="border-b border-[#e6e0d6]">
                           <th className="px-3 py-2 text-left">Product</th>
                           <th className="px-3 py-2 text-left">Qty</th>
                           <th className="px-3 py-2 text-left">Unit</th>
@@ -1564,7 +1548,7 @@ function OrderDrawer({ orderId, onClose }) {
                       </thead>
                       <tbody>
                         {(data.items || []).map((it) => (
-                          <tr key={it.id} className="border-b border-zinc-100">
+                          <tr key={it.id} className="border-b border-[#f2ede4]">
                             <td className="px-3 py-2">{it.title_snapshot}</td>
                             <td className="px-3 py-2">{it.quantity}</td>
                             <td className="px-3 py-2">
@@ -1620,11 +1604,11 @@ function OrderDrawer({ orderId, onClose }) {
 
 function InfoRow({ label, value }) {
   return (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
+    <div className="rounded-2xl border border-[#e6e0d6] bg-white p-4">
+      <div className="text-xs uppercase tracking-wide text-[#9a8c7e]">
         {label}
       </div>
-      <div className="mt-1 text-sm text-zinc-900">{value}</div>
+      <div className="mt-1 text-sm text-[#2a211a]">{value}</div>
     </div>
   );
 }
@@ -1718,14 +1702,14 @@ function ImagesSection() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="text-lg font-semibold tracking-tight">Images</div>
-              <div className="text-sm text-zinc-600">
+              <div className="text-sm text-[#7a6a5f]">
                 Add and order product gallery images.
               </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
               <div>
-                <div className="text-xs font-medium text-zinc-600">
+                <div className="text-xs font-medium text-[#7a6a5f]">
                   Product ID
                 </div>
                 <Input
@@ -1783,7 +1767,7 @@ function ImagesSection() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-zinc-500">
+            <div className="text-[#9a8c7e]">
               <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : images.length === 0 ? (
@@ -1798,10 +1782,10 @@ function ImagesSection() {
                 .map((img) => (
                   <div
                     key={img.id}
-                    className="rounded-2xl border border-zinc-200 bg-white p-3"
+                    className="rounded-2xl border border-[#e6e0d6] bg-white p-3"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="h-14 w-20 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
+                      <div className="h-14 w-20 overflow-hidden rounded-xl border border-[#e6e0d6] bg-[#faf8f4]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={img.url}
@@ -1810,10 +1794,10 @@ function ImagesSection() {
                         />
                       </div>
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-zinc-900">
+                        <div className="truncate text-sm font-medium text-[#2a211a]">
                           {img.url}
                         </div>
-                        <div className="text-xs text-zinc-600">
+                        <div className="text-xs text-[#7a6a5f]">
                           alt: {img.alt || "—"} • sort: {img.sort ?? 0}
                         </div>
                       </div>
@@ -1915,20 +1899,20 @@ function SubscribersSection() {
         <CardContent className="p-4 sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl border border-zinc-200 bg-white">
-                <Mail className="h-5 w-5 text-zinc-800" />
+              <div className="grid h-10 w-10 place-items-center rounded-2xl border border-[#e6e0d6] bg-white">
+                <Mail className="h-5 w-5 text-[#3a2f25]" />
               </div>
               <div>
                 <div className="text-lg font-semibold tracking-tight">
                   Newsletter subscribers
                 </div>
-                <div className="text-sm text-zinc-600">{rows.length} total</div>
+                <div className="text-sm text-[#7a6a5f]">{rows.length} total</div>
               </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9a8c7e]" />
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
@@ -1948,8 +1932,8 @@ function SubscribersSection() {
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-zinc-50 text-zinc-600">
-                <tr className="border-b border-zinc-200">
+              <thead className="bg-[#faf8f4] text-[#7a6a5f]">
+                <tr className="border-b border-[#e6e0d6]">
                   <th className="px-4 py-3 text-left">Email</th>
                   <th className="px-4 py-3 text-left">Joined</th>
                   <th className="px-4 py-3 text-left">Confirmed</th>
@@ -1971,15 +1955,15 @@ function SubscribersSection() {
                   filtered.map((r) => (
                     <tr
                       key={r.email}
-                      className="border-b border-zinc-100 hover:bg-zinc-50/60 transition"
+                      className="border-b border-[#f2ede4] hover:bg-[#faf8f4]/60 transition"
                     >
-                      <td className="px-4 py-3 font-medium text-zinc-900">
+                      <td className="px-4 py-3 font-medium text-[#2a211a]">
                         {r.email}
                       </td>
-                      <td className="px-4 py-3 text-zinc-600">
+                      <td className="px-4 py-3 text-[#7a6a5f]">
                         {formatDate(r.created_at)}
                       </td>
-                      <td className="px-4 py-3 text-zinc-600">
+                      <td className="px-4 py-3 text-[#7a6a5f]">
                         {r.confirmed_at ? formatDate(r.confirmed_at) : "—"}
                       </td>
                     </tr>
@@ -2027,12 +2011,12 @@ function SettingsSection() {
           <CardTitle className="text-base">Shop availability</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between rounded-2xl border border-zinc-200 bg-white p-4">
+          <div className="flex items-center justify-between rounded-2xl border border-[#e6e0d6] bg-white p-4">
             <div>
-              <div className="text-sm font-medium text-zinc-900">
+              <div className="text-sm font-medium text-[#2a211a]">
                 Pause shop
               </div>
-              <div className="text-xs text-zinc-600">
+              <div className="text-xs text-[#7a6a5f]">
                 Temporarily disable checkout & show a message.
               </div>
             </div>
@@ -2062,30 +2046,30 @@ function SettingsSection() {
           <CardTitle className="text-base">Data notes</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-            <ul className="list-disc space-y-1 pl-5 text-sm text-zinc-700">
+          <div className="rounded-2xl border border-[#e6e0d6] bg-white p-4">
+            <ul className="list-disc space-y-1 pl-5 text-sm text-[#6b5c4d]">
               <li>
                 Products:{" "}
-                <code className="rounded bg-zinc-100 px-1">shop_product</code>,
+                <code className="rounded bg-[#f2ede4] px-1">shop_product</code>,
                 images:{" "}
-                <code className="rounded bg-zinc-100 px-1">shop_image</code>.
+                <code className="rounded bg-[#f2ede4] px-1">shop_image</code>.
               </li>
               <li>
                 Orders:{" "}
-                <code className="rounded bg-zinc-100 px-1">shop_order</code> &{" "}
-                <code className="rounded bg-zinc-100 px-1">
+                <code className="rounded bg-[#f2ede4] px-1">shop_order</code> &{" "}
+                <code className="rounded bg-[#f2ede4] px-1">
                   shop_order_item
                 </code>
                 . Payments link via{" "}
-                <code className="rounded bg-zinc-100 px-1">payment</code>.
+                <code className="rounded bg-[#f2ede4] px-1">payment</code>.
               </li>
               <li>
                 Invoices (optional):{" "}
-                <code className="rounded bg-zinc-100 px-1">invoice</code>.
+                <code className="rounded bg-[#f2ede4] px-1">invoice</code>.
               </li>
               <li>
                 Newsletter:{" "}
-                <code className="rounded bg-zinc-100 px-1">
+                <code className="rounded bg-[#f2ede4] px-1">
                   newsletter_subscribers
                 </code>
                 .
@@ -2104,13 +2088,13 @@ function SettingsSection() {
 function LabeledInput({ label, helper, value, onChange, ...rest }) {
   return (
     <div className="space-y-1">
-      <div className="text-sm font-medium text-zinc-900">{label}</div>
+      <div className="text-sm font-medium text-[#2a211a]">{label}</div>
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         {...rest}
       />
-      {helper ? <div className="text-xs text-zinc-500">{helper}</div> : null}
+      {helper ? <div className="text-xs text-[#9a8c7e]">{helper}</div> : null}
     </div>
   );
 }
@@ -2118,7 +2102,7 @@ function LabeledInput({ label, helper, value, onChange, ...rest }) {
 function LabeledTextarea({ label, value, onChange, ...rest }) {
   return (
     <div className="space-y-1">
-      <div className="text-sm font-medium text-zinc-900">{label}</div>
+      <div className="text-sm font-medium text-[#2a211a]">{label}</div>
       <Textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
