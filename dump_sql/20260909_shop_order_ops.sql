@@ -29,3 +29,7 @@ alter table public.shop_order
   add column if not exists tracking_url text;
 alter table public.shop_order
   add column if not exists internal_note text;
+
+-- PostgREST caches the schema: without this the app keeps reporting the
+-- new tables and columns as missing until its cache happens to refresh.
+notify pgrst, 'reload schema';

@@ -78,3 +78,7 @@ update public.shop_product
  where sku_code is null or sku_code = '';
 
 create index if not exists shop_product_sku_code_idx on public.shop_product (sku_code);
+
+-- PostgREST caches the schema: without this the app keeps reporting the
+-- new tables and columns as missing until its cache happens to refresh.
+notify pgrst, 'reload schema';

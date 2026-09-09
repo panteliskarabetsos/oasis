@@ -6,6 +6,10 @@
 import "server-only";
 
 import { notifyOrderPaid } from "@/lib/shop/notify";
+import { isMissingSchema } from "@/lib/shop/schema";
+
+export { SHIPPING_COLUMNS } from "@/lib/shop/schema";
+import { DEFAULT_SHIPPING } from "@/lib/shop/shipping";
 
 export const ORDER_PENDING = "pending";
 export const ORDER_PAID = "paid";
@@ -155,4 +159,34 @@ export function groupImages(rows = []) {
     map.get(key).push(r);
   }
   return map;
+}
+
+/* -------------------------------- shipping -------------------------------- */
+
+/**
+ * Courier rates, from AppSetting.settings->'shipping'.
+ *
+ * Falls back to "shipping disabled", which prices every delivery at zero — the
+ * shop behaved that way before rates existed and must keep working on a
+ * deployment that has not run the migration.
+ */
+export async function getShippingSettings(admin) {
+  try {
+    const { data, error } = await admin
+      .from("AppSetting")
+      .select("settings")
+      .eq("key", "shop")
+      .maybeSingle();
+    if (error) {
+      if (isMissingSchema(error)) return { ...DEFAULT_SHIPPING, available: false };
+      throw error;
+    }
+    const shipping = data?.settings?.shipping;
+    if (!shipping || typeof shipping !== "object") {
+      return { ...DEFAULT_SHIPPING, available: true };
+    }
+    return { ...DEFAULT_SHIPPING, ...shipping, available: true };
+  } catch {
+    return { ...DEFAULT_SHIPPING, available: false };
+  }
 }

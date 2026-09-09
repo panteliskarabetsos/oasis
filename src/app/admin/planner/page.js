@@ -1,1025 +1,1011 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+// Availability planner. Two things it could not do before: see more than one
+// experience at a time, and create more than one slot at a time.
+import React from "react";
 import toast from "react-hot-toast";
-import {
-  Calendar as CalendarIcon,
-  ChevronLeft,
-  ChevronRight,
-  Pencil,
-  Trash2,
-  PlusCircle,
-  Users,
-  Loader2,
-  Settings2,
-  Clock,
-  AlertCircle,
-  CheckCircle2,
-} from "lucide-react";
 
-// ---------- Helpers ----------
-const pad = (n) => (n < 10 ? `0${n}` : `${n}`);
-const toISODate = (d) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const startOfToday = () => {
+import Icon from "@/app/admin/_ui/Icon";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  ErrorNote,
+  Muted,
+  Page,
+  PageHeader,
+  Select,
+  Skeleton,
+  StatCard,
+  inputClass,
+} from "@/app/admin/_ui";
+
+/* -------------------------------- helpers -------------------------------- */
+
+const pad = (n) => String(n).padStart(2, "0");
+const toISODate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function startOfToday() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
-};
-const dayName = (d) => d.toLocaleDateString("en-US", { weekday: "long" });
+}
 
-function getMonthMatrix(anchor) {
+function dayName(d) {
+  return d.toLocaleDateString("en-US", { weekday: "long" });
+}
+
+/** Six Monday-first weeks covering the month that `anchor` falls in. */
+function monthGrid(anchor) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-  const offset = (first.getDay() + 6) % 7;
   const start = new Date(first);
-  start.setDate(first.getDate() - offset);
-
+  start.setDate(first.getDate() - ((first.getDay() + 6) % 7));
   const weeks = [];
   for (let w = 0; w < 6; w++) {
     const row = [];
     for (let i = 0; i < 7; i++) {
       const d = new Date(start);
       d.setDate(start.getDate() + w * 7 + i);
-      row.push({
-        date: d,
-        inMonth: d.getMonth() === anchor.getMonth(),
-      });
+      row.push(d);
     }
     weeks.push(row);
   }
   return weeks;
 }
 
-const isSameDay = (a, b) =>
-  a &&
-  b &&
-  a.getFullYear() === b.getFullYear() &&
-  a.getMonth() === b.getMonth() &&
-  a.getDate() === b.getDate();
+const sameDay = (a, b) =>
+  a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
-const fmtDateLong = (iso) =>
-  new Date(iso).toLocaleDateString(undefined, {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-const fmtTimeShort = (iso) =>
-  new Date(iso).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+const timeOf = (iso) =>
+  new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-// ---------- Page ----------
+const longDate = (d) =>
+  d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+/** Stable accent per experience so the month view is readable at a glance. */
+const ACCENTS = ["#8b6f47", "#3a5d80", "#3f6b3f", "#8a6412", "#7a4a6a", "#a33c22", "#4a6b6b"];
+const accentFor = (id, list) => {
+  const i = list.findIndex((e) => e.id === id);
+  return ACCENTS[(i < 0 ? 0 : i) % ACCENTS.length];
+};
+
+/* ================================== page ================================== */
+
 export default function PlannerPage() {
-  const router = useRouter();
+  const [experiences, setExperiences] = React.useState([]);
+  const [expLoaded, setExpLoaded] = React.useState(false);
+  const [expFilter, setExpFilter] = React.useState("all");
+  const [slots, setSlots] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState("");
+  const [includeCancelled, setIncludeCancelled] = React.useState(true);
 
-  const [experiences, setExperiences] = useState([]);
-  const [selectedExperienceId, setSelectedExperienceId] = useState("");
-  const [selectedExperience, setSelectedExperience] = useState(null);
-
-  const [slots, setSlots] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const [newSlot, setNewSlot] = useState({
-    date: "",
-    time: "",
-    totalSlots: "",
-  });
-
-  const [editingSlotId, setEditingSlotId] = useState(null);
-  const [editedAvailableSlots, setEditedAvailableSlots] = useState("");
-
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-
-  // UI States
-  const [activeTab, setActiveTab] = useState("day"); // 'day', 'upcoming', 'past'
-
-  // Calendar state
-  const [calMonth, setCalMonth] = useState(() => {
+  const [month, setMonth] = React.useState(() => {
     const t = startOfToday();
     return new Date(t.getFullYear(), t.getMonth(), 1);
   });
-  const [selectedDateObj, setSelectedDateObj] = useState(null);
+  const [selectedDay, setSelectedDay] = React.useState(() => startOfToday());
 
-  // ---------- Fetch ----------
-  useEffect(() => {
+  const grid = React.useMemo(() => monthGrid(month), [month]);
+  const rangeFrom = grid[0][0];
+  const rangeTo = React.useMemo(() => {
+    const d = new Date(grid[5][6]);
+    d.setDate(d.getDate() + 1);
+    return d;
+  }, [grid]);
+
+  /* ------------------------------ load data ----------------------------- */
+
+  React.useEffect(() => {
+    let alive = true;
     fetch("/api/admin/experiences", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data) => setExperiences(Array.isArray(data) ? data : []))
-      .catch(() => toast.error("Failed to load experiences."));
+      .then((r) => r.json())
+      .then((d) => alive && setExperiences(Array.isArray(d) ? d : []))
+      .catch(() => alive && toast.error("Could not load experiences."))
+      .finally(() => alive && setExpLoaded(true));
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  useEffect(() => {
-    if (!selectedExperienceId) {
-      setSelectedExperience(null);
+  const load = React.useCallback(async () => {
+    if (!expLoaded) return;
+    if (!experiences.length) {
       setSlots([]);
+      setLoading(false);
       return;
     }
-    const exp = experiences.find((e) => e.id === Number(selectedExperienceId));
-    setSelectedExperience(exp || null);
-
+    const targets =
+      expFilter === "all" ? experiences : experiences.filter((e) => String(e.id) === expFilter);
     setLoading(true);
-    fetch(
-      `/api/admin/schedule?experienceId=${selectedExperienceId}&withUsage=1`,
-      { cache: "no-store" },
-    )
-      .then(async (res) => {
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err?.error || "Failed to load slots.");
-        }
-        return res.json();
-      })
-      .then((data) => {
-        const arr = Array.isArray(data) ? data : [];
-        arr.sort((a, b) => new Date(a.date) - new Date(b.date));
-        setSlots(arr);
-      })
-      .catch((e) => toast.error(e.message || "Failed to load slots."))
-      .finally(() => setLoading(false));
-  }, [selectedExperienceId, experiences]);
+    try {
+      // The endpoint is per-experience; with a handful of experiences fetching
+      // them side by side is cheaper than adding a cross-experience route.
+      const results = await Promise.all(
+        targets.map(async (exp) => {
+          const qs = new URLSearchParams({
+            experienceId: String(exp.id),
+            withUsage: "1",
+            includeCancelled: String(includeCancelled),
+            from: rangeFrom.toISOString(),
+            to: rangeTo.toISOString(),
+          });
+          const res = await fetch(`/api/admin/schedule?${qs}`, { cache: "no-store" });
+          if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            throw new Error(e?.error || `Could not load ${exp.name}`);
+          }
+          const rows = await res.json();
+          return (Array.isArray(rows) ? rows : []).map((s) => ({ ...s, experience: exp }));
+        })
+      );
+      setSlots(
+        results.flat().sort((a, b) => new Date(a.date) - new Date(b.date))
+      );
+      setError("");
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }, [expLoaded, experiences, expFilter, includeCancelled, rangeFrom, rangeTo]);
 
-  // ---------- Derived ----------
-  const freq = Array.isArray(selectedExperience?.frequency)
-    ? selectedExperience.frequency
-    : [];
+  React.useEffect(() => {
+    load();
+  }, [load]);
 
-  const stats = useMemo(() => {
-    const total = slots.reduce((n, s) => n + (s.totalSlots || 0), 0);
-    const booked = slots.reduce((n, s) => n + (s.booked || 0), 0);
-    const upcomingCount = slots.filter(
-      (s) => new Date(s.date) >= new Date(),
-    ).length;
-    return { totalSlots: total, booked, upcomingCount };
-  }, [slots]);
+  /* ------------------------------- derived ------------------------------ */
 
-  const selectedDateStr = selectedDateObj ? toISODate(selectedDateObj) : "";
-  const slotsOnSelectedDate = useMemo(() => {
-    if (!selectedDateStr) return [];
-    return slots.filter((s) => s.date.slice(0, 10) === selectedDateStr);
-  }, [slots, selectedDateStr]);
-
-  const upcomingSlots = useMemo(
-    () => slots.filter((s) => new Date(s.date) >= new Date()),
-    [slots],
-  );
-  const pastSlots = useMemo(
-    () => [...slots.filter((s) => new Date(s.date) < new Date())].reverse(),
-    [slots],
-  );
-
-  const countByDate = useMemo(() => {
+  const byDay = React.useMemo(() => {
     const map = new Map();
     for (const s of slots) {
       const k = s.date.slice(0, 10);
-      map.set(k, (map.get(k) || 0) + 1);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(s);
     }
     return map;
   }, [slots]);
 
-  // ---------- Handlers ----------
-  const handleDatePick = (d) => {
-    const today = startOfToday();
-    const isPast = d < today;
-    const allowed = freq.length === 0 || freq.includes(dayName(d));
-
-    if (isPast) return toast.error("Cannot select past dates.");
-    if (!allowed)
-      return toast.error("This day is not allowed by the selected experience.");
-
-    setSelectedDateObj(d);
-    setNewSlot((prev) => ({ ...prev, date: toISODate(d) }));
-    setActiveTab("day"); // auto-switch to day view
-  };
-
-  const handleAddSlot = async () => {
-    const { date, time, totalSlots } = newSlot;
-
-    if (!selectedExperienceId)
-      return toast.error("Select an experience first.");
-    if (!date || !time || !totalSlots)
-      return toast.error("Please fill in date, time and total slots.");
-
-    const dayOk =
-      freq.length === 0 ||
-      freq.includes(
-        new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
-      );
-    if (!dayOk) return toast.error("Selected date is not within allowed days.");
-
-    const isoDateTime = new Date(`${date}T${time}`).toISOString();
-
-    const res = await fetch("/api/admin/schedule", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        experienceId: Number(selectedExperienceId),
-        date: isoDateTime,
-        totalSlots: Number(totalSlots),
-      }),
-    });
-
-    if (res.ok) {
-      const newEntry = await res.json();
-      const enriched = {
-        ...newEntry,
-        booked: 0,
-        holds: 0,
-        available: Number(newEntry.totalSlots || 0),
-      };
-      setSlots((prev) =>
-        [...prev, enriched].sort((a, b) => new Date(a.date) - new Date(b.date)),
-      );
-      setNewSlot({ date, time: "", totalSlots: "" });
-      toast.success("Slot added.");
-    } else {
-      const msg =
-        (await res.json().catch(() => ({})))?.error || "Failed to add slot.";
-      toast.error(msg);
-    }
-  };
-
-  const handleEditClick = (slot) => {
-    setEditingSlotId(slot.id);
-    setEditedAvailableSlots(
-      String(Math.max((slot.totalSlots || 0) - (slot.booked || 0), 0)),
-    );
-  };
-
-  const handleSaveEdit = async () => {
-    const slot = slots.find((s) => s.id === editingSlotId);
-    if (!slot) return toast.error("Slot not found.");
-
-    const available = Number(editedAvailableSlots);
-    if (!Number.isFinite(available) || available < 0)
-      return toast.error("Available slots must be a non-negative number.");
-
-    const totalSlots = available + (slot.booked || 0);
-
-    const res = await fetch(`/api/admin/schedule`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: editingSlotId, totalSlots }),
-    });
-
-    if (res.ok) {
-      const updated = await res.json();
-      setSlots((prev) =>
-        prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)),
-      );
-      setEditingSlotId(null);
-      setEditedAvailableSlots("");
-      toast.success("Slot updated.");
-    } else {
-      const msg =
-        (await res.json().catch(() => ({})))?.error || "Failed to update slot.";
-      toast.error(msg);
-    }
-  };
-
-  const askDelete = (id) => {
-    setConfirmDeleteId(id);
-    setShowDeleteModal(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!confirmDeleteId) return;
-    const res = await fetch(`/api/admin/schedule?id=${confirmDeleteId}`, {
-      method: "DELETE",
-    });
-
-    if (res.ok) {
-      const payload = await res.json().catch(() => ({}));
-      if (payload?.slot) {
-        setSlots((prev) =>
-          prev.map((s) =>
-            s.id === payload.slot.id ? { ...s, ...payload.slot } : s,
-          ),
-        );
-      } else {
-        setSlots((prev) => prev.filter((s) => s.id !== confirmDeleteId));
-      }
-      toast.success(payload?.message || "Done.");
-    } else {
-      toast.error(
-        (await res.json().catch(() => ({})))?.error || "Failed to update slot.",
-      );
-    }
-    setShowDeleteModal(false);
-    setConfirmDeleteId(null);
-  };
-
-  // ---------- Global Pause State ----------
-  const [globalPause, setGlobalPause] = useState({
-    bookingsPaused: false,
-    bookingsPausedMessage: "",
-    bookingsPausedUntil: "",
-  });
-  const [loadingGlobal, setLoadingGlobal] = useState(true);
-  const [savingGlobal, setSavingGlobal] = useState(false);
-  const [isGlobalOpen, setIsGlobalOpen] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/settings/bookings", {
-          cache: "no-store",
-        });
-        const data = await res.json();
-        setGlobalPause({
-          bookingsPaused: !!data.bookingsPaused,
-          bookingsPausedMessage: data.bookingsPausedMessage || "",
-          bookingsPausedUntil: data.bookingsPausedUntil
-            ? data.bookingsPausedUntil.slice(0, 16)
-            : "",
-        });
-      } catch (e) {
-        toast.error("Failed to load global booking setting.");
-      } finally {
-        setLoadingGlobal(false);
-      }
-    })();
-  }, []);
-
-  async function saveGlobalPause() {
-    setSavingGlobal(true);
-    const payload = {
-      bookingsPaused: !!globalPause.bookingsPaused,
-      bookingsPausedMessage: globalPause.bookingsPausedMessage?.trim() || null,
-      bookingsPausedUntil: globalPause.bookingsPausedUntil
-        ? new Date(globalPause.bookingsPausedUntil).toISOString()
-        : null,
+  const stats = React.useMemo(() => {
+    const live = slots.filter((s) => !s.isCancelled);
+    const total = live.reduce((n, s) => n + (Number(s.totalSlots) || 0), 0);
+    const booked = live.reduce((n, s) => n + (Number(s.booked) || 0), 0);
+    const soldOut = live.filter(
+      (s) => (Number(s.totalSlots) || 0) > 0 && (Number(s.booked) || 0) >= Number(s.totalSlots)
+    ).length;
+    return {
+      slots: live.length,
+      seats: total,
+      booked,
+      available: Math.max(0, total - booked),
+      fill: total ? Math.round((booked / total) * 100) : 0,
+      soldOut,
     };
+  }, [slots]);
 
-    const res = await fetch("/api/admin/settings/bookings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    setSavingGlobal(false);
-    if (!res.ok) return toast.error("Failed to update global booking setting.");
-
-    toast.success(
-      payload.bookingsPaused || payload.bookingsPausedUntil
-        ? "Bookings paused globally."
-        : "Global bookings resumed.",
-    );
-    if (!payload.bookingsPaused) setIsGlobalOpen(false);
-  }
-
-  // ---------- Components ----------
-  const StatBadge = ({ icon: Icon, label, value }) => (
-    <div className="flex items-center gap-4 rounded-xl border border-stone-200 bg-white p-4 shadow-sm transition hover:shadow-md">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-stone-100 text-stone-700">
-        <Icon size={20} />
-      </div>
-      <div>
-        <div className="text-sm text-stone-500">{label}</div>
-        <div className="text-xl font-bold text-stone-800">{value}</div>
-      </div>
-    </div>
+  const daySlots = React.useMemo(
+    () => byDay.get(toISODate(selectedDay)) || [],
+    [byDay, selectedDay]
   );
 
-  const SlotCard = ({ s }) => {
-    const booked = s.booked || 0;
-    const total = s.totalSlots || 0;
-    const available = Number.isFinite(s.available)
-      ? s.available
-      : Math.max(total - booked, 0);
-    const pct =
-      total > 0 ? Math.min(100, Math.round((booked / total) * 100)) : 0;
-    const isPast = new Date(s.date) < new Date();
-    const editing = editingSlotId === s.id;
+  const monthLabel = month.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const selectedExperience =
+    expFilter === "all" ? null : experiences.find((e) => String(e.id) === expFilter) || null;
 
-    return (
-      <div
-        className={`group relative overflow-hidden rounded-xl border p-5 transition-all ${
-          s.isCancelled
-            ? "border-red-200 bg-red-50/30"
-            : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
-        }`}
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h4 className="font-semibold text-stone-800">
-                {fmtDateLong(s.date)}
-              </h4>
-              <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${
-                  isPast
-                    ? "bg-stone-100 text-stone-600"
-                    : "bg-emerald-100 text-emerald-700"
-                }`}
+  /* ------------------------------- actions ------------------------------ */
+
+  async function setCancelled(slot, isCancelled) {
+    try {
+      const res = await fetch("/api/admin/schedule", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: slot.id, isCancelled }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Failed");
+      toast.success(isCancelled ? "Slot cancelled." : "Slot restored.");
+      load();
+    } catch (e) {
+      toast.error(String(e.message || e));
+    }
+  }
+
+  async function removeSlot(slot) {
+    const booked = Number(slot.booked) || 0;
+    const msg = booked
+      ? `${booked} guest${booked === 1 ? " has" : "s have"} booked this slot. It will be cancelled rather than deleted. Continue?`
+      : "Delete this slot?";
+    if (!confirm(msg)) return;
+    try {
+      const res = await fetch(`/api/admin/schedule?id=${slot.id}`, { method: "DELETE" });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error || "Failed");
+      toast.success(payload?.message || "Done.");
+      load();
+    } catch (e) {
+      toast.error(String(e.message || e));
+    }
+  }
+
+  async function setCapacity(slot, totalSlots) {
+    try {
+      const res = await fetch("/api/admin/schedule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: slot.id, totalSlots }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Failed");
+      toast.success("Capacity updated.");
+      load();
+    } catch (e) {
+      toast.error(String(e.message || e));
+    }
+  }
+
+  /* -------------------------------- render ------------------------------ */
+
+  return (
+    <Page className="py-8">
+      <PageHeader
+        eyebrow="Operations"
+        title="Planner"
+        description="Every experience's availability on one calendar. Open a day to change it."
+        actions={
+          <>
+            <Select
+              value={expFilter}
+              onChange={(e) => setExpFilter(e.target.value)}
+              className="h-10 !w-auto min-w-[220px]"
+              aria-label="Experience"
+            >
+              <option value="all">All experiences</option>
+              {experiences.map((e) => (
+                <option key={e.id} value={String(e.id)}>
+                  {e.name}
+                  {e.visibility === false ? " (hidden)" : ""}
+                </option>
+              ))}
+            </Select>
+            <Button variant="secondary" onClick={load} disabled={loading}>
+              <Icon name="clock" size={14} /> {loading ? "Loading…" : "Refresh"}
+            </Button>
+          </>
+        }
+      />
+
+      <GlobalPause />
+
+      {error ? <ErrorNote className="mb-5">{error}</ErrorNote> : null}
+      {expLoaded && !experiences.length ? (
+        <ErrorNote className="mb-5">
+          There are no experiences to plan yet — create one first.
+        </ErrorNote>
+      ) : null}
+
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={`Slots in ${monthLabel}`} value={stats.slots} icon={<Icon name="calendar" size={16} />} />
+        <StatCard label="Seats offered" value={stats.seats} icon={<Icon name="users" size={16} />} />
+        <StatCard
+          label="Seats sold"
+          value={stats.booked}
+          hint={`${stats.available} still available`}
+          icon={<Icon name="check" size={16} />}
+          accent="success"
+        />
+        <StatCard
+          label="Fill rate"
+          value={`${stats.fill}%`}
+          hint={stats.soldOut ? `${stats.soldOut} sold out` : "None sold out"}
+          icon={<Icon name="chart" size={16} />}
+          accent={stats.fill >= 70 ? "warning" : "brand"}
+        />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
+        {/* ------------------------------ calendar ---------------------------- */}
+        <Card padded={false} className="overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e6e0d6] p-4">
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Previous month"
+                onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}
               >
-                {isPast ? "Past" : "Upcoming"}
+                ‹
+              </Button>
+              <span className="min-w-[160px] text-center font-serif text-[17px] text-[#2a211a]">
+                {monthLabel}
               </span>
-              {s.isCancelled && (
-                <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-red-700">
-                  Cancelled
-                </span>
-              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Next month"
+                onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}
+              >
+                ›
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const t = startOfToday();
+                  setMonth(new Date(t.getFullYear(), t.getMonth(), 1));
+                  setSelectedDay(t);
+                }}
+              >
+                Today
+              </Button>
             </div>
-            <div className="mt-1 flex items-center gap-1.5 text-sm text-stone-500">
-              <Clock size={14} />
-              <span>{fmtTimeShort(s.date)}</span>
-            </div>
+
+            <label className="flex cursor-pointer items-center gap-2 text-[12px] text-[#6b5c4d]">
+              <input
+                type="checkbox"
+                checked={includeCancelled}
+                onChange={(e) => setIncludeCancelled(e.target.checked)}
+                className="h-3.5 w-3.5 accent-[#8b6f47]"
+              />
+              Show cancelled
+            </label>
           </div>
 
-          {!editing && (
-            <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
-              <button
-                onClick={() => handleEditClick(s)}
-                disabled={s.isCancelled}
-                className="p-2 text-stone-400 hover:text-stone-700 disabled:opacity-30"
+          <div className="grid grid-cols-7 border-b border-[#e6e0d6] bg-[#faf8f4]">
+            {WEEKDAYS.map((d) => (
+              <div
+                key={d}
+                className="px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9a8c7e]"
               >
-                <Pencil size={16} />
-              </button>
-              <button
-                onClick={() => askDelete(s.id)}
-                className="p-2 text-stone-400 hover:text-red-600"
-              >
-                <Trash2 size={16} />
-              </button>
+                {d.slice(0, 3)}
+              </div>
+            ))}
+          </div>
+
+          {loading && !slots.length ? (
+            <div className="grid grid-cols-7">
+              {Array.from({ length: 42 }).map((_, i) => (
+                <div key={i} className="border-b border-r border-[#f0ebe2] p-2">
+                  <Skeleton className="h-16" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-7">
+              {grid.flat().map((d) => {
+                const key = toISODate(d);
+                const list = byDay.get(key) || [];
+                const inMonth = d.getMonth() === month.getMonth();
+                const isToday = sameDay(d, startOfToday());
+                const isSelected = sameDay(d, selectedDay);
+                const live = list.filter((s) => !s.isCancelled);
+                const total = live.reduce((n, s) => n + (Number(s.totalSlots) || 0), 0);
+                const booked = live.reduce((n, s) => n + (Number(s.booked) || 0), 0);
+                const pct = total ? Math.min(100, Math.round((booked / total) * 100)) : 0;
+
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedDay(new Date(d))}
+                    className={[
+                      "min-h-[92px] border-b border-r border-[#f0ebe2] p-1.5 text-left align-top transition-colors",
+                      inMonth ? "bg-white" : "bg-[#fcfaf7]",
+                      isSelected ? "ring-2 ring-inset ring-[#8b6f47]" : "hover:bg-[#faf8f4]",
+                    ].join(" ")}
+                  >
+                    <span
+                      className={[
+                        "inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[11px]",
+                        isToday ? "bg-[#2a211a] font-semibold text-white" : "",
+                        inMonth ? "text-[#2a211a]" : "text-[#c0b4a6]",
+                      ].join(" ")}
+                    >
+                      {d.getDate()}
+                    </span>
+
+                    <span className="mt-1 block space-y-0.5">
+                      {list.slice(0, 3).map((s) => (
+                        <span
+                          key={s.id}
+                          className={[
+                            "flex items-center gap-1 truncate rounded px-1 py-0.5 text-[10px]",
+                            s.isCancelled
+                              ? "text-[#b0a294] line-through"
+                              : "text-[#3f3127]",
+                          ].join(" ")}
+                          style={
+                            s.isCancelled
+                              ? undefined
+                              : { background: `${accentFor(s.experienceId, experiences)}14` }
+                          }
+                        >
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ background: accentFor(s.experienceId, experiences) }}
+                          />
+                          {timeOf(s.date)}
+                          <span className="ml-auto shrink-0 tabular-nums text-[#7a6a5f]">
+                            {s.booked ?? 0}/{s.totalSlots ?? 0}
+                          </span>
+                        </span>
+                      ))}
+                      {list.length > 3 ? (
+                        <span className="block px-1 text-[10px] text-[#9a8c7e]">
+                          +{list.length - 3} more
+                        </span>
+                      ) : null}
+                    </span>
+
+                    {total > 0 ? (
+                      <span className="mt-1 block h-1 w-full overflow-hidden rounded-full bg-[#f0ebe2]">
+                        <span
+                          className="block h-full rounded-full"
+                          style={{
+                            width: `${pct}%`,
+                            background: pct >= 100 ? "#a33c22" : pct >= 70 ? "#8a6412" : "#8b6f47",
+                          }}
+                        />
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
           )}
-        </div>
 
-        {!editing ? (
-          <div className="mt-5">
-            <div className="flex justify-between text-sm mb-1.5">
-              <span className="text-stone-600">
-                Booked:{" "}
-                <span className="font-semibold text-stone-800">{booked}</span> /{" "}
-                {total}
-              </span>
-              <span className="text-stone-500">
-                Avail: {available}{" "}
-                {Number(s.holds || 0) > 0 && `(+${s.holds} holds)`}
-              </span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-100">
-              <div
-                className={`h-full rounded-full ${pct > 90 ? "bg-orange-400" : pct > 0 ? "bg-stone-800" : "bg-stone-300"}`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 rounded-lg bg-stone-50 p-4 border border-stone-200">
-            <label className="block text-xs font-medium text-stone-600 mb-1">
-              Set Available Slots
-            </label>
-            <input
-              type="number"
-              min={0}
-              value={editedAvailableSlots}
-              onChange={(e) => setEditedAvailableSlots(e.target.value)}
-              className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
-            />
-            <div className="mt-3 flex gap-2">
-              <button
-                onClick={handleSaveEdit}
-                className="rounded-md bg-stone-800 px-3 py-1.5 text-xs text-white hover:bg-stone-700"
-              >
-                Save
-              </button>
-              <button
-                onClick={() => {
-                  setEditingSlotId(null);
-                  setEditedAvailableSlots("");
-                }}
-                className="rounded-md bg-white px-3 py-1.5 text-xs text-stone-600 border border-stone-300 hover:bg-stone-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const CalendarWidget = () => {
-    const matrix = getMonthMatrix(calMonth);
-    const today = startOfToday();
-
-    return (
-      <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <button
-            onClick={() =>
-              setCalMonth(
-                new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1),
-              )
-            }
-            className="rounded p-1 hover:bg-stone-100"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <div className="font-semibold text-stone-800">
-            {calMonth.toLocaleDateString(undefined, {
-              month: "long",
-              year: "numeric",
-            })}
-          </div>
-          <button
-            onClick={() =>
-              setCalMonth(
-                new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1),
-              )
-            }
-            className="rounded p-1 hover:bg-stone-100"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-
-        <div className="mb-2 grid grid-cols-7 text-center text-xs font-medium text-stone-400">
-          {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => (
-            <div key={d}>{d}</div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-7 gap-1">
-          {matrix.flat().map(({ date, inMonth }, idx) => {
-            const disabledPast = date < today;
-            const allowed = freq.length === 0 || freq.includes(dayName(date));
-            const k = toISODate(date);
-            const has = countByDate.get(k) || 0;
-            const selected =
-              selectedDateObj && isSameDay(date, selectedDateObj);
-
-            let btnClass =
-              "relative flex h-9 w-full items-center justify-center rounded-md text-sm transition-colors ";
-
-            if (!inMonth) btnClass += "text-transparent pointer-events-none";
-            else if (disabledPast)
-              btnClass += "text-stone-300 bg-stone-50 cursor-not-allowed";
-            else if (!allowed)
-              btnClass +=
-                "text-stone-300 bg-stone-50/50 cursor-not-allowed line-through decoration-stone-300";
-            else if (selected)
-              btnClass += "bg-stone-800 text-white shadow-md font-medium";
-            else
-              btnClass +=
-                "text-stone-700 hover:bg-stone-100 bg-white border border-transparent hover:border-stone-200";
-
-            return (
-              <button
-                key={idx}
-                disabled={disabledPast || !allowed || !inMonth}
-                onClick={() => handleDatePick(date)}
-                className={btnClass}
-              >
-                {inMonth && date.getDate()}
-                {!!has && inMonth && (
+          {expFilter === "all" && experiences.length ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 border-t border-[#e6e0d6] p-3">
+              {experiences.map((e) => (
+                <span key={e.id} className="flex items-center gap-1.5 text-[11px] text-[#6b5c4d]">
                   <span
-                    className={`absolute bottom-1 h-1 w-1 rounded-full ${selected ? "bg-white" : "bg-stone-400"}`}
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: accentFor(e.id, experiences) }}
                   />
-                )}
-              </button>
-            );
-          })}
+                  {e.name}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </Card>
+
+        {/* ------------------------------- day rail --------------------------- */}
+        <div className="space-y-5">
+          <Card>
+            <CardHeader
+              title={longDate(selectedDay)}
+              description={
+                daySlots.length
+                  ? `${daySlots.length} slot${daySlots.length === 1 ? "" : "s"}`
+                  : "Nothing scheduled"
+              }
+            />
+            {!daySlots.length ? (
+              <Muted className="text-[12.5px]">
+                Use the form below to open this day for booking.
+              </Muted>
+            ) : (
+              <ul className="space-y-2">
+                {daySlots.map((s) => (
+                  <SlotRow
+                    key={s.id}
+                    slot={s}
+                    showExperience={expFilter === "all"}
+                    accent={accentFor(s.experienceId, experiences)}
+                    onCapacity={setCapacity}
+                    onCancel={setCancelled}
+                    onDelete={removeSlot}
+                  />
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <AddAvailability
+            experiences={experiences}
+            selectedExperience={selectedExperience}
+            selectedDay={selectedDay}
+            onCreated={load}
+          />
         </div>
       </div>
-    );
-  };
+    </Page>
+  );
+}
 
-  // ---------- Render ----------
+/* ------------------------------- slot row -------------------------------- */
+
+function SlotRow({ slot, showExperience, accent, onCapacity, onCancel, onDelete }) {
+  const [editing, setEditing] = React.useState(false);
+  const booked = Number(slot.booked) || 0;
+  const total = Number(slot.totalSlots) || 0;
+  const holds = Number(slot.holds) || 0;
+  const available = Number.isFinite(slot.available) ? slot.available : Math.max(0, total - booked);
+  const [draft, setDraft] = React.useState(String(total));
+  const pct = total ? Math.min(100, Math.round((booked / total) * 100)) : 0;
+  const past = new Date(slot.date) < new Date();
+
   return (
-    <div className="min-h-screen bg-stone-50/50 text-stone-800 pb-20">
-      {/* Top Nav */}
-      <header className="sticky top-0 z-30 border-b border-stone-200 bg-white/80 backdrop-blur-md px-6 py-4">
-        <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/admin")}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 hover:bg-stone-50 hover:text-stone-800 transition"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <h1 className="text-xl font-bold tracking-tight text-stone-800">
-              Planner
-            </h1>
-          </div>
-          <button
-            onClick={() => setIsGlobalOpen(!isGlobalOpen)}
-            className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition ${globalPause.bookingsPaused ? "border-red-200 bg-red-50 text-red-700" : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50"}`}
+    <li
+      className={`rounded-xl border p-3 ${
+        slot.isCancelled ? "border-[#f3d5cb] bg-[#fdf6f4]" : "border-[#e6e0d6] bg-white"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-[14px] font-semibold text-[#2a211a]">
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: accent }} />
+            {timeOf(slot.date)}
+            {slot.isCancelled ? <Badge variant="danger">Cancelled</Badge> : null}
+            {past && !slot.isCancelled ? <Badge variant="neutral">Past</Badge> : null}
+          </p>
+          {showExperience ? (
+            <p className="mt-0.5 truncate text-[11.5px] text-[#7a6a5f]">{slot.experience?.name}</p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Change capacity"
+            onClick={() => {
+              setDraft(String(total));
+              setEditing((v) => !v);
+            }}
           >
-            <Settings2 size={16} />
-            {globalPause.bookingsPaused
-              ? "Bookings Paused"
-              : "Booking Settings"}
-          </button>
+            <Icon name="cog" size={14} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            title={slot.isCancelled ? "Restore this slot" : "Cancel this slot"}
+            onClick={() => onCancel(slot, !slot.isCancelled)}
+          >
+            <Icon name={slot.isCancelled ? "check" : "ban"} size={14} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Delete"
+            className="text-[#a33c22] hover:bg-[#fbeae5]"
+            onClick={() => onDelete(slot)}
+          >
+            <Icon name="trash" size={14} />
+          </Button>
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto max-w-7xl px-6 pt-8">
-        {/* Global Pause Banner */}
-        {isGlobalOpen && (
-          <div className="mb-8 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition-all">
-            <div className="border-b border-stone-100 bg-stone-50/50 px-6 py-4 flex items-center gap-3">
-              <AlertCircle className="text-stone-500" size={20} />
-              <div>
-                <h2 className="font-semibold text-stone-800">
-                  Global Booking Configuration
-                </h2>
-                <p className="text-xs text-stone-500">
-                  Halt all new incoming appointments across all experiences.
-                </p>
-              </div>
-            </div>
-            <div className="p-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 items-end">
-              <label className="flex flex-col gap-2 cursor-pointer">
-                <span className="text-sm font-medium text-stone-700">
-                  System Status
-                </span>
-                <div
-                  className={`flex items-center gap-3 rounded-lg border p-3 ${globalPause.bookingsPaused ? "border-red-200 bg-red-50 text-red-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}
-                >
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 rounded border-gray-300 text-stone-800 focus:ring-stone-800"
-                    checked={globalPause.bookingsPaused}
-                    onChange={(e) =>
-                      setGlobalPause((p) => ({
-                        ...p,
-                        bookingsPaused: e.target.checked,
-                      }))
-                    }
-                  />
-                  <span className="font-medium">
-                    {globalPause.bookingsPaused
-                      ? "Globally Paused"
-                      : "Accepting Bookings"}
-                  </span>
-                </div>
-              </label>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-stone-700">
-                  Pause Until (Optional)
-                </label>
-                <input
-                  type="datetime-local"
-                  value={globalPause.bookingsPausedUntil}
-                  onChange={(e) =>
-                    setGlobalPause((p) => ({
-                      ...p,
-                      bookingsPausedUntil: e.target.value,
-                    }))
-                  }
-                  className="rounded-lg border border-stone-300 px-3 py-3 text-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
-                />
-              </div>
-
-              <div className="flex flex-col gap-2 sm:col-span-2 lg:col-span-3">
-                <label className="text-sm font-medium text-stone-700">
-                  Public Display Message
-                </label>
-                <input
-                  type="text"
-                  value={globalPause.bookingsPausedMessage}
-                  onChange={(e) =>
-                    setGlobalPause((p) => ({
-                      ...p,
-                      bookingsPausedMessage: e.target.value,
-                    }))
-                  }
-                  placeholder="e.g. We are closed for the season..."
-                  className="rounded-lg border border-stone-300 px-3 py-3 text-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
-                />
-              </div>
-
-              <div className="sm:col-span-2 lg:col-span-3 flex justify-end gap-3 mt-2">
-                <button
-                  onClick={() => setIsGlobalOpen(false)}
-                  className="px-5 py-2.5 text-sm font-medium text-stone-600 hover:text-stone-900"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveGlobalPause}
-                  disabled={savingGlobal}
-                  className="rounded-lg bg-stone-800 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-stone-700 disabled:opacity-50"
-                >
-                  {savingGlobal ? "Saving..." : "Save Settings"}
-                </button>
-              </div>
-            </div>
+      {editing ? (
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+            inputMode="numeric"
+            aria-label="Total seats"
+            className={`${inputClass} h-9 w-24`}
+          />
+          <Muted className="flex-1 text-[11px]">
+            Total seats. {booked} already booked — cannot go below that.
+          </Muted>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={Number(draft) < booked || draft === ""}
+            onClick={() => {
+              onCapacity(slot, Number(draft));
+              setEditing(false);
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-2.5">
+          <div className="flex justify-between text-[12px]">
+            <span className="text-[#7a6a5f]">
+              <span className="font-semibold text-[#2a211a]">{booked}</span> of {total} booked
+            </span>
+            <span className="text-[#9a8c7e]">
+              {available} free{holds > 0 ? ` · ${holds} held` : ""}
+            </span>
           </div>
-        )}
-
-        {/* Top Stats */}
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatBadge
-            icon={CalendarIcon}
-            label="Upcoming Slots"
-            value={stats.upcomingCount}
-          />
-          <StatBadge
-            icon={Users}
-            label="Total Capacity"
-            value={stats.totalSlots}
-          />
-          <StatBadge
-            icon={CheckCircle2}
-            label="Total Booked"
-            value={stats.booked}
-          />
-        </div>
-
-        {/* Main Workspace */}
-        <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-          {/* LEFT SIDEBAR (Controls & Calendar) */}
-          <div className="lg:col-span-4 flex flex-col gap-6 sticky top-24">
-            {/* Experience Selector */}
-            <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
-              <label className="mb-3 block text-sm font-semibold text-stone-800">
-                1. Select Experience
-              </label>
-              <select
-                value={selectedExperienceId}
-                onChange={(e) => {
-                  setSelectedExperienceId(e.target.value);
-                  setSelectedDateObj(null);
-                  setNewSlot({ date: "", time: "", totalSlots: "" });
-                  setActiveTab("upcoming");
-                }}
-                className="w-full rounded-lg border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-medium text-stone-800 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
-              >
-                <option value="" disabled>
-                  Choose an experience...
-                </option>
-                {experiences.map((exp) => (
-                  <option key={exp.id} value={exp.id}>
-                    {exp.name}
-                  </option>
-                ))}
-              </select>
-
-              {selectedExperience && (
-                <div className="mt-4 rounded-lg bg-stone-50 p-3 border border-stone-100">
-                  <p className="text-xs font-medium text-stone-500 uppercase tracking-wider mb-2">
-                    Available Days
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(freq.length ? freq : ["All Days"]).map((day) => (
-                      <span
-                        key={day}
-                        className="rounded-md bg-white px-2 py-1 text-xs font-medium text-stone-600 border border-stone-200"
-                      >
-                        {day}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Calendar Widget */}
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#f0ebe2]">
             <div
-              className={
-                selectedExperienceId
-                  ? "opacity-100"
-                  : "opacity-50 pointer-events-none"
-              }
-            >
-              <label className="mb-3 block text-sm font-semibold text-stone-800">
-                2. Pick a Date
-              </label>
-              <CalendarWidget />
-            </div>
-          </div>
-
-          {/* RIGHT WORKSPACE (Lists & Forms) */}
-          <div className="lg:col-span-8 min-h-[600px] rounded-2xl border border-stone-200 bg-white p-2 shadow-sm flex flex-col">
-            {!selectedExperienceId ? (
-              <div className="flex flex-1 flex-col items-center justify-center text-center p-12 text-stone-400">
-                <CalendarIcon size={48} className="mb-4 opacity-20" />
-                <h3 className="text-lg font-medium text-stone-600">
-                  No Experience Selected
-                </h3>
-                <p className="text-sm mt-1">
-                  Select an experience from the sidebar to view and manage its
-                  planner.
-                </p>
-              </div>
-            ) : (
-              <>
-                {/* Tabs */}
-                <div className="flex border-b border-stone-100 px-4 pt-2">
-                  <button
-                    onClick={() => setActiveTab("day")}
-                    className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "day" ? "border-stone-800 text-stone-800" : "border-transparent text-stone-500 hover:text-stone-700"}`}
-                  >
-                    Selected Day
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("upcoming")}
-                    className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "upcoming" ? "border-stone-800 text-stone-800" : "border-transparent text-stone-500 hover:text-stone-700"}`}
-                  >
-                    All Upcoming
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("past")}
-                    className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "past" ? "border-stone-800 text-stone-800" : "border-transparent text-stone-500 hover:text-stone-700"}`}
-                  >
-                    Past Slots
-                  </button>
-                </div>
-
-                <div className="p-6 flex-1 bg-stone-50/30">
-                  {loading ? (
-                    <div className="flex py-20 items-center justify-center gap-3 text-stone-500">
-                      <Loader2 className="animate-spin" size={20} /> Loading
-                      schedule...
-                    </div>
-                  ) : (
-                    <>
-                      {/* View: Selected Day */}
-                      {activeTab === "day" && (
-                        <div>
-                          {!selectedDateObj ? (
-                            <div className="text-center py-16 text-stone-500 bg-white border border-dashed border-stone-300 rounded-xl">
-                              <p>
-                                Select a date on the calendar to view or add
-                                slots.
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="space-y-8">
-                              {/* Add Slot Inline Form */}
-                              <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
-                                <h3 className="font-semibold text-stone-800 mb-4 flex items-center gap-2">
-                                  <PlusCircle
-                                    size={18}
-                                    className="text-stone-400"
-                                  />
-                                  Add Slot for{" "}
-                                  {fmtDateLong(toISODate(selectedDateObj))}
-                                </h3>
-                                <div className="grid gap-4 sm:grid-cols-3 items-end">
-                                  <div>
-                                    <label className="mb-1.5 block text-xs font-medium text-stone-600">
-                                      Time
-                                    </label>
-                                    <input
-                                      type="time"
-                                      value={newSlot.time}
-                                      onChange={(e) =>
-                                        setNewSlot({
-                                          ...newSlot,
-                                          time: e.target.value,
-                                        })
-                                      }
-                                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="mb-1.5 block text-xs font-medium text-stone-600">
-                                      Capacity (Slots)
-                                    </label>
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      placeholder="e.g. 10"
-                                      value={newSlot.totalSlots}
-                                      onChange={(e) =>
-                                        setNewSlot({
-                                          ...newSlot,
-                                          totalSlots: e.target.value,
-                                        })
-                                      }
-                                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
-                                    />
-                                  </div>
-                                  <button
-                                    onClick={handleAddSlot}
-                                    className="w-full rounded-lg bg-stone-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700"
-                                  >
-                                    Create Slot
-                                  </button>
-                                </div>
-                                <div className="mt-3 flex gap-2">
-                                  {["09:00", "12:00", "15:00", "18:00"].map(
-                                    (t) => (
-                                      <button
-                                        type="button"
-                                        key={t}
-                                        onClick={() =>
-                                          setNewSlot((p) => ({ ...p, time: t }))
-                                        }
-                                        className="rounded-md border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs text-stone-600 hover:bg-stone-100 transition"
-                                      >
-                                        {t}
-                                      </button>
-                                    ),
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Slots List for Selected Day */}
-                              <div>
-                                <h3 className="font-medium text-stone-800 mb-4">
-                                  Scheduled on this date
-                                </h3>
-                                {slotsOnSelectedDate.length ? (
-                                  <div className="grid gap-4 sm:grid-cols-2">
-                                    {slotsOnSelectedDate.map((s) => (
-                                      <SlotCard key={s.id} s={s} />
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="text-sm text-stone-500 italic">
-                                    No slots scheduled yet.
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* View: Upcoming */}
-                      {activeTab === "upcoming" && (
-                        <div>
-                          {upcomingSlots.length ? (
-                            <div className="grid gap-4 sm:grid-cols-2">
-                              {upcomingSlots.map((s) => (
-                                <SlotCard key={s.id} s={s} />
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-center py-16 text-stone-500 bg-white border border-dashed border-stone-300 rounded-xl">
-                              <p>No upcoming slots across all dates.</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* View: Past */}
-                      {activeTab === "past" && (
-                        <div>
-                          {pastSlots.length ? (
-                            <div className="grid gap-4 sm:grid-cols-2">
-                              {pastSlots.map((s) => (
-                                <SlotCard key={s.id} s={s} />
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-center py-16 text-stone-500 bg-white border border-dashed border-stone-300 rounded-xl">
-                              <p>No past slots.</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </main>
-
-      {/* Delete confirmation modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-stone-900">
-              Delete this slot?
-            </h2>
-            <p className="mt-2 text-sm text-stone-600">
-              If the slot has bookings or active holds, it will be{" "}
-              <strong className="text-red-600">marked as cancelled</strong>{" "}
-              instead of fully deleted.
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowDeleteModal(false);
-                  setConfirmDeleteId(null);
-                }}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-              >
-                Yes, delete
-              </button>
-            </div>
+              className="h-full rounded-full"
+              style={{
+                width: `${pct}%`,
+                background: pct >= 100 ? "#a33c22" : pct >= 70 ? "#8a6412" : "#8b6f47",
+              }}
+            />
           </div>
         </div>
       )}
+    </li>
+  );
+}
+
+/* --------------------------- add / bulk creation -------------------------- */
+
+function AddAvailability({ experiences, selectedExperience, selectedDay, onCreated }) {
+  const [mode, setMode] = React.useState("single");
+  const [expId, setExpId] = React.useState("");
+  const [times, setTimes] = React.useState("10:00");
+  const [capacity, setCapacity] = React.useState("10");
+  const [weekdays, setWeekdays] = React.useState([]);
+  const [until, setUntil] = React.useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 56);
+    return toISODate(d);
+  });
+  const [busy, setBusy] = React.useState(false);
+
+  // Follow the page's experience filter, but stay changeable.
+  React.useEffect(() => {
+    if (selectedExperience) setExpId(String(selectedExperience.id));
+  }, [selectedExperience]);
+
+  const experience = experiences.find((e) => String(e.id) === expId) || null;
+  const allowedDays = React.useMemo(
+    () => (Array.isArray(experience?.frequency) ? experience.frequency : []),
+    [experience]
+  );
+
+  // Default the weekday picks to whatever the experience actually runs on.
+  React.useEffect(() => {
+    setWeekdays(allowedDays.length ? allowedDays : WEEKDAYS);
+  }, [allowedDays]);
+
+  const timeList = React.useMemo(
+    () =>
+      times
+        .split(/[,\s]+/)
+        .map((t) => t.trim())
+        .filter((t) => /^\d{1,2}:\d{2}$/.test(t)),
+    [times]
+  );
+
+  // Work out exactly which instants will be created, so the operator can see
+  // the damage before doing it.
+  const occurrences = React.useMemo(() => {
+    if (!expId || !timeList.length || !Number(capacity)) return [];
+    const out = [];
+    const now = Date.now();
+    if (mode === "single") {
+      for (const t of timeList) {
+        const d = new Date(`${toISODate(selectedDay)}T${t}`);
+        if (d.getTime() > now) out.push(d);
+      }
+      return out;
+    }
+    const end = new Date(`${until}T23:59:59`);
+    const cursor = new Date(selectedDay);
+    let guard = 0;
+    while (cursor <= end && guard++ < 400) {
+      if (weekdays.includes(dayName(cursor))) {
+        for (const t of timeList) {
+          const d = new Date(`${toISODate(cursor)}T${t}`);
+          if (d.getTime() > now) out.push(d);
+        }
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return out.slice(0, 400);
+  }, [mode, expId, timeList, capacity, selectedDay, until, weekdays]);
+
+  const outsideFrequency = React.useMemo(
+    () => (allowedDays.length ? weekdays.filter((d) => !allowedDays.includes(d)) : []),
+    [weekdays, allowedDays]
+  );
+
+  async function create() {
+    if (!expId) return toast.error("Choose an experience.");
+    if (!occurrences.length) return toast.error("Nothing to create — check the times and dates.");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/schedule/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          experienceId: Number(expId),
+          totalSlots: Number(capacity),
+          slots: occurrences.map((d) => ({ date: d.toISOString() })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not create the slots");
+      const { created = 0, skipped = 0 } = data.summary || {};
+      toast.success(
+        `${created} slot${created === 1 ? "" : "s"} created` +
+          (skipped ? ` · ${skipped} skipped (already scheduled or past)` : "")
+      );
+      onCreated?.();
+    } catch (e) {
+      toast.error(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Add availability"
+        description="One day, or the same pattern for weeks ahead."
+      />
+
+      <div className="mb-4 flex gap-1 rounded-xl bg-[#f5f0e8] p-1">
+        {[
+          ["single", "This day"],
+          ["repeat", "Repeating"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setMode(key)}
+            className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition-colors ${
+              mode === key ? "bg-white text-[#2a211a] shadow-sm" : "text-[#6b5c4d]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">Experience</span>
+          <Select value={expId} onChange={(e) => setExpId(e.target.value)} aria-label="Experience">
+            <option value="">Choose…</option>
+            {experiences.map((e) => (
+              <option key={e.id} value={String(e.id)}>
+                {e.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">
+              Time{timeList.length > 1 ? "s" : ""}
+            </span>
+            <input
+              value={times}
+              onChange={(e) => setTimes(e.target.value)}
+              placeholder="10:00, 16:00"
+              aria-label="Times"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">Seats</span>
+            <input
+              value={capacity}
+              onChange={(e) => setCapacity(e.target.value.replace(/[^0-9]/g, ""))}
+              inputMode="numeric"
+              aria-label="Seats per slot"
+              className={inputClass}
+            />
+          </div>
+        </div>
+
+        {mode === "repeat" ? (
+          <>
+            <div>
+              <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">
+                On these days
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {WEEKDAYS.map((d) => {
+                  const on = weekdays.includes(d);
+                  const allowed = !allowedDays.length || allowedDays.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      title={allowed ? d : `${d} — outside this experience's usual days`}
+                      onClick={() =>
+                        setWeekdays((prev) =>
+                          prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
+                        )
+                      }
+                      className={`rounded-full border px-2.5 py-1 text-[11.5px] font-semibold transition ${
+                        on
+                          ? "border-[#2a211a] bg-[#2a211a] text-white"
+                          : allowed
+                            ? "border-[#e6e0d6] bg-white text-[#5c4d40]"
+                            : "border-dashed border-[#e6e0d6] bg-white text-[#b0a294]"
+                      }`}
+                    >
+                      {d.slice(0, 3)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">Until</span>
+              <input
+                type="date"
+                value={until}
+                min={toISODate(selectedDay)}
+                onChange={(e) => setUntil(e.target.value)}
+                aria-label="Repeat until"
+                className={inputClass}
+              />
+            </div>
+          </>
+        ) : null}
+
+        {outsideFrequency.length ? (
+          <Muted className="text-[11.5px]">
+            {outsideFrequency.join(", ")} {outsideFrequency.length === 1 ? "is" : "are"} outside
+            this experience&rsquo;s usual days — slots will still be created.
+          </Muted>
+        ) : null}
+
+        <div className="rounded-xl bg-[#faf8f4] px-3 py-2.5">
+          {occurrences.length ? (
+            <>
+              <p className="text-[13px] text-[#2a211a]">
+                <span className="font-semibold">{occurrences.length}</span> slot
+                {occurrences.length === 1 ? "" : "s"} ·{" "}
+                {occurrences.length * Number(capacity || 0)} seats
+              </p>
+              <p className="mt-0.5 text-[11.5px] text-[#9a8c7e]">
+                {occurrences[0].toLocaleDateString("en-GB", { day: "numeric", month: "short" })}{" "}
+                {timeOf(occurrences[0].toISOString())}
+                {occurrences.length > 1
+                  ? ` → ${occurrences[occurrences.length - 1].toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                    })}`
+                  : ""}
+              </p>
+            </>
+          ) : (
+            <p className="text-[12.5px] text-[#9a8c7e]">
+              {expId ? "Nothing to create yet." : "Choose an experience to begin."}
+            </p>
+          )}
+        </div>
+
+        <Button
+          variant="primary"
+          className="w-full"
+          disabled={busy || !occurrences.length}
+          onClick={create}
+        >
+          {busy
+            ? "Creating…"
+            : `Create ${occurrences.length || ""} slot${occurrences.length === 1 ? "" : "s"}`}
+        </Button>
+        <Muted className="text-[11px]">
+          Slots that already exist, or fall in the past, are skipped rather than duplicated.
+        </Muted>
+      </div>
+    </Card>
+  );
+}
+
+/* ----------------------------- global pause ------------------------------ */
+
+function GlobalPause() {
+  const [state, setState] = React.useState({ paused: false, message: "", until: "" });
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    fetch("/api/admin/settings/bookings", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive) return;
+        setState({
+          paused: !!d.bookingsPaused,
+          message: d.bookingsPausedMessage || "",
+          until: d.bookingsPausedUntil ? String(d.bookingsPausedUntil).slice(0, 16) : "",
+        });
+      })
+      .catch(() => toast.error("Could not load the booking pause setting."))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function save(next) {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/settings/bookings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingsPaused: !!next.paused,
+          bookingsPausedMessage: next.message?.trim() || null,
+          bookingsPausedUntil: next.until ? new Date(next.until).toISOString() : null,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setState(next);
+      toast.success(next.paused ? "Bookings paused site-wide." : "Bookings resumed.");
+      if (!next.paused) setOpen(false);
+    } catch {
+      toast.error("Could not update the booking pause setting.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return null;
+
+  return (
+    <div
+      className={`mb-6 rounded-2xl border p-4 ${
+        state.paused ? "border-[#e8d9b0] bg-[#fdf7e8]" : "border-[#e6e0d6] bg-white"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className={state.paused ? "text-[#8a6412]" : "text-[#3f6b3f]"}>
+            <Icon name={state.paused ? "warning" : "check"} size={17} />
+          </span>
+          <div>
+            <p className="text-[13.5px] font-semibold text-[#2a211a]">
+              {state.paused ? "Bookings are paused site-wide" : "Bookings are open"}
+            </p>
+            <Muted className="text-[12px]">
+              {state.paused
+                ? state.message || "Customers cannot book any experience."
+                : "Customers can book any experience with availability."}
+            </Muted>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
+            {open ? "Close" : "Settings"}
+          </Button>
+          <Button
+            variant={state.paused ? "primary" : "secondary"}
+            size="sm"
+            disabled={saving}
+            onClick={() => save({ ...state, paused: !state.paused })}
+          >
+            {state.paused ? "Resume bookings" : "Pause bookings"}
+          </Button>
+        </div>
+      </div>
+
+      {open ? (
+        <div className="mt-4 grid gap-3 border-t border-[#eee8de] pt-4 sm:grid-cols-2">
+          <div>
+            <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">
+              Message for customers
+            </span>
+            <input
+              value={state.message}
+              onChange={(e) => setState((s) => ({ ...s, message: e.target.value }))}
+              placeholder="Back on Monday — thank you for your patience."
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">
+              Paused until (optional)
+            </span>
+            <div className="flex gap-2">
+              <input
+                type="datetime-local"
+                value={state.until}
+                onChange={(e) => setState((s) => ({ ...s, until: e.target.value }))}
+                className={inputClass}
+              />
+              <Button variant="primary" disabled={saving} onClick={() => save(state)}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

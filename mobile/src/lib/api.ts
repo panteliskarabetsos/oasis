@@ -22,6 +22,7 @@ import type {
   ShopOrder,
   ShopProduct,
   ShopOrderItem,
+  ShopShippingQuote,
 } from "@/lib/types";
 
 export class ApiError extends Error {
@@ -203,6 +204,13 @@ export const api = {
       `/api/shop/products/${encodeURIComponent(slug)}`
     ),
 
+  /** What this bag costs to deliver, before committing to pay. */
+  shopQuote: (body: {
+    items: { productId: number; quantity: number }[];
+    country?: string;
+    method?: "courier" | "pickup";
+  }) => request<ShopShippingQuote>(`/api/shop/quote`, { method: "POST", body }),
+
   shopCheckout: (body: {
     items: { productId: number; quantity: number; option?: string | null }[];
     contact: { name: string; email: string; phone?: string };
@@ -215,6 +223,7 @@ export const api = {
       notes?: string;
     };
     mode?: "elements" | "checkout";
+    shippingMethod?: "courier" | "pickup";
   }) =>
     request<ShopCheckoutResult>(`/api/shop/checkout`, {
       method: "POST",

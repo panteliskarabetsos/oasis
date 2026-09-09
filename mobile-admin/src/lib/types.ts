@@ -332,3 +332,62 @@ export type PosCheckoutResult = {
   bookingId?: number;
   receiptId?: number;
 };
+
+/* ------------------------------- E-shop -------------------------------- */
+
+export type ShopProductRow = {
+  id: number;
+  slug: string;
+  title: string;
+  price_cents: number;
+  currency: string;
+  active: boolean;
+  stock_qty: number;
+  sku?: number | null;
+  sku_code?: string | null;
+  /** Absent on deployments without the barcode migration. */
+  barcode?: string | null;
+  category?: string | null;
+  description?: string | null;
+  updated_at?: string | null;
+};
+
+export type ShopLookupResult = {
+  product: ShopProductRow | null;
+  matchedOn?: "barcode" | "sku" | "id";
+  code: string;
+  suggestions?: ShopProductRow[];
+  barcodesReady?: boolean;
+  hint?: string | null;
+};
+
+export type ShopOrderRow = {
+  id: number;
+  status: string;
+  total_cents: number;
+  currency: string;
+  placed_at?: string | null;
+  created_at?: string | null;
+  stripe_payment_intent_id?: string | null;
+};
+
+export type ShopOrderItemRow = {
+  id?: number;
+  product_id?: number | null;
+  quantity: number;
+  unit_price_cents: number;
+  currency?: string;
+  title_snapshot: string;
+};
+
+export type ShopOrderDetail = {
+  order: ShopOrderRow & {
+    billing_address?: { name?: string; email?: string; phone?: string } | null;
+    shipping_address?: Record<string, string> | null;
+    tracking_number?: string | null;
+    refunded_cents?: number | null;
+  };
+  items: ShopOrderItemRow[];
+  refundedCents?: number;
+  eventsAvailable?: boolean;
+};

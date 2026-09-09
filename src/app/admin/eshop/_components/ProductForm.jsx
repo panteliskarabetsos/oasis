@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 
 import CloudinaryWidget from "@/app/admin/components/CloudinaryWidget";
 import { ean13Svg, isValidEan13, normalizeScan } from "@/lib/shop/barcode";
+import { chargeableGrams } from "@/lib/shop/shipping";
 import Icon from "@/app/admin/_ui/Icon";
 import {
   Badge,
@@ -192,6 +193,7 @@ export default function ProductForm({ productId = null }) {
   const [barcode, setBarcode] = React.useState("");
   const [barcodeDraft, setBarcodeDraft] = React.useState("");
   const [labelCount, setLabelCount] = React.useState("12");
+  const [ship, setShip] = React.useState({ weight: "", length: "", width: "", height: "" });
 
   const [images, setImages] = React.useState([]); // [{id?, url, alt, sort}]
   const [imgUrl, setImgUrl] = React.useState("");
@@ -218,6 +220,12 @@ export default function ProductForm({ productId = null }) {
     setOptionGroups(normaliseOptions(product.options));
     setBarcode(product.barcode || "");
     setBarcodeDraft(product.barcode || "");
+    setShip({
+      weight: product.shipping_weight_grams ? String(product.shipping_weight_grams) : "",
+      length: product.shipping_length_cm != null ? String(product.shipping_length_cm) : "",
+      width: product.shipping_width_cm != null ? String(product.shipping_width_cm) : "",
+      height: product.shipping_height_cm != null ? String(product.shipping_height_cm) : "",
+    });
     if (imageRows) {
       setImages(
         imageRows.map((i) => ({
@@ -241,6 +249,12 @@ export default function ProductForm({ productId = null }) {
         stock: String(product.stock_qty ?? 0),
         optionGroups: normaliseOptions(product.options),
         barcode: product.barcode || "",
+        ship: {
+          weight: product.shipping_weight_grams ? String(product.shipping_weight_grams) : "",
+          length: product.shipping_length_cm != null ? String(product.shipping_length_cm) : "",
+          width: product.shipping_width_cm != null ? String(product.shipping_width_cm) : "",
+          height: product.shipping_height_cm != null ? String(product.shipping_height_cm) : "",
+        },
       })
     );
   }, []);
@@ -288,6 +302,7 @@ export default function ProductForm({ productId = null }) {
     stock,
     optionGroups,
     barcode,
+    ship,
   });
   const dirty = isEdit
     ? baseline !== null && current !== baseline
@@ -554,6 +569,10 @@ export default function ProductForm({ productId = null }) {
         options: cleanedOptions,
         // Empty hands it back to the trigger, which assigns ours from the sku.
         barcode,
+        shipping_weight_grams: ship.weight === "" ? 0 : Number(ship.weight),
+        shipping_length_cm: ship.length === "" ? null : Number(ship.length),
+        shipping_width_cm: ship.width === "" ? null : Number(ship.width),
+        shipping_height_cm: ship.height === "" ? null : Number(ship.height),
       };
 
       if (isEdit) {
@@ -692,6 +711,28 @@ export default function ProductForm({ productId = null }) {
   const priceCents = toCents(price);
   const stockNum = Number(stock) || 0;
   const barcodeSvg = barcode ? ean13Svg(barcode, { moduleWidth: 2, height: 52 }) : null;
+  // Mirrors what the courier will actually bill, using the same function the
+  // storefront quotes with.
+  const shipLine = {
+    quantity: 1,
+    shipping_weight_grams: Number(ship.weight) || 0,
+    shipping_length_cm: Number(ship.length) || 0,
+    shipping_width_cm: Number(ship.width) || 0,
+    shipping_height_cm: Number(ship.height) || 0,
+  };
+  const chargedGrams = chargeableGrams([shipLine]);
+  const volumetric =
+    shipLine.shipping_length_cm > 0 &&
+    shipLine.shipping_width_cm > 0 &&
+    shipLine.shipping_height_cm > 0
+      ? Math.round(
+          ((shipLine.shipping_length_cm *
+            shipLine.shipping_width_cm *
+            shipLine.shipping_height_cm) /
+            5000) *
+            1000
+        )
+      : 0;
 
   return (
     <Page className="py-8 pb-28">
@@ -1132,6 +1173,76 @@ export default function ProductForm({ productId = null }) {
                 <Badge variant="warning">Low stock — {stockNum} left</Badge>
               ) : (
                 <Badge variant="success">{stockNum} in stock</Badge>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Shipping size"
+              description="What the courier charges on. Weight is the minimum."
+            />
+            <div className="space-y-3">
+              <div>
+                <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">
+                  Weight (grams)
+                </span>
+                <input
+                  value={ship.weight}
+                  onChange={(e) =>
+                    setShip((v) => ({ ...v, weight: e.target.value.replace(/[^0-9]/g, "") }))
+                  }
+                  inputMode="numeric"
+                  placeholder="e.g. 800 for a 500ml bottle"
+                  aria-label="Shipping weight in grams"
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <span className="mb-1.5 block text-[12px] font-semibold text-[#3f3127]">
+                  Packed size (cm)
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    ["length", "Length"],
+                    ["width", "Width"],
+                    ["height", "Height"],
+                  ].map(([key, label]) => (
+                    <input
+                      key={key}
+                      value={ship[key]}
+                      onChange={(e) =>
+                        setShip((v) => ({ ...v, [key]: e.target.value.replace(/[^0-9.]/g, "") }))
+                      }
+                      inputMode="decimal"
+                      placeholder={label}
+                      aria-label={`${label} in centimetres`}
+                      className={inputClass}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {volumetric > 0 ? (
+                <div className="rounded-xl bg-[#faf8f4] px-3 py-2.5">
+                  <p className="text-[12.5px] text-[#2a211a]">
+                    Charged as{" "}
+                    <span className="font-semibold">{(chargedGrams / 1000).toFixed(2)} kg</span>
+                  </p>
+                  <p className="mt-0.5 text-[11.5px] text-[#9a8c7e]">
+                    {volumetric > Number(ship.weight || 0)
+                      ? `Bulk wins: ${(volumetric / 1000).toFixed(2)} kg by volume against ${(
+                          Number(ship.weight || 0) / 1000
+                        ).toFixed(2)} kg on the scales.`
+                      : "Real weight is higher than the volume, so that is what counts."}
+                  </p>
+                </div>
+              ) : (
+                <Muted className="text-[11.5px]">
+                  Leave the size blank if the parcel is dense — weight alone is enough.
+                  Couriers bill the greater of the two.
+                </Muted>
               )}
             </div>
           </Card>

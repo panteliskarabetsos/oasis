@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { isValidEan13, normalizeScan } from "@/lib/shop/barcode";
-import { isMissingSchema } from "@/lib/shop/schema";
+import { SHIPPING_COLUMNS, isMissingSchema, selectWithFallback } from "@/lib/shop/schema";
 
 const ok3 = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad3 = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -17,21 +17,14 @@ export async function GET(_req, { params }) {
   const id = Number(params?.id);
   if (!Number.isFinite(id) || id <= 0) return bad3("Invalid id");
   try {
-    const COLS =
+    const BASE =
       "id, slug, title, description, price_cents, currency, active, stock_qty, sku, sku_code, category, options, created_at, updated_at";
-    let { data: product, error } = await supabase
-      .from("shop_product")
-      .select(`${COLS}, barcode`)
-      .eq("id", id)
-      .maybeSingle();
-    if (error && isMissingSchema(error)) {
-      // The barcode migration has not been run yet; show the product regardless.
-      ({ data: product, error } = await supabase
-        .from("shop_product")
-        .select(COLS)
-        .eq("id", id)
-        .maybeSingle());
-    }
+    const WITH_BARCODE = `${BASE}, barcode`;
+    const FULL = `${WITH_BARCODE}, ${SHIPPING_COLUMNS}`;
+    const { data: product, error } = await selectWithFallback(
+      (columns) => supabase.from("shop_product").select(columns).eq("id", id).maybeSingle(),
+      [FULL, WITH_BARCODE, BASE]
+    );
     if (error) throw error;
     if (!product) return bad3("Product not found", 404);
 
@@ -90,6 +83,22 @@ export async function PATCH(req, { params }) {
       if (!Array.isArray(body.options)) return bad3("Options must be a list");
       patch.options = body.options;
     }
+    for (const key of [
+      "shipping_weight_grams",
+      "shipping_length_cm",
+      "shipping_width_cm",
+      "shipping_height_cm",
+    ]) {
+      if (body[key] === undefined) continue;
+      const raw = body[key];
+      if (raw === null || raw === "") {
+        patch[key] = key === "shipping_weight_grams" ? 0 : null;
+        continue;
+      }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) return bad3(`Invalid ${key.replace(/_/g, " ")}`);
+      patch[key] = key === "shipping_weight_grams" ? Math.round(n) : n;
+    }
     if (body.barcode !== undefined) {
       const code = normalizeScan(body.barcode);
       if (!code) {
@@ -115,8 +124,16 @@ export async function PATCH(req, { params }) {
       .eq("id", id)
       .select()
       .single();
-    if (error && isMissingSchema(error) && patch.barcode !== undefined) {
-      const { barcode: _dropped, ...rest } = patch;
+    if (error && isMissingSchema(error)) {
+      // Retry without whichever optional columns this database lacks.
+      const {
+        barcode: _b,
+        shipping_weight_grams: _w,
+        shipping_length_cm: _l,
+        shipping_width_cm: _wd,
+        shipping_height_cm: _h,
+        ...rest
+      } = patch;
       ({ data, error } = await supabase
         .from("shop_product")
         .update(rest)

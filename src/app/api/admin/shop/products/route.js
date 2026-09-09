@@ -5,7 +5,12 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { isValidEan13, normalizeScan } from "@/lib/shop/barcode";
-import { BARCODE_MIGRATION_HINT, isMissingSchema } from "@/lib/shop/schema";
+import {
+  BARCODE_MIGRATION_HINT,
+  SHIPPING_COLUMNS,
+  isMissingSchema,
+  selectWithFallback,
+} from "@/lib/shop/schema";
 
 const ok2 = (d, s = 200, headers) =>
   NextResponse.json(d, { status: s, ...(headers ? { headers } : {}) });
@@ -17,16 +22,17 @@ export async function GET(req) {
   const supabase = createSupabaseAdmin();
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("search") || "").trim();
-  // The barcode column arrives with a migration. A deploy that lands before the
-  // SQL is run must still render the products list, so ask for it and retreat
-  // to the older column set if the database has not caught up.
-  const build = (withBarcode) => {
+  // Optional columns arrive with migrations that may not have been run. Ask for
+  // the richest set the database can actually serve.
+  const BASE =
+    "id, slug, title, description, price_cents, currency, active, stock_qty, sku, sku_code, category, created_at, updated_at";
+  const WITH_BARCODE = `${BASE}, barcode`;
+  const FULL = `${WITH_BARCODE}, ${SHIPPING_COLUMNS}`;
+
+  const build = (columns) => {
     let query = supabase
       .from("shop_product")
-      .select(
-        "id, slug, title, description, price_cents, currency, active, stock_qty, sku, sku_code, category, created_at, updated_at" +
-          (withBarcode ? ", barcode" : "")
-      )
+      .select(columns)
       .order("updated_at", { ascending: false })
       .limit(200);
     if (q) {
@@ -36,21 +42,20 @@ export async function GET(req) {
         `slug.ilike.${like}`,
         `sku_code.ilike.${like}`,
       ];
-      if (withBarcode) fields.push(`barcode.ilike.${like}`);
+      if (columns.includes("barcode")) fields.push(`barcode.ilike.${like}`);
       query = query.or(fields.join(","));
     }
     return query;
   };
 
   try {
-    let { data, error } = await build(true);
-    if (error && isMissingSchema(error)) {
-      ({ data, error } = await build(false));
-      if (error) throw error;
-      return ok2(data || [], 200, { "X-Shop-Migration": BARCODE_MIGRATION_HINT });
-    }
+    const { data, error, columns } = await selectWithFallback(build, [FULL, WITH_BARCODE, BASE]);
     if (error) throw error;
-    return ok2(data || []);
+    return ok2(
+      data || [],
+      200,
+      columns === FULL ? undefined : { "X-Shop-Migration": BARCODE_MIGRATION_HINT }
+    );
   } catch (e) {
     return bad2(String(e.message || e), 500);
   }
@@ -111,6 +116,22 @@ export async function POST(req) {
     }
     // Left unset, a trigger assigns one from the product's sku sequence. Set,
     // it must be a real EAN-13 — a bought-in item keeps its own barcode.
+    for (const key of [
+      "shipping_weight_grams",
+      "shipping_length_cm",
+      "shipping_width_cm",
+      "shipping_height_cm",
+    ]) {
+      if (body?.[key] === undefined) continue;
+      const raw = body[key];
+      if (raw === null || raw === "") {
+        row[key] = key === "shipping_weight_grams" ? 0 : null;
+        continue;
+      }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) return bad2(`Invalid ${key.replace(/_/g, " ")}`);
+      row[key] = key === "shipping_weight_grams" ? Math.round(n) : n;
+    }
     if (body?.barcode !== undefined) {
       const code = normalizeScan(body.barcode);
       if (code) {

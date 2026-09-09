@@ -260,6 +260,12 @@ export type ShopOrder = {
   created_at?: string | null;
   billing_address?: { name?: string; email?: string; phone?: string } | null;
   shipping_address?: Record<string, string> | null;
+  /** Present once the shipping migration has run. */
+  shipping_cents?: number | null;
+  shipping_method?: "courier" | "pickup" | "free" | null;
+  tracking_number?: string | null;
+  tracking_url?: string | null;
+  refunded_cents?: number | null;
   items?: ShopOrderItem[];
 };
 
@@ -271,4 +277,32 @@ export type ShopCheckoutResult = {
   url?: string;
   amountCents: number;
   currency: string;
+};
+
+export type ShopQuoteLine = {
+  productId: number;
+  available: boolean;
+  reason?: string | null;
+  title?: string;
+  slug?: string;
+  priceCents?: number;
+  stockQty?: number;
+  quantity: number;
+};
+
+export type ShopShippingQuote = {
+  lines?: ShopQuoteLine[];
+  cents: number;
+  method: "courier" | "pickup" | "free";
+  label: string;
+  grams: number;
+  zone: string | null;
+  free: boolean;
+  available: boolean;
+  reason?: string;
+  subtotalCents: number;
+  totalCents: number;
+  pickupOffered: boolean;
+  pickupLabel: string;
+  freeOverCents: number;
 };
