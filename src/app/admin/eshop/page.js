@@ -2,15 +2,9 @@
 
 import React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
-import { Edit, Image as ImageIcon, LayoutDashboard, ListOrdered, Loader2, Mail, PackageSearch, Search, Settings } from "lucide-react";
-
-// shadcn/ui
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/app/components/ui/card";
-
-import { Input } from "@/app/components/ui/input";
-import { Textarea } from "@/app/components/ui/textarea";
+import { Image as ImageIcon, LayoutDashboard, ListOrdered, Mail, PackageSearch, Search, Settings } from "lucide-react";
 
 import Icon from "../_ui/Icon";
 import { Badge as UIBadge, Button as UIButton, Card as UICard, EmptyState as UIEmptyState, ErrorNote, Field, Muted, Page, PageHeader, Select as UISelect, Skeleton, StatCard, StatusBadge as UIStatusBadge, Table, Td, Th, Tr, inputClass } from "../_ui";
@@ -40,40 +34,10 @@ function formatDate(s) {
   return isNaN(d) ? String(s) : d.toLocaleString();
 }
 
-function centsFromInput(value) {
-  // accepts "12", "12.3", "12,30"
-  const normalized = String(value || "")
-    .replace(",", ".")
-    .trim();
-  const n = Number(normalized);
-  if (!isFinite(n)) return 0;
-  return Math.round(n * 100);
-}
-function inputFromCents(cents) {
-  const v = Number(cents || 0) / 100;
-  return String(v.toFixed(2));
-}
 
 /* -------------------------------------------------------------
    Visual tokens
 ------------------------------------------------------------- */
-const ui = {
-  page: "min-h-screen bg-[#f7f4ef] text-[#2a211a]",
-  container: "mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8",
-  panel:
-    "rounded-2xl border border-[#e6e0d6] bg-white shadow-[0_1px_2px_rgba(42,33,26,0.04)]",
-  card:
-    "rounded-2xl border border-[#e6e0d6] bg-white shadow-[0_1px_2px_rgba(42,33,26,0.04)]",
-  softCard:
-    "rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] shadow-[0_1px_2px_rgba(42,33,26,0.04)]",
-  muted: "text-[#7a6a5f]",
-  brand: "text-[#2a211a]",
-  accent: "text-[#8b6f47]",
-  outlineBtn: "border-[#e6e0d6] bg-white hover:border-[#c9b393] hover:bg-[#fdfbf7]",
-  dangerBtn: "border-[#f3d5cb] text-[#a33c22] hover:bg-[#fbeae5]",
-  primaryBtn: "bg-[#8b6f47] text-white hover:bg-[#7a6039]",
-};
-
 /* -------------------------------------------------------------
    Page
 ------------------------------------------------------------- */
@@ -129,9 +93,6 @@ export default function AdminEshopManagePage() {
         description={current?.blurb ?? "Products, orders, images, subscribers and shop availability."}
         actions={
           <>
-            <UIButton as="a" href="/shop" target="_blank" rel="noreferrer" variant="secondary">
-              <Icon name="external" size={15} /> Storefront
-            </UIButton>
             <UIButton as={Link} href="/admin/eshop/new-product" variant="primary">
               <Icon name="plus" size={15} /> New product
             </UIButton>
@@ -243,6 +204,7 @@ function OverviewSection() {
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           {[
             ["Add a product", "Create it, set a price and put stock against it.", "/admin/eshop/new-product"],
+            ["Open the scanner", "Look codes up, receive stock, pick orders.", "/admin/eshop/scan"],
             ["Fulfil orders", "Work the queue and mark orders as they ship.", null],
           ].map(([title, body, href]) => (
             <div
@@ -270,7 +232,6 @@ function ProductsSection() {
   const [loading, setLoading] = React.useState(true);
   const [items, setItems] = React.useState([]);
   const [error, setError] = React.useState("");
-  const [editing, setEditing] = React.useState(null);
 
   const [activeFilter, setActiveFilter] = React.useState("all"); // all|active|inactive
 
@@ -341,6 +302,17 @@ function ProductsSection() {
       if (!res.ok) {
         setItems(prev);
         const data = await res.json().catch(() => ({}));
+        // 409 means something still references it — offer the only way out.
+        if (res.status === 409 && prod.active) {
+          if (
+            confirm(
+              `${data?.error || "This product cannot be deleted."}\n\nHide it from the shop now?`
+            )
+          ) {
+            await toggleActive(prod);
+          }
+          return;
+        }
         throw new Error(data?.error || "Failed to delete");
       }
     } catch (err) {
@@ -449,6 +421,9 @@ function ProductsSection() {
             <UIButton as={Link} href="/admin/eshop/new-product" variant="primary" className="h-11">
               <Icon name="plus" size={15} /> New
             </UIButton>
+            <UIButton as={Link} href="/admin/eshop/scan" variant="secondary" className="h-11">
+              <Icon name="search" size={15} /> Scanner
+            </UIButton>
           </div>
         </div>
 
@@ -510,8 +485,7 @@ function ProductsSection() {
                   <Td>
                     <span className="block font-semibold text-[#2a211a]">{p.title}</span>
                     <span className="block font-mono text-[11px] text-[#9a8c7e]">
-                      {p.slug}
-                      {p.sku_code ? ` · ${p.sku_code}` : ""}
+                      {[p.slug, p.sku_code, p.barcode].filter(Boolean).join(" · ")}
                     </span>
                   </Td>
                   <Td className="whitespace-nowrap text-right font-semibold">
@@ -535,13 +509,13 @@ function ProductsSection() {
                   </Td>
                   <Td className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => setEditing(p)}
-                        title="Edit product"
+                      <Link
+                        href={`/admin/eshop/product/${p.id}`}
+                        title="Manage product"
                         className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4] hover:text-[#2a211a]"
                       >
                         <Icon name="file" size={15} />
-                      </button>
+                      </Link>
                       <button
                         onClick={() => removeProduct(p)}
                         title="Delete product"
@@ -591,16 +565,6 @@ function ProductsSection() {
         ) : null}
       </UICard>
 
-      {editing ? (
-        <ProductModal
-          existing={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            fetchProducts();
-          }}
-        />
-      ) : null}
     </div>
   );
 }
@@ -722,176 +686,17 @@ function SortTh({ label, k, sort, onSort, align }) {
     </Th>
   );
 }
-function ProductModal({ existing, onClose, onSaved }) {
-  const [title, setTitle] = React.useState(existing?.title || "");
-  const [slug, setSlug] = React.useState(existing?.slug || "");
-  const [price, setPrice] = React.useState(
-    inputFromCents(existing?.price_cents || 0)
-  );
-  const [currency, setCurrency] = React.useState(existing?.currency || "EUR");
-  const [description, setDescription] = React.useState(
-    existing?.description || ""
-  );
-  const [active, setActive] = React.useState(!!existing?.active);
-  const [stock, setStock] = React.useState(String(existing?.stock_qty ?? 0));
-  const [sku, setSku] = React.useState(existing?.sku_code || "");
-  const [category, setCategory] = React.useState(existing?.category || "other");
-
-  const [saving, setSaving] = React.useState(false);
-  const [err, setErr] = React.useState("");
-
-  const save = async () => {
-    try {
-      setSaving(true);
-      setErr("");
-
-      const stockValue = Number(stock);
-      if (!Number.isInteger(stockValue) || stockValue < 0) {
-        setErr("Stock must be a whole number of 0 or more.");
-        setSaving(false);
-        return;
-      }
-
-      const payload = {
-        title,
-        slug,
-        price_cents: centsFromInput(price),
-        currency,
-        description,
-        active,
-        stock_qty: stockValue,
-        sku_code: sku.trim() || null,
-        category,
-      };
-
-      const res = await fetch(`/api/admin/shop/products/${existing.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Failed to save product");
-
-      onSaved?.();
-    } catch (e) {
-      setErr(String(e.message || e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  React.useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-[#e6e0d6] bg-white p-6 shadow-2xl sm:rounded-3xl">
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="font-serif text-[19px] text-[#2a211a]">Edit product</h2>
-            <p className="mt-0.5 font-mono text-[12px] text-[#9a8c7e]">{existing?.slug}</p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]"
-          >
-            <Icon name="x" size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <Field label="Title">
-            <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
-          </Field>
-          <Field label="Slug" hint="Used in the storefront URL.">
-            <input value={slug} onChange={(e) => setSlug(e.target.value)} className={`${inputClass} font-mono`} />
-          </Field>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={`Price (${currency})`}>
-              <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className={inputClass} />
-            </Field>
-            <Field label="Currency">
-              <UISelect value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {["EUR", "USD", "GBP"].map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </UISelect>
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Stock" hint="The POS blocks a sale at zero.">
-              <input
-                type="number" min="0" step="1"
-                value={stock}
-                onChange={(e) => setStock(e.target.value)}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="SKU" hint="Scanned at the till.">
-              <input value={sku} onChange={(e) => setSku(e.target.value)} className={`${inputClass} font-mono`} />
-            </Field>
-          </div>
-
-          <Field label="Category">
-            <UISelect value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="clothing">Clothing</option>
-              <option value="food">Food</option>
-              <option value="other">Other</option>
-            </UISelect>
-          </Field>
-
-          <Field label="Description">
-            <textarea
-              rows={4}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className={`${inputClass} h-auto py-2 leading-relaxed`}
-            />
-          </Field>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={active}
-              onChange={(e) => setActive(e.target.checked)}
-              className="h-4 w-4 accent-[#8b6f47]"
-            />
-            <span className="text-[13px] text-[#2a211a]">Show in the shop</span>
-          </label>
-        </div>
-
-        {err ? <ErrorNote className="mt-3">{err}</ErrorNote> : null}
-
-        <div className="mt-5 flex justify-end gap-2 border-t border-[#f0ebe2] pt-4">
-          <UIButton variant="secondary" onClick={onClose}>Cancel</UIButton>
-          <UIButton variant="primary" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save changes"}
-          </UIButton>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* -------------------------------------------------------------
    Orders
 ------------------------------------------------------------- */
 function OrdersSection() {
-  const [status, setStatus] = React.useState("pending");
+  const router = useRouter();
+  // Defaulting to "pending" made the tab look empty as soon as an order was
+  // paid — which is every order that actually completed.
+  const [status, setStatus] = React.useState("all");
   const [q, setQ] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [orders, setOrders] = React.useState([]);
-  const [selected, setSelected] = React.useState(null);
 
   const fetchOrders = React.useCallback(async () => {
     try {
@@ -917,15 +722,10 @@ function OrdersSection() {
     return () => clearTimeout(id);
   }, [fetchOrders]);
 
-  const filtered = orders.filter((o) => {
-    if (!q.trim()) return true;
-    const needle = q.trim().toLowerCase();
-    return [o.id, o.status, o.stripe_payment_intent_id]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .includes(needle);
-  });
+  // The server has already applied `q` (including the billing/shipping email,
+  // which is not in the row we render). Re-filtering here would silently drop
+  // exactly those matches, so the list shows what the query returned.
+  const filtered = orders;
 
   return (
     <div className="space-y-5">
@@ -982,12 +782,18 @@ function OrdersSection() {
             description={
               q
                 ? "Nothing matches that search."
-                : `No ${status === "all" ? "" : status} orders to show.`
+                : status === "all"
+                  ? "No orders have been placed yet."
+                  : `No ${status} orders — try “All statuses”.`
             }
             action={
               q ? (
                 <UIButton variant="secondary" onClick={() => setQ("")}>
                   Clear search
+                </UIButton>
+              ) : status !== "all" ? (
+                <UIButton variant="secondary" onClick={() => setStatus("all")}>
+                  Show all statuses
                 </UIButton>
               ) : null
             }
@@ -1006,7 +812,7 @@ function OrdersSection() {
             </thead>
             <tbody>
               {filtered.map((o) => (
-                <Tr key={o.id} onClick={() => setSelected(o.id)}>
+                <Tr key={o.id} onClick={() => router.push(`/admin/eshop/order/${o.id}`)}>
                   <Td className="font-mono text-[12.5px] font-semibold text-[#2a211a]">
                     S-{String(o.id).padStart(6, "0")}
                   </Td>
@@ -1023,13 +829,13 @@ function OrdersSection() {
                     {o.stripe_payment_intent_id ? o.stripe_payment_intent_id.slice(0, 18) + "…" : "—"}
                   </Td>
                   <Td className="text-right" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => setSelected(o.id)}
+                    <Link
+                      href={`/admin/eshop/order/${o.id}`}
                       title="Open order"
-                      className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4] hover:text-[#2a211a]"
+                      className="inline-block rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4] hover:text-[#2a211a]"
                     >
                       <Icon name="external" size={15} />
-                    </button>
+                    </Link>
                   </Td>
                 </Tr>
               ))}
@@ -1038,199 +844,6 @@ function OrdersSection() {
         )}
       </UICard>
 
-      {selected ? (
-        <OrderDrawer
-          orderId={selected}
-          onClose={() => {
-            setSelected(null);
-            fetchOrders();
-          }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function OrderDrawer({ orderId, onClose }) {
-  const [loading, setLoading] = React.useState(true);
-  const [data, setData] = React.useState(null);
-  const [err, setErr] = React.useState("");
-  const [updating, setUpdating] = React.useState(false);
-
-  React.useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/admin/shop/orders/${orderId}`, {
-          cache: "no-store",
-        });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d?.error || "Failed to load order");
-        setData(d);
-        setErr("");
-      } catch (e) {
-        setErr(String(e.message || e));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [orderId]);
-
-  const updateStatus = async (status) => {
-    try {
-      setUpdating(true);
-      const res = await fetch(`/api/admin/shop/orders/${orderId}/status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d?.error || "Failed to update status");
-      setData((prev) => ({ ...prev, order: { ...prev.order, status } }));
-    } catch (e) {
-      alert(String(e.message || e));
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  React.useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const order = data?.order;
-  const lines = data?.items ?? [];
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <aside className="relative z-10 flex h-full w-full max-w-md flex-col border-l border-[#e6e0d6] bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-[#e6e0d6] px-5 py-4">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#b89a6b]">
-              Order
-            </p>
-            <h2 className="font-serif text-[19px] text-[#2a211a]">
-              S-{String(orderId).padStart(6, "0")}
-            </h2>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]"
-          >
-            <Icon name="x" size={18} />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5">
-          {err ? (
-            <ErrorNote>{err}</ErrorNote>
-          ) : loading ? (
-            <div className="space-y-2">
-              {[0, 1, 2].map((i) => (
-                <Skeleton key={i} className="h-14" />
-              ))}
-            </div>
-          ) : !order ? (
-            <Muted>Order not found.</Muted>
-          ) : (
-            <div className="space-y-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <UIStatusBadge status={order.status} />
-                <span className="font-serif text-[22px] text-[#2a211a]">
-                  {formatCents(order.total_cents, order.currency)}
-                </span>
-              </div>
-
-              <div>
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
-                  Items
-                </p>
-                {lines.length ? (
-                  <ul className="divide-y divide-[#f0ebe2] rounded-2xl border border-[#e6e0d6]">
-                    {lines.map((l) => (
-                      <li key={l.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                        <div className="min-w-0">
-                          <p className="truncate text-[13px] font-medium text-[#2a211a]">
-                            {l.title_snapshot}
-                          </p>
-                          <p className="text-[11.5px] text-[#9a8c7e]">
-                            {l.quantity} × {formatCents(l.unit_price_cents, l.currency)}
-                          </p>
-                        </div>
-                        <span className="shrink-0 text-[13px] font-semibold">
-                          {formatCents(l.unit_price_cents * l.quantity, l.currency)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <Muted className="text-[12.5px]">No line items recorded.</Muted>
-                )}
-              </div>
-
-              <div>
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
-                  Details
-                </p>
-                <dl className="space-y-2 text-[13px]">
-                  <InfoRow label="Placed" value={order.placed_at ? formatDate(order.placed_at) : "—"} />
-                  <InfoRow label="Created" value={order.created_at ? formatDate(order.created_at) : "—"} />
-                  <InfoRow label="Payment" value={order.stripe_payment_intent_id || "—"} />
-                </dl>
-              </div>
-
-              {order.shipping_address ? (
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
-                    Shipping
-                  </p>
-                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] p-3 text-[12px] text-[#3f3127]">
-                    {JSON.stringify(order.shipping_address, null, 2)}
-                  </pre>
-                </div>
-              ) : null}
-            </div>
-          )}
-        </div>
-
-        {order ? (
-          <div className="border-t border-[#e6e0d6] p-4">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
-              Move to
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {["paid", "fulfilled", "cancelled"].map((s) => (
-                <UIButton
-                  key={s}
-                  size="sm"
-                  variant={s === "cancelled" ? "danger" : order.status === s ? "dark" : "secondary"}
-                  disabled={updating || order.status === s}
-                  onClick={() => updateStatus(s)}
-                >
-                  {s[0].toUpperCase() + s.slice(1)}
-                </UIButton>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </aside>
-    </div>
-  );
-}
-
-function InfoRow({ label, value }) {
-  return (
-    <div className="rounded-2xl border border-[#e6e0d6] bg-white p-4">
-      <div className="text-xs uppercase tracking-wide text-[#9a8c7e]">
-        {label}
-      </div>
-      <div className="mt-1 text-sm text-[#2a211a]">{value}</div>
     </div>
   );
 }
@@ -1275,7 +888,7 @@ function ImagesSection() {
           product_id: Number(productId),
           url,
           alt,
-          sort: (images[images.length - 1]?.sort || 0) + 1,
+          sort: images.reduce((m, i) => Math.max(m, Number(i.sort) || 0), -1) + 1,
         }),
       });
       const data = await res.json();
@@ -1288,15 +901,28 @@ function ImagesSection() {
     }
   };
 
+  // Swap sort values with the neighbour. Nudging one row's sort by ±1 left
+  // duplicate sorts behind (0,1,1) and the order then depended on the
+  // database's tie-breaking, so a second click could do nothing at all.
   const bump = async (img, dir) => {
+    const idx = images.findIndex((i) => i.id === img.id);
+    const other = images[idx + dir];
+    if (!other) return;
     try {
-      const res = await fetch(`/api/admin/shop/images/${img.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sort: (img.sort || 0) + dir }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to update order");
+      const patch = (id, sort) =>
+        fetch(`/api/admin/shop/images/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sort }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data?.error || "Failed to update order");
+          }
+        });
+      // Positions, not the stored values — those can be equal or have gaps.
+      await patch(img.id, idx + dir);
+      await patch(other.id, idx);
       load();
     } catch (e) {
       alert(String(e.message || e));
@@ -1591,6 +1217,39 @@ function SettingsSection() {
   const [paused, setPaused] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [emails, setEmails] = React.useState(null);
+  const [automations, setAutomations] = React.useState({});
+  const [emailNotice, setEmailNotice] = React.useState("");
+
+  // Without this the toggle always reads "open" — even while the storefront
+  // is refusing checkout — and saving would silently unpause the shop.
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/shop/settings", { cache: "no-store" });
+        const data = await res.json();
+        if (!alive || !res.ok) return;
+        setPaused(Boolean(data?.paused));
+        setMessage(data?.message || "");
+        setAutomations(data?.automations || {});
+        setEmails(data?.emails || null);
+        if (data?.emails && data.emails.available === false) {
+          setEmailNotice(
+            "Switches are showing their defaults — run dump_sql/20260909_shop_emails.sql to save changes."
+          );
+        }
+      } catch {
+        // leave the defaults; saving still works
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const save = async () => {
     try {
@@ -1598,11 +1257,11 @@ function SettingsSection() {
       const res = await fetch("/api/admin/shop/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paused, message }),
+        body: JSON.stringify({ paused, message, emails: emails || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to save settings");
-      alert("Saved");
+      alert(data?.warning ? `Saved.\n\n${data.warning}` : "Saved");
     } catch (e) {
       alert(String(e.message || e));
     } finally {
@@ -1622,6 +1281,7 @@ function SettingsSection() {
           <input
             type="checkbox"
             checked={paused}
+            disabled={loading}
             onChange={(e) => setPaused(e.target.checked)}
             className="mt-0.5 h-4 w-4 accent-[#8b6f47]"
           />
@@ -1658,16 +1318,76 @@ function SettingsSection() {
       </UICard>
 
       <UICard>
-        <h2 className="font-serif text-[17px] text-[#2a211a]">Storefront</h2>
+        <h2 className="font-serif text-[17px] text-[#2a211a]">Email automations</h2>
         <Muted className="mt-0.5 text-[12px]">
-          What customers see, and where to check it.
+          What the shop sends on its own, and to whom.
         </Muted>
+
+        {emailNotice ? <ErrorNote className="mt-3">{emailNotice}</ErrorNote> : null}
+
         <div className="mt-4 space-y-2">
-          <UIButton as="a" href="/shop" target="_blank" rel="noreferrer" variant="secondary" className="w-full">
-            <Icon name="external" size={15} /> Open the shop
+          {Object.entries(automations).map(([key, meta]) => {
+            const on = emails ? emails[key] !== false : true;
+            return (
+              <label
+                key={key}
+                className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] p-3.5"
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  disabled={loading}
+                  onChange={(e) =>
+                    setEmails((prev) => ({ ...(prev || {}), [key]: e.target.checked }))
+                  }
+                  className="mt-0.5 h-4 w-4 accent-[#8b6f47]"
+                />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-semibold text-[#2a211a]">
+                    {meta.label}
+                    <UIBadge
+                      variant={meta.audience === "staff" ? "info" : "neutral"}
+                      className="ml-2"
+                    >
+                      {meta.audience}
+                    </UIBadge>
+                  </span>
+                  <span className="mt-0.5 block text-[12px] text-[#7a6a5f]">
+                    {meta.description}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+          {!Object.keys(automations).length ? (
+            <Muted className="text-[12.5px]">Loading…</Muted>
+          ) : null}
+        </div>
+
+        <Field
+          label="Send staff alerts to"
+          hint="Leave empty to use the shop's default sending address."
+          className="mt-4"
+        >
+          <input
+            value={emails?.staffTo || ""}
+            onChange={(e) =>
+              setEmails((prev) => ({ ...(prev || {}), staffTo: e.target.value }))
+            }
+            placeholder="orders@youroasis.gr"
+            className={inputClass}
+          />
+        </Field>
+
+        <div className="mt-4 flex items-center gap-2 border-t border-[#f0ebe2] pt-4">
+          <UIButton variant="primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save settings"}
           </UIButton>
-          <UIButton as={Link} href="/admin/eshop/new-product" variant="secondary" className="w-full">
+          <UIButton as={Link} href="/admin/eshop/new-product" variant="secondary">
             <Icon name="plus" size={15} /> Add a product
+          </UIButton>
+          <UIButton as={Link} href="/admin/eshop/scan" variant="secondary">
+            <Icon name="search" size={15} /> Scanner
           </UIButton>
         </div>
       </UICard>

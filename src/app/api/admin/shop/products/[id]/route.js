@@ -4,9 +4,48 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
+import { isValidEan13, normalizeScan } from "@/lib/shop/barcode";
+import { isMissingSchema } from "@/lib/shop/schema";
 
 const ok3 = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad3 = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
+
+export async function GET(_req, { params }) {
+  const auth = await requireAdmin("eshop");
+  if (!auth.ok) return auth.response;
+  const supabase = createSupabaseAdmin();
+  const id = Number(params?.id);
+  if (!Number.isFinite(id) || id <= 0) return bad3("Invalid id");
+  try {
+    const COLS =
+      "id, slug, title, description, price_cents, currency, active, stock_qty, sku, sku_code, category, options, created_at, updated_at";
+    let { data: product, error } = await supabase
+      .from("shop_product")
+      .select(`${COLS}, barcode`)
+      .eq("id", id)
+      .maybeSingle();
+    if (error && isMissingSchema(error)) {
+      // The barcode migration has not been run yet; show the product regardless.
+      ({ data: product, error } = await supabase
+        .from("shop_product")
+        .select(COLS)
+        .eq("id", id)
+        .maybeSingle());
+    }
+    if (error) throw error;
+    if (!product) return bad3("Product not found", 404);
+
+    const { data: images } = await supabase
+      .from("shop_image")
+      .select("id, product_id, url, alt, sort")
+      .eq("product_id", id)
+      .order("sort", { ascending: true });
+
+    return ok3({ product, images: images || [] });
+  } catch (e) {
+    return bad3(String(e.message || e), 500);
+  }
+}
 
 export async function PATCH(req, { params }) {
   const auth = await requireAdmin("eshop");
@@ -47,6 +86,21 @@ export async function PATCH(req, { params }) {
       }
       patch.category = c;
     }
+    if (body.options !== undefined) {
+      if (!Array.isArray(body.options)) return bad3("Options must be a list");
+      patch.options = body.options;
+    }
+    if (body.barcode !== undefined) {
+      const code = normalizeScan(body.barcode);
+      if (!code) {
+        // Clearing it hands the product back to the auto-assigning trigger.
+        patch.barcode = null;
+      } else if (!isValidEan13(code)) {
+        return bad3("That barcode is not a valid EAN-13 (13 digits, check digit included)");
+      } else {
+        patch.barcode = code;
+      }
+    }
     if (body.price_cents !== undefined) {
       const price = Number(body.price_cents);
       if (!Number.isFinite(price) || price < 0)
@@ -55,13 +109,32 @@ export async function PATCH(req, { params }) {
     }
     patch.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("shop_product")
       .update(patch)
       .eq("id", id)
       .select()
       .single();
-    if (error) throw error;
+    if (error && isMissingSchema(error) && patch.barcode !== undefined) {
+      const { barcode: _dropped, ...rest } = patch;
+      ({ data, error } = await supabase
+        .from("shop_product")
+        .update(rest)
+        .eq("id", id)
+        .select()
+        .single());
+    }
+    if (error) {
+      if (error.code === "23505") {
+        const what = /barcode/i.test(error.message || "")
+          ? "barcode"
+          : /sku/i.test(error.message || "")
+            ? "SKU"
+            : "slug";
+        return bad3(`That ${what} is already used by another product`, 409);
+      }
+      throw error;
+    }
     return ok3(data);
   } catch (e) {
     return bad3(String(e.message || e), 500);
@@ -74,17 +147,59 @@ export async function DELETE(_req, { params }) {
   const supabase = createSupabaseAdmin();
   const id = Number(params?.id);
   if (!Number.isFinite(id) || id <= 0) return bad3("Invalid id");
+
   try {
-    // Remove dependent images first (FK likely restricts delete)
+    // shop_order_item references shop_product, so a product that has ever been
+    // bought can never be deleted. Check before touching anything, and say so.
+    const { count: orderedCount, error: countErr } = await supabase
+      .from("shop_order_item")
+      .select("id", { count: "exact", head: true })
+      .eq("product_id", id);
+    if (countErr) throw countErr;
+    if (orderedCount) {
+      return bad3(
+        `“Delete” is not possible: this product appears on ${orderedCount} order ` +
+          `line${orderedCount === 1 ? "" : "s"} and the order history has to keep ` +
+          `pointing at it. Switch it to Hidden instead — it disappears from the ` +
+          `shop and the app immediately.`,
+        409
+      );
+    }
+
+    // Images have to go first (they reference the product), but a later failure
+    // would then leave the product intact with its gallery destroyed. Keep the
+    // rows so they can be put back.
+    const { data: imageRows, error: readErr } = await supabase
+      .from("shop_image")
+      .select("id, product_id, url, alt, sort")
+      .eq("product_id", id);
+    if (readErr) throw readErr;
+
     const { error: imgErr } = await supabase
       .from("shop_image")
       .delete()
       .eq("product_id", id);
     if (imgErr) throw imgErr;
+
     const { error } = await supabase.from("shop_product").delete().eq("id", id);
-    if (error) throw error;
+    if (error) {
+      if (imageRows?.length) {
+        // Best effort: put the gallery back before reporting the failure.
+        await supabase.from("shop_image").insert(imageRows);
+      }
+      // 23503 = foreign key violation; anything still pointing here blocks it.
+      if (error.code === "23503") {
+        return bad3(
+          "Something else in the database still refers to this product, so it " +
+            "cannot be deleted. Switch it to Hidden instead.",
+          409
+        );
+      }
+      throw error;
+    }
+
     return ok3({ ok: true });
   } catch (e) {
-    return bad3(String(e.message || e), 500);
+    return bad3(String(e?.message || e), 500);
   }
 }

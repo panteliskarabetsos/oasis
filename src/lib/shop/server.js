@@ -5,6 +5,8 @@
 // stock.
 import "server-only";
 
+import { notifyOrderPaid } from "@/lib/shop/notify";
+
 export const ORDER_PENDING = "pending";
 export const ORDER_PAID = "paid";
 
@@ -43,7 +45,7 @@ export const ADDRESS_FIELDS = [
  * back; the loser sees zero rows and skips the stock write. Returns the order
  * either way so callers can respond with its current state.
  */
-export async function markOrderPaid(admin, orderId, refs = {}) {
+export async function markOrderPaid(admin, orderId, refs = {}, opts = {}) {
   const id = Number(orderId);
   if (!Number.isFinite(id) || id <= 0) return { ok: false, error: "Invalid order id" };
 
@@ -72,6 +74,13 @@ export async function markOrderPaid(admin, orderId, refs = {}) {
   }
 
   await drawDownStock(admin, id);
+
+  // Only the caller that actually flipped the row sends the confirmation, so
+  // the webhook and the client-side confirm cannot both email the customer.
+  if (opts.notify !== false) {
+    await notifyOrderPaid(admin, id);
+  }
+
   return { ok: true, already: false, order: claimed };
 }
 
