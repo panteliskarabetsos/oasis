@@ -2,47 +2,18 @@
 
 import React from "react";
 import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Edit,
-  Euro,
-  ExternalLink,
-  Eye,
-  Image as ImageIcon,
-  LayoutDashboard,
-  ListOrdered,
-  Loader2,
-  Mail,
-  PackageSearch,
-  Plus,
-  RefreshCw,
-  Search,
-  Settings,
-  Store,
-  ToggleLeft,
-  ToggleRight,
-  Trash2,
-  X,
-} from "lucide-react";
+
+import { Edit, Image as ImageIcon, LayoutDashboard, ListOrdered, Loader2, Mail, PackageSearch, Search, Settings } from "lucide-react";
 
 // shadcn/ui
-import { Button } from "@/app/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/app/components/ui/card";
-import { Badge } from "@/app/components/ui/badge";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/app/components/ui/card";
+
 import { Input } from "@/app/components/ui/input";
 import { Textarea } from "@/app/components/ui/textarea";
-import { Switch } from "@/app/components/ui/switch";
+
+import Icon from "../_ui/Icon";
+import { Badge as UIBadge, Button as UIButton, Card as UICard, EmptyState as UIEmptyState, ErrorNote, Field, Muted, Page, PageHeader, Select as UISelect, Skeleton, StatCard, StatusBadge as UIStatusBadge, Table, Td, Th, Tr, inputClass } from "../_ui";
 
 /* -------------------------------------------------------------
    Small utils
@@ -140,153 +111,63 @@ export default function AdminEshopManagePage() {
   }, []);
 
   const nav = [
-    { key: "overview", label: "Overview", icon: LayoutDashboard },
-    { key: "products", label: "Products", icon: PackageSearch },
-    { key: "orders", label: "Orders", icon: ListOrdered },
-    { key: "images", label: "Images", icon: ImageIcon },
-    { key: "subscribers", label: "Subscribers", icon: Mail },
-    { key: "settings", label: "Settings", icon: Settings },
+    { key: "overview", label: "Overview", icon: LayoutDashboard, blurb: "How the shop is trading right now." },
+    { key: "products", label: "Products", icon: PackageSearch, blurb: "Catalogue, pricing and stock on hand." },
+    { key: "orders", label: "Orders", icon: ListOrdered, blurb: "Fulfilment queue and order history." },
+    { key: "images", label: "Images", icon: ImageIcon, blurb: "Product photography." },
+    { key: "subscribers", label: "Subscribers", icon: Mail, blurb: "Newsletter list." },
+    { key: "settings", label: "Settings", icon: Settings, blurb: "Shop availability and storefront copy." },
   ];
 
+  const current = nav.find((n) => n.key === tab);
+
   return (
-    <div className={ui.page}>
-      <div className={ui.container}>
-        <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-          <div className="min-w-0">
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#b89a6b]">
-              Growth
-            </p>
-            <h1 className="font-serif text-[26px] leading-tight text-[#2a211a]">e-Shop</h1>
-            <p className="mt-1.5 text-[13px] text-[#7a6a5f]">
-              Products, orders, images, subscribers and shop availability.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/admin/eshop/new-product"
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#8b6f47] px-4 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-[#7a6039]"
-            >
-              <Plus className="h-4 w-4" /> New product
-            </Link>
-            <a
-              href="/shop"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#e6e0d6] bg-white px-4 text-[13px] font-semibold text-[#3f3127] transition-colors hover:border-[#c9b393] hover:bg-[#fdfbf7]"
-            >
-              <ExternalLink className="h-4 w-4" /> Storefront
-            </a>
-          </div>
-        </header>
+    <Page className="pb-10">
+      <PageHeader
+        eyebrow="Growth"
+        title="e-Shop"
+        description={current?.blurb ?? "Products, orders, images, subscribers and shop availability."}
+        actions={
+          <>
+            <UIButton as="a" href="/shop" target="_blank" rel="noreferrer" variant="secondary">
+              <Icon name="external" size={15} /> Storefront
+            </UIButton>
+            <UIButton as={Link} href="/admin/eshop/new-product" variant="primary">
+              <Icon name="plus" size={15} /> New product
+            </UIButton>
+          </>
+        }
+      />
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[260px_1fr]">
-          {/* Sidebar (desktop) */}
-          <aside className={cx("hidden lg:block", ui.panel)}>
-            <div className="p-3">
-              <div className="px-2 pb-2 text-xs font-medium uppercase tracking-wide text-[#9a8c7e]">
-                Navigation
-              </div>
-              <div className="space-y-1">
-                {nav.map((it) => (
-                  <NavItem
-                    key={it.key}
-                    active={tab === it.key}
-                    onClick={() => setTab(it.key)}
-                    icon={it.icon}
-                    label={it.label}
-                  />
-                ))}
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-[#e6e0d6] bg-white p-3">
-                <div className="text-sm font-medium text-[#2a211a]">Tips</div>
-                <div className="mt-1 text-xs text-[#7a6a5f]">
-                  Use quick keys: <span className="font-mono">g</span> then{" "}
-                  <span className="font-mono">o/p/r/i/s/t</span>.
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          {/* Top nav (mobile/tablet) */}
-          <div className="lg:hidden">
-            <div className={cx("sticky top-4 z-30", ui.panel)}>
-              <div className="flex gap-2 overflow-x-auto p-2">
-                {nav.map((it) => (
-                  <button
-                    key={it.key}
-                    onClick={() => setTab(it.key)}
-                    className={cx(
-                      "inline-flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm transition",
-                      tab === it.key
-                        ? "bg-[#2a211a] text-white shadow-sm"
-                        : "bg-white hover:bg-[#faf8f4] border border-[#e6e0d6] text-[#6b5c4d]"
-                    )}
-                  >
-                    <it.icon className="h-4 w-4" />
-                    {it.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Content */}
-          <main className="min-w-0">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={tab}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.18 }}
-                className="space-y-6"
-              >
-                {tab === "overview" && <OverviewSection />}
-                {tab === "products" && <ProductsSection />}
-                {tab === "orders" && <OrdersSection />}
-                {tab === "images" && <ImagesSection />}
-                {tab === "subscribers" && <SubscribersSection />}
-                {tab === "settings" && <SettingsSection />}
-              </motion.div>
-            </AnimatePresence>
-          </main>
-        </div>
+      {/* section switch */}
+      <div className="mb-5 flex flex-wrap gap-1.5">
+        {nav.map((it) => (
+          <button
+            key={it.key}
+            onClick={() => setTab(it.key)}
+            className={cx(
+              "inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-[13px] font-semibold transition-colors",
+              tab === it.key
+                ? "bg-[#2a211a] text-white"
+                : "bg-white text-[#6b5c4d] ring-1 ring-inset ring-[#e6e0d6] hover:bg-[#f2ede4]",
+            )}
+          >
+            <it.icon className="h-4 w-4" />
+            {it.label}
+          </button>
+        ))}
       </div>
-    </div>
+
+      {tab === "overview" ? <OverviewSection /> : null}
+      {tab === "products" ? <ProductsSection /> : null}
+      {tab === "orders" ? <OrdersSection /> : null}
+      {tab === "images" ? <ImagesSection /> : null}
+      {tab === "subscribers" ? <SubscribersSection /> : null}
+      {tab === "settings" ? <SettingsSection /> : null}
+    </Page>
   );
 }
 
-function NavItem({ active, onClick, icon: Icon, label }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
-      className={cx(
-        "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition",
-        active
-          ? "bg-[#2a211a] text-white shadow-sm"
-          : "hover:bg-white/70 text-[#6b5c4d]"
-      )}
-    >
-      <span
-        className={cx(
-          "grid h-9 w-9 place-items-center rounded-xl border",
-          active ? "border-white/15 bg-white/10" : "border-[#e6e0d6] bg-white"
-        )}
-      >
-        <Icon
-          className={cx("h-4 w-4", active ? "text-white" : "text-[#3a2f25]")}
-        />
-      </span>
-      <span className="font-medium">{label}</span>
-    </button>
-  );
-}
-
-/* -------------------------------------------------------------
-   Overview
-------------------------------------------------------------- */
 function OverviewSection() {
   const [loading, setLoading] = React.useState(true);
   const [stats, setStats] = React.useState({
@@ -315,90 +196,74 @@ function OverviewSection() {
   }, []);
 
   return (
-    <div className="space-y-6">
-      <Card className={ui.softCard}>
-        <CardContent className="p-5 sm:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-sm text-[#7a6a5f]">Dashboard</div>
-              <div className="text-xl font-semibold tracking-tight text-[#2a211a]">
-                Store health at a glance
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="rounded-full bg-white text-[#6b5c4d] border border-[#e6e0d6] hover:bg-white">
-                Live data
-              </Badge>
-              <Badge className="rounded-full bg-white text-[#6b5c4d] border border-[#e6e0d6] hover:bg-white">
-                Cache: no-store
-              </Badge>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="space-y-5">
+      {error ? <ErrorNote>{error}</ErrorNote> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard
-          title="Products"
-          value={stats.productCount}
-          icon={<PackageSearch className="h-5 w-5" />}
-          loading={loading}
-          error={error}
-        />
-        <KpiCard
-          title="Active products"
-          value={stats.activeProductCount}
-          icon={<CheckCircle2 className="h-5 w-5" />}
-          loading={loading}
-        />
-        <KpiCard
-          title="Pending orders"
-          value={stats.ordersPendingCount}
-          icon={<ListOrdered className="h-5 w-5" />}
-          loading={loading}
-        />
-        <KpiCard
-          title="Revenue (30d)"
-          value={formatCents(stats.revenue30dCents)}
-          icon={<Euro className="h-5 w-5" />}
-          loading={loading}
-        />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {loading ? (
+          [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)
+        ) : (
+          <>
+            <StatCard
+              label="Products"
+              value={stats.productCount ?? 0}
+              hint={`${stats.activeProductCount ?? 0} live`}
+              icon={<Icon name="bag" size={16} />}
+            />
+            <StatCard
+              label="Live products"
+              value={stats.activeProductCount ?? 0}
+              hint="Visible in the shop"
+              accent="info"
+              icon={<Icon name="check" size={16} />}
+            />
+            <StatCard
+              label="Orders to fulfil"
+              value={stats.ordersPendingCount ?? 0}
+              hint="Awaiting action"
+              accent={stats.ordersPendingCount > 0 ? "warning" : "brand"}
+              icon={<Icon name="inbox" size={16} />}
+            />
+            <StatCard
+              label="Revenue"
+              value={formatCents(stats.revenue30dCents ?? 0)}
+              hint="Last 30 days"
+              accent="success"
+              icon={<Icon name="chart" size={16} />}
+            />
+          </>
+        )}
       </div>
+
+      <UICard>
+        <h2 className="font-serif text-[17px] text-[#2a211a]">Getting things done</h2>
+        <Muted className="mt-0.5 text-[12px]">
+          The usual jobs, in the order they normally come up.
+        </Muted>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {[
+            ["Add a product", "Create it, set a price and put stock against it.", "/admin/eshop/new-product"],
+            ["Fulfil orders", "Work the queue and mark orders as they ship.", null],
+          ].map(([title, body, href]) => (
+            <div
+              key={title}
+              className="rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] px-4 py-3"
+            >
+              <p className="text-[13.5px] font-semibold text-[#2a211a]">{title}</p>
+              <p className="mt-0.5 text-[12px] text-[#7a6a5f]">{body}</p>
+              {href ? (
+                <UIButton as={Link} href={href} size="sm" variant="secondary" className="mt-2.5">
+                  Open
+                </UIButton>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </UICard>
     </div>
   );
 }
 
-function KpiCard({ title, value, icon, loading, error }) {
-  return (
-    <Card className={ui.card}>
-      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-[#7a6a5f]">
-          {title}
-        </CardTitle>
-        <div className="grid h-9 w-9 place-items-center rounded-xl border border-[#e6e0d6] bg-[#faf8f4] text-[#3a2f25]">
-          {icon}
-        </div>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-[#9a8c7e]">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </div>
-        ) : error ? (
-          <div className="text-sm text-[#a33c22]">{error}</div>
-        ) : (
-          <div className="text-2xl font-semibold tracking-tight text-[#2a211a]">
-            {value}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/* -------------------------------------------------------------
-   Products
-------------------------------------------------------------- */
 function ProductsSection() {
   const [search, setSearch] = React.useState("");
   const [debounced, setDebounced] = React.useState("");
@@ -529,328 +394,204 @@ function ProductsSection() {
   }, [activeFilter, size]);
 
   return (
-    <div className="space-y-4">
-      {/* Toolbar / summary */}
-      <Card className={ui.softCard}>
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-lg font-semibold tracking-tight">
-                  Products
-                </div>
-                <Badge className="rounded-full bg-white text-[#6b5c4d] border border-[#e6e0d6] hover:bg-white">
-                  {totals.total} total
-                </Badge>
-                <Badge className="rounded-full bg-green-50 text-green-700 border border-green-200 hover:bg-green-50">
-                  {totals.active} active
-                </Badge>
-                <Badge className="rounded-full bg-[#faf8f4] text-[#6b5c4d] border border-[#e6e0d6] hover:bg-[#faf8f4]">
-                  {totals.inactive} inactive
-                </Badge>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <FilterPill
-                  active={activeFilter === "all"}
-                  onClick={() => setActiveFilter("all")}
+    <div className="space-y-5">
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard label="Products" value={totals.total} icon={<Icon name="bag" size={16} />} />
+        <StatCard label="Live" value={totals.active} accent="success" icon={<Icon name="check" size={16} />} />
+        <StatCard label="Hidden" value={totals.inactive} accent="warning" icon={<Icon name="x" size={16} />} />
+      </div>
+
+      <UICard padded={false} className="overflow-hidden">
+        <div className="border-b border-[#e6e0d6]">
+          <div className="flex flex-wrap items-center gap-2 p-4 pb-3">
+            <div className="relative min-w-[240px] flex-1">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+                <Icon name="search" size={16} />
+              </span>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search a product by name or slug"
+                className={`${inputClass} h-11 pl-9 ${search ? "pr-9" : ""}`}
+              />
+              {search ? (
+                <button
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4]"
                 >
-                  All
-                </FilterPill>
-                <FilterPill
-                  active={activeFilter === "active"}
-                  onClick={() => setActiveFilter("active")}
-                >
-                  Active
-                </FilterPill>
-                <FilterPill
-                  active={activeFilter === "inactive"}
-                  onClick={() => setActiveFilter("inactive")}
-                >
-                  Inactive
-                </FilterPill>
-              </div>
+                  <Icon name="x" size={14} />
+                </button>
+              ) : null}
             </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9a8c7e]" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search title, slug…"
-                  className="pl-9 w-full sm:w-72"
-                />
-              </div>
+            <div className="inline-flex rounded-xl border border-[#e6e0d6] bg-[#fdfbf7] p-1">
+              {[
+                ["all", "All"],
+                ["active", "Live"],
+                ["inactive", "Hidden"],
+              ].map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => setActiveFilter(v)}
+                  className={cx(
+                    "rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition-colors",
+                    activeFilter === v
+                      ? "bg-[#2a211a] text-white"
+                      : "text-[#6b5c4d] hover:bg-[#f2ede4]",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-              <Button
-                variant="outline"
-                className={ui.outlineBtn}
-                onClick={fetchProducts}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
-              </Button>
+            <UIButton as={Link} href="/admin/eshop/new-product" variant="primary" className="h-11">
+              <Icon name="plus" size={15} /> New
+            </UIButton>
+          </div>
+        </div>
 
-              <select
-                className="h-10 rounded-xl border border-[#e6e0d6] bg-white px-3 text-sm"
-                value={`${sort.key}:${sort.dir}`}
-                onChange={(e) => {
-                  const [k, d] = e.target.value.split(":");
-                  setSort({ key: k, dir: d });
-                }}
-                title="Sort"
-              >
-                <option value="updated_at:desc">Updated ↓</option>
-                <option value="updated_at:asc">Updated ↑</option>
-                <option value="title:asc">Title A→Z</option>
-                <option value="title:desc">Title Z→A</option>
-                <option value="slug:asc">Slug A→Z</option>
-                <option value="slug:desc">Slug Z→A</option>
-                <option value="price_cents:asc">Price ↑</option>
-                <option value="price_cents:desc">Price ↓</option>
-              </select>
+        {error ? (
+          <div className="p-5">
+            <ErrorNote>{error}</ErrorNote>
+            <UIButton className="mt-3" variant="secondary" onClick={fetchProducts}>
+              Try again
+            </UIButton>
+          </div>
+        ) : loading ? (
+          <div className="space-y-2 p-5">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-12" />
+            ))}
+          </div>
+        ) : !pageRows.length ? (
+          <UIEmptyState
+            icon={<Icon name="bag" size={20} />}
+            title={items.length ? "No matches" : "No products yet"}
+            description={
+              items.length
+                ? "Nothing matches that search or filter."
+                : "Create your first product to start selling."
+            }
+            action={
+              items.length ? (
+                <UIButton
+                  variant="secondary"
+                  onClick={() => {
+                    setSearch("");
+                    setActiveFilter("all");
+                  }}
+                >
+                  Clear filters
+                </UIButton>
+              ) : (
+                <UIButton as={Link} href="/admin/eshop/new-product" variant="primary">
+                  New product
+                </UIButton>
+              )
+            }
+          />
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <SortTh label="Product" k="title" sort={sort} onSort={sortBy} />
+                <SortTh label="Price" k="price_cents" sort={sort} onSort={sortBy} align="right" />
+                <SortTh label="Stock" k="stock_qty" sort={sort} onSort={sortBy} />
+                <Th>State</Th>
+                <SortTh label="Updated" k="updated_at" sort={sort} onSort={sortBy} />
+                <Th className="text-right">Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((p) => (
+                <Tr key={p.id}>
+                  <Td>
+                    <span className="block font-semibold text-[#2a211a]">{p.title}</span>
+                    <span className="block font-mono text-[11px] text-[#9a8c7e]">
+                      {p.slug}
+                      {p.sku_code ? ` · ${p.sku_code}` : ""}
+                    </span>
+                  </Td>
+                  <Td className="whitespace-nowrap text-right font-semibold">
+                    {formatCents(p.price_cents, p.currency)}
+                  </Td>
+                  <Td>
+                    <StockCell product={p} onSaved={fetchProducts} />
+                  </Td>
+                  <Td>
+                    <button
+                      onClick={() => toggleActive(p)}
+                      title={p.active ? "Hide from the shop" : "Show in the shop"}
+                    >
+                      <UIBadge variant={p.active ? "success" : "neutral"}>
+                        {p.active ? "Live" : "Hidden"}
+                      </UIBadge>
+                    </button>
+                  </Td>
+                  <Td className="whitespace-nowrap text-[#7a6a5f]">
+                    {p.updated_at ? formatDate(p.updated_at) : "—"}
+                  </Td>
+                  <Td className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => setEditing(p)}
+                        title="Edit product"
+                        className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4] hover:text-[#2a211a]"
+                      >
+                        <Icon name="file" size={15} />
+                      </button>
+                      <button
+                        onClick={() => removeProduct(p)}
+                        title="Delete product"
+                        className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#fbeae5] hover:text-[#a33c22]"
+                      >
+                        <Icon name="trash" size={15} />
+                      </button>
+                    </div>
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
 
-              <select
-                className="h-10 rounded-xl border border-[#e6e0d6] bg-white px-3 text-sm"
-                value={size}
-                onChange={(e) => {
-                  setSize(Number(e.target.value || 10));
-                }}
-                title="Rows per page"
+        {!loading && !error && prepared.length ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e6e0d6] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Muted className="text-[12px]">
+                Page {page} of {maxPage} · {prepared.length} product
+                {prepared.length === 1 ? "" : "s"}
+              </Muted>
+              <UISelect
+                value={String(size)}
+                onChange={(e) => setSize(Number(e.target.value))}
+                className="h-8 !w-auto text-[12px]"
+                aria-label="Rows per page"
               >
-                {[10, 20, 50].map((n) => (
+                {[10, 25, 50].map((n) => (
                   <option key={n} value={n}>
-                    {n}/page
+                    {n} / page
                   </option>
                 ))}
-              </select>
-
-              <Link
-                href="/admin/eshop/new-product"
-                className={cx(
-                  "inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm shadow-sm transition",
-                  ui.primaryBtn
-                )}
-              >
-                <Plus className="h-4 w-4" />
-                New
-              </Link>
+              </UISelect>
+            </div>
+            <div className="flex items-center gap-2">
+              <UIButton size="sm" variant="secondary" disabled={page <= 1}
+                onClick={() => setPage((x) => Math.max(1, x - 1))}>
+                Previous
+              </UIButton>
+              <UIButton size="sm" variant="secondary" disabled={page >= maxPage}
+                onClick={() => setPage((x) => Math.min(maxPage, x + 1))}>
+                Next
+              </UIButton>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        ) : null}
+      </UICard>
 
-      {/* Table */}
-      <Card className={ui.card}>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-[#faf8f4] text-[#7a6a5f]">
-                <tr className="border-b border-[#e6e0d6]">
-                  <ThSort
-                    onClick={() => sortBy("title")}
-                    active={sort.key === "title"}
-                    dir={sort.dir}
-                  >
-                    Product
-                  </ThSort>
-                  <ThSort
-                    onClick={() => sortBy("slug")}
-                    active={sort.key === "slug"}
-                    dir={sort.dir}
-                  >
-                    Slug
-                  </ThSort>
-                  <ThSort
-                    onClick={() => sortBy("price_cents")}
-                    active={sort.key === "price_cents"}
-                    dir={sort.dir}
-                  >
-                    Price
-                  </ThSort>
-                  <ThSort
-                    onClick={() => sortBy("stock_qty")}
-                    active={sort.key === "stock_qty"}
-                    dir={sort.dir}
-                  >
-                    Stock
-                  </ThSort>
-                  <th className="px-4 py-3 text-left">State</th>
-                  <ThSort
-                    onClick={() => sortBy("updated_at")}
-                    active={sort.key === "updated_at"}
-                    dir={sort.dir}
-                  >
-                    Updated
-                  </ThSort>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {loading ? (
-                  <SkeletonRows cols={7} />
-                ) : error ? (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-10 text-center text-[#a33c22]"
-                    >
-                      {error}
-                    </td>
-                  </tr>
-                ) : pageRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-12">
-                      <EmptyState
-                        title="No products found"
-                        subtitle="Try a different search, or create your first product."
-                        action={
-                          <Link
-                            href="/admin/eshop/new-product"
-                            className={cx(
-                              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm shadow-sm transition",
-                              ui.primaryBtn
-                            )}
-                          >
-                            <Plus className="h-4 w-4" />
-                            Create product
-                          </Link>
-                        }
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  pageRows.map((p) => (
-                    <tr
-                      key={p.id}
-                      className="border-b border-[#f2ede4] hover:bg-[#faf8f4]/60 transition"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="grid h-9 w-9 place-items-center rounded-xl border border-[#e6e0d6] bg-white">
-                            <span className="text-xs font-semibold text-[#6b5c4d]">
-                              {String(p.title || "P")
-                                .slice(0, 1)
-                                .toUpperCase()}
-                            </span>
-                          </div>
-                          <div className="min-w-0">
-                            <div className="truncate font-medium text-[#2a211a]">
-                              {p.title}
-                            </div>
-                            <div className="text-xs text-[#9a8c7e]">
-                              ID: {p.id}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-[#7a6a5f]">{p.slug}</td>
-                      <td className="px-4 py-3">
-                        <StockCell product={p} onSaved={fetchProducts} />
-                      </td>
-                      <td className="px-4 py-3 font-medium">
-                        {formatCents(p.price_cents, p.currency)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => toggleActive(p)}
-                          className={cx(
-                            "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition",
-                            p.active
-                              ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
-                              : "border-[#e6e0d6] bg-white text-[#6b5c4d] hover:bg-[#faf8f4]"
-                          )}
-                          title="Toggle active"
-                        >
-                          {p.active ? (
-                            <span className="inline-flex items-center">
-                              <ToggleRight className="h-4 w-4" />
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center">
-                              <ToggleLeft className="h-4 w-4" />
-                            </span>
-                          )}
-                          {p.active ? "Active" : "Inactive"}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 text-[#7a6a5f]">
-                        {formatDate(p.updated_at || p.updatedAt)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="outline"
-                            className={ui.outlineBtn}
-                            onClick={() => setEditing(p)}
-                          >
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit
-                          </Button>
-
-                          <Link
-                            href={`/admin/eshop/products/${p.id}/images`}
-                            className="inline-flex items-center rounded-xl border border-[#e6e0d6] bg-white px-3 py-2 text-sm hover:bg-[#faf8f4]"
-                          >
-                            <ImageIcon className="mr-2 h-4 w-4" />
-                            Images
-                          </Link>
-
-                          <Button
-                            variant="outline"
-                            className={ui.dangerBtn}
-                            onClick={() => removeProduct(p)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-
-              {!loading && !error && prepared.length > size ? (
-                <tfoot>
-                  <tr>
-                    <td colSpan={7} className="px-4 py-3">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <span className="text-xs text-[#7a6a5f]">
-                          {prepared.length} items • page {page} of {maxPage}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            className={ui.outlineBtn}
-                            disabled={page <= 1}
-                            onClick={() => setPage((p) => Math.max(1, p - 1))}
-                          >
-                            <ChevronLeft className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className={ui.outlineBtn}
-                            disabled={page >= maxPage}
-                            onClick={() =>
-                              setPage((p) => Math.min(maxPage, p + 1))
-                            }
-                          >
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                </tfoot>
-              ) : null}
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {editing && (
+      {editing ? (
         <ProductModal
           existing={editing}
           onClose={() => setEditing(null)}
@@ -859,7 +600,7 @@ function ProductsSection() {
             fetchProducts();
           }}
         />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -962,75 +703,25 @@ function StockCell({ product, onSaved }) {
   );
 }
 
-function FilterPill({ active, children, onClick }) {
+function SortTh({ label, k, sort, onSort, align }) {
+  const active = sort.key === k;
   return (
-    <button
-      onClick={onClick}
-      className={cx(
-        "rounded-full px-3 py-1.5 text-xs font-medium transition border",
-        active
-          ? "bg-[#2a211a] text-white border-[#2a211a]"
-          : "bg-white text-[#6b5c4d] border-[#e6e0d6] hover:bg-[#faf8f4]"
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ThSort({ children, onClick, active, dir }) {
-  return (
-    <th className="px-4 py-3 text-left">
+    <Th className={align === "right" ? "text-right" : ""}>
       <button
-        onClick={onClick}
-        className="inline-flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-[#f2ede4] transition"
+        onClick={() => onSort(k)}
+        className={cx(
+          "inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-[#2a211a]",
+          active && "text-[#2a211a]",
+        )}
       >
-        <span>{children}</span>
-        <span className="text-[#b0a294]">
-          <ArrowUpDown className="h-4 w-4" />
+        {label}
+        <span className={active ? "opacity-100" : "opacity-0"}>
+          {sort.dir === "asc" ? "▲" : "▼"}
         </span>
-        {active ? (
-          <span className="text-xs text-[#9a8c7e]">
-            {dir === "asc" ? "↑" : "↓"}
-          </span>
-        ) : null}
       </button>
-    </th>
+    </Th>
   );
 }
-
-function SkeletonRows({ cols }) {
-  return (
-    <>
-      {Array.from({ length: 7 }).map((_, i) => (
-        <tr key={i} className="border-b border-[#f2ede4]">
-          <td colSpan={cols} className="px-4 py-4">
-            <div className="h-4 w-full animate-pulse rounded bg-[#e6e0d6]/60" />
-          </td>
-        </tr>
-      ))}
-    </>
-  );
-}
-
-function EmptyState({ title, subtitle, action }) {
-  return (
-    <div className="rounded-2xl border border-dashed border-[#e6e0d6] bg-white p-8 text-center">
-      <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-2xl border border-[#e6e0d6] bg-[#faf8f4]">
-        <PackageSearch className="h-5 w-5 text-[#6b5c4d]" />
-      </div>
-      <div className="text-base font-semibold text-[#2a211a]">{title}</div>
-      <div className="mx-auto mt-1 max-w-md text-sm text-[#7a6a5f]">
-        {subtitle}
-      </div>
-      {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------
-   Product Modal (self-contained)
-------------------------------------------------------------- */
 function ProductModal({ existing, onClose, onSaved }) {
   const [title, setTitle] = React.useState(existing?.title || "");
   const [slug, setSlug] = React.useState(existing?.slug || "");
@@ -1099,148 +790,95 @@ function ProductModal({ existing, onClose, onSaved }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <motion.div
-        initial={{ opacity: 0, y: 18, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 10, scale: 0.98 }}
-        transition={{ duration: 0.18 }}
-        className="relative w-full max-w-2xl"
-      >
-        <Card className={cx(ui.card, "overflow-hidden")}>
-          <CardHeader className="border-b border-[#e6e0d6] bg-[#faf8f4]">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle className="text-lg">Edit product</CardTitle>
-                <div className="mt-1 text-sm text-[#7a6a5f]">
-                  ID: {existing.id}
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                className={ui.outlineBtn}
-                onClick={onClose}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </CardHeader>
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-[#e6e0d6] bg-white p-6 shadow-2xl sm:rounded-3xl">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-serif text-[19px] text-[#2a211a]">Edit product</h2>
+            <p className="mt-0.5 font-mono text-[12px] text-[#9a8c7e]">{existing?.slug}</p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]"
+          >
+            <Icon name="x" size={18} />
+          </button>
+        </div>
 
-          <CardContent className="p-5 sm:p-6 space-y-4">
-            {err ? (
-              <div className="rounded-xl border border-[#f3d5cb] bg-[#fbeae5] px-3 py-2 text-sm text-[#a33c22]">
-                {err}
-              </div>
-            ) : null}
+        <div className="space-y-3">
+          <Field label="Title">
+            <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
+          </Field>
+          <Field label="Slug" hint="Used in the storefront URL.">
+            <input value={slug} onChange={(e) => setSlug(e.target.value)} className={`${inputClass} font-mono`} />
+          </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <LabeledInput
-                label="Title"
-                value={title}
-                onChange={setTitle}
-                placeholder="Product name"
-              />
-              <LabeledInput
-                label="Slug"
-                value={slug}
-                onChange={setSlug}
-                placeholder="product-slug"
-              />
-              <LabeledInput
-                label="Price"
-                helper="Use decimals (e.g. 12.50)"
-                value={price}
-                onChange={setPrice}
-                placeholder="0.00"
-              />
-              <LabeledInput
-                label="Stock"
-                helper="Units on hand. The POS blocks a sale at zero."
-                type="number"
-                min="0"
-                step="1"
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={`Price (${currency})`}>
+              <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className={inputClass} />
+            </Field>
+            <Field label="Currency">
+              <UISelect value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                {["EUR", "USD", "GBP"].map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </UISelect>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Stock" hint="The POS blocks a sale at zero.">
+              <input
+                type="number" min="0" step="1"
                 value={stock}
-                onChange={setStock}
+                onChange={(e) => setStock(e.target.value)}
+                className={inputClass}
               />
-              <LabeledInput
-                label="SKU"
-                helper="Scanned at the till. Optional."
-                value={sku}
-                onChange={setSku}
-              />
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-[#6b5c4d]">
-                  Category
-                </span>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-lg border border-[#d9d0c3] px-3 py-2 text-sm focus:border-[#2a211a] focus:outline-none"
-                >
-                  <option value="clothing">Clothing</option>
-                  <option value="food">Food</option>
-                  <option value="other">Other</option>
-                </select>
-              </label>
-              <div className="space-y-1">
-                <div className="text-sm font-medium text-[#2a211a]">
-                  Currency
-                </div>
-                <select
-                  className="h-10 w-full rounded-xl border border-[#e6e0d6] bg-white px-3 text-sm"
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
-                >
-                  <option value="EUR">EUR</option>
-                  <option value="USD">USD</option>
-                  <option value="GBP">GBP</option>
-                </select>
-                <div className="text-xs text-[#9a8c7e]">
-                  Must match how you charge customers.
-                </div>
-              </div>
-            </div>
+            </Field>
+            <Field label="SKU" hint="Scanned at the till.">
+              <input value={sku} onChange={(e) => setSku(e.target.value)} className={`${inputClass} font-mono`} />
+            </Field>
+          </div>
 
-            <LabeledTextarea
-              label="Description"
+          <Field label="Category">
+            <UISelect value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="clothing">Clothing</option>
+              <option value="food">Food</option>
+              <option value="other">Other</option>
+            </UISelect>
+          </Field>
+
+          <Field label="Description">
+            <textarea
+              rows={4}
               value={description}
-              onChange={setDescription}
-              placeholder="Short description for the storefront…"
+              onChange={(e) => setDescription(e.target.value)}
+              className={`${inputClass} h-auto py-2 leading-relaxed`}
             />
+          </Field>
 
-            <div className="flex items-center justify-between rounded-2xl border border-[#e6e0d6] bg-white p-4">
-              <div>
-                <div className="text-sm font-medium text-[#2a211a]">Active</div>
-                <div className="text-xs text-[#7a6a5f]">
-                  Visible and purchasable in the store.
-                </div>
-              </div>
-              <Switch checked={active} onCheckedChange={setActive} />
-            </div>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={active}
+              onChange={(e) => setActive(e.target.checked)}
+              className="h-4 w-4 accent-[#8b6f47]"
+            />
+            <span className="text-[13px] text-[#2a211a]">Show in the shop</span>
+          </label>
+        </div>
 
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <Button
-                variant="outline"
-                className={ui.outlineBtn}
-                onClick={onClose}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={save}
-                disabled={saving}
-                className={ui.primaryBtn}
-              >
-                {saving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : null}
-                Save changes
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
+        {err ? <ErrorNote className="mt-3">{err}</ErrorNote> : null}
+
+        <div className="mt-5 flex justify-end gap-2 border-t border-[#f0ebe2] pt-4">
+          <UIButton variant="secondary" onClick={onClose}>Cancel</UIButton>
+          <UIButton variant="primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save changes"}
+          </UIButton>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1279,142 +917,137 @@ function OrdersSection() {
     return () => clearTimeout(id);
   }, [fetchOrders]);
 
+  const filtered = orders.filter((o) => {
+    if (!q.trim()) return true;
+    const needle = q.trim().toLowerCase();
+    return [o.id, o.status, o.stripe_payment_intent_id]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(needle);
+  });
+
   return (
-    <div className="space-y-4">
-      <Card className={ui.softCard}>
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-lg font-semibold tracking-tight">Orders</div>
-              <div className="text-sm text-[#7a6a5f]">
-                Review payments and fulfillment status.
-              </div>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className="h-10 rounded-xl border border-[#e6e0d6] bg-white px-3 text-sm"
+    <div className="space-y-5">
+      <UICard padded={false} className="overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#e6e0d6] p-4">
+          <div className="relative min-w-[220px] flex-1">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+              <Icon name="search" size={16} />
+            </span>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search order number or payment id"
+              className={`${inputClass} h-11 pl-9 ${q ? "pr-9" : ""}`}
+            />
+            {q ? (
+              <button
+                onClick={() => setQ("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4]"
               >
-                <option value="all">All statuses</option>
-                <option value="pending">Pending</option>
-                <option value="paid">Paid</option>
-                <option value="fulfilled">Fulfilled</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9a8c7e]" />
-                <Input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search by email, id…"
-                  className="pl-9 w-full sm:w-72"
-                />
-              </div>
-
-              <Button
-                variant="outline"
-                className={ui.outlineBtn}
-                onClick={fetchOrders}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
-              </Button>
-            </div>
+                <Icon name="x" size={14} />
+              </button>
+            ) : null}
           </div>
-        </CardContent>
-      </Card>
 
-      <Card className={ui.card}>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-[#faf8f4] text-[#7a6a5f]">
-                <tr className="border-b border-[#e6e0d6]">
-                  <th className="px-4 py-3 text-left">Order #</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-left">Total</th>
-                  <th className="px-4 py-3 text-left">Placed</th>
-                  <th className="px-4 py-3 text-left">Payment</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <SkeletonRows cols={6} />
-                ) : orders.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="px-4 py-12">
-                      <EmptyState
-                        title="No orders"
-                        subtitle="When customers place orders, they’ll show up here."
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  orders.map((o) => (
-                    <tr
-                      key={o.id}
-                      className="border-b border-[#f2ede4] hover:bg-[#faf8f4]/60 transition"
+          <UISelect
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="h-11 !w-auto min-w-[160px]"
+          >
+            {["pending", "paid", "fulfilled", "cancelled", "all"].map((s) => (
+              <option key={s} value={s}>
+                {s === "all" ? "All statuses" : s[0].toUpperCase() + s.slice(1)}
+              </option>
+            ))}
+          </UISelect>
+
+          <UIButton variant="secondary" className="h-11" onClick={fetchOrders}>
+            <Icon name="clock" size={15} /> Refresh
+          </UIButton>
+        </div>
+
+        {loading ? (
+          <div className="space-y-2 p-5">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-12" />
+            ))}
+          </div>
+        ) : !filtered.length ? (
+          <UIEmptyState
+            icon={<Icon name="inbox" size={20} />}
+            title="No orders"
+            description={
+              q
+                ? "Nothing matches that search."
+                : `No ${status === "all" ? "" : status} orders to show.`
+            }
+            action={
+              q ? (
+                <UIButton variant="secondary" onClick={() => setQ("")}>
+                  Clear search
+                </UIButton>
+              ) : null
+            }
+          />
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Order</Th>
+                <Th>Status</Th>
+                <Th className="text-right">Total</Th>
+                <Th>Placed</Th>
+                <Th>Payment</Th>
+                <Th className="text-right">Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((o) => (
+                <Tr key={o.id} onClick={() => setSelected(o.id)}>
+                  <Td className="font-mono text-[12.5px] font-semibold text-[#2a211a]">
+                    S-{String(o.id).padStart(6, "0")}
+                  </Td>
+                  <Td>
+                    <UIStatusBadge status={o.status} />
+                  </Td>
+                  <Td className="whitespace-nowrap text-right font-semibold">
+                    {formatCents(o.total_cents, o.currency)}
+                  </Td>
+                  <Td className="whitespace-nowrap text-[#7a6a5f]">
+                    {o.placed_at || o.created_at ? formatDate(o.placed_at || o.created_at) : "—"}
+                  </Td>
+                  <Td className="font-mono text-[11px] text-[#9a8c7e]">
+                    {o.stripe_payment_intent_id ? o.stripe_payment_intent_id.slice(0, 18) + "…" : "—"}
+                  </Td>
+                  <Td className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setSelected(o.id)}
+                      title="Open order"
+                      className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4] hover:text-[#2a211a]"
                     >
-                      <td className="px-4 py-3 font-medium text-[#2a211a]">
-                        {o.id}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={o.status} />
-                      </td>
-                      <td className="px-4 py-3 font-medium">
-                        {formatCents(o.total_cents, o.currency)}
-                      </td>
-                      <td className="px-4 py-3 text-[#7a6a5f]">
-                        {formatDate(o.placed_at || o.created_at)}
-                      </td>
-                      <td className="px-4 py-3 text-[#7a6a5f]">
-                        {o.stripe_payment_intent_id ? "Stripe" : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button
-                          variant="outline"
-                          className={ui.outlineBtn}
-                          onClick={() => setSelected(o)}
-                        >
-                          <Eye className="mr-2 h-4 w-4" />
-                          View
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                      <Icon name="external" size={15} />
+                    </button>
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </UICard>
 
-      {selected && (
-        <OrderDrawer orderId={selected.id} onClose={() => setSelected(null)} />
-      )}
+      {selected ? (
+        <OrderDrawer
+          orderId={selected}
+          onClose={() => {
+            setSelected(null);
+            fetchOrders();
+          }}
+        />
+      ) : null}
     </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const map = {
-    pending: "bg-[#fbf1dc] text-[#8a6412] border-amber-200",
-    paid: "bg-green-50 text-green-700 border-green-200",
-    fulfilled: "bg-blue-50 text-blue-700 border-blue-200",
-    cancelled: "bg-[#fbeae5] text-[#a33c22] border-[#f3d5cb]",
-  };
-  return (
-    <span
-      className={cx(
-        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
-        map[status] || "bg-[#faf8f4] text-[#6b5c4d] border-[#e6e0d6]"
-      )}
-    >
-      {status}
-    </span>
   );
 }
 
@@ -1469,135 +1102,124 @@ function OrderDrawer({ orderId, onClose }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const order = data?.order;
+  const lines = data?.items ?? [];
+
   return (
-    <div className="fixed inset-0 z-50 flex">
-      <div className="flex-1 bg-black/40" onClick={onClose} />
-      <motion.div
-        initial={{ x: 30, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        exit={{ x: 30, opacity: 0 }}
-        transition={{ duration: 0.18 }}
-        className="h-full w-full max-w-xl overflow-auto bg-white shadow-2xl"
-      >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#e6e0d6] bg-white px-5 py-4">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-2xl border border-[#e6e0d6] bg-[#faf8f4]">
-              <ListOrdered className="h-5 w-5 text-[#3a2f25]" />
-            </div>
-            <div>
-              <div className="text-sm text-[#7a6a5f]">Order</div>
-              <div className="font-semibold tracking-tight text-[#2a211a]">
-                #{orderId}
-              </div>
-            </div>
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <aside className="relative z-10 flex h-full w-full max-w-md flex-col border-l border-[#e6e0d6] bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-[#e6e0d6] px-5 py-4">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#b89a6b]">
+              Order
+            </p>
+            <h2 className="font-serif text-[19px] text-[#2a211a]">
+              S-{String(orderId).padStart(6, "0")}
+            </h2>
           </div>
-          <Button variant="outline" className={ui.outlineBtn} onClick={onClose}>
-            Close
-          </Button>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-[#9a8c7e] hover:bg-[#f2ede4]"
+          >
+            <Icon name="x" size={18} />
+          </button>
         </div>
 
-        <div className="p-5 space-y-5">
-          {loading ? (
-            <div className="text-[#9a8c7e]">
-              <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading…
+        <div className="flex-1 overflow-y-auto p-5">
+          {err ? (
+            <ErrorNote>{err}</ErrorNote>
+          ) : loading ? (
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-14" />
+              ))}
             </div>
-          ) : err ? (
-            <div className="rounded-xl border border-[#f3d5cb] bg-[#fbeae5] px-3 py-2 text-sm text-[#a33c22]">
-              {err}
-            </div>
+          ) : !order ? (
+            <Muted>Order not found.</Muted>
           ) : (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <InfoRow
-                  label="Status"
-                  value={<StatusBadge status={data.order.status} />}
-                />
-                <InfoRow
-                  label="Total"
-                  value={formatCents(
-                    data.order.total_cents,
-                    data.order.currency
-                  )}
-                />
-                <InfoRow
-                  label="Placed"
-                  value={formatDate(
-                    data.order.placed_at || data.order.created_at
-                  )}
-                />
-                <InfoRow
-                  label="Payment"
-                  value={data.order.stripe_payment_intent_id ? "Stripe" : "—"}
-                />
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <UIStatusBadge status={order.status} />
+                <span className="font-serif text-[22px] text-[#2a211a]">
+                  {formatCents(order.total_cents, order.currency)}
+                </span>
               </div>
 
-              <Card className={ui.card}>
-                <CardHeader>
-                  <CardTitle className="text-base">Items</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-[#faf8f4] text-[#7a6a5f]">
-                        <tr className="border-b border-[#e6e0d6]">
-                          <th className="px-3 py-2 text-left">Product</th>
-                          <th className="px-3 py-2 text-left">Qty</th>
-                          <th className="px-3 py-2 text-left">Unit</th>
-                          <th className="px-3 py-2 text-left">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(data.items || []).map((it) => (
-                          <tr key={it.id} className="border-b border-[#f2ede4]">
-                            <td className="px-3 py-2">{it.title_snapshot}</td>
-                            <td className="px-3 py-2">{it.quantity}</td>
-                            <td className="px-3 py-2">
-                              {formatCents(it.unit_price_cents, it.currency)}
-                            </td>
-                            <td className="px-3 py-2">
-                              {formatCents(
-                                it.unit_price_cents * it.quantity,
-                                it.currency
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  className={ui.outlineBtn}
-                  disabled={updating}
-                  onClick={() => updateStatus("paid")}
-                >
-                  Mark paid
-                </Button>
-                <Button
-                  variant="outline"
-                  className={ui.outlineBtn}
-                  disabled={updating}
-                  onClick={() => updateStatus("fulfilled")}
-                >
-                  Mark fulfilled
-                </Button>
-                <Button
-                  variant="outline"
-                  className={ui.dangerBtn}
-                  disabled={updating}
-                  onClick={() => updateStatus("cancelled")}
-                >
-                  Cancel order
-                </Button>
+              <div>
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
+                  Items
+                </p>
+                {lines.length ? (
+                  <ul className="divide-y divide-[#f0ebe2] rounded-2xl border border-[#e6e0d6]">
+                    {lines.map((l) => (
+                      <li key={l.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] font-medium text-[#2a211a]">
+                            {l.title_snapshot}
+                          </p>
+                          <p className="text-[11.5px] text-[#9a8c7e]">
+                            {l.quantity} × {formatCents(l.unit_price_cents, l.currency)}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-[13px] font-semibold">
+                          {formatCents(l.unit_price_cents * l.quantity, l.currency)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <Muted className="text-[12.5px]">No line items recorded.</Muted>
+                )}
               </div>
-            </>
+
+              <div>
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
+                  Details
+                </p>
+                <dl className="space-y-2 text-[13px]">
+                  <InfoRow label="Placed" value={order.placed_at ? formatDate(order.placed_at) : "—"} />
+                  <InfoRow label="Created" value={order.created_at ? formatDate(order.created_at) : "—"} />
+                  <InfoRow label="Payment" value={order.stripe_payment_intent_id || "—"} />
+                </dl>
+              </div>
+
+              {order.shipping_address ? (
+                <div>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
+                    Shipping
+                  </p>
+                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] p-3 text-[12px] text-[#3f3127]">
+                    {JSON.stringify(order.shipping_address, null, 2)}
+                  </pre>
+                </div>
+              ) : null}
+            </div>
           )}
         </div>
-      </motion.div>
+
+        {order ? (
+          <div className="border-t border-[#e6e0d6] p-4">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
+              Move to
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {["paid", "fulfilled", "cancelled"].map((s) => (
+                <UIButton
+                  key={s}
+                  size="sm"
+                  variant={s === "cancelled" ? "danger" : order.status === s ? "dark" : "secondary"}
+                  disabled={updating || order.status === s}
+                  onClick={() => updateStatus(s)}
+                >
+                  {s[0].toUpperCase() + s.slice(1)}
+                </UIButton>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </aside>
     </div>
   );
 }
@@ -1696,142 +1318,116 @@ function ImagesSection() {
   };
 
   return (
-    <div className="space-y-4">
-      <Card className={ui.softCard}>
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="text-lg font-semibold tracking-tight">Images</div>
-              <div className="text-sm text-[#7a6a5f]">
-                Add and order product gallery images.
-              </div>
-            </div>
+    <div className="space-y-5">
+      <UICard>
+        <h2 className="font-serif text-[17px] text-[#2a211a]">Product images</h2>
+        <Muted className="mt-0.5 text-[12px]">
+          Pick a product by id, then add image URLs in the order they should appear.
+        </Muted>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <div>
-                <div className="text-xs font-medium text-[#7a6a5f]">
-                  Product ID
-                </div>
-                <Input
-                  value={productId}
-                  onChange={(e) => setProductId(e.target.value)}
-                  placeholder="e.g. 12"
-                  className="w-full sm:w-44"
-                />
-              </div>
-              <Button
-                onClick={load}
-                variant="outline"
-                className={ui.outlineBtn}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Load
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className={ui.card}>
-        <CardHeader>
-          <CardTitle className="text-base">Add image</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-3">
-          <LabeledInput
-            label="Image URL"
-            value={url}
-            onChange={setUrl}
-            placeholder="https://…"
-          />
-          <LabeledInput
-            label="Alt text"
-            value={alt}
-            onChange={setAlt}
-            placeholder="Optional…"
-          />
-          <div className="flex items-end">
-            <Button
-              onClick={add}
-              disabled={!productId || !url}
-              className={cx(ui.primaryBtn, "w-full")}
-            >
-              Add
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className={ui.card}>
-        <CardHeader>
-          <CardTitle className="text-base">Gallery</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="text-[#9a8c7e]">
-              <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading…
-            </div>
-          ) : images.length === 0 ? (
-            <EmptyState
-              title="No images"
-              subtitle="Load a product ID and add the first image URL."
+        <div className="mt-4 flex flex-wrap items-end gap-2">
+          <Field label="Product id" className="w-[140px]">
+            <input
+              value={productId}
+              onChange={(e) => setProductId(e.target.value)}
+              inputMode="numeric"
+              placeholder="e.g. 12"
+              className={inputClass}
             />
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {images
-                .sort((a, b) => (a.sort || 0) - (b.sort || 0))
-                .map((img) => (
-                  <div
-                    key={img.id}
-                    className="rounded-2xl border border-[#e6e0d6] bg-white p-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-14 w-20 overflow-hidden rounded-xl border border-[#e6e0d6] bg-[#faf8f4]">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={img.url}
-                          alt={img.alt || ""}
-                          className="h-full w-full object-cover"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-[#2a211a]">
-                          {img.url}
-                        </div>
-                        <div className="text-xs text-[#7a6a5f]">
-                          alt: {img.alt || "—"} • sort: {img.sort ?? 0}
-                        </div>
-                      </div>
-                    </div>
+          </Field>
+          <UIButton variant="secondary" onClick={load} disabled={!productId || loading}>
+            {loading ? "Loading…" : "Load images"}
+          </UIButton>
+        </div>
+      </UICard>
 
-                    <div className="mt-3 flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        className={ui.outlineBtn}
-                        onClick={() => bump(img, -1)}
-                      >
-                        <ArrowUp className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className={ui.outlineBtn}
-                        onClick={() => bump(img, 1)}
-                      >
-                        <ArrowDown className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className={ui.dangerBtn}
-                        onClick={() => remove(img)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {productId ? (
+        <UICard>
+          <h3 className="font-serif text-[16px] text-[#2a211a]">Add an image</h3>
+          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+            <Field label="Image URL">
+              <input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://…"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Alt text" hint="Describes the photo for screen readers.">
+              <input value={alt} onChange={(e) => setAlt(e.target.value)} className={inputClass} />
+            </Field>
+            <UIButton variant="primary" onClick={add} disabled={!url.trim()}>
+              <Icon name="plus" size={15} /> Add
+            </UIButton>
+          </div>
+        </UICard>
+      ) : null}
+
+      <UICard padded={false} className="overflow-hidden">
+        {loading ? (
+          <div className="space-y-2 p-5">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-16" />
+            ))}
+          </div>
+        ) : !images.length ? (
+          <UIEmptyState
+            icon={<Icon name="grid" size={20} />}
+            title={productId ? "No images yet" : "Pick a product"}
+            description={
+              productId
+                ? "Add the first image using the form above."
+                : "Enter a product id and load its images."
+            }
+          />
+        ) : (
+          <ul className="divide-y divide-[#f0ebe2]">
+            {images.map((img, idx) => (
+              <li key={img.id} className="flex items-center gap-3 px-4 py-3">
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-[#e6e0d6] bg-[#faf8f4]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.url}
+                    alt={img.alt || ""}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12.5px] font-medium text-[#2a211a]">
+                    {img.alt || "No alt text"}
+                  </p>
+                  <p className="truncate font-mono text-[11px] text-[#9a8c7e]">{img.url}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => bump(img, -1)}
+                    disabled={idx === 0}
+                    title="Move up"
+                    className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4] disabled:opacity-30"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => bump(img, 1)}
+                    disabled={idx === images.length - 1}
+                    title="Move down"
+                    className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#f2ede4] disabled:opacity-30"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={() => remove(img)}
+                    title="Remove image"
+                    className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#fbeae5] hover:text-[#a33c22]"
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </UICard>
     </div>
   );
 }
@@ -1894,87 +1490,97 @@ function SubscribersSection() {
   }, [rows, q]);
 
   return (
-    <div className="space-y-4">
-      <Card className={ui.softCard}>
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl border border-[#e6e0d6] bg-white">
-                <Mail className="h-5 w-5 text-[#3a2f25]" />
-              </div>
-              <div>
-                <div className="text-lg font-semibold tracking-tight">
-                  Newsletter subscribers
-                </div>
-                <div className="text-sm text-[#7a6a5f]">{rows.length} total</div>
-              </div>
-            </div>
+    <UICard padded={false} className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#e6e0d6] p-4">
+        <div className="relative min-w-[220px] flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#b0a294]">
+            <Icon name="search" size={16} />
+          </span>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search an email address"
+            className={`${inputClass} h-11 pl-9 ${q ? "pr-9" : ""}`}
+          />
+          {q ? (
+            <button
+              onClick={() => setQ("")}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#9a8c7e] hover:bg-[#f2ede4]"
+            >
+              <Icon name="x" size={14} />
+            </button>
+          ) : null}
+        </div>
+        <UIButton variant="secondary" onClick={exportCsv} disabled={!filtered.length}>
+          <Icon name="download" size={15} /> Export CSV
+        </UIButton>
+      </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9a8c7e]" />
-                <Input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search email…"
-                  className="pl-9 w-full sm:w-72"
-                />
-              </div>
-              <Button onClick={exportCsv} className={ui.primaryBtn}>
-                Export CSV
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {loading ? (
+        <div className="space-y-2 p-5">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-11" />
+          ))}
+        </div>
+      ) : !filtered.length ? (
+        <UIEmptyState
+          icon={<Icon name="mail" size={20} />}
+          title={rows.length ? "No matches" : "No subscribers yet"}
+          description={
+            rows.length
+              ? "No address matches that search."
+              : "Sign-ups from the website appear here."
+          }
+          action={
+            rows.length ? (
+              <UIButton variant="secondary" onClick={() => setQ("")}>
+                Clear search
+              </UIButton>
+            ) : null
+          }
+        />
+      ) : (
+        <Table>
+          <thead>
+            <tr>
+              <Th>Email</Th>
+              <Th>Status</Th>
+              <Th>Subscribed</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((r) => {
+              const status = r.unsubscribed_at
+                ? { label: "Unsubscribed", variant: "danger" }
+                : r.confirmed_at
+                  ? { label: "Confirmed", variant: "success" }
+                  : { label: "Pending", variant: "warning" };
+              return (
+                <Tr key={r.email}>
+                  <Td className="font-medium text-[#2a211a]">{r.email}</Td>
+                  <Td>
+                    <UIBadge variant={status.variant}>{status.label}</UIBadge>
+                  </Td>
+                  <Td className="whitespace-nowrap text-[#7a6a5f]">
+                    {r.created_at ? formatDate(r.created_at) : "—"}
+                  </Td>
+                </Tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      )}
 
-      <Card className={ui.card}>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-[#faf8f4] text-[#7a6a5f]">
-                <tr className="border-b border-[#e6e0d6]">
-                  <th className="px-4 py-3 text-left">Email</th>
-                  <th className="px-4 py-3 text-left">Joined</th>
-                  <th className="px-4 py-3 text-left">Confirmed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <SkeletonRows cols={3} />
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan="3" className="px-4 py-12">
-                      <EmptyState
-                        title="No subscribers"
-                        subtitle="Subscribers will appear as users sign up."
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((r) => (
-                    <tr
-                      key={r.email}
-                      className="border-b border-[#f2ede4] hover:bg-[#faf8f4]/60 transition"
-                    >
-                      <td className="px-4 py-3 font-medium text-[#2a211a]">
-                        {r.email}
-                      </td>
-                      <td className="px-4 py-3 text-[#7a6a5f]">
-                        {formatDate(r.created_at)}
-                      </td>
-                      <td className="px-4 py-3 text-[#7a6a5f]">
-                        {r.confirmed_at ? formatDate(r.confirmed_at) : "—"}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+      {!loading && filtered.length ? (
+        <div className="border-t border-[#e6e0d6] px-4 py-3">
+          <Muted className="text-[12px]">
+            {filtered.length} of {rows.length} subscriber
+            {rows.length === 1 ? "" : "s"}
+          </Muted>
+        </div>
+      ) : null}
+    </UICard>
   );
 }
 
@@ -2005,79 +1611,66 @@ function SettingsSection() {
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card className={ui.card}>
-        <CardHeader>
-          <CardTitle className="text-base">Shop availability</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between rounded-2xl border border-[#e6e0d6] bg-white p-4">
-            <div>
-              <div className="text-sm font-medium text-[#2a211a]">
-                Pause shop
-              </div>
-              <div className="text-xs text-[#7a6a5f]">
-                Temporarily disable checkout & show a message.
-              </div>
-            </div>
-            <Switch checked={paused} onCheckedChange={setPaused} />
-          </div>
+    <div className="grid gap-5 lg:grid-cols-2">
+      <UICard>
+        <h2 className="font-serif text-[17px] text-[#2a211a]">Shop availability</h2>
+        <Muted className="mt-0.5 text-[12px]">
+          Pausing hides checkout from customers. The storefront stays browsable.
+        </Muted>
 
-          <LabeledTextarea
-            label="Pause message"
-            value={message}
-            onChange={setMessage}
-            placeholder="We are closed for harvest week…"
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-[#e6e0d6] bg-[#fdfbf7] p-4">
+          <input
+            type="checkbox"
+            checked={paused}
+            onChange={(e) => setPaused(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-[#8b6f47]"
           />
+          <span className="min-w-0">
+            <span className="block text-[13.5px] font-semibold text-[#2a211a]">
+              Pause the shop
+            </span>
+            <span className="mt-0.5 block text-[12px] text-[#7a6a5f]">
+              Customers can look but not buy.
+            </span>
+          </span>
+        </label>
 
-          <div className="flex justify-end">
-            <Button onClick={save} disabled={saving} className={ui.primaryBtn}>
-              {saving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : null}
-              Save settings
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+        <Field
+          label="Pause message"
+          hint="Shown to customers while the shop is paused."
+          className="mt-4"
+        >
+          <textarea
+            rows={3}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Back on Monday — thank you for your patience."
+            className={`${inputClass} h-auto py-2 leading-relaxed`}
+          />
+        </Field>
 
-      <Card className={ui.softCard}>
-        <CardHeader>
-          <CardTitle className="text-base">Data notes</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-2xl border border-[#e6e0d6] bg-white p-4">
-            <ul className="list-disc space-y-1 pl-5 text-sm text-[#6b5c4d]">
-              <li>
-                Products:{" "}
-                <code className="rounded bg-[#f2ede4] px-1">shop_product</code>,
-                images:{" "}
-                <code className="rounded bg-[#f2ede4] px-1">shop_image</code>.
-              </li>
-              <li>
-                Orders:{" "}
-                <code className="rounded bg-[#f2ede4] px-1">shop_order</code> &{" "}
-                <code className="rounded bg-[#f2ede4] px-1">
-                  shop_order_item
-                </code>
-                . Payments link via{" "}
-                <code className="rounded bg-[#f2ede4] px-1">payment</code>.
-              </li>
-              <li>
-                Invoices (optional):{" "}
-                <code className="rounded bg-[#f2ede4] px-1">invoice</code>.
-              </li>
-              <li>
-                Newsletter:{" "}
-                <code className="rounded bg-[#f2ede4] px-1">
-                  newsletter_subscribers
-                </code>
-                .
-              </li>
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
+        <div className="mt-4 flex items-center gap-2 border-t border-[#f0ebe2] pt-4">
+          <UIButton variant="primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save settings"}
+          </UIButton>
+          {paused ? <UIBadge variant="warning">Shop paused</UIBadge> : null}
+        </div>
+      </UICard>
+
+      <UICard>
+        <h2 className="font-serif text-[17px] text-[#2a211a]">Storefront</h2>
+        <Muted className="mt-0.5 text-[12px]">
+          What customers see, and where to check it.
+        </Muted>
+        <div className="mt-4 space-y-2">
+          <UIButton as="a" href="/shop" target="_blank" rel="noreferrer" variant="secondary" className="w-full">
+            <Icon name="external" size={15} /> Open the shop
+          </UIButton>
+          <UIButton as={Link} href="/admin/eshop/new-product" variant="secondary" className="w-full">
+            <Icon name="plus" size={15} /> Add a product
+          </UIButton>
+        </div>
+      </UICard>
     </div>
   );
 }
@@ -2085,29 +1678,3 @@ function SettingsSection() {
 /* -------------------------------------------------------------
    Reusable fields
 ------------------------------------------------------------- */
-function LabeledInput({ label, helper, value, onChange, ...rest }) {
-  return (
-    <div className="space-y-1">
-      <div className="text-sm font-medium text-[#2a211a]">{label}</div>
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        {...rest}
-      />
-      {helper ? <div className="text-xs text-[#9a8c7e]">{helper}</div> : null}
-    </div>
-  );
-}
-
-function LabeledTextarea({ label, value, onChange, ...rest }) {
-  return (
-    <div className="space-y-1">
-      <div className="text-sm font-medium text-[#2a211a]">{label}</div>
-      <Textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        {...rest}
-      />
-    </div>
-  );
-}

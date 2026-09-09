@@ -17,6 +17,11 @@ import type {
   PromoValidation,
   PromotionInfo,
   ScheduleSlot,
+  ShopCheckoutResult,
+  ShopListing,
+  ShopOrder,
+  ShopProduct,
+  ShopOrderItem,
 } from "@/lib/types";
 
 export class ApiError extends Error {
@@ -173,6 +178,64 @@ export const api = {
     ),
 
   promotionsActive: () => request<PromotionInfo>(`/api/promotions/active`),
+
+  /* ---------------- Shop ---------------- */
+
+  shopProducts: (params?: {
+    category?: string;
+    search?: string;
+    sort?: "new" | "price_asc" | "price_desc" | "title";
+    limit?: number;
+    offset?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.category && params.category !== "all") q.set("category", params.category);
+    if (params?.search) q.set("search", params.search);
+    if (params?.sort) q.set("sort", params.sort);
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    const qs = q.toString();
+    return request<ShopListing>(`/api/shop/products${qs ? `?${qs}` : ""}`);
+  },
+
+  shopProduct: (slug: string) =>
+    request<{ product: ShopProduct; related: ShopProduct[] }>(
+      `/api/shop/products/${encodeURIComponent(slug)}`
+    ),
+
+  shopCheckout: (body: {
+    items: { productId: number; quantity: number; option?: string | null }[];
+    contact: { name: string; email: string; phone?: string };
+    shipping: {
+      line1: string;
+      line2?: string;
+      city: string;
+      postalCode: string;
+      country?: string;
+      notes?: string;
+    };
+    mode?: "elements" | "checkout";
+  }) =>
+    request<ShopCheckoutResult>(`/api/shop/checkout`, {
+      method: "POST",
+      body,
+      auth: true,
+    }),
+
+  confirmShopOrder: (orderId: number | string, paymentIntentId?: string) =>
+    request<{ ok: boolean; already?: boolean; status?: string; order?: ShopOrder }>(
+      `/api/shop/orders/${orderId}/confirm`,
+      { method: "POST", body: paymentIntentId ? { paymentIntentId } : {}, auth: true }
+    ),
+
+  shopOrder: (orderId: number | string, email?: string) =>
+    request<{ order: ShopOrder; items: ShopOrderItem[] }>(
+      `/api/shop/orders/${orderId}${email ? `?email=${encodeURIComponent(email)}` : ""}`,
+      { auth: true }
+    ),
+
+  myShopOrders: () =>
+    request<{ items: ShopOrder[] }>(`/api/shop/orders`, { auth: true }),
 
   /* ---------------- Manage booking (guest lookup) ---------------- */
 
