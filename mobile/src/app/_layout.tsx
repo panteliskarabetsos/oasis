@@ -18,6 +18,7 @@ import { useEffect } from "react";
 
 import { colors, fonts } from "@/constants/theme";
 import { AuthProvider } from "@/context/auth";
+import { BagProvider } from "@/context/cart";
 import { config } from "@/lib/config";
 
 SplashScreen.preventAutoHideAsync();
@@ -45,6 +46,7 @@ export default function RootLayout() {
       merchantIdentifier="merchant.gr.youroasis.app"
     >
     <AuthProvider>
+      <BagProvider>
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
@@ -66,6 +68,13 @@ export default function RootLayout() {
           options={{ title: "Confirmation", headerBackVisible: false, gestureEnabled: false }}
         />
         <Stack.Screen name="bookings/[id]" options={{ title: "Your Booking" }} />
+        <Stack.Screen name="shop/p/[slug]" options={{ headerShown: false }} />
+        <Stack.Screen name="shop/orders" options={{ title: "My Orders" }} />
+        <Stack.Screen name="shop/bag" options={{ title: "Your Bag" }} />
+        <Stack.Screen
+          name="shop/order/[id]"
+          options={{ title: "Order", headerBackVisible: false, gestureEnabled: false }}
+        />
         <Stack.Screen name="manage-booking" options={{ title: "Guest Portal" }} />
         <Stack.Screen name="login" options={{ title: "Log In", presentation: "modal" }} />
         <Stack.Screen name="sign-up" options={{ title: "Register" }} />
@@ -84,6 +93,7 @@ export default function RootLayout() {
           options={{ title: "Cancellation Policy" }}
         />
       </Stack>
+      </BagProvider>
     </AuthProvider>
     </StripeProvider>
   );

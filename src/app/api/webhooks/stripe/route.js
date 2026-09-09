@@ -6,6 +6,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { markOrderPaid } from "@/lib/shop/server";
 
 // --- email/stripe helpers ---------------------------------------------------
 function brandName() {
@@ -358,6 +359,24 @@ export async function POST(req) {
       case "checkout.session.completed": {
         const s = event.data.object;
 
+        // E-shop order paid through Stripe Checkout.
+        const shopOrderIdFromSession = Number(s.metadata?.shop_order_id);
+        if (Number.isFinite(shopOrderIdFromSession) && shopOrderIdFromSession > 0) {
+          const result = await markOrderPaid(admin, shopOrderIdFromSession, {
+            sessionId: s.id,
+            paymentIntentId:
+              typeof s.payment_intent === "string"
+                ? s.payment_intent
+                : s.payment_intent?.id,
+          });
+          return ok({
+            received: true,
+            action: "shop_order_paid",
+            orderId: shopOrderIdFromSession,
+            already: Boolean(result.already),
+          });
+        }
+
         // 1. CHECK IF THIS IS AN ADMIN-GENERATED LINK (Existing Booking)
         const existingBookingId = s.metadata?.bookingId;
         const isAdminGenerated = s.metadata?.admin_generated === "true";
@@ -426,6 +445,20 @@ export async function POST(req) {
 
       case "payment_intent.succeeded": {
         const pi = event.data.object;
+
+        // E-shop order paid through the in-app PaymentSheet.
+        const shopOrderId = Number(pi.metadata?.shop_order_id);
+        if (Number.isFinite(shopOrderId) && shopOrderId > 0) {
+          const result = await markOrderPaid(admin, shopOrderId, {
+            paymentIntentId: pi.id,
+          });
+          return ok({
+            received: true,
+            action: "shop_order_paid",
+            orderId: shopOrderId,
+            already: Boolean(result.already),
+          });
+        }
 
         // Logic for Payment Intent (Direct charges / Virtual Terminal)
         const existingBookingId = pi.metadata?.bookingId;

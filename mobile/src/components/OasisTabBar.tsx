@@ -4,12 +4,14 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { colors, fonts } from "@/constants/theme";
+import { useBag } from "@/context/cart";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
 const TABS: Record<string, { label: string; icon: IconName; iconActive: IconName }> = {
   index: { label: "Home", icon: "leaf-outline", iconActive: "leaf" },
   explore: { label: "Explore", icon: "compass-outline", iconActive: "compass" },
+  shop: { label: "Shop", icon: "bag-handle-outline", iconActive: "bag-handle" },
   favorites: { label: "Saved", icon: "heart-outline", iconActive: "heart" },
   bookings: { label: "Journeys", icon: "calendar-clear-outline", iconActive: "calendar-clear" },
   profile: { label: "Profile", icon: "person-outline", iconActive: "person" },
@@ -35,6 +37,7 @@ type TabBarProps = {
  *  icons — the active tab is marked by a single gold dot. */
 export function OasisTabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
+  const bag = useBag();
 
   return (
     <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -68,11 +71,18 @@ export function OasisTabBar({ state, descriptors, navigation }: TabBarProps) {
             style={styles.item}
             hitSlop={6}
           >
-            <Ionicons
-              name={focused ? config.iconActive : config.icon}
-              size={21}
-              color={focused ? "#26201a" : colors.mutedWarm}
-            />
+            <View>
+              <Ionicons
+                name={focused ? config.iconActive : config.icon}
+                size={21}
+                color={focused ? "#26201a" : colors.mutedWarm}
+              />
+              {route.name === "shop" && bag.count > 0 ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{bag.count > 9 ? "9+" : bag.count}</Text>
+                </View>
+              ) : null}
+            </View>
             <Text style={[styles.label, focused && styles.labelActive]}>{config.label}</Text>
             <View style={[styles.dot, focused && styles.dotActive]} />
           </Pressable>
@@ -91,6 +101,23 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   item: { flex: 1, alignItems: "center", gap: 4 },
+  badge: {
+    position: "absolute",
+    top: -4,
+    right: -8,
+    minWidth: 15,
+    height: 15,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.gold,
+  },
+  badgeText: {
+    fontFamily: fonts.sansBold,
+    fontSize: 9,
+    color: colors.creamSoft,
+  },
   label: {
     fontFamily: fonts.sansMedium,
     fontSize: 9,

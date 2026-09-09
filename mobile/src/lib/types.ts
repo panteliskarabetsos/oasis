@@ -206,3 +206,69 @@ export type BookingSettings = {
   bookingsPausedMessage?: string | null;
   bookingsPausedUntil?: string | null;
 };
+
+/* ---------------------------- Shop (e-shop) ---------------------------- */
+
+export type ShopImage = { url: string; alt?: string };
+
+export type ShopProductOption =
+  | string
+  | { name?: string; values?: string[] };
+
+export type ShopProduct = {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  priceCents: number;
+  currency: string;
+  category: string;
+  skuCode: string | null;
+  stockQty: number;
+  inStock: boolean;
+  lowStock: boolean;
+  options: ShopProductOption[];
+  images: ShopImage[];
+  image: string | null;
+  createdAt: string | null;
+};
+
+export type ShopListing = {
+  items: ShopProduct[];
+  total: number;
+  offset: number;
+  limit: number;
+  categories: string[];
+  shop: { paused: boolean; message: string };
+};
+
+export type ShopOrderItem = {
+  id?: number;
+  product_id?: number | null;
+  quantity: number;
+  unit_price_cents: number;
+  currency?: string;
+  title_snapshot: string;
+};
+
+export type ShopOrder = {
+  id: number;
+  status: string;
+  total_cents: number;
+  currency: string;
+  placed_at?: string | null;
+  created_at?: string | null;
+  billing_address?: { name?: string; email?: string; phone?: string } | null;
+  shipping_address?: Record<string, string> | null;
+  items?: ShopOrderItem[];
+};
+
+export type ShopCheckoutResult = {
+  mode: "elements" | "checkout";
+  orderId: number;
+  clientSecret?: string;
+  paymentIntentId?: string;
+  url?: string;
+  amountCents: number;
+  currency: string;
+};

@@ -151,6 +151,7 @@ export default function ProfileScreen() {
         <Eyebrow>Your Space</Eyebrow>
         <MenuRow icon="calendar-outline" label="My Bookings" onPress={() => router.push("/bookings")} />
         <MenuRow icon="heart-outline" label="My Favorites" onPress={() => router.push("/favorites")} />
+        <MenuRow icon="bag-handle-outline" label="My Orders" onPress={() => router.push("/shop/orders")} />
         <MenuRow
           icon="key-outline"
           label="Guest Portal (find a booking)"
