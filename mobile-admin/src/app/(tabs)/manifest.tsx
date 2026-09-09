@@ -45,6 +45,9 @@ function endOfDayISO(day: string) {
 
 const NO_PICKUP = /^no pickup set$/i;
 
+/** Stored numbers read "+30 6912345678"; tel:/sms: must not carry the space. */
+const dialable = (phone: string) => phone.replace(/[^\d+]/g, "");
+
 function ManifestContent() {
   const insets = useSafeAreaInsets();
   const [day, setDay] = useState(() => ymd(new Date()));
@@ -294,9 +297,9 @@ function ContactSheet({
   onClose: () => void;
 }) {
   if (!guest) return null;
-  const call = () => guest.phone && Linking.openURL(`tel:${guest.phone}`);
+  const call = () => guest.phone && Linking.openURL(`tel:${dialable(guest.phone)}`);
   const mail = () => guest.email && Linking.openURL(`mailto:${guest.email}`);
-  const sms = () => guest.phone && Linking.openURL(`sms:${guest.phone}`);
+  const sms = () => guest.phone && Linking.openURL(`sms:${dialable(guest.phone)}`);
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>

@@ -44,6 +44,9 @@ const groupSlotsByDay = (slots) =>
 
 const NO_PICKUP = /^no pickup set$/i;
 
+/** Stored numbers read "+30 6912345678"; a tel: URI must not carry the space. */
+const telHref = (phone) => `tel:${String(phone).replace(/[^\d+]/g, "")}`;
+
 export default function SchedulePage() {
   // Partners hold "schedule" but not "bookings", so the booking link has to be
   // conditional or it is a dead end for exactly the people using this screen.
@@ -508,7 +511,7 @@ function GuestRow({ booking: b, canOpenBooking }) {
                 <div className="flex items-center justify-between gap-3">
                   <dt className="text-[#9a8c7e]">Phone</dt>
                   <dd>
-                    <a href={`tel:${b.phone}`} className="font-medium text-[#8b6f47] hover:underline">
+                    <a href={telHref(b.phone)} className="font-medium text-[#8b6f47] hover:underline">
                       {b.phone}
                     </a>
                   </dd>
@@ -542,7 +545,7 @@ function GuestRow({ booking: b, canOpenBooking }) {
 
           <div className="mt-3 flex flex-wrap gap-2 border-t border-[#f0ebe2] pt-2.5">
             {b.phone ? (
-              <Button as="a" href={`tel:${b.phone}`} size="sm" variant="secondary">
+              <Button as="a" href={telHref(b.phone)} size="sm" variant="secondary">
                 Call
               </Button>
             ) : null}

@@ -29,6 +29,15 @@ import {
   Heart,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
+import {
+  COUNTRY_CODES,
+  DEFAULT_COUNTRY,
+  formatPhone,
+  isValidNational,
+  isValidStoredPhone,
+  normalizeNational,
+  splitPhone,
+} from "@/lib/phone";
 
 const DIETARY_OPTIONS = [
   { id: "Vegetarian", label: "Vegetarian", icon: Leaf },
@@ -72,6 +81,7 @@ export default function AttendeesPage() {
   // Primary contact
   const [pcName, setPcName] = useState("");
   const [pcEmail, setPcEmail] = useState("");
+  const [pcCountry, setPcCountry] = useState(DEFAULT_COUNTRY);
   const [pcPhone, setPcPhone] = useState("");
 
   // Auto-link primary contact name to first adult
@@ -180,7 +190,11 @@ export default function AttendeesPage() {
         if (pc) {
           setPcName(pc.name || "");
           setPcEmail(pc.email || "");
-          setPcPhone(pc.phone || "");
+          {
+          const { iso, national } = splitPhone(pc.phone || "");
+          setPcCountry(iso);
+          setPcPhone(national);
+        }
           if (pc.name) setAutoPcFromFirstAdult(false);
         }
 
@@ -275,7 +289,7 @@ export default function AttendeesPage() {
     const issues = validate(attendees, counts, {
       name: effectivePcName,
       email: pcEmail,
-      phone: pcPhone,
+      phone: formatPhone(pcCountry, pcPhone),
     });
 
     if (issues.length) {
@@ -295,7 +309,7 @@ export default function AttendeesPage() {
             primaryContact: {
               name: (effectivePcName || "").trim(),
               email: pcEmail.trim(),
-              phone: pcPhone.trim(),
+              phone: formatPhone(pcCountry, pcPhone),
             },
             attendees: attendees.map((a) => {
               const dietaryStr =
@@ -662,16 +676,37 @@ export default function AttendeesPage() {
                     </Field>
 
                     <Field label="Phone Number">
-                      <div className="relative">
-                        <Phone className="w-4 h-4 text-[#a09084] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                        <input
-                          type="tel"
-                          value={pcPhone}
-                          onChange={(e) => setPcPhone(e.target.value)}
-                          placeholder="For day-of updates"
-                          className={`${inputCls} pl-10`}
-                        />
+                      <div className="flex gap-2">
+                        <select
+                          value={pcCountry}
+                          onChange={(e) => setPcCountry(e.target.value)}
+                          aria-label="Country calling code"
+                          className={`${inputCls} w-[122px] shrink-0 pr-1`}
+                        >
+                          {COUNTRY_CODES.map((c) => (
+                            <option key={c.iso} value={c.iso}>
+                              {c.flag} +{c.dial}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="relative flex-1">
+                          <Phone className="w-4 h-4 text-[#a09084] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="tel"
+                            inputMode="tel"
+                            autoComplete="tel-national"
+                            value={pcPhone}
+                            onChange={(e) => setPcPhone(normalizeNational(e.target.value))}
+                            placeholder="6912345678"
+                            className={`${inputCls} pl-10`}
+                          />
+                        </div>
                       </div>
+                      {pcPhone && !isValidNational(pcPhone) ? (
+                        <p className="mt-1 text-xs text-[#b44d4d]">
+                          Enter the number without the leading zero or country code.
+                        </p>
+                      ) : null}
                     </Field>
                   </div>
 
@@ -875,6 +910,9 @@ function validate(attendees, counts, primaryContact) {
     issues.push("Booking Contact: Name is required.");
   if (!isValidEmail(primaryContact.email))
     issues.push("Booking Contact: Valid email is required for tickets.");
+  // A guide needs to reach the guest on the day, so this is no longer optional.
+  if (!isValidStoredPhone(primaryContact.phone))
+    issues.push("Booking Contact: A phone number with country code is required.");
 
   return issues;
 }
