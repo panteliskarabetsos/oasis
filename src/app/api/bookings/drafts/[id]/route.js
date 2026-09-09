@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "../../../../../lib/supabase/admin";
+import { isValidStoredPhone } from "@/lib/phone";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -156,7 +157,9 @@ export async function PATCH(req, ctx) {
         counts,
         status,
         "convertedBookingId",
-        "selected_meetup_point"
+        "selected_meetup_point",
+        "experienceId",
+        Experience:"experienceId" ( "meetupPoints" )
       `,
     )
     .eq("id", draftId)
@@ -196,6 +199,26 @@ export async function PATCH(req, ctx) {
       return bad("Kid age must be 3–12");
     if (a?.category === "adult" && !(age >= 16))
       return bad("Adult age must be 16+");
+  }
+
+  // The booking contact is what the manifest and the day-of comms rely on, so
+  // validate it here as well: the client checks are trivially bypassable.
+  if (!primaryContact?.name?.trim())
+    return bad("A booking contact name is required");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(primaryContact?.email ?? "").trim()))
+    return bad("A valid booking contact email is required");
+  if (!isValidStoredPhone(primaryContact?.phone))
+    return bad("A booking contact phone number with country code is required");
+
+  // A pickup point is required whenever the experience offers any.
+  const meetupPoints = Array.isArray(draft?.Experience?.meetupPoints)
+    ? draft.Experience.meetupPoints
+    : [];
+  if (meetupPoints.length > 0) {
+    const chosen = selected_meetup_point?.name;
+    if (!chosen) return bad("Please choose a pickup point");
+    if (!meetupPoints.some((p) => p?.name === chosen))
+      return bad("That pickup point is not offered for this experience");
   }
 
   const { error: upErr } = await admin

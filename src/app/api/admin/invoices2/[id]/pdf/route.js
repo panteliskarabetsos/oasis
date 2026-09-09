@@ -6,7 +6,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
-import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 import { buildInvoicePdf, formatInv } from "@/lib/pdf/invoice-pdf-v2";
 import { loadInvoiceForPdf } from "@/lib/pdf/load-invoice-for-pdf";
 
@@ -25,8 +25,8 @@ async function requireAdmin() {
   if (!user) return { error: true, response: bad("Unauthorized", 401) };
   // Resolve the role with the service client — the user client is RLS-bound
   // and was silently downgrading real admins to "user".
-  const role = await resolveStaffRole(user);
-  if (!roleCan(role, "invoices"))
+  const { role, permissions } = await resolveStaffAccess(user);
+  if (!accessCan(permissions, "invoices"))
     return { error: true, response: bad("Forbidden", 403) };
   return { error: false };
 }

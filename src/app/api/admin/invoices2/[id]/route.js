@@ -8,7 +8,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
 // add near the top with your other imports:
 import Stripe from "stripe";
-import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" })
@@ -337,8 +337,8 @@ async function requireAdmin() {
   if (!user) return { error: true, response: bad("Unauthorized", 401) };
   // Resolve the role with the service client — the user client is RLS-bound
   // and was silently downgrading real admins to "user".
-  const role = await resolveStaffRole(user);
-  if (!roleCan(role, "invoices"))
+  const { role, permissions } = await resolveStaffAccess(user);
+  if (!accessCan(permissions, "invoices"))
     return { error: true, response: bad("Forbidden", 403) };
   return { error: false };
 }

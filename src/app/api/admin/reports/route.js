@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -63,8 +63,8 @@ async function requireAdmin() {
 
   // Resolve the role with the service client — querying User through the
   // user client is RLS-bound and silently downgraded real admins to "user".
-  const role = await resolveStaffRole(user);
-  if (!roleCan(role, "payments"))
+  const { role, permissions } = await resolveStaffAccess(user);
+  if (!accessCan(permissions, "payments"))
     return { error: true, response: bad("Forbidden", 403) };
 
   const admin = createSupabaseAdmin();

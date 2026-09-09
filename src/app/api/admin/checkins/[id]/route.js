@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { resolveStaffRole, roleCan } from "@/lib/auth/requireAdmin";
+import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 
 const TBL_BOOKING = "booking";
 const TBL_EXPERIENCE = "Experience";
@@ -61,8 +61,8 @@ async function getAuthedAdmin() {
       ),
     };
 
-  const role = await resolveStaffRole(user);
-  if (!roleCan(role, "checkins"))
+  const { role, permissions } = await resolveStaffAccess(user);
+  if (!accessCan(permissions, "checkins"))
     return {
       errorResponse: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     };
