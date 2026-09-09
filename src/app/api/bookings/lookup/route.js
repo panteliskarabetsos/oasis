@@ -4,6 +4,8 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "../../../../lib/supabase/admin";
+import { legacyBookingId, normalizeBookingCode } from "@/lib/bookingCode";
+import { isMissingSchema } from "@/lib/shop/schema";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -46,20 +48,25 @@ export async function GET(req) {
       return bad("Both booking reference and last name are required.", 400);
     }
 
-    const numericId = parseInt(ref.replace(/\D/g, ""), 10);
+    // A reference is either the random code on the booking, or — for anything
+    // booked before codes existed, whose confirmation email is already in a
+    // customer's inbox — "BK-" plus the row id.
+    const code = normalizeBookingCode(ref);
+    const numericId = legacyBookingId(ref);
 
-    if (isNaN(numericId)) {
+    if (!code && !numericId) {
       return bad(
         "Booking not found. Please check your details and try again.",
         404,
       );
     }
 
-    const { data: booking, error } = await admin
-      .from("booking")
-      .select(
-        `
+    const selectBooking = (apply) =>
+      apply(
+        admin.from("booking").select(
+          `
         id,
+        code,
         experienceId,
         customExperienceName,
         status,
@@ -84,9 +91,23 @@ export async function GET(req) {
         User ( name, surname, email ),
         ScheduleSlot ( date )
       `,
-      )
-      .eq("id", numericId)
-      .maybeSingle();
+        ),
+      ).maybeSingle();
+
+    // Prefer the code; fall back to the legacy id so old emails keep working.
+    let booking = null;
+    let error = null;
+    if (code) {
+      ({ data: booking, error } = await selectBooking((q) => q.eq("code", code)));
+      if (error && isMissingSchema(error)) {
+        // Codes have not been migrated yet.
+        error = null;
+        booking = null;
+      }
+    }
+    if (!booking && !error && numericId) {
+      ({ data: booking, error } = await selectBooking((q) => q.eq("id", numericId)));
+    }
 
     if (error) {
       console.error("[lookup] select error:", error);

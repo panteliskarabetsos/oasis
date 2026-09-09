@@ -54,7 +54,7 @@ export default function BookingDetailScreen() {
 
   const name = booking.experience?.name ?? booking.experienceName ?? "Oasis Experience";
   const when = booking.startTime ?? booking.scheduleSlot?.date;
-  const reference = bookingRef(booking.id);
+  const reference = bookingRef(booking);
   const qrValue = booking.qrValue ?? `BOOKING-CHECKIN:${booking.id}`;
   const guests = (booking.counts?.adults ?? 0) + (booking.counts?.kids ?? 0);
   const location = booking.experience?.location ?? "Chania, Crete";

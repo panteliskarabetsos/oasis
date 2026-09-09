@@ -38,6 +38,7 @@ export async function GET() {
     // If your DB prefers the other FK name, swap the line with the commented alternative below.
     const SELECT_BOOKING = `
       id,
+      code,
       status,
       createdAt,
       updatedAt,
