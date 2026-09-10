@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { markOrderPaid } from "@/lib/shop/server";
+import { settleLinkPayment } from "@/lib/pos/settleLink";
 
 // --- email/stripe helpers ---------------------------------------------------
 function brandName() {
@@ -367,6 +368,30 @@ export async function POST(req) {
     switch (event.type) {
       case "checkout.session.completed": {
         const s = event.data.object;
+
+        // A till QR payment. The app polls for this too and usually wins the
+        // race; this is the safety net for when it cannot — the app was killed,
+        // the wifi dropped, the cashier walked away. Someone who has paid must
+        // end up with a receipt either way.
+        if (s.metadata?.rail === "qr_link") {
+          const piId =
+            typeof s.payment_intent === "string"
+              ? s.payment_intent
+              : s.payment_intent?.id;
+
+          if (s.payment_status !== "paid" || !piId) {
+            return ok({ received: true, action: "pos_qr_ignored" });
+          }
+
+          const settled = await settleLinkPayment(admin, s.id, piId);
+          return ok({
+            received: true,
+            action: "pos_qr_link",
+            settled: settled.settled,
+            reason: settled.reason,
+            receiptId: settled.receiptId ?? null,
+          });
+        }
 
         // E-shop order paid through Stripe Checkout.
         const shopOrderIdFromSession = Number(s.metadata?.shop_order_id);

@@ -287,19 +287,45 @@ function PosContent() {
       const res = await api.posPaymentLinkCancel(session.sessionId);
       // They paid in the moment it took to press Cancel — settle it anyway
       // rather than pocketing a payment with no receipt behind it.
-      if (res.alreadyPaid && res.paymentIntentId) await settleLink(res.paymentIntentId);
+      if (res.alreadyPaid) await settleLink(session.sessionId);
     } catch {
       // The session expires on its own within 30 minutes.
     }
   }
 
-  async function settleLink(paymentIntentId: string) {
+  /**
+   * Close out a QR sale.
+   *
+   * Goes through the settle route rather than plain checkout so the till and
+   * the Stripe webhook contend for the same parked basket — whichever gets
+   * there first records the sale, and the customer never gets two receipts.
+   */
+  async function settleLink(sessionId: string) {
     setLinkSession(null);
     setBusy(true);
     try {
-      await finish({ ...payload(paymentIntentId), stripePaymentIntentId: paymentIntentId });
+      const res = await api.posPaymentLinkSettle(sessionId, payload());
+      clear();
+      const receiptId = res?.receiptId ?? res?.bookingId;
+      const mail = res?.receiptEmail;
+      const lines = [
+        receiptId ? `Receipt #${receiptId}` : "Recorded.",
+        mail?.sent
+          ? `Emailed to ${mail.to}.`
+          : mail && mail.reason !== "no-email"
+            ? "The receipt email failed to send — resend it from the receipt."
+            : null,
+      ].filter(Boolean);
+      Alert.alert("Payment received", lines.join("\n"));
+      refresh();
     } catch (e) {
-      Alert.alert("Checkout", e instanceof Error ? e.message : "Checkout failed.");
+      // The money is with Stripe either way; the webhook records the sale.
+      Alert.alert(
+        "Paid",
+        e instanceof Error
+          ? `${e.message}\n\nThe payment went through — it will be recorded automatically.`
+          : "The payment went through but could not be recorded here.",
+      );
     } finally {
       setBusy(false);
     }
@@ -783,7 +809,7 @@ function PosContent() {
         <LinkSheet
           session={linkSession}
           onCancel={cancelLink}
-          onPaid={settleLink}
+          onPaid={() => settleLink(linkSession.sessionId)}
         />
       ) : null}
     </KeyboardAvoidingView>
@@ -803,7 +829,7 @@ function LinkSheet({
 }: {
   session: PosPaymentLink;
   onCancel: () => void;
-  onPaid: (paymentIntentId: string) => void;
+  onPaid: () => void;
 }) {
   const [status, setStatus] = useState<"pending" | "paid" | "expired">("pending");
   const onPaidRef = useRef(onPaid);
@@ -816,9 +842,9 @@ function LinkSheet({
         const res = await api.posPaymentLinkStatus(session.sessionId);
         if (!alive) return;
         setStatus(res.status);
-        if (res.status === "paid" && res.paymentIntentId) {
+        if (res.status === "paid") {
           clearInterval(timer);
-          onPaidRef.current(res.paymentIntentId);
+          onPaidRef.current();
         }
         if (res.status === "expired") clearInterval(timer);
       } catch {
