@@ -141,7 +141,7 @@ function PaymentsScreenContent() {
               </Card>
             </Pressable>
           )}
-          ListEmptyComponent={<EmptyState title="No payments" />}
+          ListEmptyComponent={<EmptyState title="No payments" icon="card-outline" />}
         />
       )}
 

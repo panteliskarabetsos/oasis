@@ -126,6 +126,9 @@ export async function GET() {
 
       return {
         id: b.id,
+        // Selected above but previously dropped here, so the apps fell back to
+        // "BK-" plus the id and showed a reference nobody was ever given.
+        code: b.code ?? null,
         status: b.status,
         createdAt: b.createdAt,
         updatedAt: b.updatedAt,

@@ -1,21 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  Linking,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { FlatList, Linking, RefreshControl, StyleSheet, Text, View } from "react-native";
 
-import { Badge, Card, EmptyState, ErrorState, ListSkeleton, Muted } from "@/components/ui";
-import { colors, fonts, radii, spacing } from "@/constants/theme";
+import { PermissionGate } from "@/components/access";
+import { PressableScale } from "@/components/premium";
+import { Screen } from "@/components/screen";
+import {
+  Avatar,
+  Badge,
+  Card,
+  EmptyState,
+  ErrorState,
+  ListSkeleton,
+  Muted,
+  SearchBar,
+} from "@/components/ui";
+import { colors, fonts, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
-import { PermissionGate } from "@/components/access";
 
 function UsersScreenContent() {
   const { data, loading, error, refresh } = useApi(() => api.users());
@@ -31,22 +33,15 @@ function UsersScreenContent() {
   }, [data, query]);
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.search}>
-        <Ionicons name="search-outline" size={16} color={colors.muted} />
-        <TextInput
-          placeholder="Search name, email, phone"
-          placeholderTextColor={colors.faint}
-          value={query}
-          onChangeText={setQuery}
-          style={styles.searchInput}
-          autoCapitalize="none"
-        />
-      </View>
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.gold} />
-        </View>
+    <Screen>
+      <SearchBar
+        placeholder="Search name, email, phone"
+        value={query}
+        onChangeText={setQuery}
+        style={{ marginHorizontal: spacing.md, marginTop: spacing.sm }}
+      />
+      {loading && !data ? (
+        <ListSkeleton />
       ) : error ? (
         <ErrorState title="Couldn't load users" message={error} onRetry={refresh} />
       ) : (
@@ -65,13 +60,9 @@ function UsersScreenContent() {
           contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: 48 }}
           renderItem={({ item: u }) => (
             <Card>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>
-                    {(u.name?.[0] ?? u.email?.[0] ?? "?").toUpperCase()}
-                  </Text>
-                </View>
-                <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 11 }}>
+                <Avatar name={[u.name, u.surname].filter(Boolean).join(" ") || u.email} />
+                <View style={{ flex: 1, gap: 2 }}>
                   <Text style={styles.name} numberOfLines={1}>
                     {[u.name, u.surname].filter(Boolean).join(" ") || u.email}
                   </Text>
@@ -82,55 +73,44 @@ function UsersScreenContent() {
                 </View>
                 {u.role && u.role !== "user" ? <Badge label={u.role} tone="info" /> : null}
                 {u.phone ? (
-                  <Ionicons
-                    name="call-outline"
-                    size={18}
-                    color={colors.gold}
+                  // A bare icon with an onPress has a ~18pt target; guides tap
+                  // this one-handed with a phone already at their ear.
+                  <PressableScale
+                    style={styles.call}
                     onPress={() => Linking.openURL(`tel:${u.phone}`)}
-                  />
+                    accessibilityLabel={`Call ${u.name ?? "guest"}`}
+                  >
+                    <Ionicons name="call" size={16} color={colors.gold} />
+                  </PressableScale>
                 ) : null}
               </View>
             </Card>
           )}
-          ListEmptyComponent={<EmptyState title="No matches" />}
+          ListEmptyComponent={
+            <EmptyState
+              title="No matches"
+              subtitle={query ? `Nothing matches "${query.trim()}".` : undefined}
+              icon="people-outline"
+            />
+          }
         />
       )}
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  search: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    margin: spacing.md,
-    marginBottom: 0,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.pill,
-    paddingHorizontal: 14,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 11,
-    fontFamily: fonts.sans,
-    fontSize: 14,
-    color: colors.text,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.chip,
+  call: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: colors.goldWash,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.goldLine,
   },
-  avatarText: { fontFamily: fonts.serif, fontSize: 15, color: colors.gold },
-  name: { fontFamily: fonts.sansSemiBold, fontSize: 14, color: colors.text },
+  name: { fontFamily: fonts.sansSemiBold, fontSize: 14.5, color: colors.text },
 });
 
 export default function UsersScreen() {

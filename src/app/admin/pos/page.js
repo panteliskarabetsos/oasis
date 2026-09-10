@@ -620,7 +620,14 @@ export default function POSPage() {
 
       if (txType === "items" || txType === "addons") {
         const receiptId = data.receiptId || data.bookingId;
-        toast.success("Receipt generated.");
+        // The cashier is standing in front of the customer: say plainly
+        // whether the emailed copy actually went, so they can offer a print
+        // instead of assuming.
+        const mail = data.receiptEmail;
+        if (mail?.sent) toast.success(`Receipt emailed to ${mail.to}.`);
+        else if (mail && mail.reason !== "no-email")
+          toast.error("Receipt generated, but the email failed. Print or resend it.");
+        else toast.success("Receipt generated.");
         clearCart(false);
         if (receiptId) {
           window.open(`/api/receipts/${receiptId}/pdf`, "_blank");

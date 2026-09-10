@@ -68,7 +68,11 @@ function ExperiencesScreenContent() {
           </View>
 
           {items.length === 0 ? (
-            <EmptyState title="No experiences yet" subtitle="Create your first journey." />
+            <EmptyState
+              title="No experiences yet"
+              subtitle="Create your first journey."
+              icon="leaf-outline"
+            />
           ) : (
             items.map((exp) => (
               <PressableScale

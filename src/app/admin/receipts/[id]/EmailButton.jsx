@@ -23,8 +23,10 @@ export default function EmailButton({ receipt }) {
       const res = await fetch("/api/receipts/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // The server loads the receipt itself; sending the whole object let
+        // the endpoint email arbitrary content.
         body: JSON.stringify({
-          receipt: receipt,
+          receiptId: receipt?.id,
           email: emailToUse.trim(),
         }),
       });

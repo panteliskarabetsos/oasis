@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PermissionGate } from "@/components/access";
+import { Screen, ScreenHeader } from "@/components/screen";
 import {
   Badge,
   Button,
@@ -63,11 +65,8 @@ function ShopOrders() {
   const orders = data ?? [];
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Eyebrow>E-shop</Eyebrow>
-        <Serif style={{ fontSize: 26 }}>Orders</Serif>
-      </View>
+    <Screen>
+      <ScreenHeader eyebrow="E-shop" title="Orders" onBack={() => router.back()} />
 
       <FlatList
         horizontal
@@ -146,7 +145,7 @@ function ShopOrders() {
           refresh();
         }}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -407,8 +406,6 @@ function OrderSheet({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
 
   filterRow: { gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
   filterChip: {

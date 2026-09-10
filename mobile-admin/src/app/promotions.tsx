@@ -162,7 +162,11 @@ function PromotionsScreenContent() {
           <ErrorState title="Couldn't load" message={error} onRetry={refreshAll} />
         ) : tab === "codes" ? (
           (codesQ.data ?? []).length === 0 ? (
-            <EmptyState title="No discount codes" subtitle="Create one to run a promotion." />
+            <EmptyState
+              title="No discount codes"
+              subtitle="Create one to run a promotion."
+              icon="pricetags-outline"
+            />
           ) : (
             (codesQ.data ?? []).map((c) => {
               const exhausted =
@@ -211,7 +215,11 @@ function PromotionsScreenContent() {
           )
         ) : tab === "campaigns" ? (
           (campaignsQ.data ?? []).length === 0 ? (
-            <EmptyState title="No campaigns" subtitle="Campaigns show as the site's promo banner." />
+            <EmptyState
+              title="No campaigns"
+              subtitle="Campaigns show as the site's promo banner."
+              icon="megaphone-outline"
+            />
           ) : (
             (campaignsQ.data ?? []).map((c) => {
               const expired = c.endsAt ? new Date(c.endsAt).getTime() < Date.now() : false;
@@ -248,7 +256,7 @@ function PromotionsScreenContent() {
             })
           )
         ) : (vouchersQ.data ?? []).length === 0 ? (
-          <EmptyState title="No vouchers" />
+          <EmptyState title="No vouchers" icon="ticket-outline" />
         ) : (
           (vouchersQ.data ?? []).map((v) => (
             <Card key={String(v.id)}>

@@ -1,19 +1,25 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import buildReceiptPdfBuffer from "@/lib/pdf/buildReceipt";
 
+import { accessCan, requireAdmin } from "@/lib/auth/requireAdmin";
+import buildReceiptPdfBuffer from "@/lib/pdf/buildReceipt";
+import { storeIdentity } from "@/lib/storeIdentity";
+
+// A receipt carries a customer's name, email and what they bought, so this
+// is staff-only. It was open to anyone who could guess a row id.
 export async function GET(req, { params }) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+  if (!accessCan(auth.permissions, "pos") && !accessCan(auth.permissions, "zreport")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { id } = await params;
 
-  const { data: receipt } = await supabase
+  const { data: receipt } = await auth.admin
     .from("Receipt")
     .select("*")
     .eq("id", id)
-    .single();
+    .maybeSingle();
 
   if (!receipt)
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -21,11 +27,7 @@ export async function GET(req, { params }) {
   // Generate the PDF Buffer
   const pdfBuffer = await buildReceiptPdfBuffer({
     receipt,
-    store: {
-      name: "Oasis",
-      address: "123 Artisan Lane\nChania, Crete 73100",
-      taxId: "EL123456789",
-    },
+    store: storeIdentity(),
   });
 
   return new NextResponse(pdfBuffer, {

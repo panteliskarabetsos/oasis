@@ -1,9 +1,9 @@
-import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { StyleSheet, View } from "react-native";
+import { View } from "react-native";
 
+import { Screen } from "@/components/screen";
 import { Button, EmptyState, Muted } from "@/components/ui";
-import { colors, spacing } from "@/constants/theme";
+import { spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
 import { PERMISSION_LABELS } from "@/lib/permissions";
 
@@ -19,23 +19,21 @@ export function NoAccess({ permission }: { permission?: string }) {
   const label = permission ? (PERMISSION_LABELS[permission] ?? permission) : "this section";
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.icon}>
-        <Ionicons name="lock-closed-outline" size={24} color={colors.gold} />
-      </View>
+    <Screen style={{ justifyContent: "center" }}>
       <EmptyState
         title="No access to this section"
         subtitle={`Your account doesn't include ${label}.`}
+        icon="lock-closed-outline"
       >
         <View style={{ gap: spacing.sm, alignItems: "center" }}>
           <Muted style={{ fontSize: 12, textAlign: "center" }}>
             Signed in as {profile?.email ?? "—"}
             {profile?.role ? ` · ${profile.role}` : ""}
           </Muted>
-          <Button title="Go back" variant="ghost" onPress={() => router.back()} />
+          <Button title="Go back" variant="ghost" icon="arrow-back" onPress={() => router.back()} />
         </View>
       </EmptyState>
-    </View>
+    </Screen>
   );
 }
 
@@ -52,17 +50,3 @@ export function PermissionGate({
   if (!can(permission)) return <NoAccess permission={permission} />;
   return <>{children}</>;
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg, justifyContent: "center" },
-  icon: {
-    alignSelf: "center",
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.chip,
-    marginBottom: spacing.sm,
-  },
-});

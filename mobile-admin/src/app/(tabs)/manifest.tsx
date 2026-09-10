@@ -10,19 +10,17 @@ import {
   Text,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PermissionGate } from "@/components/access";
 import { PressableScale } from "@/components/premium";
+import { Screen, ScreenHeader, useTabBarPadding } from "@/components/screen";
 import {
   Badge,
   Button,
   Card,
   EmptyState,
   ErrorState,
-  Eyebrow,
   Muted,
-  Serif,
 } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
@@ -49,7 +47,7 @@ const NO_PICKUP = /^no pickup set$/i;
 const dialable = (phone: string) => phone.replace(/[^\d+]/g, "");
 
 function ManifestContent() {
-  const insets = useSafeAreaInsets();
+  const bottomPad = useTabBarPadding();
   const [day, setDay] = useState(() => ymd(new Date()));
   const [selected, setSelected] = useState<ManifestBooking | null>(null);
 
@@ -95,86 +93,84 @@ function ManifestContent() {
   });
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={{ paddingTop: insets.top + spacing.md, paddingBottom: 90 }}
-      refreshControl={
-        <RefreshControl
-          refreshing={loading && !!data}
-          onRefresh={refresh}
-          tintColor={colors.gold}
-        />
-      }
-    >
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Eyebrow>Operations</Eyebrow>
-          <Serif style={{ fontSize: 26 }}>Daily manifest</Serif>
-        </View>
-      </View>
-
-      {/* day picker */}
-      <View style={styles.dayBar}>
-        <PressableScale style={styles.dayNav} onPress={() => shift(-1)}>
-          <Ionicons name="chevron-back" size={18} color={colors.textSoft} />
-        </PressableScale>
-        <View style={{ flex: 1, alignItems: "center" }}>
-          <Text style={styles.dayLabel}>{heading}</Text>
-          {isToday ? <Text style={styles.dayToday}>Today</Text> : null}
-        </View>
-        <PressableScale style={styles.dayNav} onPress={() => shift(1)}>
-          <Ionicons name="chevron-forward" size={18} color={colors.textSoft} />
-        </PressableScale>
-      </View>
-
-      {!isToday ? (
-        <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.sm }}>
-          <Button title="Back to today" variant="ghost" onPress={() => setDay(ymd(new Date()))} />
-        </View>
-      ) : null}
-
-      {/* totals */}
-      {!loading && !error && slots.length ? (
-        <View style={styles.totals}>
-          <Totals label="Tours" value={totals.tours} />
-          <Totals label="Guests" value={totals.guests} />
-          <Totals
-            label="No pickup"
-            value={totals.noPickup}
-            tone={totals.noPickup > 0 ? "warning" : undefined}
+    <Screen>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: bottomPad }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading && !!data}
+            onRefresh={refresh}
+            tintColor={colors.gold}
           />
-        </View>
-      ) : null}
+        }
+      >
+        <ScreenHeader eyebrow="Operations" title="Daily manifest" />
 
-      {error ? (
-        <View style={{ paddingHorizontal: spacing.md }}>
-          <ErrorState title="Couldn't load the manifest" message={error} onRetry={refresh} />
+        {/* day picker */}
+        <View style={styles.dayBar}>
+          <PressableScale style={styles.dayNav} onPress={() => shift(-1)}>
+            <Ionicons name="chevron-back" size={18} color={colors.textSoft} />
+          </PressableScale>
+          <View style={{ flex: 1, alignItems: "center" }}>
+            <Text style={styles.dayLabel}>{heading}</Text>
+            {isToday ? <Text style={styles.dayToday}>Today</Text> : null}
+          </View>
+          <PressableScale style={styles.dayNav} onPress={() => shift(1)}>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSoft} />
+          </PressableScale>
         </View>
-      ) : loading && !data ? (
-        <View style={{ paddingHorizontal: spacing.md, gap: spacing.sm }}>
-          {[0, 1].map((i) => (
-            <View key={i} style={styles.skeleton} />
-          ))}
-        </View>
-      ) : !slots.length ? (
-        <EmptyState
-          title="Nothing scheduled"
-          subtitle={`No tours are running on ${heading}.`}
-        />
-      ) : (
-        <View style={{ paddingHorizontal: spacing.md, gap: spacing.md }}>
-          {slots.map((slot) => (
-            <SlotCard key={slot.id} slot={slot} onSelect={setSelected} />
-          ))}
-        </View>
-      )}
 
-      <Muted style={styles.footnote}>
-        This is a read-only view. Availability is managed by the office.
-      </Muted>
+        {!isToday ? (
+          <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.sm }}>
+            <Button title="Back to today" variant="ghost" onPress={() => setDay(ymd(new Date()))} />
+          </View>
+        ) : null}
 
-      <ContactSheet guest={selected} onClose={() => setSelected(null)} />
-    </ScrollView>
+        {/* totals */}
+        {!loading && !error && slots.length ? (
+          <View style={styles.totals}>
+            <Totals label="Tours" value={totals.tours} />
+            <Totals label="Guests" value={totals.guests} />
+            <Totals
+              label="No pickup"
+              value={totals.noPickup}
+              tone={totals.noPickup > 0 ? "warning" : undefined}
+            />
+          </View>
+        ) : null}
+
+        {error ? (
+          <View style={{ paddingHorizontal: spacing.md }}>
+            <ErrorState title="Couldn't load the manifest" message={error} onRetry={refresh} />
+          </View>
+        ) : loading && !data ? (
+          <View style={{ paddingHorizontal: spacing.md, gap: spacing.sm }}>
+            {[0, 1].map((i) => (
+              <View key={i} style={styles.skeleton} />
+            ))}
+          </View>
+        ) : !slots.length ? (
+          <EmptyState
+            title="Nothing scheduled"
+            subtitle={`No tours are running on ${heading}.`}
+            icon="sunny-outline"
+          />
+        ) : (
+          <View style={{ paddingHorizontal: spacing.md, gap: spacing.md }}>
+            {slots.map((slot) => (
+              <SlotCard key={slot.id} slot={slot} onSelect={setSelected} />
+            ))}
+          </View>
+        )}
+
+        <Muted style={styles.footnote}>
+          This is a read-only view. Availability is managed by the office.
+        </Muted>
+
+        <ContactSheet guest={selected} onClose={() => setSelected(null)} />
+      </ScrollView>
+    </Screen>
   );
 }
 
@@ -379,8 +375,6 @@ export default function ManifestScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   dayBar: {
     flexDirection: "row",
     alignItems: "center",

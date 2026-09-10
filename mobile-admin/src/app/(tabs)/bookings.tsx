@@ -1,38 +1,29 @@
-import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
+import { PermissionGate } from "@/components/access";
 import { PressableScale } from "@/components/premium";
+import { Screen, ScreenHeader, useTabBarPadding } from "@/components/screen";
 import {
+  Avatar,
   Badge,
   Chip,
   EmptyState,
   ErrorState,
-  Eyebrow,
   ListSkeleton,
   Muted,
-  Serif,
+  SearchBar,
 } from "@/components/ui";
-import { colors, fonts, radii, spacing } from "@/constants/theme";
+import { colors, fonts, radii, spacing, type Tone } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { useDebounced } from "@/hooks/useDebounced";
 import { api } from "@/lib/api";
 import type { Reservation } from "@/lib/types";
-import { PermissionGate } from "@/components/access";
 
 const STATUSES = ["all", "confirmed", "pending", "checked_in", "no_show", "cancelled"] as const;
 
-export function statusTone(status?: string): "success" | "warning" | "danger" | "neutral" | "info" {
+export function statusTone(status?: string): Tone {
   switch ((status ?? "").toLowerCase()) {
     case "confirmed":
     case "paid":
@@ -52,7 +43,7 @@ export function statusTone(status?: string): "success" | "warning" | "danger" | 
 }
 
 function BookingsScreenContent() {
-  const insets = useSafeAreaInsets();
+  const bottomPad = useTabBarPadding();
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounced(query);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("all");
@@ -84,62 +75,58 @@ function BookingsScreenContent() {
   const pages = Math.max(1, Math.ceil(total / 25));
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Eyebrow>Operations</Eyebrow>
-          <Serif style={{ fontSize: 26 }}>Bookings</Serif>
-        </View>
-        <Muted style={{ fontSize: 12 }}>{total} results</Muted>
-      </View>
+    <Screen>
+      <ScreenHeader
+        eyebrow="Operations"
+        title="Bookings"
+        trailing={
+          <View style={styles.countPill}>
+            <Text style={styles.countValue}>{total}</Text>
+            <Text style={styles.countLabel}>results</Text>
+          </View>
+        }
+      />
 
-      <View style={styles.search}>
-        <Ionicons name="search-outline" size={16} color={colors.muted} />
-        <TextInput
-          placeholder="Search guest, email, or #code"
-          placeholderTextColor={colors.faint}
-          value={query}
-          onChangeText={setQuery}
-          returnKeyType="search"
-          style={styles.searchInput}
-          autoCapitalize="none"
-        />
-        {query ? (
-          <Ionicons
-            name="close-circle"
-            size={16}
-            color={colors.muted}
-            onPress={() => setQuery("")}
+      <SearchBar
+        placeholder="Search guest, email, or code"
+        value={query}
+        onChangeText={setQuery}
+        style={{ marginHorizontal: spacing.md, marginTop: spacing.sm }}
+      />
+
+      <FlatList
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        data={STATUSES}
+        keyExtractor={(s) => s}
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={{
+          gap: 8,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
+        }}
+        renderItem={({ item: s }) => (
+          <Chip
+            label={s === "all" ? "All" : s.replace("_", " ")}
+            active={status === s}
+            onPress={() => {
+              setStatus(s);
+              setPage(1);
+            }}
           />
-        ) : null}
-      </View>
-
-      <View>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={STATUSES}
-          keyExtractor={(s) => s}
-          contentContainerStyle={{ gap: 8, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}
-          renderItem={({ item: s }) => (
-            <Chip
-              label={s === "all" ? "All" : s.replace("_", " ")}
-              active={status === s}
-              onPress={() => {
-                setStatus(s);
-                setPage(1);
-              }}
-            />
-          )}
-        />
-      </View>
+        )}
+      />
 
       {loading && !data ? (
         <ListSkeleton />
       ) : error && !items.length ? (
         <ErrorState title="Couldn't load bookings" message={error} onRetry={refresh} />
       ) : items.length === 0 ? (
-        <EmptyState title="No bookings found" subtitle="Try a different search or filter." />
+        <EmptyState
+          title="No bookings found"
+          subtitle="Try a different search or filter."
+          icon="calendar-outline"
+        />
       ) : (
         <FlatList
           refreshControl={
@@ -151,7 +138,12 @@ function BookingsScreenContent() {
           }
           data={items}
           keyExtractor={(b) => `${b.source}-${b.id}`}
-          contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: 90 }}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingHorizontal: spacing.md,
+            gap: spacing.sm,
+            paddingBottom: bottomPad,
+          }}
           renderItem={({ item }) => <BookingRow booking={item} />}
           ListFooterComponent={
             pages > 1 ? (
@@ -166,89 +158,80 @@ function BookingsScreenContent() {
           }
         />
       )}
-    </View>
+    </Screen>
   );
 }
 
 function BookingRow({ booking: b }: { booking: Reservation }) {
   const when = b.startTime
-    ? new Date(b.startTime).toLocaleString("en-GB", {
+    ? `${new Date(b.startTime).toLocaleDateString("en-GB", {
         day: "numeric",
         month: "short",
+      })} · ${new Date(b.startTime).toLocaleTimeString("en-GB", {
         hour: "2-digit",
         minute: "2-digit",
-      })
+      })}`
     : "Private";
   const pax = (b.adults ?? 0) + (b.kids ?? 0);
+  const guest = b.guestName || b.guestEmail || "—";
   return (
     <PressableScale
       style={styles.row}
-      onPress={() =>
-        b.source === "booking" ? router.push(`/bookings/${b.id}`) : undefined
-      }
+      scaleTo={0.985}
+      onPress={() => (b.source === "booking" ? router.push(`/bookings/${b.id}`) : undefined)}
     >
+      <Avatar name={b.guestName || b.guestEmail} />
       <View style={{ flex: 1, gap: 3 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={styles.rowTop}>
           <Text style={styles.code}>{b.code}</Text>
+          <Badge label={b.status ?? "—"} tone={statusTone(b.status)} dot />
           {b.isPrivate ? <Badge label="private" tone="info" /> : null}
           {b.source === "draft" ? <Badge label="draft" tone="neutral" /> : null}
         </View>
         <Text style={styles.guest} numberOfLines={1}>
-          {b.guestName || b.guestEmail || "—"}
+          {guest}
         </Text>
-        <Muted style={{ fontSize: 12 }} numberOfLines={1}>
+        <Muted style={{ fontSize: 12 }} numberOfLines={2}>
           {b.experienceName || "—"} · {when} · {pax || "?"} pax
         </Muted>
       </View>
-      <View style={{ alignItems: "flex-end", gap: 6 }}>
-        <Text style={styles.amount}>€{Number(b.totalAmount ?? 0).toFixed(0)}</Text>
-        <Badge label={b.status ?? "—"} tone={statusTone(b.status)} />
-      </View>
+      <Text style={styles.amount}>€{Number(b.totalAmount ?? 0).toFixed(0)}</Text>
     </PressableScale>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    paddingHorizontal: spacing.md,
-    gap: spacing.md,
-  },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  search: {
-    flexDirection: "row",
+  countPill: {
     alignItems: "center",
-    gap: 8,
-    marginHorizontal: spacing.md,
-    marginTop: spacing.md,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.md,
     backgroundColor: colors.surface,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    borderRadius: radii.pill,
-    paddingHorizontal: 14,
   },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 11,
-    fontFamily: fonts.sans,
-    fontSize: 14,
-    color: colors.text,
+  countValue: { fontFamily: fonts.serif, fontSize: 17, color: colors.gold },
+  countLabel: {
+    fontFamily: fonts.sansMedium,
+    fontSize: 9,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    color: colors.faint,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
+    gap: spacing.sm + 4,
     backgroundColor: colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
     borderRadius: radii.lg,
-    padding: spacing.md,
+    padding: spacing.md - 2,
   },
-  code: { fontFamily: fonts.sansBold, fontSize: 12, color: colors.gold, letterSpacing: 0.5 },
+  rowTop: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 7 },
+  code: { fontFamily: fonts.sansBold, fontSize: 11.5, color: colors.gold, letterSpacing: 0.6 },
   guest: { fontFamily: fonts.sansSemiBold, fontSize: 15, color: colors.text },
-  amount: { fontFamily: fonts.serif, fontSize: 17, color: colors.text },
+  amount: { fontFamily: fonts.serif, fontSize: 18, color: colors.text, alignSelf: "flex-start" },
   pager: {
     flexDirection: "row",
     alignItems: "center",
