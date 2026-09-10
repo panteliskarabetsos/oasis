@@ -18,6 +18,7 @@ import { Badge, Button, EmptyState, Eyebrow, Muted, Serif } from "@/components/u
 import { colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
 import { useApi } from "@/hooks/useApi";
+import { guestMessage } from "@/lib/errors";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { MyBooking } from "@/lib/types";
@@ -50,7 +51,7 @@ function isUpcoming(b: MyBooking): boolean {
 export default function BookingsScreen() {
   const insets = useSafeAreaInsets();
   const { session, loading: authLoading } = useAuth();
-  const { data: bookings, loading, error, refresh } = useApi(
+  const { data: bookings, loading, error, errorStatus, refresh } = useApi(
     async () => (session ? api.myBookings() : []),
     [session?.user?.id]
   );
@@ -136,7 +137,11 @@ export default function BookingsScreen() {
               <ActivityIndicator color={colors.brand} />
             </View>
           ) : error ? (
-            <EmptyState title="Couldn't load bookings" subtitle={error}>
+            <EmptyState
+              title="Couldn't load bookings"
+              subtitle={guestMessage(error, errorStatus)}
+              icon="calendar-clear-outline"
+            >
               <Button title="Reload" onPress={refresh} />
             </EmptyState>
           ) : filtered.length === 0 ? (

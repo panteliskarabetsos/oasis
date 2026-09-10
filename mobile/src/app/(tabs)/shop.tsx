@@ -21,6 +21,7 @@ import { Chip, EmptyState, Eyebrow, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useBag } from "@/context/cart";
 import { useApi } from "@/hooks/useApi";
+import { guestMessage } from "@/lib/errors";
 import { api } from "@/lib/api";
 import { moneyCents } from "@/lib/format";
 import type { ShopProduct } from "@/lib/types";
@@ -64,7 +65,7 @@ export default function ShopScreen() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data, loading, error, refresh } = useApi(
+  const { data, loading, error, errorStatus, refresh } = useApi(
     () => api.shopProducts({ category, sort, search: query || undefined }),
     [category, sort, query]
   );
@@ -180,10 +181,12 @@ export default function ShopScreen() {
           ) : error ? (
             <EmptyState
               title="We couldn't open the shop"
-              subtitle={error}
+              subtitle={guestMessage(error, errorStatus)}
+              icon="bag-handle-outline"
             />
           ) : (
             <EmptyState
+              icon={query ? "search-outline" : "leaf-outline"}
               title={query ? "Nothing by that name" : "The shelves are bare"}
               subtitle={
                 query

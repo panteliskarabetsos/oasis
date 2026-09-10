@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
@@ -176,14 +177,21 @@ export function Badge({ label, tone = "neutral" }: { label: string; tone?: "neut
 export function EmptyState({
   title,
   subtitle,
+  icon,
   children,
 }: {
   title: string;
   subtitle?: string;
+  icon?: React.ComponentProps<typeof Ionicons>["name"];
   children?: React.ReactNode;
 }) {
   return (
     <View style={styles.empty}>
+      {icon ? (
+        <View style={styles.emptyMedallion}>
+          <Ionicons name={icon} size={22} color={colors.brand} />
+        </View>
+      ) : null}
       <Serif style={{ fontSize: 22, textAlign: "center" }}>{title}</Serif>
       {subtitle ? (
         <Muted style={{ textAlign: "center", marginTop: 8 }}>{subtitle}</Muted>
@@ -196,6 +204,17 @@ export function EmptyState({
 /* ---------- Styles ---------- */
 
 const styles = StyleSheet.create({
+  emptyMedallion: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.creamChip,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSand,
+    marginBottom: spacing.md,
+  },
   serif: {
     fontFamily: fonts.serifRegular,
     color: "#26201a",

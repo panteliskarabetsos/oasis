@@ -10,11 +10,12 @@ import {
   PlayfairDisplay_700Bold,
   useFonts,
 } from "@expo-google-fonts/playfair-display";
-import { StripeProvider } from "@stripe/stripe-react-native";
+import { StripeProvider, useStripe } from "@stripe/stripe-react-native";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { Linking } from "react-native";
 
 import { colors, fonts } from "@/constants/theme";
 import { AuthProvider } from "@/context/auth";
@@ -44,7 +45,11 @@ export default function RootLayout() {
     <StripeProvider
       publishableKey={config.stripePublishableKey || "pk_test_placeholder"}
       merchantIdentifier="merchant.gr.youroasis.app"
+      // Required for anything that leaves the app and comes back — Revolut
+      // Pay, and 3-D Secure on a card. Must match `scheme` in app.json.
+      urlScheme="oasis"
     >
+    <StripeDeepLinkBridge />
     <AuthProvider>
       <BagProvider>
       <StatusBar style="dark" />
@@ -97,4 +102,36 @@ export default function RootLayout() {
     </AuthProvider>
     </StripeProvider>
   );
+}
+
+/**
+ * Hands payment return URLs back to the Stripe SDK.
+ *
+ * When a customer pays with Revolut Pay they leave for the Revolut app and
+ * return through `oasis://stripe-redirect`. app/+native-intent.tsx stops
+ * expo-router trying to navigate there; this is what tells Stripe the customer
+ * is back so it can finish confirming the payment.
+ */
+function StripeDeepLinkBridge() {
+  const { handleURLCallback } = useStripe();
+
+  const handle = useCallback(
+    async (url: string | null) => {
+      if (!url) return;
+      try {
+        await handleURLCallback(url);
+      } catch {
+        // A link Stripe does not recognise is not an error worth surfacing.
+      }
+    },
+    [handleURLCallback],
+  );
+
+  useEffect(() => {
+    Linking.getInitialURL().then(handle);
+    const sub = Linking.addEventListener("url", (e) => handle(e.url));
+    return () => sub.remove();
+  }, [handle]);
+
+  return null;
 }
