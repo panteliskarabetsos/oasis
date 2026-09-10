@@ -7,6 +7,7 @@ import { Badge, Button, EmptyState, Eyebrow, Muted, Serif } from "@/components/u
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
 import { useApi } from "@/hooks/useApi";
+import { guestMessage } from "@/lib/errors";
 import { api } from "@/lib/api";
 import { formatDate, moneyCents } from "@/lib/format";
 import { orderRef, orderStatusLabel, orderTone } from "@/lib/shop";
@@ -16,7 +17,7 @@ const INK = "#26201a";
 
 export default function ShopOrdersScreen() {
   const { session } = useAuth();
-  const { data, loading, error, refresh } = useApi(
+  const { data, loading, error, errorStatus, refresh } = useApi(
     () => (session ? api.myShopOrders() : Promise.resolve({ items: [] })),
     [session?.user?.id]
   );
@@ -48,7 +49,11 @@ export default function ShopOrdersScreen() {
       {loading ? (
         <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
       ) : error ? (
-        <EmptyState title="We couldn't load your orders" subtitle={error} />
+        <EmptyState
+          title="We couldn't load your orders"
+          subtitle={guestMessage(error, errorStatus)}
+          icon="bag-handle-outline"
+        />
       ) : orders.length === 0 ? (
         <EmptyState
           title="No orders yet"

@@ -13,11 +13,12 @@ import {
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { Linking } from "react-native";
 
 import { colors, fonts } from "@/constants/theme";
 import { AuthProvider } from "@/context/auth";
-import { StripeProvider } from "@stripe/stripe-react-native";
+import { StripeProvider, useStripe } from "@stripe/stripe-react-native";
 
 import { config } from "@/lib/config";
 
@@ -43,7 +44,11 @@ export default function RootLayout() {
   return (
     <StripeProvider
       publishableKey={config.stripePublishableKey}
+      // Required for anything that leaves the app and comes back — 3-D Secure
+      // on a card charge. Must match `scheme` in app.json.
+      urlScheme="oasisadmin"
     >
+      <StripeDeepLinkBridge />
       <AuthProvider>
       <StatusBar style="light" />
       <Stack
@@ -78,4 +83,35 @@ export default function RootLayout() {
     </AuthProvider>
     </StripeProvider>
   );
+}
+
+/**
+ * Hands payment return URLs back to the Stripe SDK.
+ *
+ * A card charge that needs 3-D Secure leaves the app and returns through
+ * `oasisadmin://stripe-redirect`. app/+native-intent.tsx stops expo-router
+ * navigating there; this is what tells Stripe to finish confirming the charge.
+ */
+function StripeDeepLinkBridge() {
+  const { handleURLCallback } = useStripe();
+
+  const handle = useCallback(
+    async (url: string | null) => {
+      if (!url) return;
+      try {
+        await handleURLCallback(url);
+      } catch {
+        // A link Stripe does not recognise is not an error worth surfacing.
+      }
+    },
+    [handleURLCallback],
+  );
+
+  useEffect(() => {
+    Linking.getInitialURL().then(handle);
+    const sub = Linking.addEventListener("url", (e) => handle(e.url));
+    return () => sub.remove();
+  }, [handle]);
+
+  return null;
 }

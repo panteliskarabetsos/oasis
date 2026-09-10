@@ -19,6 +19,7 @@ import { Shimmer } from "@/components/premium";
 import { Button, Card, EmptyState, Eyebrow, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
+import { guestMessage } from "@/lib/errors";
 import { api } from "@/lib/api";
 import { dayKey } from "@/lib/format";
 import type { Experience } from "@/lib/types";
@@ -27,7 +28,9 @@ type Filter = { from: string; to: string; party: number } | null;
 
 export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
-  const { data: experiences, loading, error, refresh } = useApi(() => api.experiences());
+  const { data: experiences, loading, error, errorStatus, refresh } = useApi(() =>
+    api.experiences(),
+  );
   const [filter, setFilter] = useState<Filter>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [filtering, setFiltering] = useState(false);
@@ -120,7 +123,11 @@ export default function ExploreScreen() {
           {loading || filtering ? (
             [0, 1, 2].map((i) => <Shimmer key={i} style={styles.skeleton} />)
           ) : error ? (
-            <EmptyState title="Couldn't load experiences" subtitle={error}>
+            <EmptyState
+              title="Couldn't load experiences"
+              subtitle={guestMessage(error, errorStatus)}
+              icon="compass-outline"
+            >
               <Button title="Try again" onPress={refresh} />
             </EmptyState>
           ) : visible.length === 0 ? (

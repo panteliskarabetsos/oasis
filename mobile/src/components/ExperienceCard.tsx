@@ -10,13 +10,52 @@ import type { Experience } from "@/lib/types";
 
 const INK = "#26201a";
 
+const DAY_ORDER = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+] as const;
+
+/**
+ * How often an experience runs, in the space a caption has.
+ *
+ * The full list was joined verbatim, so a card offered on four days read
+ * "MONDAY, TUESDAY,…" — the reader learned nothing beyond Tuesday. Short day
+ * names fit, a run of consecutive days collapses to a range, and anything
+ * still too long falls back to a count.
+ */
 function frequencyLabel(freq?: string | string[] | null): string | null {
   if (!freq) return null;
-  const list = Array.isArray(freq) ? freq : [freq];
+  const list = (Array.isArray(freq) ? freq : [freq])
+    .map((d) => String(d ?? "").trim())
+    .filter(Boolean);
   if (!list.length) return null;
-  const joined = list.join(", ");
-  if (/every ?day|daily/i.test(joined)) return "Every day";
-  return joined;
+
+  if (/every ?day|daily/i.test(list.join(" "))) return "Every day";
+
+  const indexes = list
+    .map((d) => DAY_ORDER.indexOf(d.toLowerCase() as (typeof DAY_ORDER)[number]))
+    .filter((i) => i >= 0)
+    .sort((a, b) => a - b);
+
+  // Not a list of weekday names — leave whatever it is alone.
+  if (indexes.length !== list.length) return list.join(", ");
+
+  if (indexes.length === 7) return "Every day";
+
+  const short = (i: number) => DAY_ORDER[i].slice(0, 3).replace(/^./, (c) => c.toUpperCase());
+
+  const consecutive = indexes.every((v, i) => i === 0 || v === indexes[i - 1] + 1);
+  if (consecutive && indexes.length >= 3) {
+    return `${short(indexes[0])}–${short(indexes[indexes.length - 1])}`;
+  }
+
+  if (indexes.length <= 3) return indexes.map(short).join(", ");
+  return `${indexes.length} days a week`;
 }
 
 /** Editorial listing: a quiet photograph with a caption beneath it. */
