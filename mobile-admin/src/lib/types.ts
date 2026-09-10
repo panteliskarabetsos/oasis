@@ -328,6 +328,16 @@ export type PosCartLine = {
   stock: number | null;
 };
 
+export type PosPaymentLink = {
+  sessionId: string;
+  url: string;
+  /** PNG data URL, rendered server-side so the app needs no QR library. */
+  qrDataUrl: string;
+  amountCents: number;
+  currency: string;
+  expiresAt?: number;
+};
+
 export type PosCheckoutResult = {
   bookingId?: number;
   receiptId?: number;
