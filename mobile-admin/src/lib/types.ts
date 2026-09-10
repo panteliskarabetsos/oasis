@@ -331,6 +331,13 @@ export type PosCartLine = {
 export type PosCheckoutResult = {
   bookingId?: number;
   receiptId?: number;
+  /** Present for item sales: whether the customer's receipt email went out. */
+  receiptEmail?: {
+    sent: boolean;
+    to?: string;
+    reason: string;
+    error?: string;
+  } | null;
 };
 
 /* ------------------------------- E-shop -------------------------------- */

@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { accessCan, requireAdmin } from "@/lib/auth/requireAdmin";
+import sendReceiptEmail, { markReceiptEmailed } from "@/lib/email/sendReceiptEmail";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20",
@@ -369,6 +370,8 @@ export async function POST(req) {
     const notes = notesPieces.length ? notesPieces.join("\n\n") : null;
 
     let responseId = null;
+    /** Result of the customer receipt email, surfaced to the till. */
+    let receiptEmail = null;
 
     /* -----------------------------------------------------------
        DATABASE INSERTS (Experience vs Items/Addons)
@@ -390,10 +393,12 @@ export async function POST(req) {
         relatedBookingRef: body.relatedBookingRef || null,
       };
 
+      // Select the whole row back: the receipt PDF and email render from the
+      // stored record, including the columns the database fills in itself.
       const { data: createdReceipt, error: receiptErr } = await supabase
         .from("Receipt")
         .insert(receiptPayload)
-        .select("id")
+        .select("*")
         .single();
 
       if (receiptErr) {
@@ -401,6 +406,22 @@ export async function POST(req) {
       }
 
       responseId = { receiptId: createdReceipt.id };
+
+      // Email the customer their receipt. The till asks for an address
+      // "for the receipt", so this is a promise the app was already making.
+      // Best-effort, like the stock decrement below: the money is banked and
+      // a mail failure must never void a completed sale.
+      receiptEmail = await sendReceiptEmail({ receipt: createdReceipt });
+      if (receiptEmail.sent) {
+        await markReceiptEmailed(supabase, createdReceipt.id);
+      } else if (receiptEmail.reason !== "no-email") {
+        console.error(
+          "[pos/checkout] receipt email not sent",
+          createdReceipt.id,
+          receiptEmail.reason,
+          receiptEmail.error || "",
+        );
+      }
 
       // Reduce stock for real catalogue lines. Nothing decremented stock before,
       // so the number shown in the shop admin and the POS drifted from reality
@@ -553,7 +574,9 @@ export async function POST(req) {
       });
     }
 
-    return NextResponse.json(responseId);
+    return NextResponse.json(
+      receiptEmail ? { ...responseId, receiptEmail } : responseId,
+    );
   } catch (e) {
     return NextResponse.json(
       { error: e.message || "Checkout error" },

@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PermissionGate } from "@/components/access";
+import { Screen, ScreenHeader } from "@/components/screen";
 import { Badge, Button, EmptyState, ErrorState, Eyebrow, ListSkeleton, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
@@ -78,19 +79,21 @@ function ShopProducts() {
   }
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Eyebrow>E-shop</Eyebrow>
-          <Serif style={{ fontSize: 26 }}>Products</Serif>
-        </View>
-        <Button
-          title="Scan"
-          variant="ghost"
-          onPress={() => router.push("/shop-scan" as never)}
-          style={{ minHeight: 42, paddingHorizontal: 18 }}
-        />
-      </View>
+    <Screen>
+      <ScreenHeader
+        eyebrow="E-shop"
+        title="Products"
+        onBack={() => router.back()}
+        trailing={
+          <Button
+            title="Scan"
+            variant="ghost"
+            icon="barcode-outline"
+            compact
+            onPress={() => router.push("/shop-scan" as never)}
+          />
+        }
+      />
 
       <View style={styles.searchRow}>
         <Ionicons name="search" size={16} color={colors.faint} />
@@ -223,7 +226,7 @@ function ShopProducts() {
           setEditing(null);
         }}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -334,14 +337,6 @@ function ProductSheet({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",

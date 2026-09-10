@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PermissionGate } from "@/components/access";
+import { ScreenHeader } from "@/components/screen";
 import { PressableScale } from "@/components/premium";
 import {
   Badge,
@@ -22,10 +23,8 @@ import {
   Card,
   Chip,
   ErrorState,
-  Eyebrow,
   Field,
   Muted,
-  Serif,
 } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
@@ -253,7 +252,18 @@ function PosContent() {
     const res = await api.posCheckout(body);
     clear();
     const receiptId = res?.receiptId ?? res?.bookingId;
-    Alert.alert("Sale complete", receiptId ? `Receipt #${receiptId}` : "Recorded.");
+    const mail = res?.receiptEmail;
+    // The till insists on an email "for the receipt", so the cashier needs to
+    // know whether it actually arrived before the customer walks away.
+    const lines = [
+      receiptId ? `Receipt #${receiptId}` : "Recorded.",
+      mail?.sent
+        ? `Emailed to ${mail.to}.`
+        : mail && mail.reason !== "no-email"
+          ? "The receipt email failed to send — resend it from the receipt."
+          : null,
+    ].filter(Boolean);
+    Alert.alert("Sale complete", lines.join("\n"));
     refresh();
   }
 
@@ -326,17 +336,18 @@ function PosContent() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + spacing.md, paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Eyebrow>Revenue</Eyebrow>
-            <Serif style={{ fontSize: 26 }}>Point of sale</Serif>
-          </View>
-          <PressableScale onPress={() => router.back()} style={styles.close}>
-            <Ionicons name="close" size={20} color={colors.textSoft} />
-          </PressableScale>
-        </View>
+        <ScreenHeader
+          eyebrow="Revenue"
+          title="Point of sale"
+          trailing={
+            <PressableScale onPress={() => router.back()} style={styles.close}>
+              <Ionicons name="close" size={20} color={colors.textSoft} />
+            </PressableScale>
+          }
+        />
 
         {tillLocked ? (
           <View style={styles.lockBanner}>
@@ -769,12 +780,6 @@ export default function PosScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-  },
   close: {
     width: 34,
     height: 34,

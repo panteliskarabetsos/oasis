@@ -18,12 +18,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PressableScale } from "@/components/premium";
-import { Badge, Button, EmptyState, ErrorState, Eyebrow, Muted, Serif } from "@/components/ui";
+import { Badge, EmptyState, ErrorState, Muted } from "@/components/ui";
 import { colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { CheckinBooking } from "@/lib/types";
 import { PermissionGate } from "@/components/access";
+import { Screen, ScreenHeader, useTabBarPadding } from "@/components/screen";
 
 function dayKey(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -154,6 +155,7 @@ function CheckinsScreenContent() {
     [soundOn, okSound, dupSound, errSound],
   );
   const insets = useSafeAreaInsets();
+  const bottomPad = useTabBarPadding();
   const [date, setDate] = useState(() => dayKey(new Date()));
   const { data, loading, error, refresh } = useApi(() => api.checkins(date), [date]);
   const [scanOpen, setScanOpen] = useState(false);
@@ -364,26 +366,26 @@ function CheckinsScreenContent() {
   }
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Eyebrow>Arrivals</Eyebrow>
-          <Serif style={{ fontSize: 26 }}>Check-in</Serif>
-        </View>
-        <PressableScale
-          style={styles.scanCta}
-          onPress={async () => {
-            if (!permission?.granted) {
-              const res = await requestPermission();
-              if (!res.granted) return;
-            }
-            setScanOpen(true);
-          }}
-        >
-          <Ionicons name="qr-code" size={16} color="#1d160f" />
-          <Text style={styles.scanCtaText}>Scan</Text>
-        </PressableScale>
-      </View>
+    <Screen>
+      <ScreenHeader
+        eyebrow="Arrivals"
+        title="Check-in"
+        trailing={
+          <PressableScale
+            style={styles.scanCta}
+            onPress={async () => {
+              if (!permission?.granted) {
+                const res = await requestPermission();
+                if (!res.granted) return;
+              }
+              setScanOpen(true);
+            }}
+          >
+            <Ionicons name="qr-code" size={16} color={colors.onGold} />
+            <Text style={styles.scanCtaText}>Scan</Text>
+          </PressableScale>
+        }
+      />
 
       {/* Day strip */}
       <ScrollView
@@ -451,7 +453,7 @@ function CheckinsScreenContent() {
         <EmptyState title="A quiet day" subtitle="No departures scheduled for this date." />
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: spacing.md, gap: spacing.md, paddingBottom: 90 }}
+          contentContainerStyle={{ padding: spacing.md, gap: spacing.md, paddingBottom: bottomPad }}
           refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.gold} />}
         >
           {slots.map((slot) => {
@@ -667,7 +669,7 @@ function CheckinsScreenContent() {
           ) : null}
         </View>
       </Modal>
-    </View>
+    </Screen>
   );
 }
 
@@ -784,14 +786,7 @@ const rowStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.md,
-    gap: spacing.md,
-  },
   scanCta: {
     flexDirection: "row",
     alignItems: "center",

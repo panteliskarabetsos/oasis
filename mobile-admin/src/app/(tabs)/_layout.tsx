@@ -1,12 +1,26 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import * as Haptics from "expo-haptics";
 import { Redirect, Tabs } from "expo-router";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View, type ColorValue } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, EmptyState, Muted } from "@/components/ui";
-import { colors, fonts, spacing } from "@/constants/theme";
+import { TAB_BAR_HEIGHT, colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
 
+type IconName = React.ComponentProps<typeof Ionicons>["name"];
+
+/** Outline when resting, solid when selected — the iOS convention, and the
+ *  clearest "you are here" signal on a bar this dark. */
+function tabIcon(outline: IconName, solid: IconName) {
+  return function TabIcon({ color, focused }: { color: ColorValue; focused: boolean }) {
+    return <Ionicons name={focused ? solid : outline} size={23} color={color} />;
+  };
+}
+
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
   const { session, profile, loading, signOut, can } = useAuth();
 
   if (loading) {
@@ -23,6 +37,7 @@ export default function TabsLayout() {
       <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: "center" }}>
         <EmptyState
           title="Staff access only"
+          icon="lock-closed-outline"
           subtitle={
             profile?.role && profile.role !== "user"
               ? `The ${profile.role} role has no components assigned yet. Ask a Super Admin to grant access.`
@@ -43,31 +58,54 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.gold,
-        tabBarInactiveTintColor: colors.faint,
+        tabBarInactiveTintColor: colors.muted,
+        // The bar floats over the content rather than sitting in its own
+        // opaque strip; screens reserve room for it with `useTabBarPadding`.
         tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
+          position: "absolute",
+          left: spacing.md,
+          right: spacing.md,
+          bottom: Math.max(insets.bottom, spacing.sm),
+          height: TAB_BAR_HEIGHT,
+          paddingBottom: 0,
+          paddingTop: 6,
+          borderRadius: radii.xl,
+          borderTopWidth: 0,
+          backgroundColor: "transparent",
+          ...shadows.lifted,
         },
-        tabBarLabelStyle: { fontFamily: fonts.sansMedium, fontSize: 10 },
+        tabBarItemStyle: { paddingVertical: 0 },
+        tabBarLabelStyle: {
+          fontFamily: fonts.sansMedium,
+          fontSize: 9.5,
+          letterSpacing: 0.2,
+          marginTop: 1,
+        },
+        tabBarBackground: () => (
+          <View style={styles.barBackground}>
+            <BlurView tint="dark" intensity={42} style={StyleSheet.absoluteFill} />
+            {/* Blur alone over an espresso background reads grey; the wash
+                pulls it back toward the brand brown. */}
+            <View style={styles.barTint} />
+          </View>
+        ),
+      }}
+      screenListeners={{
+        tabPress: () => {
+          Haptics.selectionAsync().catch(() => {});
+        },
       }}
     >
       <Tabs.Screen
         name="index"
-        options={{
-          title: "Home",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid-outline" size={size} color={color} />
-          ),
-        }}
+        options={{ title: "Home", tabBarIcon: tabIcon("grid-outline", "grid") }}
       />
       <Tabs.Screen
         name="bookings"
         options={{
           title: "Bookings",
           href: can("bookings") ? undefined : null,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" size={size} color={color} />
-          ),
+          tabBarIcon: tabIcon("calendar-outline", "calendar"),
         }}
       />
       <Tabs.Screen
@@ -75,9 +113,7 @@ export default function TabsLayout() {
         options={{
           title: "Check-in",
           href: can("checkins") ? undefined : null,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="qr-code-outline" size={size} color={color} />
-          ),
+          tabBarIcon: tabIcon("qr-code-outline", "qr-code"),
         }}
       />
       <Tabs.Screen
@@ -85,9 +121,7 @@ export default function TabsLayout() {
         options={{
           title: "Manifest",
           href: can("schedule") ? undefined : null,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="list-outline" size={size} color={color} />
-          ),
+          tabBarIcon: tabIcon("list-outline", "list"),
         }}
       />
       <Tabs.Screen
@@ -96,20 +130,38 @@ export default function TabsLayout() {
           title: "Availability",
           // Editing availability is a different privilege from reading the day.
           href: can("experiences") ? undefined : null,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="time-outline" size={size} color={color} />
-          ),
+          tabBarIcon: tabIcon("time-outline", "time"),
         }}
       />
       <Tabs.Screen
         name="more"
         options={{
           title: "More",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="ellipsis-horizontal-circle-outline" size={size} color={color} />
-          ),
+          tabBarIcon: tabIcon("ellipsis-horizontal-circle-outline", "ellipsis-horizontal-circle"),
         }}
       />
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  barBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: radii.xl,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderGold,
+  },
+  barTint: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(33,26,19,0.62)",
+  },
+});

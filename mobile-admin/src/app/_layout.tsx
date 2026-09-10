@@ -68,6 +68,9 @@ export default function RootLayout() {
         <Stack.Screen name="reports" options={{ title: "Reports" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="users" options={{ title: "Guests" }} />
+        {/* Full-bleed screens that draw their own ScreenHeader — without this
+            they showed the native bar *and* their own title. */}
+        <Stack.Screen name="pos" options={{ headerShown: false }} />
         <Stack.Screen name="shop-scan" options={{ headerShown: false }} />
         <Stack.Screen name="shop-products" options={{ headerShown: false }} />
         <Stack.Screen name="shop-orders" options={{ headerShown: false }} />

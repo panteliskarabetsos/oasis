@@ -13,14 +13,14 @@ import {
   View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Badge, Button, Card, Chip, EmptyState, Eyebrow, Field, Muted, Serif } from "@/components/ui";
+import { Badge, Button, Card, Chip, EmptyState, Field, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { AdminSlot } from "@/lib/types";
 import { PermissionGate } from "@/components/access";
+import { Screen, ScreenHeader, useTabBarPadding } from "@/components/screen";
 
 function dayKey(iso: string | Date): string {
   const d = new Date(iso);
@@ -29,7 +29,7 @@ function dayKey(iso: string | Date): string {
 }
 
 function ScheduleScreenContent() {
-  const insets = useSafeAreaInsets();
+  const bottomPad = useTabBarPadding();
   const { data: experiences, loading: expLoading } = useApi(() => api.adminExperiences());
   const [expId, setExpId] = useState<number | null>(null);
   const activeExpId = expId ?? experiences?.[0]?.id ?? null;
@@ -128,21 +128,22 @@ function ScheduleScreenContent() {
   }
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Eyebrow>Planner</Eyebrow>
-          <Serif style={{ fontSize: 26 }}>Schedule</Serif>
-        </View>
-        <Button
-          title="+ Slot"
-          onPress={() => {
-            setAddDate(dayKey(new Date(Date.now() + 86400000)));
-            setAddOpen(true);
-          }}
-          style={{ paddingHorizontal: 18, minHeight: 42, paddingVertical: 10 }}
-        />
-      </View>
+    <Screen>
+      <ScreenHeader
+        eyebrow="Planner"
+        title="Schedule"
+        trailing={
+          <Button
+            title="Slot"
+            icon="add"
+            compact
+            onPress={() => {
+              setAddDate(dayKey(new Date(Date.now() + 86400000)));
+              setAddOpen(true);
+            }}
+          />
+        }
+      />
 
       {/* Experience picker */}
       {expLoading ? (
@@ -171,11 +172,15 @@ function ScheduleScreenContent() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: 90 }}
+          contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: bottomPad }}
           refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.gold} />}
         >
           {upcoming.length === 0 ? (
-            <EmptyState title="No upcoming slots" subtitle="Add a slot to open bookings." />
+            <EmptyState
+              title="No upcoming slots"
+              subtitle="Add a slot to open bookings."
+              icon="time-outline"
+            />
           ) : (
             upcoming.map((s) => {
               const booked = s.booked ?? 0;
@@ -304,19 +309,12 @@ function ScheduleScreenContent() {
           <Button title="Save" loading={busy} onPress={saveCapacity} style={{ marginTop: spacing.md }} />
         </View>
       </Modal>
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.md,
-    gap: spacing.md,
-  },
   slotDate: { fontFamily: fonts.sansSemiBold, fontSize: 15, color: colors.text },
   iconBtn: {
     width: 34,

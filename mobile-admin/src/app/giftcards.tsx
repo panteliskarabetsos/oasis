@@ -105,7 +105,7 @@ function GiftcardsScreenContent() {
         ) : error ? (
           <ErrorState title="Couldn't load gift cards" message={error} onRetry={refresh} />
         ) : (cards ?? []).length === 0 ? (
-          <EmptyState title="No gift cards yet" />
+          <EmptyState title="No gift cards yet" icon="gift-outline" />
         ) : (
           (cards ?? []).map((c) => (
             <Pressable

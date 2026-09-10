@@ -1,8 +1,8 @@
 // src/app/api/receipts/send/route.js
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
-import generateReceiptEmailHtml from "@/lib/email/ReceiptEmail";
-import buildReceiptPdfBuffer from "@/lib/pdf/buildReceipt";
+
+import { accessCan, requireAdmin } from "@/lib/auth/requireAdmin";
+import sendReceiptEmail, { markReceiptEmailed } from "@/lib/email/sendReceiptEmail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,75 +11,58 @@ function bad(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-function isEmail(email) {
-  return /.+@.+\..+/.test(String(email || "").trim());
-}
-
-function createTransporter() {
-  return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: Number(process.env.EMAIL_PORT || 465),
-    secure: String(process.env.EMAIL_SECURE) === "true", // true for 465
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-}
-
+/**
+ * Resend a receipt to a customer.
+ *
+ * The receipt is always loaded from the database by id. It used to be taken
+ * from the request body, which — on an unauthenticated route — let anyone
+ * have arbitrary content emailed as a PDF from the Oasis address.
+ */
 export async function POST(req) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+  if (!accessCan(auth.permissions, "pos") && !accessCan(auth.permissions, "zreport")) {
+    return bad("Forbidden", 403);
+  }
+
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
 
-    const receipt = body?.receipt;
-    const email = String(body?.email || receipt?.customerEmail || "").trim();
-
-    if (!receipt) return bad("Receipt data is missing", 400);
-    if (!email) return bad("Recipient email is missing", 400);
-    if (!isEmail(email)) return bad("Recipient email is invalid", 400);
-
-    if (
-      !process.env.EMAIL_HOST ||
-      !process.env.EMAIL_USER ||
-      !process.env.EMAIL_PASS
-    ) {
-      return bad("SMTP is not configured", 500);
+    const receiptId = Number(body?.receiptId ?? body?.receipt?.id);
+    if (!Number.isFinite(receiptId) || receiptId <= 0) {
+      return bad("A receipt id is required", 400);
     }
 
-    const receiptNumber = String(receipt.id || "0").padStart(6, "0");
+    const { data: receipt, error } = await auth.admin
+      .from("Receipt")
+      .select("*")
+      .eq("id", receiptId)
+      .maybeSingle();
 
-    const html = generateReceiptEmailHtml(receipt);
+    if (error) return bad(error.message, 500);
+    if (!receipt) return bad("Receipt not found", 404);
 
-    const pdfBuffer = await buildReceiptPdfBuffer({
-      receipt,
-      store: {
-        name: "Oasis",
-        address: "123 Artisan Lane\nChania, Crete 73100",
-        taxId: "EL123456789",
-      },
-    });
+    // The cashier may correct a mistyped address; anything else comes off the
+    // stored receipt.
+    const to = String(body?.email || receipt.customerEmail || "").trim();
 
-    const transporter = createTransporter();
+    const result = await sendReceiptEmail({ receipt, to });
 
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM || `"Oasis" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: `Your Oasis Receipt #${receiptNumber}`,
-      html,
-      attachments: [
-        {
-          filename: `receipt-${receiptNumber}.pdf`,
-          content: pdfBuffer,
-          contentType: "application/pdf",
-        },
-      ],
-    });
+    if (!result.sent) {
+      const status = result.reason === "send-failed" ? 502 : 400;
+      return NextResponse.json(
+        { error: EXPLAIN[result.reason] || result.error || "Could not send the receipt" },
+        { status },
+      );
+    }
+
+    await markReceiptEmailed(auth.admin, receipt.id);
 
     return NextResponse.json({
       success: true,
-      messageId: info.messageId,
-      sentTo: email,
-      receiptId: receipt.id || null,
+      messageId: result.messageId,
+      sentTo: result.to,
+      receiptId: receipt.id,
     });
   } catch (error) {
     console.error("Receipt email API error:", error);
@@ -89,3 +72,8 @@ export async function POST(req) {
     );
   }
 }
+
+const EXPLAIN = {
+  "no-email": "This receipt has no customer email address.",
+  "invalid-email": "That email address doesn't look valid.",
+};
