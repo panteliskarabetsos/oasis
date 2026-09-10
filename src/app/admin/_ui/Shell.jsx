@@ -192,7 +192,13 @@ export default function AdminShell({
       ) : null}
 
       {/* ---------------- main column ---------------- */}
-      <div className="lg:pl-[248px]">
+      {/* The header is sticky, so anything else that sticks has to know how
+          tall it is. The test-mode banner changes that height, hence a
+          variable rather than a number copied into each page. */}
+      <div
+        className="lg:pl-[248px]"
+        style={{ "--admin-header-h": isTest ? "83px" : "57px" }}
+      >
         <header
           className="sticky top-0 z-30 border-b border-[#e6e0d6] bg-[#f7f4ef]/85 backdrop-blur"
           style={{ paddingTop: "max(env(safe-area-inset-top),0px)" }}
