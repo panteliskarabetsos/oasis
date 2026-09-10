@@ -21,6 +21,7 @@ import type {
   PosCheckoutResult,
   PosExperience,
   PosItem,
+  PosPaymentLink,
   Profile,
   ReportKpis,
   Reservation,
@@ -249,6 +250,23 @@ export const api = {
     request<{ intentId: string | null; clientSecret: string | null; quote?: { amountCents?: number } }>(
       "/api/pos/payments/intent",
       { method: "POST", body: payload },
+    ),
+
+  /** Opens a Stripe Checkout Session for the cart and returns a QR code for it. */
+  posPaymentLink: (payload: unknown) =>
+    request<PosPaymentLink>("/api/pos/payments/link", { method: "POST", body: payload }),
+
+  /** Where a QR payment has got to. `paid` carries the PaymentIntent to settle with. */
+  posPaymentLinkStatus: (sessionId: string) =>
+    request<{ status: "pending" | "paid" | "expired"; paymentIntentId: string | null }>(
+      `/api/pos/payments/link/status?sessionId=${encodeURIComponent(sessionId)}`,
+    ),
+
+  /** Abandon a QR payment; expires it at Stripe unless it was already paid. */
+  posPaymentLinkCancel: (sessionId: string) =>
+    request<{ expired: boolean; alreadyPaid: boolean; paymentIntentId: string | null }>(
+      `/api/pos/payments/link?sessionId=${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
     ),
 
   posCheckout: (payload: unknown) =>

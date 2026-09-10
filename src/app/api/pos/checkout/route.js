@@ -146,6 +146,10 @@ export async function POST(req) {
     const scheduleSlotId = Number(body?.scheduleSlotId) || null;
     const clientCurrency = toCurrency(body?.currency || "eur");
     const method = body?.payment?.method || "cash";
+    // "link" is the QR payment link: the customer pays through Stripe on their
+    // own phone, so it settles exactly like the card sheet — same PaymentIntent
+    // verification, same dedupe, and gift cards likewise cannot be stacked on it.
+    const isStripeRail = method === "card" || method === "link";
     const reference = (body?.payment?.reference || "").trim() || null;
 
     // A comp writes off the whole sale, so it is deliberately not part of any
@@ -248,7 +252,7 @@ export async function POST(req) {
        Gift card (non-card flows)
     -------------------------------- */
     let gift = null;
-    if (giftCode && method !== "card") {
+    if (giftCode && !isStripeRail) {
       const gc = await fetchGiftCardByCode(giftCode);
       if (canRedeemGiftCard(gc, clientCurrency)) {
         const redeemable = Math.min(gc.remaining_amount_cents, netBeforeGiftC);
@@ -262,7 +266,7 @@ export async function POST(req) {
     }
 
     const netAfterGiftC =
-      method === "card"
+      isStripeRail
         ? netBeforeGiftC
         : Math.max(0, netBeforeGiftC - (gift?.redeem_cents || 0));
 
@@ -275,7 +279,7 @@ export async function POST(req) {
     let paymentNote = "";
     let bookingStatus = "confirmed";
 
-    if (method === "card") {
+    if (isStripeRail) {
       const piId = body.stripePaymentIntentId;
       if (!piId) {
         return NextResponse.json(
@@ -332,7 +336,7 @@ export async function POST(req) {
       stripePaymentIntentId = pi.id;
 
       paymentNote =
-        `Paid by web card • ${brand || "CARD"} • **** **** **** ${last4 || "????"} • PI ${pi.id}` +
+        `Paid by ${method === "link" ? "payment link" : "web card"} • ${brand || "CARD"} • **** **** **** ${last4 || "????"} • PI ${pi.id}` +
         (receiptUrl ? ` • receipt: ${receiptUrl}` : "");
 
       bookingStatus = pi.status === "succeeded" ? "confirmed" : "pending";
@@ -462,9 +466,9 @@ export async function POST(req) {
           discountTotal: fromCents(discountTotalC),
           netBeforeGift: fromCents(netBeforeGiftC),
           giftApplied:
-            method === "card" ? 0 : fromCents(gift?.redeem_cents || 0),
+            isStripeRail ? 0 : fromCents(gift?.redeem_cents || 0),
           netAfterGift:
-            method === "card"
+            isStripeRail
               ? fromCents(netBeforeGiftC)
               : fromCents(netAfterGiftC),
           totalPaidAmount,
@@ -492,7 +496,7 @@ export async function POST(req) {
                 currency: promo.currency || currency,
               }),
         gift: gift &&
-          method !== "card" && {
+          !isStripeRail && {
             id: gift.id,
             code: gift.code,
             redeem_cents: gift.redeem_cents,
@@ -544,7 +548,7 @@ export async function POST(req) {
       await incrementDiscountRedemption(promo.id);
     }
 
-    if (gift && method !== "card" && gift.redeem_cents > 0) {
+    if (gift && !isStripeRail && gift.redeem_cents > 0) {
       const { data: gcRow } = await supabase
         .from("GiftCard")
         .select("remaining_amount_cents")

@@ -1,10 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useStripe } from "@stripe/stripe-react-native";
 import { router } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -25,13 +28,20 @@ import {
   ErrorState,
   Field,
   Muted,
+  Serif,
 } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import { config } from "@/lib/config";
-import type { AdminSlot, PosCartLine, PosExperience, PosItem } from "@/lib/types";
+import type {
+  AdminSlot,
+  PosCartLine,
+  PosExperience,
+  PosItem,
+  PosPaymentLink,
+} from "@/lib/types";
 
 const VAT_RATE = 24;
 const TENDER = [5, 10, 20, 50, 100];
@@ -42,7 +52,7 @@ const eur = (n: number) =>
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
-type Method = "card" | "cash" | "comp";
+type Method = "card" | "link" | "cash" | "comp";
 
 function PosContent() {
   const insets = useSafeAreaInsets();
@@ -103,6 +113,7 @@ function PosContent() {
 
   const [cart, setCart] = useState<Record<string, PosCartLine>>({});
   const [method, setMethod] = useState<Method>("card");
+  const [linkSession, setLinkSession] = useState<PosPaymentLink | null>(null);
   const [cashGiven, setCashGiven] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -248,6 +259,52 @@ function PosContent() {
     };
   }
 
+  /**
+   * Open a Stripe Checkout Session and show its QR code.
+   *
+   * The customer scans and pays on their own phone; we poll until Stripe says
+   * the money is in, then settle through the ordinary checkout so the sale is
+   * recorded exactly as a card sale would be.
+   */
+  async function payByLink() {
+    setBusy(true);
+    try {
+      const session = await api.posPaymentLink(payload());
+      setLinkSession(session);
+    } catch (e) {
+      Alert.alert("Payment link", e instanceof Error ? e.message : "Could not create the link.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Abandon a QR payment, expiring it at Stripe so it cannot be paid later. */
+  async function cancelLink() {
+    const session = linkSession;
+    setLinkSession(null);
+    if (!session?.sessionId) return;
+    try {
+      const res = await api.posPaymentLinkCancel(session.sessionId);
+      // They paid in the moment it took to press Cancel — settle it anyway
+      // rather than pocketing a payment with no receipt behind it.
+      if (res.alreadyPaid && res.paymentIntentId) await settleLink(res.paymentIntentId);
+    } catch {
+      // The session expires on its own within 30 minutes.
+    }
+  }
+
+  async function settleLink(paymentIntentId: string) {
+    setLinkSession(null);
+    setBusy(true);
+    try {
+      await finish({ ...payload(paymentIntentId), stripePaymentIntentId: paymentIntentId });
+    } catch (e) {
+      Alert.alert("Checkout", e instanceof Error ? e.message : "Checkout failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function finish(body: unknown) {
     const res = await api.posCheckout(body);
     clear();
@@ -305,6 +362,7 @@ function PosContent() {
       return;
     }
     if (method === "card") return payByCard();
+    if (method === "link") return payByLink();
 
     if (method === "comp") {
       const ok = await new Promise<boolean>((resolve) =>
@@ -630,6 +688,12 @@ function PosContent() {
               onPress={() => setMethod("card")}
             />
             <MethodBtn
+              label="Scan to pay"
+              icon="qr-code-outline"
+              active={method === "link"}
+              onPress={() => setMethod("link")}
+            />
+            <MethodBtn
               label="Cash"
               icon="cash-outline"
               active={method === "cash"}
@@ -705,14 +769,106 @@ function PosContent() {
                 ? "Working…"
                 : method === "comp"
                   ? `Comp ${eur(gross)}`
-                  : `Charge ${eur(toCharge)}`
+                  : method === "link"
+                    ? `Show QR for ${eur(toCharge)}`
+                    : `Charge ${eur(toCharge)}`
             }
             onPress={takePayment}
             disabled={busy || blockers.length > 0}
           />
         </View>
       </ScrollView>
+
+      {linkSession ? (
+        <LinkSheet
+          session={linkSession}
+          onCancel={cancelLink}
+          onPaid={settleLink}
+        />
+      ) : null}
     </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * The customer-facing half of a QR sale: hand the phone over, they scan.
+ *
+ * The QR arrives from the server as a PNG data URL, so this screen needs no
+ * QR library of its own — and the app needs no new native dependency.
+ */
+function LinkSheet({
+  session,
+  onCancel,
+  onPaid,
+}: {
+  session: PosPaymentLink;
+  onCancel: () => void;
+  onPaid: (paymentIntentId: string) => void;
+}) {
+  const [status, setStatus] = useState<"pending" | "paid" | "expired">("pending");
+  const onPaidRef = useRef(onPaid);
+  onPaidRef.current = onPaid;
+
+  useEffect(() => {
+    let alive = true;
+    const timer = setInterval(async () => {
+      try {
+        const res = await api.posPaymentLinkStatus(session.sessionId);
+        if (!alive) return;
+        setStatus(res.status);
+        if (res.status === "paid" && res.paymentIntentId) {
+          clearInterval(timer);
+          onPaidRef.current(res.paymentIntentId);
+        }
+        if (res.status === "expired") clearInterval(timer);
+      } catch {
+        // A dropped poll on retreat wifi is not a failed payment; retry next tick.
+      }
+    }, 2500);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [session.sessionId]);
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.qrBackdrop}>
+        <View style={styles.qrSheet}>
+          <Serif style={{ fontSize: 22, textAlign: "center" }}>Scan to pay</Serif>
+          <Muted style={{ textAlign: "center", marginTop: 6 }}>
+            Ask the customer to scan this with their phone camera for{" "}
+            {eur((session.amountCents || 0) / 100)}.
+          </Muted>
+
+          {status === "expired" ? (
+            <View style={styles.qrExpired}>
+              <Text style={styles.qrExpiredText}>
+                This code has expired. Close and start again.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.qrFrame}>
+              <Image source={{ uri: session.qrDataUrl }} style={styles.qrImage} />
+            </View>
+          )}
+
+          {status === "paid" ? (
+            <View style={styles.qrPaid}>
+              <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+              <Text style={styles.qrPaidText}>Paid — finishing the sale…</Text>
+            </View>
+          ) : status === "pending" ? (
+            <View style={styles.qrWaiting}>
+              <ActivityIndicator color={colors.gold} size="small" />
+              <Text style={styles.qrWaitingText}>Waiting for payment…</Text>
+            </View>
+          ) : null}
+
+          <Button title="Cancel" variant="ghost" onPress={onCancel} />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -962,6 +1118,53 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: 12,
     gap: 3,
+  },
+  qrBackdrop: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  qrSheet: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  // A white plate behind the code: scanners struggle with a dark quiet zone.
+  qrFrame: {
+    alignSelf: "center",
+    backgroundColor: "#ffffff",
+    borderRadius: radii.lg,
+    padding: 12,
+  },
+  qrImage: { width: 240, height: 240 },
+  qrWaiting: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  qrWaitingText: {
+    fontFamily: fonts.sansSemiBold,
+    fontSize: 11.5,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    color: colors.gold,
+  },
+  qrPaid: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  qrPaidText: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.success },
+  qrExpired: {
+    backgroundColor: colors.dangerSoft,
+    borderRadius: radii.md,
+    paddingVertical: 22,
+    paddingHorizontal: spacing.md,
+  },
+  qrExpiredText: {
+    fontFamily: fonts.sansSemiBold,
+    fontSize: 13,
+    color: colors.danger,
+    textAlign: "center",
   },
   blockerText: { fontFamily: fonts.sans, fontSize: 12.5, color: colors.warning },
 });

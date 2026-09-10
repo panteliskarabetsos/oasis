@@ -7,139 +7,38 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe/server";
 import crypto from "node:crypto";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
+import { quotePosSale } from "@/lib/pos/quote";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
 
-const toCents = (n) => Math.round(Number(n || 0) * 100);
 
 export async function POST(req) {
   const auth = await requireAdmin("pos");
   if (!auth.ok) return auth.response;
   try {
     const body = await req.json();
-    const {
-      experienceId,
-      startTime,
-      counts,
-      items = [],
-      manualDiscount = 0,
-      promoCode,
-      giftCode,
-      customer = {},
-      currency = "eur",
-    } = body || {};
+    const { experienceId, startTime, counts, customer = {} } = body || {};
 
     const supa = await createSupabaseAdmin();
 
-    /* -------- Experience (optional) -------- */
-    const adults = Number(counts?.adults || 0);
-    const kids = Number(counts?.kids || 0);
+    // Priced by the shared POS quote so the card sheet and the QR payment
+    // link can never charge different amounts for the same basket.
+    const priced = await quotePosSale(supa, body);
+    if (!priced.ok) return bad(priced.error, priced.status);
 
-    let unitAdult = 0,
-      unitKid = 0;
-    if (experienceId) {
-      const { data: e, error: ee } = await supa
-        .from("Experience")
-        .select("id,priceAdult,priceKid")
-        .eq("id", experienceId)
-        .single();
-      if (ee || !e) return bad("Experience not found", 404);
-      if (adults + kids <= 0) return bad("No attendees");
-      if (!startTime) return bad("Missing startTime");
+    const { adults, kids, cleanItems } = priced;
+    const {
+      grossCents,
+      promoDeductionCents,
+      giftDeductionCents,
+      manualCents,
+      netCents,
+      currency: stripeCurrency,
+    } = priced.quote;
 
-      unitAdult = Number(e.priceAdult || 0);
-      unitKid = Number(e.priceKid || 0);
-    }
-
-    const expSubtotalCents =
-      toCents(unitAdult) * adults + toCents(unitKid) * kids;
-
-    /* -------------- Items --------------- */
-    // (For full trust, fetch prices server-side by id.)
-    const cleanItems = (items || [])
-      .filter((it) => Number(it.quantity) > 0)
-      .map((it) => ({
-        id: it.id ?? null,
-        name: String(it.name || "").slice(0, 120),
-        sku: it.sku ? String(it.sku).slice(0, 80) : null,
-        unitPriceCents: toCents(it.unitPrice),
-        quantity: Number(it.quantity || 0),
-      }));
-
-    const itemsSubtotalCents = cleanItems.reduce(
-      (s, it) => s + it.unitPriceCents * it.quantity,
-      0
-    );
-
-    const grossCents = expSubtotalCents + itemsSubtotalCents;
-
-    /* -------------- Promo --------------- */
-    let promoDeductionCents = 0;
-    if (promoCode) {
-      const { data: pc } = await supa
-        .from("DiscountCode")
-        .select("*")
-        .ilike("code", String(promoCode).trim())
-        .maybeSingle();
-
-      if (pc && pc.active) {
-        const now = new Date();
-        const within =
-          (!pc.startsAt || new Date(pc.startsAt) <= now) &&
-          (!pc.endsAt || new Date(pc.endsAt) >= now);
-        const scopeOk =
-          pc.scope === "global" ||
-          (experienceId &&
-            Array.isArray(pc.experienceIds) &&
-            pc.experienceIds.includes(experienceId));
-        const notMaxed =
-          pc.maxRedemptions == null ||
-          Number(pc.redemptionCount || 0) < Number(pc.maxRedemptions || 0);
-
-        if (within && scopeOk && notMaxed) {
-          const t = pc.discountType;
-          const v = Number(pc.discountValue || 0);
-          promoDeductionCents =
-            t === "percent"
-              ? Math.round((grossCents * v) / 100)
-              : Math.min(grossCents, toCents(v));
-        }
-      }
-    }
-
-    /* -------------- Gift --------------- */
-    let giftDeductionCents = 0;
-    if (giftCode) {
-      const { data: gc } = await supa
-        .from("GiftCard")
-        .select("*")
-        .ilike("code", String(giftCode).trim())
-        .maybeSingle();
-
-      if (
-        gc &&
-        gc.status === "active" &&
-        Number(gc.remaining_amount_cents) > 0
-      ) {
-        const baseAfterPromoCents = Math.max(
-          0,
-          grossCents - promoDeductionCents
-        );
-        giftDeductionCents = Math.min(
-          baseAfterPromoCents,
-          Number(gc.remaining_amount_cents)
-        );
-      }
-    }
-
-    const manualCents = Math.max(0, toCents(manualDiscount));
-    const netCents = Math.max(
-      0,
-      grossCents - promoDeductionCents - giftDeductionCents - manualCents
-    );
-
-    const stripeCurrency = (currency || "eur").toLowerCase();
+    const promoCode = body?.promoCode;
+    const giftCode = body?.giftCode;
 
     // No payment needed (e.g., fully discounted)
     if (netCents === 0) {

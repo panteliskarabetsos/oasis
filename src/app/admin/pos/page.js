@@ -149,6 +149,7 @@ export default function POSPage() {
   const [piId, setPiId] = useState(null);
   const [quote, setQuote] = useState(null);
   const [terminalIntentId, setTerminalIntentId] = useState(null);
+  const [linkSession, setLinkSession] = useState(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [undoData, setUndoData] = useState(null);
@@ -507,7 +508,7 @@ export default function POSPage() {
 
   /* -------------------------------- payment -------------------------------- */
 
-  function createPayload(overrideRef = null) {
+  function createPayload(overrideRef = null, overridePiId = null) {
     return {
       transactionType: txType,
       relatedBookingRef: txType === "addons" ? bookingRef.trim() : null,
@@ -540,7 +541,8 @@ export default function POSPage() {
       },
       currency: "eur",
       clientGross: totalGross,
-      stripePaymentIntentId: method === "card" ? piId : null,
+      stripePaymentIntentId:
+        method === "card" ? piId : method === "link" ? overridePiId : null,
     };
   }
 
@@ -579,6 +581,48 @@ export default function POSPage() {
     }
   }
 
+  async function openLinkCharge() {
+    if (!guardTill()) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/pos/payments/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(createPayload()),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not create the payment link");
+      setLinkSession(data);
+    } catch (e) {
+      toast.error(e.message || "The payment link could not be created.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  /** Abandon a QR payment, expiring it at Stripe so it cannot be paid later. */
+  async function cancelLink() {
+    const session = linkSession;
+    setLinkSession(null);
+    if (!session?.sessionId) return;
+    try {
+      const res = await fetch(
+        `/api/pos/payments/link?sessionId=${encodeURIComponent(session.sessionId)}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      const data = await res.json();
+      // They paid in the moment it took to press Cancel — settle it anyway
+      // rather than pocketing a payment with no receipt behind it.
+      if (data?.alreadyPaid && data.paymentIntentId) {
+        toast.success("The customer had already paid — completing the sale.");
+        handleCheckout(data.paymentIntentId, data.paymentIntentId);
+      }
+    } catch {
+      // The session expires on its own within 30 minutes.
+    }
+  }
+
   async function openTerminalCharge() {
     if (!guardTill()) return;
     setSubmitting(true);
@@ -603,7 +647,7 @@ export default function POSPage() {
     }
   }
 
-  async function handleCheckout(overrideRef = null) {
+  async function handleCheckout(overrideRef = null, overridePiId = null) {
     if (!hasAnyCart) return;
     if (todayLocked) return toast.error("Today's Z-report is locked. The till is closed.");
 
@@ -613,7 +657,7 @@ export default function POSPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(createPayload(overrideRef)),
+        body: JSON.stringify(createPayload(overrideRef, overridePiId)),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Checkout failed");
@@ -648,6 +692,7 @@ export default function POSPage() {
 
   function onConfirmClick() {
     if (method === "card") return openCardCharge();
+    if (method === "link") return openLinkCharge();
     if (method === "terminal") return openTerminalCharge();
     return handleCheckout();
   }
@@ -1017,6 +1062,7 @@ export default function POSPage() {
               {[
                 ["terminal", "Terminal", "card"],
                 ["card", "Card (online)", "card"],
+                ["link", "Payment link", "qr"],
                 ["cash", "Cash", "register"],
                 ["comp", "Comp", "gift"],
               ].map(([v, label, icon]) => (
@@ -1101,12 +1147,25 @@ export default function POSPage() {
           >
             {submitting
               ? "Working…"
-              : method === "comp"
-                ? "Record comp sale"
-                : `Charge ${formatCurrency(amountToCharge)}`}
+              : method === "link"
+                ? `Show QR for ${formatCurrency(amountToCharge)}`
+                : method === "comp"
+                  ? "Record comp sale"
+                  : `Charge ${formatCurrency(amountToCharge)}`}
           </Button>
         </div>
       </div>
+
+      {linkSession ? (
+        <LinkWaitingSheet
+          session={linkSession}
+          onCancel={cancelLink}
+          onPaid={(paymentIntentId) => {
+            setLinkSession(null);
+            handleCheckout(paymentIntentId, paymentIntentId);
+          }}
+        />
+      ) : null}
 
       {terminalIntentId ? (
         <TerminalWaitingSheet
@@ -1285,6 +1344,111 @@ function Spinner({ className }) {
         fill="none"
       />
     </svg>
+  );
+}
+
+/**
+ * The customer-facing half of a QR sale.
+ *
+ * The cashier turns the screen around; the customer scans, pays on their own
+ * phone, and this polls Stripe until the money lands. The sale is only written
+ * to our database afterwards, by the same checkout call the card sheet uses.
+ */
+function LinkWaitingSheet({ session, onCancel, onPaid }) {
+  const [status, setStatus] = useState("pending");
+  const [copied, setCopied] = useState(false);
+  const onPaidRef = useRef(onPaid);
+  onPaidRef.current = onPaid;
+
+  useEffect(() => {
+    let stop = false;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/pos/payments/link/status?sessionId=${encodeURIComponent(session.sessionId)}`,
+          { credentials: "include" },
+        );
+        const data = await res.json();
+        if (stop || !res.ok) return;
+
+        setStatus(data.status);
+        if (data.status === "paid" && data.paymentIntentId) {
+          clearInterval(interval);
+          onPaidRef.current(data.paymentIntentId);
+        }
+        if (data.status === "expired") clearInterval(interval);
+      } catch (err) {
+        // A dropped poll is not a failed payment — the next tick retries.
+        console.error("Payment link polling error", err);
+      }
+    }, 2500);
+
+    return () => {
+      stop = true;
+      clearInterval(interval);
+    };
+  }, [session.sessionId]);
+
+  const amount = (session.amountCents || 0) / 100;
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <div className="relative w-full max-w-sm rounded-[2rem] bg-white p-8 shadow-2xl text-center">
+        <h3 className="text-2xl font-serif font-bold mb-1">Scan to pay</h3>
+        <p className="text-[#7a6a5f] mb-5 text-sm">
+          Ask the customer to scan this with their phone camera for{" "}
+          <strong className="text-[#4c4138] text-base">{formatCurrency(amount)}</strong>.
+        </p>
+
+        {status === "expired" ? (
+          <div className="mb-6 rounded-xl border border-red-100 bg-red-50 py-6 text-red-600 font-bold">
+            This code has expired. Close and start again.
+          </div>
+        ) : (
+          <img
+            src={session.qrDataUrl}
+            alt="Payment QR code"
+            width={256}
+            height={256}
+            className="mx-auto mb-5 h-64 w-64 rounded-2xl border border-[#e6e0d6] bg-white p-2"
+          />
+        )}
+
+        {status === "paid" ? (
+          <div className="mb-6 flex items-center justify-center gap-2 rounded-xl border border-green-100 bg-green-50 py-3 font-bold text-green-700">
+            <Icon name="check" size={16} /> Paid — finishing the sale…
+          </div>
+        ) : status === "pending" ? (
+          <div className="mb-6 flex items-center justify-center gap-2 text-sm font-bold uppercase tracking-widest text-[#8b6f47]">
+            <Spinner className="h-4 w-4" /> Waiting for payment…
+          </div>
+        ) : null}
+
+        {/* A camera that will not focus, a cracked screen: give the cashier a
+            way to hand the link over by other means. */}
+        <button
+          onClick={() => {
+            navigator.clipboard?.writeText(session.url).then(
+              () => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              },
+              () => {},
+            );
+          }}
+          className="mb-3 w-full py-3 rounded-xl border border-[#e6e0d6] text-[13px] font-semibold text-[#6b5c4d] hover:bg-[#f0e7d9] transition"
+        >
+          {copied ? "Link copied" : "Copy payment link"}
+        </button>
+
+        <button
+          onClick={onCancel}
+          className="w-full py-3.5 rounded-xl border border-[#d8cfc3] text-[#4c4138] font-bold uppercase tracking-widest hover:bg-[#f0e7d9] transition shadow-sm"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
