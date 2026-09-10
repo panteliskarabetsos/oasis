@@ -6,6 +6,11 @@ import { NextResponse } from "next/server";
 import QRCode from "qrcode";
 
 import { requireAdmin } from "@/lib/auth/requireAdmin";
+import {
+  createPendingSale,
+  finishPendingSale,
+  getPendingSale,
+} from "@/lib/pos/pendingSale";
 import { quotePosSale } from "@/lib/pos/quote";
 import { getStripe } from "@/lib/stripe/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
@@ -90,6 +95,16 @@ export async function POST(req) {
 
     if (!session.url) return bad("Stripe did not return a payment URL.", 502);
 
+    // Park the basket so the webhook can settle this sale if the till never
+    // gets back to it. Best-effort: the till's own polling does not need it.
+    await createPendingSale(supa, {
+      sessionId: session.id,
+      payload: body,
+      amountCents: netCents,
+      currency,
+      staffEmail: auth.user?.email,
+    });
+
     // Rendered server-side so neither till needs a QR library of its own.
     //
     // Level "L": a Stripe Checkout URL is ~470 characters, and at "M" that is
@@ -150,6 +165,14 @@ export async function DELETE(req) {
     }
 
     if (session.status === "open") await stripe.checkout.sessions.expire(sessionId);
+
+    // Take it off the webhook's books too, so a late event does not resurrect
+    // a basket the cashier abandoned.
+    const supa = await createSupabaseAdmin();
+    if (await getPendingSale(supa, sessionId)) {
+      await finishPendingSale(supa, sessionId, { status: "cancelled" });
+    }
+
     return ok({ expired: true, alreadyPaid: false });
   } catch (e) {
     console.error("[pos/payments/link] cancel", e?.message || e);

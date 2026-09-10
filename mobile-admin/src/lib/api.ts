@@ -269,6 +269,13 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  /** Close out a QR sale once Stripe reports it paid. */
+  posPaymentLinkSettle: (sessionId: string, payload: unknown) =>
+    request<PosCheckoutResult>("/api/pos/payments/link/settle", {
+      method: "POST",
+      body: { sessionId, payload },
+    }),
+
   posCheckout: (payload: unknown) =>
     request<PosCheckoutResult>("/api/pos/checkout", { method: "POST", body: payload }),
 

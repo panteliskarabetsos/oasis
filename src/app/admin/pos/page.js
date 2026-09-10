@@ -508,7 +508,7 @@ export default function POSPage() {
 
   /* -------------------------------- payment -------------------------------- */
 
-  function createPayload(overrideRef = null, overridePiId = null) {
+  function createPayload(overrideRef = null) {
     return {
       transactionType: txType,
       relatedBookingRef: txType === "addons" ? bookingRef.trim() : null,
@@ -541,8 +541,7 @@ export default function POSPage() {
       },
       currency: "eur",
       clientGross: totalGross,
-      stripePaymentIntentId:
-        method === "card" ? piId : method === "link" ? overridePiId : null,
+      stripePaymentIntentId: method === "card" ? piId : null,
     };
   }
 
@@ -601,6 +600,38 @@ export default function POSPage() {
     }
   }
 
+  async function settleLink(sessionId) {
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/pos/payments/link/settle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ sessionId, payload: createPayload() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not complete the sale");
+
+      const receiptId = data.receiptId || data.bookingId;
+      const mail = data.receiptEmail;
+      if (mail?.sent) toast.success(`Paid — receipt emailed to ${mail.to}.`);
+      else if (mail && mail.reason !== "no-email")
+        toast.error("Paid, but the receipt email failed. Print or resend it.");
+      else toast.success("Payment received.");
+
+      clearCart(false);
+      if (receiptId) {
+        window.open(`/api/receipts/${receiptId}/pdf`, "_blank");
+        router.push(`/admin/receipts/${receiptId}`);
+      }
+    } catch (e) {
+      // The money is with Stripe either way; the webhook will record the sale.
+      toast.error(e.message || "Paid, but the sale could not be recorded here.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   /** Abandon a QR payment, expiring it at Stripe so it cannot be paid later. */
   async function cancelLink() {
     const session = linkSession;
@@ -614,9 +645,9 @@ export default function POSPage() {
       const data = await res.json();
       // They paid in the moment it took to press Cancel — settle it anyway
       // rather than pocketing a payment with no receipt behind it.
-      if (data?.alreadyPaid && data.paymentIntentId) {
+      if (data?.alreadyPaid) {
         toast.success("The customer had already paid — completing the sale.");
-        handleCheckout(data.paymentIntentId, data.paymentIntentId);
+        settleLink(session.sessionId);
       }
     } catch {
       // The session expires on its own within 30 minutes.
@@ -647,7 +678,7 @@ export default function POSPage() {
     }
   }
 
-  async function handleCheckout(overrideRef = null, overridePiId = null) {
+  async function handleCheckout(overrideRef = null) {
     if (!hasAnyCart) return;
     if (todayLocked) return toast.error("Today's Z-report is locked. The till is closed.");
 
@@ -657,7 +688,7 @@ export default function POSPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(createPayload(overrideRef, overridePiId)),
+        body: JSON.stringify(createPayload(overrideRef)),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Checkout failed");
@@ -1160,9 +1191,10 @@ export default function POSPage() {
         <LinkWaitingSheet
           session={linkSession}
           onCancel={cancelLink}
-          onPaid={(paymentIntentId) => {
+          onPaid={() => {
+            const sessionId = linkSession.sessionId;
             setLinkSession(null);
-            handleCheckout(paymentIntentId, paymentIntentId);
+            settleLink(sessionId);
           }}
         />
       ) : null}
