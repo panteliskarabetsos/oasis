@@ -243,6 +243,9 @@ export default function POSPage() {
           if (isOutOfStock(match)) toast.error(`${match.name} is out of stock.`);
           else {
             addItem(match);
+            // A scan can land while the Experiences tab is showing, which hid
+            // the thing that was just added.
+            setMode("items");
             toast.success(`Scanned: ${match.name}`);
           }
           setQueryRaw("");
@@ -294,6 +297,8 @@ export default function POSPage() {
   const expVatTotal = expGross - expGross / (1 + expVatRate);
 
   const itemLines = useMemo(() => Object.values(cartItems), [cartItems]);
+  // Lines in the basket, counting a selected experience as one.
+  const cartLineCount = itemLines.length + (selectedExperience ? 1 : 0);
 
   const itemsGross = useMemo(
     () => itemLines.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0),
@@ -802,7 +807,7 @@ export default function POSPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start xl:grid-cols-[minmax(0,1fr)_400px]">
         {/* catalogue */}
         <div className="space-y-4">
           <Card padded={false} className="overflow-hidden">
@@ -918,11 +923,25 @@ export default function POSPage() {
           ) : null}
         </div>
 
-        {/* cart + payment */}
-        <div className="space-y-4 xl:sticky xl:top-6">
+        {/* cart + payment
+            The column ran to ~1200px with two lines in the basket, so on a
+            900px screen the Charge button sat below the fold on every sale.
+            It is now a panel bounded by the viewport: the cart, discount,
+            customer and payment scroll inside it, while the amount due and
+            the charge button stay pinned to the bottom where the cashier
+            always has them. */}
+        <div className="lg:sticky lg:top-[calc(var(--admin-header-h,57px)+1rem)] lg:flex lg:max-h-[calc(100vh-var(--admin-header-h,57px)-2rem)] lg:flex-col lg:gap-4">
+          <div className="space-y-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
           <Card padded={false} className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-[#e6e0d6] px-4 py-3">
-              <h2 className="font-serif text-[17px] text-[#2a211a]">Current sale</h2>
+              <h2 className="font-serif text-[17px] text-[#2a211a]">
+                Current sale
+                {cartLineCount ? (
+                  <span className="ml-2 align-middle text-[12px] font-medium text-[#9a8c7e]">
+                    {cartLineCount} line{cartLineCount === 1 ? "" : "s"}
+                  </span>
+                ) : null}
+              </h2>
               {hasAnyCart ? (
                 <div className="flex gap-1">
                   <Button size="sm" variant="ghost" onClick={holdOrder}>Park</Button>
@@ -931,7 +950,7 @@ export default function POSPage() {
               ) : null}
             </div>
 
-            <div className="max-h-[280px] overflow-y-auto">
+            <div className="max-h-[min(38vh,340px)] overflow-y-auto">
               {!hasAnyCart ? (
                 <p className="px-4 py-10 text-center text-[13px] text-[#9a8c7e]">
                   Nothing in the cart yet.
@@ -995,7 +1014,7 @@ export default function POSPage() {
               )}
             </div>
 
-            {/* totals */}
+            {/* totals — the headline amount lives in the pinned footer below */}
             <div className="space-y-1.5 border-t border-[#e6e0d6] bg-[#fdfbf7] px-4 py-3 text-[13px]">
               <Row label="Gross" value={formatCurrency(totalGross)} />
               {clampedDiscount > 0 ? (
@@ -1003,10 +1022,6 @@ export default function POSPage() {
               ) : null}
               <Row label="Net" value={formatCurrency(finalNetTotal)} muted />
               <Row label="VAT" value={formatCurrency(finalVatTotal)} muted />
-              <div className="flex items-baseline justify-between border-t border-[#e6e0d6] pt-2">
-                <span className="text-[12px] font-semibold uppercase tracking-wider text-[#9a8c7e]">To pay</span>
-                <span className="font-serif text-[24px] text-[#2a211a]">{formatCurrency(amountToCharge)}</span>
-              </div>
             </div>
           </Card>
 
@@ -1158,32 +1173,46 @@ export default function POSPage() {
             ) : null}
           </Card>
 
-          {blockers.length && hasAnyCart ? (
-            <div className="rounded-2xl border border-[#f0e0bb] bg-[#fbf1dc] px-4 py-3">
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a6412]">
-                Before you can charge
-              </p>
-              <ul className="list-inside list-disc space-y-0.5 text-[12.5px] text-[#8a6412]">
-                {blockers.map((b) => <li key={b}>{b}</li>)}
-              </ul>
-            </div>
-          ) : null}
+          </div>
 
-          <Button
-            variant="primary"
-            size="lg"
-            className="w-full text-[15px]"
-            disabled={!canSubmit}
-            onClick={onConfirmClick}
-          >
-            {submitting
-              ? "Working…"
-              : method === "link"
-                ? `Show QR for ${formatCurrency(amountToCharge)}`
-                : method === "comp"
-                  ? "Record comp sale"
-                  : `Charge ${formatCurrency(amountToCharge)}`}
-          </Button>
+          {/* Pinned: the amount and the action, never scrolled off. */}
+          <div className="shrink-0 space-y-3 rounded-2xl border border-[#e6e0d6] bg-white p-4 shadow-[0_-4px_16px_-12px_rgba(42,33,26,0.35)]">
+            {blockers.length && hasAnyCart ? (
+              <div className="rounded-xl border border-[#f0e0bb] bg-[#fbf1dc] px-3 py-2">
+                <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-[#8a6412]">
+                  Before you can charge
+                </p>
+                <ul className="list-inside list-disc space-y-0.5 text-[12.5px] text-[#8a6412]">
+                  {blockers.map((b) => <li key={b}>{b}</li>)}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className="flex items-baseline justify-between">
+              <span className="text-[12px] font-semibold uppercase tracking-wider text-[#9a8c7e]">
+                To pay
+              </span>
+              <span className="font-serif text-[32px] leading-none text-[#2a211a]">
+                {formatCurrency(amountToCharge)}
+              </span>
+            </div>
+
+            <Button
+              variant="primary"
+              size="lg"
+              className="w-full text-[15px]"
+              disabled={!canSubmit}
+              onClick={onConfirmClick}
+            >
+              {submitting
+                ? "Working…"
+                : method === "link"
+                  ? `Show QR for ${formatCurrency(amountToCharge)}`
+                  : method === "comp"
+                    ? "Record comp sale"
+                    : `Charge ${formatCurrency(amountToCharge)}`}
+            </Button>
+          </div>
         </div>
       </div>
 

@@ -884,12 +884,15 @@ function LinkSheet({
               <Ionicons name="checkmark-circle" size={16} color={colors.success} />
               <Text style={styles.qrPaidText}>Paid — finishing the sale…</Text>
             </View>
-          ) : status === "pending" ? (
+          ) : status === "expired" ? null : (
+            // Anything that is not paid or expired is still in flight. Written
+            // this way round so an unexpected status still shows the cashier
+            // that the till is watching, rather than a silent sheet.
             <View style={styles.qrWaiting}>
               <ActivityIndicator color={colors.gold} size="small" />
               <Text style={styles.qrWaitingText}>Waiting for payment…</Text>
             </View>
-          ) : null}
+          )}
 
           <Button title="Cancel" variant="ghost" onPress={onCancel} />
         </View>

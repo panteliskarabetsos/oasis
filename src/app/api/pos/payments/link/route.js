@@ -164,7 +164,28 @@ export async function DELETE(req) {
       });
     }
 
-    if (session.status === "open") await stripe.checkout.sessions.expire(sessionId);
+    if (session.status === "open") {
+      try {
+        await stripe.checkout.sessions.expire(sessionId);
+      } catch (expireErr) {
+        // Stripe refuses to expire a session that is no longer open, which
+        // means the customer paid in the moment between the read above and
+        // this call. Re-read and hand the payment back to the till rather
+        // than leaving money with no sale behind it.
+        const now = await stripe.checkout.sessions.retrieve(sessionId);
+        if (now.payment_status === "paid") {
+          return ok({
+            expired: false,
+            alreadyPaid: true,
+            paymentIntentId:
+              typeof now.payment_intent === "string"
+                ? now.payment_intent
+                : (now.payment_intent?.id ?? null),
+          });
+        }
+        throw expireErr;
+      }
+    }
 
     // Take it off the webhook's books too, so a late event does not resurrect
     // a basket the cashier abandoned.
