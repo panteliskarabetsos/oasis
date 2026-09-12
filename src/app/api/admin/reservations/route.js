@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
+import { expireStaleHolds } from "@/lib/bookings/holds";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const bad = (msg, status = 400) =>
@@ -54,6 +55,10 @@ export async function GET(req) {
   const auth = await requireAdmin();
   if (auth.error) return auth.response;
   const supa = auth.admin;
+
+  // Release seats held by unpaid bookings before reading, so the list and the
+  // availability it implies are both current. Never throws.
+  await expireStaleHolds(supa);
 
   try {
     const { searchParams } = new URL(req.url);
@@ -211,11 +216,24 @@ export async function GET(req) {
     });
 
     const total = merged.length;
+
+    // Tallied over the whole filtered set, not the page. The bookings screen
+    // showed "128 results / 4 confirmed" because it could only count the rows
+    // it had been sent; `merged` is already in hand here, so the true figures
+    // cost nothing.
+    const counts = {};
+    let revenue = 0;
+    for (const r of merged) {
+      const key = String(r?.status || "unknown").toLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
+      revenue += Number(r?.totalAmount) || 0;
+    }
+
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
     const items = merged.slice(start, end);
 
-    return ok({ items, total });
+    return ok({ items, total, counts, revenue: Math.round(revenue * 100) / 100 });
   } catch (e) {
     console.error("/api/admin/reservations GET error", e);
     return bad(e?.message || "Failed to load reservations", 500);
@@ -304,6 +322,11 @@ export async function POST(req) {
     const row = {
       userId: intOrNull(body.userId) ?? null,
       scheduleSlotId,
+      // Copied off the slot rather than left null. Everything downstream that
+      // reads the booking on its own — the payment-request email above all —
+      // had no date to show and fell back to "Date to be determined".
+      startTime: slotCheck?.date ?? null,
+      experienceId: slotCheck?.experienceId ?? null,
       status: finalStatus,
       notes: body.notes ?? null,
       numberOfPeople,
