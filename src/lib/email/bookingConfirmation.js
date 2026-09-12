@@ -1,5 +1,7 @@
 import "server-only";
 
+import sendBookingConfirmation from "@/lib/email/sendBookingConfirmation";
+
 /**
  * The "booking confirmed" email.
  *
@@ -261,7 +263,11 @@ export async function confirmPaidBooking(
     }
     if (!claimed?.length) return { sent: false, reason: "already-sent" };
 
-    await sendConfirmationEmail({ stripe, admin, bookingId, sessionId, piId });
+    const result = await sendGuestConfirmation(admin, bookingId, {
+      sessionId,
+      amountPaid,
+    });
+    if (!result.sent) throw new Error(result.error || "confirmation-not-sent");
     return { sent: true, reason: "sent" };
   } catch (e) {
     console.error("[booking confirm]", bookingId, e?.message || e);
@@ -277,3 +283,87 @@ export async function confirmPaidBooking(
 }
 
 export { sendConfirmationEmail };
+
+/**
+ * Send the guest the same confirmation they would get booking for themselves.
+ *
+ * Admin-created bookings used to receive a different, plainer email over a
+ * different transport — Resend with an unset EMAIL_FROM, which falls back to
+ * Resend's test sender and does not deliver to real recipients. This routes
+ * them through sendBookingConfirmation: the message the website's own flow
+ * sends, ticket attached, over the SMTP transport the rest of the app uses.
+ *
+ * A booking is not a draft, so the fields that function reads are mapped
+ * across; everything it wants is on the booking row under one name or another.
+ */
+async function sendGuestConfirmation(admin, bookingId, { sessionId, amountPaid }) {
+  const { data: booking, error } = await admin
+    .from("booking")
+    .select("*")
+    .eq("id", bookingId)
+    .single();
+  if (error || !booking) return { sent: false, error: "booking-not-found" };
+
+  const to = booking.primary_contact?.email;
+  if (!to) return { sent: false, error: "no-guest-email" };
+
+  // Fetched separately rather than joined, so a missing relation cannot take
+  // the whole confirmation down with it.
+  let experience = null;
+  let slot = null;
+  if (booking.experienceId) {
+    const { data } = await admin
+      .from("Experience")
+      .select("*")
+      .eq("id", booking.experienceId)
+      .maybeSingle();
+    experience = data ?? null;
+  }
+  if (booking.scheduleSlotId) {
+    const { data } = await admin
+      .from("ScheduleSlot")
+      .select("*")
+      .eq("id", booking.scheduleSlotId)
+      .maybeSingle();
+    slot = data ?? null;
+    if (!experience && slot?.experienceId) {
+      const { data: exp } = await admin
+        .from("Experience")
+        .select("*")
+        .eq("id", slot.experienceId)
+        .maybeSingle();
+      experience = exp ?? null;
+    }
+  }
+
+  const paid = Number.isFinite(Number(amountPaid))
+    ? Number(amountPaid)
+    : Number(booking.totalPaidAmount) || 0;
+
+  const draftLike = {
+    ...booking,
+    // Names sendBookingConfirmation looks for that a booking spells differently.
+    totalAmount: paid,
+    participants: booking.attendees,
+    guests: booking.attendees,
+    selectedMeetupPoint: booking.selected_meetup_point,
+    pickupPoint: booking.selected_meetup_point,
+    slot,
+  };
+
+  const result = await sendBookingConfirmation({
+    to,
+    draft: draftLike,
+    session: {
+      amount_total: Math.round(paid * 100),
+      currency: String(booking.currency || "EUR").toLowerCase(),
+      id: sessionId || booking.stripeSessionId || null,
+    },
+    experience,
+    slot,
+    bookingCode: booking.code || null,
+    bookingId: booking.id,
+  });
+
+  return { sent: Boolean(result?.sent), error: result?.error || null };
+}
