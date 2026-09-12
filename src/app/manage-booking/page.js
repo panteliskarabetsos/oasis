@@ -139,6 +139,73 @@ export default function ManageBookingPage() {
 
   const [paymentLoading, setPaymentLoading] = useState(false);
 
+  // Set when Stripe has just sent the guest back here after paying.
+  const [paidReturn, setPaidReturn] = useState(null);
+
+  /**
+   * Settle the booking the moment the guest lands back from Stripe.
+   *
+   * The return used to be decorative — ?paid=1 with nothing behind it — so a
+   * paid booking only left "pending" if a webhook happened to arrive. Verifying
+   * the session here confirms it from the guest's own return, and the server
+   * asks Stripe whether the session really was paid rather than trusting the
+   * query string.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("session_id");
+    const paid = params.get("paid") === "1";
+    const cancelled = params.get("cancelled") === "1";
+
+    if (!paid && !cancelled) return;
+
+    // Clear the markers so a refresh does not replay this.
+    const clean = window.location.pathname;
+    window.history.replaceState(null, "", clean);
+
+    if (cancelled) {
+      setPaidReturn({ state: "cancelled" });
+      return;
+    }
+
+    if (!sessionId) {
+      // A link made before the session id travelled back. Nothing to verify.
+      setPaidReturn({ state: "unverified" });
+      return;
+    }
+
+    let alive = true;
+    setPaidReturn({ state: "loading" });
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/booking/verify-session?session_id=${encodeURIComponent(sessionId)}`,
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!alive) return;
+        if (!res.ok) throw new Error(data?.error || "Could not verify payment");
+
+        setPaidReturn({
+          state: data.status === "paid" ? "confirmed" : "pending",
+          reference: data.bookingCode || null,
+          amount: data.amount,
+          currency: data.currency,
+          experienceName: data.experienceName,
+        });
+
+        // Half the search is already known, so ask only for the name.
+        if (data.bookingCode) setReference(data.bookingCode);
+      } catch (err) {
+        if (alive) setPaidReturn({ state: "error", message: err.message });
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const privateBooking = booking ? isPrivateBooking(booking) : false;
   const unpaid = booking ? isBookingUnpaid(booking) : false;
 
@@ -465,6 +532,10 @@ export default function ManageBookingPage() {
                   </p>
                 </div>
 
+                {paidReturn ? (
+                  <PaymentReturnBanner result={paidReturn} />
+                ) : null}
+
                 <div className="bg-white border border-stone-200 rounded-[2rem] p-6 sm:p-8 shadow-xl shadow-stone-200/50">
                   <form onSubmit={handleSearch} className="space-y-5">
                     <InputField
@@ -789,6 +860,106 @@ function InputField({
           {hint}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * What the guest sees on returning from Stripe.
+ *
+ * The booking has already been confirmed server-side by then; this says so,
+ * and hands back the reference so the lookup below needs only a surname.
+ */
+function PaymentReturnBanner({ result }) {
+  if (result.state === "loading") {
+    return (
+      <div className="mb-6 flex items-center gap-3 rounded-2xl border border-stone-200 bg-white p-5 text-stone-600">
+        <Loader2 className="animate-spin text-[#8b6f47]" size={20} />
+        <span className="text-sm font-medium">Confirming your payment…</span>
+      </div>
+    );
+  }
+
+  if (result.state === "confirmed") {
+    return (
+      <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+        <div className="flex items-start gap-3">
+          <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={22} />
+          <div className="min-w-0">
+            <p className="font-semibold text-emerald-900">
+              Payment received — your booking is confirmed.
+            </p>
+            <p className="mt-1 text-sm text-emerald-800">
+              {result.experienceName ? `${result.experienceName}. ` : ""}
+              A confirmation email with your ticket is on its way.
+            </p>
+            {result.reference ? (
+              <p className="mt-2 font-mono text-sm font-bold tracking-tight text-emerald-900">
+                {result.reference}
+              </p>
+            ) : null}
+            <p className="mt-2 text-sm text-emerald-800">
+              Enter your last name below to open it.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (result.state === "pending") {
+    return (
+      <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+        <div className="flex items-start gap-3">
+          <Clock className="mt-0.5 shrink-0 text-amber-600" size={22} />
+          <div>
+            <p className="font-semibold text-amber-900">
+              Your payment is still being processed.
+            </p>
+            <p className="mt-1 text-sm text-amber-800">
+              Some payment methods take a little longer to settle. We will email
+              you as soon as it clears — no need to pay again.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (result.state === "cancelled") {
+    return (
+      <div className="mb-6 rounded-2xl border border-stone-200 bg-stone-50 p-5">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="mt-0.5 shrink-0 text-stone-500" size={22} />
+          <div>
+            <p className="font-semibold text-stone-800">
+              Payment cancelled — nothing was charged.
+            </p>
+            <p className="mt-1 text-sm text-stone-600">
+              Your booking is unchanged. Look it up below to try again.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // "unverified" or "error" — the payment may well have gone through, so never
+  // imply it did not.
+  return (
+    <div className="mb-6 rounded-2xl border border-stone-200 bg-white p-5">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="mt-0.5 shrink-0 text-stone-500" size={22} />
+        <div>
+          <p className="font-semibold text-stone-800">
+            We could not check your payment automatically.
+          </p>
+          <p className="mt-1 text-sm text-stone-600">
+            If you completed the payment it has still gone through. Look up your
+            booking below to see its current status.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

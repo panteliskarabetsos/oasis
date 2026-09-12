@@ -229,13 +229,34 @@ export async function POST(req) {
           });
         }
 
-        // 1. CHECK IF THIS IS AN ADMIN-GENERATED LINK (Existing Booking)
+        // 1. A PAYMENT LINK FOR AN EXISTING BOOKING.
+        //
+        // `bookingId` in the metadata is the whole signal. This used to also
+        // require admin_generated === "true", which only the admin link sets —
+        // so a guest paying the link from their own booking portal fell through
+        // to the draft branch below, matched nothing, and the booking sat at
+        // "pending" after the money had been taken.
         const existingBookingId = s.metadata?.bookingId;
-        const isAdminGenerated = s.metadata?.admin_generated === "true";
 
-        if (existingBookingId && isAdminGenerated) {
+        if (existingBookingId) {
+          const source = s.metadata?.admin_generated === "true"
+            ? "admin link"
+            : s.metadata?.source || "payment link";
+
+          // checkout.session.completed also fires for payment methods that
+          // settle later, so the session is only proof of payment once Stripe
+          // says it is paid.
+          if (s.payment_status !== "paid") {
+            return ok({
+              received: true,
+              action: "booking_payment_unpaid",
+              bookingId: existingBookingId,
+              paymentStatus: s.payment_status,
+            });
+          }
+
           console.log(
-            `🔔 Webhook: Updating Existing Booking ${existingBookingId}`,
+            `🔔 Webhook: confirming booking ${existingBookingId} (${source})`,
           );
 
           const amountPaid = s.amount_total / 100;
@@ -306,29 +327,24 @@ export async function POST(req) {
         }
 
         // Logic for Payment Intent (Direct charges / Virtual Terminal)
+        //
+        // Same shared path as the session event above. This branch used to
+        // hand-roll the update and then send a different, unguarded email, so
+        // a booking could be confirmed twice over with two different messages
+        // depending on which event Stripe delivered first.
         const existingBookingId = pi.metadata?.bookingId;
         if (existingBookingId) {
-          const amountPaid = pi.amount_received / 100;
-
-          const { error: updateErr } = await admin
-            .from("booking") // FIXED: Lowercase 'booking'
-            .update({
-              status: "confirmed",
-              totalPaidAmount: amountPaid,
-              stripePaymentIntentId: pi.id,
-              updatedAt: new Date().toISOString(),
-            })
-            .eq("id", existingBookingId);
-
-          if (updateErr) throw updateErr;
-
-          await sendConfirmationEmail({
+          const confirmed = await confirmPaidBooking(admin, existingBookingId, {
             stripe,
-            admin,
-            bookingId: existingBookingId,
             piId: pi.id,
+            amountPaid: pi.amount_received / 100,
           });
-          return ok({ received: true, action: "updated_existing_pi" });
+          return ok({
+            received: true,
+            action: "updated_existing_pi",
+            emailed: confirmed.sent,
+            reason: confirmed.reason,
+          });
         }
 
         // Standard draft flow for PIs
