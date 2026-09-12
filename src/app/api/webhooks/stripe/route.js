@@ -7,195 +7,13 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { markOrderPaid } from "@/lib/shop/server";
+import {
+  confirmPaidBooking,
+  sendConfirmationEmail,
+} from "@/lib/email/bookingConfirmation";
 import { settleLinkPayment } from "@/lib/pos/settleLink";
 
 // --- email/stripe helpers ---------------------------------------------------
-function brandName() {
-  return process.env.NEXT_PUBLIC_SITE_NAME || "Oasis";
-}
-
-function formatInv(id) {
-  return `INV-${String(id).padStart(6, "0")}`;
-}
-
-async function fetchPdfBuffer(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`PDF fetch failed: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-async function sendMail({ to, subject, html, attachments }) {
-  const apiKey = process.env.RESEND_API_KEY;
-  let from = process.env.EMAIL_FROM;
-  if (!from) from = "Oasis Bookings <onboarding@resend.dev>"; // dev fallback
-  const { Resend } = await import("resend");
-  const resend = new Resend(apiKey);
-  const res = await resend.emails.send({
-    from,
-    to,
-    subject,
-    html,
-    attachments: attachments?.length ? attachments : undefined,
-  });
-  if (res?.error) throw new Error(res.error.message || "Mail provider error");
-}
-
-function renderConfirmationEmail(booking, { receiptUrl }) {
-  const inv = formatInv(booking.id);
-  const amt = new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: (booking.currency || "EUR").toUpperCase(),
-  }).format(Number(booking.totalPaidAmount || 0));
-  const email = booking.primary_contact?.email || "";
-  const name =
-    booking.primary_contact?.fullName || booking.primary_contact?.name || email;
-  return `
-  <div style="font-family: ui-sans-serif, system-ui; color:#1f2937;">
-    <h2 style="margin:0 0 6px;">${brandName()} — Booking confirmed</h2>
-   <p style="margin: 8px 0 16px;">Thanks for your payment, ${name}.</p>
-    <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
-      <tbody>
-       <tr>
-         <td style="padding:10px;border-bottom:1px solid #e5e7eb;background:#fafaf9;width:180px;">Invoice #</td>
-         <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${inv}</td>
-       </tr>
-       <tr>
-         <td style="padding:10px;border-bottom:1px solid #e5e7eb;background:#fafaf9;">Amount</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><strong>${amt}</strong></td>
-        </tr>
-      </tbody>
-    </table>
-    ${
-      receiptUrl
-        ? `<div style="margin-top:16px;">
-             <a href="${receiptUrl}"
-               style="display:inline-block;background:#1f2937;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;">
-               View Stripe Receipt
-             </a>
-            <div style="font-size:12px;color:#6b7280;margin-top:8px;">
-               Opens Stripe’s official receipt page.
-             </div>
-           </div>`
-        : ""
-    }
-    <p style="font-size:12px;color:#6b7280;margin-top:14px;">
-      We’ve attached your invoice PDF.
-   </p>
-  </div>`;
-}
-
-async function receiptUrlFromPI(stripe, piOrId) {
-  const pi =
-    typeof piOrId === "string"
-      ? await stripe.paymentIntents.retrieve(piOrId, {
-          expand: ["latest_charge"],
-        })
-      : piOrId;
-  if (!pi) return null;
-  if (pi.latest_charge) {
-    const ch =
-      typeof pi.latest_charge === "string"
-        ? await stripe.charges.retrieve(pi.latest_charge)
-        : pi.latest_charge;
-    if (ch?.receipt_url) return ch.receipt_url;
-  }
-  const first = pi?.charges?.data?.[0];
-  return first?.receipt_url || null;
-}
-
-// Send confirmation email with invoice PDF (if any) + hosted receipt link
-async function sendConfirmationEmail({
-  stripe,
-  admin,
-  bookingId,
-  sessionId,
-  piId,
-  invoiceId,
-}) {
-  // 1) Load booking (email + amounts)
-  // `code` is the random reference the customer quotes back to us; without it
-  // the email falls back to "BK-" plus the row id, which is guessable.
-  let { data: b } = await admin
-    .from("booking")
-    .select("id, code, primary_contact, totalPaidAmount, currency")
-    .eq("id", bookingId)
-    .single();
-  if (!b) {
-    ({ data: b } = await admin
-      .from("booking")
-      .select("id, primary_contact, totalPaidAmount, currency")
-      .eq("id", bookingId)
-      .single());
-  }
-  if (!b?.primary_contact?.email) return;
-  const to = b.primary_contact.email;
-
-  // 2) Resolve sources
-  let session = null,
-    invoice = null,
-    pi = null;
-  let receiptUrl = null,
-    invoicePdfUrl = null;
-
-  if (sessionId) {
-    session = await stripe.checkout.sessions.retrieve(sessionId, {
-      expand: ["invoice", "payment_intent.latest_charge"],
-    });
-    if (session?.invoice) {
-      invoice =
-        typeof session.invoice === "string"
-          ? await stripe.invoices.retrieve(session.invoice)
-          : session.invoice;
-      invoicePdfUrl = invoice?.invoice_pdf || null;
-    }
-    if (session?.payment_intent) {
-      pi = session.payment_intent;
-    }
-  }
-
-  if (!invoice && invoiceId) {
-    invoice = await stripe.invoices.retrieve(invoiceId);
-    invoicePdfUrl = invoice?.invoice_pdf || invoicePdfUrl;
-  }
-
-  if (!pi && piId) {
-    pi = await stripe.paymentIntents.retrieve(piId, {
-      expand: ["latest_charge"],
-    });
-  }
-
-  // 3) Hosted receipt URL (from charge)
-  receiptUrl = await receiptUrlFromPI(stripe, pi || piId);
-  // 4) Attach invoice PDF if available
-  const attachments = [];
-
-  if (invoicePdfUrl) {
-    const pdfBuffer = await fetchPdfBuffer(invoicePdfUrl);
-    attachments.push({
-      filename: invoice?.number
-        ? `${invoice.number}.pdf`
-        : `${formatInv(b.id)}.pdf`,
-      content: pdfBuffer,
-      contentType: "application/pdf",
-    });
-  }
-
-  const html = renderConfirmationEmail(b, { receiptUrl });
-  await sendMail({
-    to,
-    subject: `Booking confirmed · ${brandName()}`,
-    html,
-    attachments,
-  });
-
-  // 5) Mark sent (best-effort)
-  try {
-    await admin
-      .from("booking")
-      .update({ confirmationEmailSentAt: new Date().toISOString() })
-      .eq("id", b.id);
-  } catch {}
-}
 // --- helpers ---------------------------------------------------------------
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -426,29 +244,22 @@ export async function POST(req) {
               ? s.payment_intent
               : s.payment_intent?.id;
 
-          const { error: updateErr } = await admin
-            .from("booking") // FIXED: Use lowercase 'booking' per your schema
-            .update({
-              status: "confirmed",
-              totalPaidAmount: amountPaid,
-              stripePaymentIntentId: piId, // LINKING PI TO BOOKING
-              stripeSessionUrl: null, // Clear the link from UI
-              updatedAt: new Date().toISOString(),
-            })
-            .eq("id", existingBookingId);
-
-          if (updateErr) throw updateErr;
-
-          // Send confirmation email
-          await sendConfirmationEmail({
+          // Confirm and notify through the shared path. The guest's own
+          // return to the success page does the same thing, and whichever
+          // arrives first is the one that sends.
+          const confirmed = await confirmPaidBooking(admin, existingBookingId, {
             stripe,
-            admin,
-            bookingId: existingBookingId,
             sessionId: s.id,
-            piId: piId,
+            piId,
+            amountPaid,
           });
 
-          return ok({ received: true, action: "updated_existing" });
+          return ok({
+            received: true,
+            action: "updated_existing",
+            emailed: confirmed.sent,
+            reason: confirmed.reason,
+          });
         }
 
         // 2. FALLBACK TO STANDARD DRAFT CONVERSION (Web Checkout)

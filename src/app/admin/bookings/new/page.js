@@ -24,6 +24,7 @@ import {
   StickyNote,
   Settings,
   AlertCircle,
+  MapPin,
 } from "lucide-react";
 
 /* ---------------------------- Constants & Styles ---------------------------- */
@@ -71,6 +72,17 @@ export default function NewBookingPage() {
   const [experiences, setExperiences] = useState([]);
   const [expLoading, setExpLoading] = useState(false);
   const [experienceId, setExperienceId] = useState(null);
+  /** The full experience record, once fetched — its meetupPoints feed the picker. */
+  const [experience, setExperience] = useState(null);
+  /**
+   * Where the group is met. Either one of the experience's own points, or an
+   * exceptional one arranged for this booking, which may carry a charge.
+   */
+  const [meetup, setMeetup] = useState({
+    mode: "default",
+    pointId: "",
+    custom: { name: "", time: "", instructions: "", surcharge: "" },
+  });
 
   const [date, setDate] = useState("");
   const [slots, setSlots] = useState([]);
@@ -139,11 +151,41 @@ export default function NewBookingPage() {
   );
 
   const toMoney = (n) => Number(n ?? 0).toFixed(2);
+
+  /** Charge for an exceptional meeting point, 0 for the experience's own. */
+  const meetupSurcharge = useMemo(() => {
+    if (meetup.mode !== "custom") return 0;
+    const n = parseFloat(meetup.custom.surcharge);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }, [meetup]);
+
+  /** The meeting point as it will be stored on the booking. */
+  const selectedMeetupPoint = useMemo(() => {
+    if (meetup.mode === "custom") {
+      const name = meetup.custom.name.trim();
+      if (!name) return null;
+      return {
+        id: "custom",
+        name,
+        time: meetup.custom.time.trim(),
+        mapPin: "",
+        instructions: meetup.custom.instructions.trim(),
+        exceptional: true,
+        surcharge: meetupSurcharge,
+      };
+    }
+    const points = Array.isArray(experience?.meetupPoints)
+      ? experience.meetupPoints
+      : [];
+    return points.find((x) => String(x.id) === String(meetup.pointId)) || null;
+  }, [meetup, experience, meetupSurcharge]);
+
   const estimate = useMemo(
     () =>
       (parseInt(form.adultsCount) || 0) * priceAdult +
-      (parseInt(form.kidsCount) || 0) * priceKid,
-    [form.adultsCount, form.kidsCount, priceAdult, priceKid],
+      (parseInt(form.kidsCount) || 0) * priceKid +
+      meetupSurcharge,
+    [form.adultsCount, form.kidsCount, priceAdult, priceKid, meetupSurcharge],
   );
 
   const selectedSlot = useMemo(
@@ -234,6 +276,8 @@ export default function NewBookingPage() {
         });
         const j = await res.json().catch(() => ({}));
         const exp = j?.experience || j?.item || j || {};
+
+        setExperience(exp && exp.id ? exp : null);
 
         const expAdult = exp.priceAdult ?? exp.unitPriceAdult ?? null;
         const expKid = exp.priceKid ?? exp.unitPriceKid ?? null;
@@ -454,6 +498,7 @@ export default function NewBookingPage() {
           phone: (form.primary_contact?.phone || "").trim(),
         },
         attendees: form.attendees?.length ? form.attendees : null,
+        selected_meetup_point: selectedMeetupPoint,
         stripeSessionId: form.stripeSessionId?.trim() || null,
         stripePaymentIntentId: form.stripePaymentIntentId?.trim() || null,
       };
@@ -687,6 +732,12 @@ export default function NewBookingPage() {
                                 title="Clear the chosen experience and date"
                                 onClick={() => {
                                   setExperienceId(null);
+                                  setExperience(null);
+                                  setMeetup({
+                                    mode: "default",
+                                    pointId: "",
+                                    custom: { name: "", time: "", instructions: "", surcharge: "" },
+                                  });
                                   setSelectedDate("");
                                   setSelectedSlotId(null);
                                   setSlots([]);
@@ -1076,6 +1127,15 @@ export default function NewBookingPage() {
                             </div>
 
                             <div className="border-t border-black/5 pt-8">
+                              <MeetupPicker
+                                points={experience?.meetupPoints}
+                                value={meetup}
+                                onChange={setMeetup}
+                                currency={form.currency}
+                              />
+                            </div>
+
+                            <div className="border-t border-black/5 pt-8">
                               <div className="rounded-xl border border-[#a3845b]/25 bg-[#a3845b]/5 p-4">
                                 <div className="flex items-start gap-3">
                                   <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-[#a3845b]" />
@@ -1185,6 +1245,16 @@ export default function NewBookingPage() {
                               className={inputStyles}
                             />
                           </Field>
+                        </div>
+
+                        <div className="border-t border-black/5 pt-8">
+                          <AttendeeEditor
+                            adults={parseInt(form.adultsCount) || 0}
+                            kids={parseInt(form.kidsCount) || 0}
+                            attendees={form.attendees}
+                            onChange={(next) => setField("attendees", next)}
+                            primary={form.primary_contact}
+                          />
                         </div>
 
                         <div className="border-t border-black/5 dark:border-white/5 pt-8">
@@ -1299,6 +1369,233 @@ export default function NewBookingPage() {
 }
 
 /* --------------------------- Widgets --------------------------- */
+/**
+ * Where the group is met.
+ *
+ * Usually one of the points the experience already publishes. An exceptional
+ * one — a guest's villa, a hotel across town — can be arranged for a single
+ * booking and carries its own charge, which is added to what the guest is
+ * asked to pay.
+ */
+function MeetupPicker({ points, value, onChange, currency = "EUR" }) {
+  const list = Array.isArray(points) ? points : [];
+  const setCustom = (patch) =>
+    onChange({ ...value, custom: { ...value.custom, ...patch } });
+
+  return (
+    <Field label="Meeting point" icon={<MapPin className="h-4 w-4" />}>
+      <div className="space-y-2">
+        {list.length === 0 ? (
+          <p className="rounded-xl bg-black/5 p-3 text-xs text-black/60">
+            This experience has no saved meeting points. Add an exceptional one
+            below, or set them on the experience so they are offered every time.
+          </p>
+        ) : (
+          list.map((p) => {
+            const active = value.mode === "default" && String(value.pointId) === String(p.id);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onChange({ ...value, mode: "default", pointId: p.id })}
+                className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${
+                  active
+                    ? "border-[#a3845b] bg-[#a3845b]/10"
+                    : "border-black/10 hover:border-[#a3845b]/50 hover:bg-black/[0.02]"
+                }`}
+              >
+                <span
+                  className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${
+                    active ? "border-[#a3845b] bg-[#a3845b]" : "border-black/20"
+                  }`}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{p.name}</span>
+                  <span className="block text-xs text-black/50">
+                    {[p.time, p.instructions].filter(Boolean).join(" · ") || "No time set"}
+                  </span>
+                </span>
+              </button>
+            );
+          })
+        )}
+
+        <button
+          type="button"
+          onClick={() => onChange({ ...value, mode: value.mode === "custom" ? "default" : "custom" })}
+          className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${
+            value.mode === "custom"
+              ? "border-[#a3845b] bg-[#a3845b]/10"
+              : "border-dashed border-black/20 hover:border-[#a3845b]/50"
+          }`}
+        >
+          <span
+            className={`h-4 w-4 shrink-0 rounded-full border-2 ${
+              value.mode === "custom" ? "border-[#a3845b] bg-[#a3845b]" : "border-black/20"
+            }`}
+          />
+          <span className="text-sm font-medium">Exceptional meeting point</span>
+        </button>
+
+        {value.mode === "custom" ? (
+          <div className="grid gap-3 rounded-xl border border-black/10 bg-black/[0.02] p-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-black/50">
+                Where
+              </label>
+              <input
+                value={value.custom.name}
+                onChange={(e) => setCustom({ name: e.target.value })}
+                placeholder="e.g. Villa Elia, Akrotiri"
+                className={inputStyles}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-black/50">
+                Time
+              </label>
+              <input
+                value={value.custom.time}
+                onChange={(e) => setCustom({ time: e.target.value })}
+                placeholder="e.g. 08:30AM"
+                className={inputStyles}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-black/50">
+                Extra charge ({currency})
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={value.custom.surcharge}
+                onChange={(e) => setCustom({ surcharge: e.target.value })}
+                placeholder="0.00"
+                className={inputStyles}
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-black/50">
+                Instructions for the guest
+              </label>
+              <input
+                value={value.custom.instructions}
+                onChange={(e) => setCustom({ instructions: e.target.value })}
+                placeholder="e.g. wait by the gate, the driver will call"
+                className={inputStyles}
+              />
+            </div>
+            <p className="sm:col-span-2 text-[11px] text-black/50">
+              The charge is added to the total and appears on the guest&apos;s
+              payment page.
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </Field>
+  );
+}
+
+/**
+ * Who is actually coming, and anything the guide needs to know about each.
+ *
+ * The booking already carried an `attendees` array but nothing ever filled it,
+ * so every booking arrived as a head count. One row per person, sized by the
+ * adult and child counts from step 2.
+ */
+function AttendeeEditor({ adults, kids, attendees, onChange, primary }) {
+  const total = adults + kids;
+  const rows = useMemo(() => {
+    const out = [];
+    for (let i = 0; i < total; i++) {
+      const existing = attendees?.[i] || {};
+      out.push({
+        firstName: existing.firstName ?? "",
+        lastName: existing.lastName ?? "",
+        category: existing.category ?? (i < adults ? "adult" : "child"),
+        notes: existing.notes ?? "",
+      });
+    }
+    return out;
+  }, [total, adults, attendees]);
+
+  // The list is derived from the counts, so keep the stored array the same
+  // length — otherwise a party trimmed in step 2 keeps ghosts from step 3.
+  useEffect(() => {
+    const current = Array.isArray(attendees) ? attendees : [];
+    if (current.length !== total) onChange(rows);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total]);
+
+  const update = (i, patch) => {
+    const next = rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
+    // A name is what everything downstream reads; keep it in step with the parts.
+    next[i].name = [next[i].firstName, next[i].lastName].filter(Boolean).join(" ").trim();
+    onChange(next);
+  };
+
+  if (total === 0) {
+    return (
+      <Field label="Guests" icon={<Users className="h-4 w-4" />}>
+        <p className="rounded-xl bg-black/5 p-3 text-xs text-black/60">
+          Set the party size in step 2 and each guest will appear here.
+        </p>
+      </Field>
+    );
+  }
+
+  return (
+    <Field label={`Guests (${total})`} icon={<Users className="h-4 w-4" />}>
+      <div className="space-y-3">
+        {rows.map((r, i) => (
+          <div key={i} className="rounded-xl border border-black/10 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-black/50">
+                {r.category === "child" ? "Child" : "Adult"} {i + 1}
+              </span>
+              {i === 0 && primary?.firstName ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    update(0, {
+                      firstName: primary.firstName || "",
+                      lastName: primary.lastName || "",
+                    })
+                  }
+                  className="rounded-md bg-black/5 px-2 py-1 text-[10px] font-medium uppercase tracking-wider hover:bg-black/10"
+                >
+                  Same as contact
+                </button>
+              ) : null}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input
+                value={r.firstName}
+                onChange={(e) => update(i, { firstName: e.target.value })}
+                placeholder="First name"
+                className={inputStyles}
+              />
+              <input
+                value={r.lastName}
+                onChange={(e) => update(i, { lastName: e.target.value })}
+                placeholder="Surname"
+                className={inputStyles}
+              />
+              <input
+                value={r.notes}
+                onChange={(e) => update(i, { notes: e.target.value })}
+                placeholder="Allergies, mobility, anything the guide should know"
+                className={`${inputStyles} sm:col-span-2`}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </Field>
+  );
+}
+
 function Stepper({ step, onStep, canEnterStep2 = true, canEnterStep3 = true }) {
   const steps = [
     { id: 1, label: "Experience & Date" },

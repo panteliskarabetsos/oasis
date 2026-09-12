@@ -341,6 +341,11 @@ export async function POST(req) {
       primary_contact: isPlainObject(body.primary_contact)
         ? body.primary_contact
         : null,
+      // Where the group is met, and any charge that came with an exceptional
+      // one. Dropped on the floor before, so the guest was never told.
+      selected_meetup_point: isPlainObject(body.selected_meetup_point)
+        ? body.selected_meetup_point
+        : null,
       stripeSessionId: body.stripeSessionId ?? null,
       stripePaymentIntentId: body.stripePaymentIntentId ?? null,
     };
