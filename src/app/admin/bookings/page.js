@@ -89,6 +89,8 @@ export default function AdminBookingsPage() {
   // data
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
+  /** Whole-result tallies from the API; null on a deployment without them. */
+  const [totals, setTotals] = useState(null);
   const [experiences, setExperiences] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -169,6 +171,12 @@ export default function AdminBookingsPage() {
       const items = data?.items || [];
       setRows(items);
       setTotal(Number(data?.total || items.length));
+      // Absent on an older deployment; the cards fall back to counting rows.
+      setTotals(
+        data?.counts
+          ? { counts: data.counts, revenue: Number(data.revenue) || 0 }
+          : null,
+      );
     } catch (e) {
       if (e?.name === "AbortError") return;
       setError(e?.message || "Failed to load bookings");
@@ -202,12 +210,31 @@ export default function AdminBookingsPage() {
   }, [load]);
 
   /* derived */
+  /**
+   * Figures for the summary cards.
+   *
+   * These sit next to "Results", so they have to describe the same set. When
+   * the API sends whole-result tallies we use them; otherwise we fall back to
+   * counting the loaded page and say so on the label, rather than quietly
+   * reporting a page count as if it were the total.
+   */
   const stats = useMemo(() => {
-    const confirmed = rows.filter((r) => r.status === "confirmed").length;
-    const pending = rows.filter((r) => r.status === "pending").length;
-    const revenue = rows.reduce((s, r) => s + (Number(r.totalAmount) || 0), 0);
-    return { confirmed, pending, revenue };
-  }, [rows]);
+    if (totals) {
+      const c = totals.counts || {};
+      return {
+        scope: "all",
+        confirmed: Number(c.confirmed || 0),
+        pending: Number(c.pending || 0),
+        revenue: totals.revenue,
+      };
+    }
+    return {
+      scope: "page",
+      confirmed: rows.filter((r) => r.status === "confirmed").length,
+      pending: rows.filter((r) => r.status === "pending").length,
+      revenue: rows.reduce((s, r) => s + (Number(r.totalAmount) || 0), 0),
+    };
+  }, [rows, totals]);
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const isCodeSearch = /^#\s*\S/.test(query);
@@ -401,9 +428,9 @@ export default function AdminBookingsPage() {
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           ["Results", total, "brand"],
-          ["Confirmed", stats.confirmed, "success"],
-          ["Pending", stats.pending, "warning"],
-          ["Page revenue", eur(stats.revenue), "brand"],
+          [stats.scope === "all" ? "Confirmed" : "Confirmed (page)", stats.confirmed, "success"],
+          [stats.scope === "all" ? "Pending" : "Pending (page)", stats.pending, "warning"],
+          [stats.scope === "all" ? "Revenue" : "Page revenue", eur(stats.revenue), "brand"],
         ].map(([label, value]) => (
           <Card key={label} className="py-3.5">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">
@@ -618,22 +645,30 @@ export default function AdminBookingsPage() {
                 <Th>Guest</Th>
                 <Th>Experience</Th>
                 <Th>When</Th>
-                <Th className="text-center">Pax</Th>
+                <Th className="hidden text-center xl:table-cell">Pax</Th>
                 <Th className="text-right">Total</Th>
                 <Th>Status</Th>
-                <Th className="text-right">Actions</Th>
+                <Th className="sticky right-0 z-10 border-l border-[#f0ebe2] bg-white text-right">
+                  Actions
+                </Th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <Tr key={`${r.source}-${r.id}`} onClick={() => router.push(`/admin/bookings/${r.id}`)}>
-                  <Td className="font-bold text-[#8b6f47]">{r.code}</Td>
+                <Tr
+                  key={`${r.source}-${r.id}`}
+                  className="group"
+                  onClick={() => router.push(`/admin/bookings/${r.id}`)}
+                >
+                  <Td className="whitespace-nowrap font-bold text-[#8b6f47]">{r.code}</Td>
                   <Td>
-                    <span className="block font-semibold text-[#2a211a]">
+                    <span className="block max-w-[180px] truncate font-semibold text-[#2a211a]">
                       {r.guestName || "—"}
                     </span>
                     {r.guestEmail ? (
-                      <span className="block text-[11.5px] text-[#9a8c7e]">{r.guestEmail}</span>
+                      <span className="hidden truncate text-[11.5px] text-[#9a8c7e] xl:block">
+                        {r.guestEmail}
+                      </span>
                     ) : null}
                   </Td>
                   <Td className="max-w-[220px]">
@@ -641,14 +676,19 @@ export default function AdminBookingsPage() {
                     {r.isPrivate ? <Badge variant="info">private</Badge> : null}
                   </Td>
                   <Td className="whitespace-nowrap text-[#7a6a5f]">{fmtWhen(r.startTime)}</Td>
-                  <Td className="text-center">{(r.adults || 0) + (r.kids || 0) || "—"}</Td>
+                  <Td className="hidden text-center xl:table-cell">
+                    {(r.adults || 0) + (r.kids || 0) || "—"}
+                  </Td>
                   <Td className="whitespace-nowrap text-right font-semibold">
                     {eur(r.totalAmount)}
                   </Td>
-                  <Td>
+                  <Td className="whitespace-nowrap">
                     <StatusBadge status={r.status} />
                   </Td>
-                  <Td className="text-right" onClick={(e) => e.stopPropagation()}>
+                  <Td
+                    className="sticky right-0 z-10 border-l border-[#f0ebe2] bg-white text-right group-hover:bg-[#fdfbf7]"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div className="flex items-center justify-end gap-1">
                       {r.scheduleSlotId ? (
                         <button
@@ -673,7 +713,7 @@ export default function AdminBookingsPage() {
                         title="Delete booking"
                         className="rounded-lg p-1.5 text-[#7a6a5f] hover:bg-[#fbeae5] hover:text-[#a33c22]"
                       >
-                        <Icon name="file" size={16} />
+                        <Icon name="trash" size={16} />
                       </button>
                     </div>
                   </Td>

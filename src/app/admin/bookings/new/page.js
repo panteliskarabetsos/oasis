@@ -28,6 +28,8 @@ import {
 
 /* ---------------------------- Constants & Styles ---------------------------- */
 const MAX_GROUP = 100;
+// Mirrors HOLD_HOURS in @/lib/bookings/holds — that module is server-only.
+const HOLD_HOURS = 24;
 const MIN_ADULTS = 1;
 
 // Replaces the injected <style> tag with standard Tailwind
@@ -85,6 +87,8 @@ export default function NewBookingPage() {
   });
 
   const [submitting, setSubmitting] = useState(false);
+  /** Which part of saving is running, shown on the buttons. */
+  const [stage, setStage] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -222,11 +226,14 @@ export default function NewBookingPage() {
       if (filled) return;
 
       try {
-        const res = await fetch(`/api/admin/experiences/?id=${experienceId}`, {
+        // The collection endpoint ignores ?id= and answers with every
+        // experience, so ask the by-id route for the one we want.
+        const res = await fetch(`/api/admin/experiences/${experienceId}`, {
           cache: "no-store",
+          credentials: "include",
         });
         const j = await res.json().catch(() => ({}));
-        const exp = j?.experience || j || {};
+        const exp = j?.experience || j?.item || j || {};
 
         const expAdult = exp.priceAdult ?? exp.unitPriceAdult ?? null;
         const expKid = exp.priceKid ?? exp.unitPriceKid ?? null;
@@ -418,9 +425,12 @@ export default function NewBookingPage() {
     }
 
     setSubmitting(true);
+    setStage("Creating booking…");
     try {
       const common = {
-        status: String(form.status || "confirmed").toLowerCase(),
+        // Online payment only: the booking is held unpaid until the guest
+        // follows the emailed link, and the Stripe webhook confirms it.
+        status: "pending",
         notes: form.notes?.trim() || null,
         numberOfPeople,
         adultsCount: Number(form.adultsCount),
@@ -434,10 +444,7 @@ export default function NewBookingPage() {
           form.unitPriceAdult === "" ? null : Number(priceAdult.toFixed(2)),
         unitPriceKid:
           form.unitPriceKid === "" ? null : Number(priceKid.toFixed(2)),
-        totalPaidAmount:
-          form.totalPaidAmount === ""
-            ? null
-            : Number(parseFloat(form.totalPaidAmount).toFixed(2)),
+        totalPaidAmount: null,
         currency: form.currency || "EUR",
         primary_contact: {
           name: (form.primary_contact?.name || "").trim(),
@@ -483,16 +490,57 @@ export default function NewBookingPage() {
 
       const data = await res.json();
       const item = data?.item || data;
-      setSuccess("Booking created successfully.");
-      setTimeout(() => {
-        router.push(
-          item?.id ? `/admin/bookings/${item.id}` : "/admin/bookings",
-        );
-      }, 600);
+
+      // Hold the seats and send the guest their payment link. The booking
+      // exists either way, so a failure here is reported rather than thrown —
+      // the link can be resent from the booking page.
+      let note = "Booking created.";
+      let emailFailed = false;
+      if (item?.id) {
+        setStage("Sending payment link…");
+        try {
+          const payRes = await fetch(
+            `/api/admin/reservations/${item.id}/request-payment`,
+            { method: "POST", credentials: "include" },
+          );
+          const pay = await payRes.json().catch(() => ({}));
+          if (!payRes.ok) throw new Error(pay?.error || "Could not send the payment link");
+
+          if (pay.emailed) {
+            note = `Booking held for ${pay.holdHours}h — payment link sent to ${pay.sentTo}.`;
+          } else {
+            emailFailed = true;
+            note = `Booking held for ${pay.holdHours}h, but the payment link could not be emailed${
+              pay.emailError ? ` (${pay.emailError})` : ""
+            }. Resend it from the booking.`;
+          }
+        } catch (e) {
+          emailFailed = true;
+          note = `Booking created, but the payment link failed: ${
+            e?.message || "unknown error"
+          }. Send it from the booking.`;
+        }
+      }
+
+      setSuccess(note);
+
+      // A failure the admin needs to act on must not scroll past in a second;
+      // leave them here to read it and follow the link themselves.
+      if (!emailFailed) {
+        setStage("Opening booking…");
+        setTimeout(() => {
+          router.push(
+            item?.id ? `/admin/bookings/${item.id}` : "/admin/bookings",
+          );
+        }, 1100);
+      } else {
+        setSubmitting(false);
+        setStage("");
+      }
     } catch (err) {
       setError(err?.message || "Something went wrong");
-    } finally {
       setSubmitting(false);
+      setStage("");
     }
   }
 
@@ -542,7 +590,12 @@ export default function NewBookingPage() {
             <button
               form="booking-form"
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !canEnterStep3}
+              title={
+                canEnterStep3
+                  ? undefined
+                  : "Choose an experience, a date and a slot first"
+              }
               className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#a3845b] to-[#b79266] px-5 py-2 text-sm font-medium text-white shadow-md hover:brightness-110 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {submitting ? (
@@ -550,7 +603,7 @@ export default function NewBookingPage() {
               ) : (
                 <Save className="h-4 w-4" />
               )}
-              {submitting ? "Saving…" : "Save Booking"}
+              {submitting ? stage || "Saving…" : "Save booking"}
             </button>
           </div>
         </div>
@@ -631,8 +684,8 @@ export default function NewBookingPage() {
                               </div>
                               <button
                                 type="button"
+                                title="Clear the chosen experience and date"
                                 onClick={() => {
-                                  setPrivateBooking(true);
                                   setExperienceId(null);
                                   setSelectedDate("");
                                   setSelectedSlotId(null);
@@ -918,12 +971,6 @@ export default function NewBookingPage() {
                           : 999;
                         const adultMax = uiMax;
                         const kidMax = Math.max(0, uiMax - adults);
-                        const paid =
-                          form.totalPaidAmount === ""
-                            ? 0
-                            : parseFloat(form.totalPaidAmount) || 0;
-                        const balance = +(estimate - paid).toFixed(2);
-
                         return (
                           <div className="space-y-8">
                             {/* People Section */}
@@ -1028,50 +1075,30 @@ export default function NewBookingPage() {
                               </Field>
                             </div>
 
-                            <div className="border-t border-black/5 dark:border-white/5 pt-8 grid gap-6 sm:grid-cols-2">
-                              <Field label="Amount Paid By Client">
-                                <div className="relative">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    step="0.01"
-                                    value={form.totalPaidAmount}
-                                    onChange={(e) =>
-                                      setField(
-                                        "totalPaidAmount",
-                                        e.target.value,
-                                      )
-                                    }
-                                    placeholder="0.00"
-                                    className={inputStyles}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setField(
-                                        "totalPaidAmount",
-                                        estimate.toFixed(2),
-                                      )
-                                    }
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-black/5 px-2 py-1 text-[10px] font-medium uppercase tracking-wider hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20"
-                                  >
-                                    Full Price
-                                  </button>
+                            <div className="border-t border-black/5 pt-8">
+                              <div className="rounded-xl border border-[#a3845b]/25 bg-[#a3845b]/5 p-4">
+                                <div className="flex items-start gap-3">
+                                  <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-[#a3845b]" />
+                                  <div className="text-xs leading-relaxed text-black/70">
+                                    <p className="mb-1 text-[13px] font-semibold text-black/80">
+                                      Payment by link
+                                    </p>
+                                    <p>
+                                      Saving emails{" "}
+                                      <strong className="font-medium text-black/80">
+                                        {form.primary_contact?.email?.trim() || "the guest"}
+                                      </strong>{" "}
+                                      a secure payment link for{" "}
+                                      <strong className="font-medium text-black/80">
+                                        {estimate.toFixed(2)} {form.currency}
+                                      </strong>
+                                      . The seats are held for {HOLD_HOURS} hours: paying
+                                      confirms the booking, and if the window closes the
+                                      booking is cancelled and the seats go back on sale.
+                                    </p>
+                                  </div>
                                 </div>
-                              </Field>
-                              <Field label="Booking Status">
-                                <select
-                                  value={form.status}
-                                  onChange={(e) =>
-                                    setField("status", e.target.value)
-                                  }
-                                  className={inputStyles}
-                                >
-                                  <option value="confirmed">Confirmed</option>
-                                  <option value="pending">Pending</option>
-                                  <option value="cancelled">Cancelled</option>
-                                </select>
-                              </Field>
+                              </div>
                             </div>
 
                             {/* Step Footer */}
@@ -1234,23 +1261,17 @@ export default function NewBookingPage() {
                         {estimate.toFixed(2)} {form.currency}
                       </span>
                     </Row>
-                    <Row
-                      label="Amount Paid"
-                      value={`${(Number(form.totalPaidAmount) || 0).toFixed(2)} ${form.currency}`}
-                    />
-
-                    {/* Balance calculation */}
-                    <div className="mt-4 flex items-center justify-between rounded-xl bg-black/5 p-3 dark:bg-white/5">
-                      <span className="font-medium text-sm">Balance Due</span>
-                      <span
-                        className={`font-bold ${estimate - (Number(form.totalPaidAmount) || 0) > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
-                      >
-                        {Math.max(
-                          0,
-                          estimate - (Number(form.totalPaidAmount) || 0),
-                        ).toFixed(2)}{" "}
-                        {form.currency}
-                      </span>
+                    {/* What the guest will be asked to pay online */}
+                    <div className="mt-4 rounded-xl bg-black/5 p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">To pay by link</span>
+                        <span className="font-bold text-amber-600">
+                          {estimate.toFixed(2)} {form.currency}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-black/50">
+                        Held {HOLD_HOURS}h — cancelled automatically if unpaid.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1266,7 +1287,7 @@ export default function NewBookingPage() {
                   ) : (
                     <Save className="h-5 w-5" />
                   )}
-                  {submitting ? "Processing..." : "Finalize Booking"}
+                  {submitting ? stage || "Saving…" : "Save booking"}
                 </button>
               </div>
             </aside>
