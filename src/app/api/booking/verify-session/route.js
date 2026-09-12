@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { bookingRef as refFor } from "@/lib/bookingCode";
 import Stripe from "stripe";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { confirmPaidBooking } from "@/lib/email/bookingConfirmation";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -61,10 +62,33 @@ export async function GET(req) {
       );
     }
 
-    // 3. The booking's own code, falling back to the legacy id form.
+    // 3. The guest is back from Stripe having paid, so confirm the booking and
+    //    send their confirmation here rather than waiting on the webhook — a
+    //    webhook that is slow, retried or misconfigured should not decide
+    //    whether someone gets their confirmation. confirmPaidBooking claims the
+    //    booking first, so the two paths cannot both send.
+    let confirmation = { sent: false, reason: "not-paid" };
+    if (session.payment_status === "paid") {
+      const piId =
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : (session.payment_intent?.id ?? null);
+
+      confirmation = await confirmPaidBooking(admin, booking.id, {
+        stripe,
+        sessionId: session.id,
+        piId,
+        amountPaid:
+          typeof session.amount_total === "number"
+            ? session.amount_total / 100
+            : null,
+      });
+    }
+
+    // 4. The booking's own code, falling back to the legacy id form.
     const derivedCode = refFor(booking);
 
-    // 4. Return clean data for the UI
+    // 5. Return clean data for the UI
     return NextResponse.json({
       customerName:
         booking.primary_contact?.firstName ||
@@ -79,6 +103,7 @@ export async function GET(req) {
       amount: session.amount_total / 100,
       currency: (session.currency || booking.currency || "EUR").toUpperCase(),
       status: session.payment_status,
+      confirmationEmail: confirmation.reason,
     });
   } catch (error) {
     console.error("Verify Session Error:", error);
