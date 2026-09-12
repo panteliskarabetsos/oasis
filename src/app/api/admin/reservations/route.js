@@ -7,6 +7,12 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 import { expireStaleHolds } from "@/lib/bookings/holds";
+import {
+  bookingRef,
+  legacyBookingId,
+  normalizeBookingCode,
+} from "@/lib/bookingCode";
+import { isMissingSchema } from "@/lib/shop/schema";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const bad = (msg, status = 400) =>
@@ -47,9 +53,11 @@ async function requireAdmin() {
  * - page (default 1)
  * - pageSize (default 20)
  * - q (search: name/email/phone/code)
+ * - code (a booking reference — BK-XXXX-XXXX, or a bare row id)
  * - status (pending|confirmed|cancelled|draft|paid or empty)
  * - from, to (YYYY-MM-DD)
  * - experienceId (number)
+ * - sort (recent | soonest | latest; default recent)
  */
 export async function GET(req) {
   const auth = await requireAdmin();
@@ -73,9 +81,21 @@ export async function GET(req) {
     const experienceId = Number(searchParams.get("experienceId")) || null;
     const from = (searchParams.get("from") || "").trim();
     const to = (searchParams.get("to") || "").trim();
-    // Special: code param from "#123" search in UI (numeric booking/draft id)
-    const rawCode = (searchParams.get("code") || "").trim();
-    const codeId = rawCode && /^\d+$/.test(rawCode) ? Number(rawCode) : null;
+    const sort = (searchParams.get("sort") || "recent").toLowerCase();
+
+    // A reference from the search box. It is either a booking's own code
+    // (BK-XXXX-XXXX) or, for anything predating codes and for drafts, the row
+    // id. Both have to resolve: the code is what the guest reads off their
+    // email, the id is what the admin sees in the URL.
+    const rawCode = (searchParams.get("code") || "").trim().replace(/^#\s*/, "");
+    const exactCode = normalizeBookingCode(rawCode);
+    const codeId = legacyBookingId(rawCode);
+    // "884Q" should find BK-884Q-8FG6. Numeric terms are id searches, so they
+    // are left out of this or "372" would drag in every code containing 372.
+    const looseCode =
+      rawCode && !/^#?\s*\d+$/.test(rawCode)
+        ? rawCode.toUpperCase().replace(/[\s-]/g, "")
+        : null;
 
     // Special #ID search: e.g. "#256" or "# 256"
     let idSearch = null;
@@ -105,12 +125,8 @@ export async function GET(req) {
     // ---- BOOKINGS (finalized) ----
     let bookings = [];
     if (status !== "draft") {
-      // inside GET, replace the Booking select with this:
-      let bq = supa
-        .from("booking")
-        .select(
-          `
-    id, "userId", "createdAt", "updatedAt",
+      const bookingColumns = (withCode) => `
+    id, ${withCode ? "code," : ""} "userId", "createdAt", "updatedAt",
     "scheduleSlotId", status, notes, "numberOfPeople",
     attendees, counts, "adultsCount", "kidsCount",
     "unitPriceAdult", "unitPriceKid", "totalPaidAmount", currency,
@@ -125,25 +141,31 @@ export async function GET(req) {
     Experience:Experience!Booking_experienceId_fkey(id, name),
 
     User:User(id, email, name, surname, phone)
-  `
-        )
-        .order("createdAt", { ascending: false })
-        .limit(2000);
+  `;
 
-      // Case-insensitive status filter for safety ("Paid" vs "paid")
-      if (status) bq = bq.ilike("status", status);
+      // One query, retried without `code` only if this database predates the
+      // booking-codes migration — otherwise a missing column would take the
+      // whole bookings screen down rather than one field on it.
+      const runBookings = async (withCode) => {
+        let bq = supa
+          .from("booking")
+          .select(bookingColumns(withCode))
+          .order("createdAt", { ascending: false })
+          .limit(2000);
 
-      if (slotIds !== null) {
-        if (slotIds.length === 0) {
-          bookings = [];
-        } else {
-          bq = bq.in("scheduleSlotId", slotIds);
-          const { data: raw, error } = await bq;
-          if (error) throw error;
-          bookings = (raw || []).map(mapBookingRow);
-        }
+        // Case-insensitive status filter for safety ("Paid" vs "paid")
+        if (status) bq = bq.ilike("status", status);
+        if (slotIds !== null) bq = bq.in("scheduleSlotId", slotIds);
+        return bq;
+      };
+
+      if (slotIds !== null && slotIds.length === 0) {
+        bookings = [];
       } else {
-        const { data: raw, error } = await bq;
+        let { data: raw, error } = await runBookings(true);
+        if (error && isMissingSchema(error)) {
+          ({ data: raw, error } = await runBookings(false));
+        }
         if (error) throw error;
         bookings = (raw || []).map(mapBookingRow);
       }
@@ -186,33 +208,57 @@ export async function GET(req) {
     // merge + search
     let merged = [...bookings, ...drafts];
 
-    // 1️⃣ If we have a numeric codeId (from "code" query), filter by id
-    if (codeId !== null) {
+    const flatten = (v) =>
+      String(v ?? "").toUpperCase().replace(/[\s-]/g, "");
+
+    // 1️⃣ Reference search — the code on the booking, or the row id.
+    if (rawCode) {
       merged = merged.filter((r) => {
-        const n = Number(r.id);
-        return Number.isFinite(n) && n === codeId;
+        if (exactCode && r.code === exactCode) return true;
+        if (codeId !== null && Number(r.id) === codeId) return true;
+        if (looseCode && looseCode.length >= 3)
+          return flatten(r.code).includes(looseCode);
+        return false;
       });
     }
     // 2️⃣ Otherwise fall back to normal text search "q"
     else if (q) {
+      // A guest quoting their reference down the phone may say "oh" for 0 or
+      // read it without the dashes, so the code is matched on its normalized
+      // form as well as literally.
+      const qCode = normalizeBookingCode(rawQ);
+      // Digit-only terms are phone numbers far more often than references, and
+      // are matched as such below rather than against every code.
+      const qFlat = /[A-Za-z]/.test(rawQ) ? flatten(rawQ) : "";
       const like = (s) => (s || "").toString().toLowerCase().includes(q);
       merged = merged.filter(
         (r) =>
           like(r.code) ||
+          (qCode && r.code === qCode) ||
+          (qFlat.length >= 4 && flatten(r.code).includes(qFlat)) ||
           like(r.guestName) ||
           like(r.guestEmail) ||
           like(r.guestPhone)
       );
     }
 
-    // sort by startTime desc then createdAt desc
+    // Newest first by default. Sorting by trip date put a booking for next
+    // summer above one taken this morning, which is the opposite of what the
+    // screen is used for; the trip-date orders stay available explicitly.
+    const ms = (v) => (v ? new Date(v).getTime() || 0 : 0);
     merged.sort((a, b) => {
-      const at = a.startTime ? new Date(a.startTime).getTime() : 0;
-      const bt = b.startTime ? new Date(b.startTime).getTime() : 0;
-      if (bt !== at) return bt - at;
-      const ac = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bc = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bc - ac;
+      if (sort === "soonest" || sort === "latest") {
+        const at = ms(a.startTime);
+        const bt = ms(b.startTime);
+        // Private bookings carry no slot date; keep them last either way.
+        if (at !== bt) {
+          if (!at) return 1;
+          if (!bt) return -1;
+          return sort === "soonest" ? at - bt : bt - at;
+        }
+      }
+      const diff = ms(b.createdAt) - ms(a.createdAt);
+      return diff !== 0 ? diff : Number(b.id) - Number(a.id);
     });
 
     const total = merged.length;
@@ -424,7 +470,10 @@ function mapBookingRow(b) {
     // --- existing list fields (backward compatible) ---
     id: b.id,
     source: "booking",
-    code: `B-${String(b.id).padStart(6, "0")}`,
+    // The reference the guest actually holds — on their email, their ticket
+    // and their QR. This used to be a "B-000391" invented here, which matched
+    // nothing the guest could quote and nothing the check-in scanner reads.
+    code: bookingRef(b),
     scheduleSlotId,
     startTime,
     experienceId,

@@ -63,6 +63,29 @@ async function safeJson(res) {
   }
 }
 
+const SORTS = [
+  { key: "recent", label: "Newest first" },
+  { key: "soonest", label: "Trip date — soonest" },
+  { key: "latest", label: "Trip date — latest" },
+];
+
+/**
+ * Does this look like a booking reference rather than a name?
+ *
+ * Guests quote "BK-884Q-8FG6" off their confirmation email; staff type "#372"
+ * or paste a row id. Both go to the API's `code` filter — matching them against
+ * guest names would only turn up noise.
+ */
+function asReference(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  const hash = s.match(/^#\s*(.+)$/);
+  if (hash) return hash[1].trim();
+  if (/^bk[\s-]?[0-9a-z]{4}[\s-]?[0-9a-z]{4}$/i.test(s)) return s;
+  if (/^bk[\s-]?\d{1,6}$/i.test(s)) return s;
+  return null;
+}
+
 const QUICK_RANGES = [
   { key: "today", label: "Today", from: today, to: today },
   { key: "7d", label: "Next 7 days", from: today, to: () => plusDays(7) },
@@ -82,6 +105,7 @@ export default function AdminBookingsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [experienceId, setExperienceId] = useState("");
+  const [sort, setSort] = useState("recent");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -108,8 +132,46 @@ export default function AdminBookingsPage() {
   const [slotTo, setSlotTo] = useState(() => plusDays(60));
   const [targetSlotId, setTargetSlotId] = useState("");
 
+  // reference just copied, for the tick on the code cell
+  const [copied, setCopied] = useState("");
+
   const controllerRef = useRef(null);
   const searchRef = useRef(null);
+  const copiedTimer = useRef(null);
+
+  const copyRef = useCallback(async (code) => {
+    if (!code) return;
+    // The async clipboard is refused outright in some contexts (older Safari,
+    // anything not on https), so fall back the way the promotions screen does
+    // rather than leaving the button dead.
+    let done = false;
+    try {
+      await navigator.clipboard.writeText(code);
+      done = true;
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = code;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        done = document.execCommand("copy");
+        ta.remove();
+      } catch {
+        done = false;
+      }
+    }
+    if (!done) {
+      toast.error("Could not copy the reference");
+      return;
+    }
+    setCopied(code);
+    clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(""), 1400);
+  }, []);
+
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
 
   /* debounce search */
   useEffect(() => {
@@ -151,10 +213,11 @@ export default function AdminBookingsPage() {
     const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (debouncedQuery) {
       const raw = debouncedQuery.trim();
-      const m = raw.match(/^#\s*(.+)$/); // "#123" searches by booking code
-      if (m && m[1]) qs.set("code", m[1].trim());
+      const ref = asReference(raw);
+      if (ref) qs.set("code", ref);
       else qs.set("q", raw);
     }
+    if (sort && sort !== "recent") qs.set("sort", sort);
     if (status) qs.set("status", status);
     if (from) qs.set("from", from);
     if (to) qs.set("to", to);
@@ -185,7 +248,7 @@ export default function AdminBookingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedQuery, status, from, to, experienceId]);
+  }, [page, pageSize, debouncedQuery, status, from, to, experienceId, sort]);
 
   useEffect(() => {
     load();
@@ -237,7 +300,7 @@ export default function AdminBookingsPage() {
   }, [rows, totals]);
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
-  const isCodeSearch = /^#\s*\S/.test(query);
+  const isCodeSearch = Boolean(asReference(query));
 
   const activeFilters = useMemo(() => {
     const out = [];
@@ -245,7 +308,7 @@ export default function AdminBookingsPage() {
       out.push({
         key: "q",
         prefix: isCodeSearch ? "code" : "search",
-        label: query.replace(/^#\s*/, ""),
+        label: isCodeSearch ? asReference(query) : query,
         clear: () => setQuery(""),
       });
     if (status)
@@ -454,7 +517,7 @@ export default function AdminBookingsPage() {
                 ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by guest, email, phone — or #372 for a booking code"
+                placeholder="Search by guest, email, phone — or a reference like BK-884Q-8FG6"
                 className={`${inputClass} h-11 pl-9 ${query ? "pr-24" : "pr-16"}`}
               />
               <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
@@ -510,6 +573,22 @@ export default function AdminBookingsPage() {
               {experiences.map((x) => (
                 <option key={x.id} value={x.id}>
                   {x.name}
+                </option>
+              ))}
+            </Select>
+
+            <Select
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Sort bookings"
+              className="h-11 !w-auto min-w-[165px]"
+            >
+              {SORTS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
                 </option>
               ))}
             </Select>
@@ -660,7 +739,27 @@ export default function AdminBookingsPage() {
                   className="group"
                   onClick={() => router.push(`/admin/bookings/${r.id}`)}
                 >
-                  <Td className="whitespace-nowrap font-bold text-[#8b6f47]">{r.code}</Td>
+                  <Td className="whitespace-nowrap">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        copyRef(r.code);
+                      }}
+                      title="Copy reference"
+                      className="group/code inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 font-mono text-[12px] font-bold tracking-tight text-[#8b6f47] hover:bg-[#f3ece1]"
+                    >
+                      {r.code}
+                      <Icon
+                        name={copied === r.code ? "check" : "copy"}
+                        size={12}
+                        className={
+                          copied === r.code
+                            ? "text-[#3f7d52]"
+                            : "text-[#c3b6a6] opacity-0 transition-opacity group-hover/code:opacity-100"
+                        }
+                      />
+                    </button>
+                  </Td>
                   <Td>
                     <span className="block max-w-[180px] truncate font-semibold text-[#2a211a]">
                       {r.guestName || "—"}
