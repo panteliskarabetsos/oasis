@@ -99,6 +99,15 @@ export async function createBookingPaymentLink(admin, bookingId, { baseUrl } = {
       bookingId: String(bookingId),
       admin_generated: "true",
     },
+    // The same id on the PaymentIntent, so payment_intent.succeeded can
+    // identify the booking too. Without it that event was anonymous and the
+    // session event was the only thing that could confirm the booking.
+    payment_intent_data: {
+      metadata: {
+        bookingId: String(bookingId),
+        admin_generated: "true",
+      },
+    },
     customer_email: booking.primary_contact?.email || undefined,
   });
 

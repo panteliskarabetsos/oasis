@@ -187,7 +187,11 @@ export async function POST(req, { params }) {
           source: "manage_booking_payment_link",
         },
       },
-      success_url: `${baseUrl}/manage-booking?paid=1&booking=${booking.id}`,
+      // The session id travels back so the portal can confirm the booking on
+      // the guest's return, exactly as /booking/success does. Without it the
+      // return page had nothing to verify and the booking stayed pending
+      // until — and only if — a webhook arrived.
+      success_url: `${baseUrl}/manage-booking?paid=1&booking=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/manage-booking?cancelled=1&booking=${booking.id}`,
     });
 
