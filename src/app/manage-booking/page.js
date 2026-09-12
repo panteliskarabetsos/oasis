@@ -29,8 +29,47 @@ import {
   ReceiptText,
   WalletCards,
   ShieldCheck,
+  Copy,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
+import { legacyBookingId, normalizeBookingCode } from "@/lib/bookingCode";
+
+/**
+ * Tidy a reference as it is typed.
+ *
+ * Codes are Crockford base32 — BK-884Q-8FG6 — which has no O, I, L or U in it
+ * precisely so a code read down the phone cannot be mistyped. Folding those
+ * here means the field shows the guest exactly what will be searched for, and
+ * the server's own normalizer agrees with it.
+ *
+ * Older bookings are still referred to by "BK-" plus their row id in
+ * confirmation emails people already have, so a purely numeric body is left
+ * alone rather than forced into the 4-4 shape.
+ */
+const formatReferenceInput = (raw) => {
+  const cleaned = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!cleaned) return "";
+
+  const body = cleaned.startsWith("BK") ? cleaned.slice(2) : cleaned;
+  if (!body) return "BK-";
+
+  if (/^\d+$/.test(body)) return `BK-${body.slice(0, 10)}`;
+
+  const folded = body
+    .replace(/[OQ]/g, "0")
+    .replace(/[IL]/g, "1")
+    .replace(/U/g, "V")
+    .slice(0, 8);
+
+  return folded.length <= 4
+    ? `BK-${folded}`
+    : `BK-${folded.slice(0, 4)}-${folded.slice(4)}`;
+};
+
+/** Will the server be able to resolve this, in either form? */
+const isResolvableReference = (raw) =>
+  Boolean(normalizeBookingCode(raw) || legacyBookingId(raw));
 
 const formatMoney = (amount, currency = "EUR") =>
   new Intl.NumberFormat("en-GB", {
@@ -142,6 +181,15 @@ export default function ManageBookingPage() {
 
     if (!reference.trim() || !lastName.trim()) {
       toast.error("Please enter both your booking reference and last name.");
+      return;
+    }
+
+    // Catch a half-typed reference here rather than sending it and answering
+    // with a flat "not found", which reads as "we lost your booking".
+    if (!isResolvableReference(reference)) {
+      toast.error(
+        "That reference looks incomplete — it should look like BK-884Q-8FG6.",
+      );
       return;
     }
 
@@ -424,8 +472,10 @@ export default function ManageBookingPage() {
                       label="Booking Reference"
                       icon={<Ticket size={18} />}
                       value={reference}
-                      onChange={setReference}
-                      placeholder="e.g. BK-4K7M-Q2XR"
+                      onChange={(v) => setReference(formatReferenceInput(v))}
+                      placeholder="BK-884Q-8FG6"
+                      mono
+                      hint="At the top of your confirmation email. Older references like BK-000388 still work."
                     />
 
                     <InputField
@@ -497,9 +547,7 @@ export default function ManageBookingPage() {
                           )}
                         </div>
 
-                        <h2 className="text-2xl font-mono font-bold text-stone-800">
-                          {booking.reference}
-                        </h2>
+                        <CopyableReference value={booking.reference} />
                       </div>
 
                       {getStatusBadge()}
@@ -698,7 +746,16 @@ export default function ManageBookingPage() {
   );
 }
 
-function InputField({ id, label, icon, value, onChange, placeholder }) {
+function InputField({
+  id,
+  label,
+  icon,
+  value,
+  onChange,
+  placeholder,
+  mono = false,
+  hint = null,
+}) {
   return (
     <div>
       <label
@@ -717,11 +774,86 @@ function InputField({ id, label, icon, value, onChange, placeholder }) {
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full pl-10 pr-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] transition-all"
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          aria-describedby={hint ? `${id}-hint` : undefined}
+          className={`w-full pl-10 pr-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] transition-all ${
+            mono ? "font-mono tracking-[0.08em] placeholder:tracking-normal" : ""
+          }`}
           required
         />
       </div>
+      {hint ? (
+        <p id={`${id}-hint`} className="mt-1.5 text-xs text-stone-500">
+          {hint}
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * The reference, ready to be quoted back to us. Guests read this out on the
+ * phone or paste it into an email, so copying it should not mean selecting
+ * text on a phone screen.
+ */
+function CopyableReference({ value }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return undefined;
+    const t = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  const copy = async () => {
+    let done = false;
+    try {
+      await navigator.clipboard.writeText(value);
+      done = true;
+    } catch {
+      // Refused outside a secure context, and on some older mobile browsers.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = value;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        done = document.execCommand("copy");
+        ta.remove();
+      } catch {
+        done = false;
+      }
+    }
+    if (done) setCopied(true);
+    else toast.error("Could not copy — select the reference to copy it.");
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title="Copy booking reference"
+      className="group inline-flex items-center gap-2 rounded-lg px-1 py-0.5 -ml-1 transition hover:bg-stone-100"
+    >
+      <span className="text-2xl font-mono font-bold text-stone-800 tracking-tight">
+        {value}
+      </span>
+      {copied ? (
+        <Check size={16} className="text-emerald-600" aria-hidden />
+      ) : (
+        <Copy
+          size={16}
+          className="text-stone-300 transition-colors group-hover:text-stone-500"
+          aria-hidden
+        />
+      )}
+      <span className="sr-only">
+        {copied ? "Reference copied" : "Copy booking reference"}
+      </span>
+    </button>
   );
 }
 

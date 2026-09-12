@@ -143,6 +143,13 @@ export async function GET(req) {
       );
     }
 
+    // The row we actually found — never `numericId`, which is null whenever the
+    // guest searched with their own BK-XXXX-XXXX code. These three then ran as
+    // booking_id = null, errored, and left every ledger empty: a refunded
+    // booking looked unrefunded, a cash payment looked unpaid, and a pending
+    // reschedule left no trace on the portal.
+    const bookingId = booking.id;
+
     const [
       { data: requests, error: requestsError },
       { data: payments, error: paymentsError },
@@ -151,17 +158,17 @@ export async function GET(req) {
       admin
         .from("booking_request")
         .select("type, status")
-        .eq("booking_id", numericId),
+        .eq("booking_id", bookingId),
 
       admin
         .from("payment")
         .select("amount, currency")
-        .eq("booking_id", numericId),
+        .eq("booking_id", bookingId),
 
       admin
         .from("payment_refund")
         .select("amount_cents, currency")
-        .eq("booking_id", numericId),
+        .eq("booking_id", bookingId),
     ]);
 
     if (requestsError)
