@@ -64,6 +64,8 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="bookings/[id]" options={{ title: "Reservation" }} />
+        {/* Draws its own ScreenHeader with a back control. */}
+        <Stack.Screen name="bookings/new" options={{ headerShown: false }} />
         <Stack.Screen name="requests" options={{ title: "Guest Requests" }} />
         <Stack.Screen name="experiences" options={{ title: "Experiences" }} />
         <Stack.Screen name="experience-edit" options={{ title: "Experience" }} />

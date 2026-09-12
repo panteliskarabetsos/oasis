@@ -19,6 +19,8 @@ export default async function sendPaymentRequest(opts = {}) {
     booking,
     paymentLink,
     amountDue,
+    /** How long the seats are held. Stated in the email, so it must match. */
+    holdHours = 24,
     brand = {
       primary: "#000000",
       bg: "#f9f9f9",
@@ -65,6 +67,64 @@ export default async function sendPaymentRequest(opts = {}) {
   const firstName =
     booking.primary_contact?.firstName || booking.guest?.name || "Guest";
 
+  const money = (n) =>
+    new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(
+      Number(n) || 0,
+    );
+
+  /* -------------------- who is coming ------------------ */
+
+  const attendees = (Array.isArray(booking.attendees) ? booking.attendees : [])
+    .map((a, i) => {
+      const name =
+        String(
+          a?.name || [a?.firstName, a?.lastName].filter(Boolean).join(" ") || "",
+        ).trim() || `Guest ${i + 1}`;
+      return {
+        name,
+        category: a?.category === "child" ? "Child" : "Adult",
+        notes: String(a?.notes || a?.allergies || "").trim(),
+      };
+    });
+
+  /* -------------------- where to meet ------------------ */
+
+  const meetup =
+    booking.selected_meetup_point ||
+    booking.selectedMeetupPoint ||
+    booking.pickupPoint ||
+    null;
+
+  /* -------------------- what it is made of ------------------ */
+
+  const adults = Number(booking.adultsCount ?? booking.counts?.adults ?? 0) || 0;
+  const kids = Number(booking.kidsCount ?? booking.counts?.kids ?? 0) || 0;
+  const unitAdult = Number(booking.unitPriceAdult) || 0;
+  const unitKid = Number(booking.unitPriceKid) || 0;
+  const surcharge = Number(meetup?.surcharge) || 0;
+  const discount = Number(booking.discountAmount) || 0;
+  const alreadyPaid = Number(booking.totalPaidAmount) || 0;
+
+  const priceLines = [
+    adults > 0
+      ? {
+          label: `Adults · ${adults} × ${money(unitAdult)}`,
+          value: money(adults * unitAdult),
+        }
+      : null,
+    kids > 0
+      ? {
+          label: `Children · ${kids} × ${money(unitKid)}`,
+          value: money(kids * unitKid),
+        }
+      : null,
+    surcharge > 0
+      ? { label: "Private meeting point", value: money(surcharge) }
+      : null,
+    discount > 0 ? { label: "Discount", value: `− ${money(discount)}` } : null,
+    alreadyPaid > 0 ? { label: "Already paid", value: `− ${money(alreadyPaid)}` } : null,
+  ].filter(Boolean);
+
   /* ---------------------- subject / preheader ------------------------ */
 
   const subject = `Complete your reservation — ${experienceName}`;
@@ -82,6 +142,10 @@ export default async function sendPaymentRequest(opts = {}) {
     amountLabel,
     reference,
     paymentLink,
+    attendees,
+    meetup,
+    priceLines,
+    holdHours,
   });
 
   const text = renderTextFallback({
@@ -91,6 +155,10 @@ export default async function sendPaymentRequest(opts = {}) {
     amountLabel,
     reference,
     paymentLink,
+    attendees,
+    meetup,
+    priceLines,
+    holdHours,
   });
 
   /* ------------------------------ send ------------------------------- */
@@ -127,6 +195,10 @@ export function renderPaymentRequestHtml({
   amountLabel,
   reference,
   paymentLink,
+  attendees = [],
+  meetup = null,
+  priceLines = [],
+  holdHours = 24,
 }) {
   const {
     text = "#111111",
@@ -173,7 +245,7 @@ export function renderPaymentRequestHtml({
               <td style="padding:0 40px 30px;">
                 <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:${text};">Dear ${escapeHtml(firstName)},</p>
                 <p style="margin:0;font-size:15px;line-height:1.6;color:${text};">
-                  We are excited to welcome you to Oasis. To finalize your reservation and ensure everything is prepared for your arrival, please complete your payment within the next <strong>48 hours</strong>.
+                  We are excited to welcome you to Oasis. To finalize your reservation and ensure everything is prepared for your arrival, please complete your payment within the next <strong>${holdHours} hours</strong>.
                 </p>
               </td>
             </tr>
@@ -184,6 +256,49 @@ export function renderPaymentRequestHtml({
                 <table role="presentation" width="100%">
                   ${row("Experience", experienceName, border)}
                   ${row("Date", dateLabel, border)}
+                  ${
+                    meetup?.name
+                      ? row(
+                          "Meeting point",
+                          [meetup.name, meetup.time].filter(Boolean).join(" · "),
+                          border,
+                        )
+                      : ""
+                  }
+                  ${
+                    meetup?.instructions
+                      ? row("On arrival", meetup.instructions, border)
+                      : ""
+                  }
+                  ${row("Reference", reference, border)}
+                </table>
+
+                ${
+                  attendees.length
+                    ? `<div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:${subtext};margin:28px 0 12px;">Guests</div>
+                <table role="presentation" width="100%">
+                  ${attendees
+                    .map(
+                      (a) => `<tr>
+                    <td style="padding:10px 0;border-bottom:1px solid ${border};color:#111111;">
+                      ${escapeHtml(a.name)}
+                      <span style="color:${subtext};font-size:12px;"> · ${escapeHtml(a.category)}</span>
+                      ${
+                        a.notes
+                          ? `<div style="color:${subtext};font-size:12px;line-height:1.5;margin-top:2px;">${escapeHtml(a.notes)}</div>`
+                          : ""
+                      }
+                    </td>
+                  </tr>`,
+                    )
+                    .join("")}
+                </table>`
+                    : ""
+                }
+
+                <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:${subtext};margin:28px 0 12px;">Price</div>
+                <table role="presentation" width="100%">
+                  ${priceLines.map((l) => row(l.label, l.value, border)).join("")}
                   <tr>
                     <td style="padding:16px 0 0;border-top:1px solid ${border};font-size:16px;"><strong>Total Due</strong></td>
                     <td align="right" style="padding:16px 0 0;border-top:1px solid ${border};font-size:16px;color:${primary};"><strong>${escapeHtml(
@@ -208,7 +323,7 @@ export function renderPaymentRequestHtml({
                 <div style="color:${subtext};font-size:11px;letter-spacing:0.5px;line-height:1.6;">
                   If you require assistance or wish to use an alternative payment method, please reply directly to this email.
                   <br/>© ${new Date().getFullYear()} ${escapeHtml(
-                    (experienceName || "Oasis").replace(/<[^>]*>/g, ""),
+                    process.env.NEXT_PUBLIC_SITE_NAME || "Oasis",
                   )}.
                 </div>
               </td>
@@ -227,21 +342,49 @@ function renderTextFallback({
   amountLabel,
   reference,
   paymentLink,
+  attendees = [],
+  meetup = null,
+  priceLines = [],
+  holdHours = 24,
 }) {
   const lines = [
     `Secure Your Reservation — ${experienceName}`,
     `Reference: ${reference}`,
     "",
     `Dear ${firstName},`,
-    `We are excited to welcome you to Oasis. To finalize your reservation, please complete your payment of ${amountLabel} within the next 48 hours.`,
+    `We are excited to welcome you to Oasis. To finalize your reservation, please complete your payment of ${amountLabel} within the next ${holdHours} hours.`,
     "",
     `Date: ${dateLabel}`,
+  ];
+
+  if (meetup?.name) {
+    lines.push(
+      `Meeting point: ${[meetup.name, meetup.time].filter(Boolean).join(" · ")}`,
+    );
+    if (meetup.instructions) lines.push(`On arrival: ${meetup.instructions}`);
+  }
+
+  if (attendees.length) {
+    lines.push("", "Guests:");
+    for (const a of attendees) {
+      lines.push(`  - ${a.name} (${a.category})${a.notes ? ` — ${a.notes}` : ""}`);
+    }
+  }
+
+  if (priceLines.length) {
+    lines.push("", "Price:");
+    for (const l of priceLines) lines.push(`  ${l.label}: ${l.value}`);
+  }
+
+  lines.push(
+    "",
     `Total Due: ${amountLabel}`,
     "",
     `Complete your payment securely here: ${paymentLink}`,
     "",
     "If you require assistance, simply reply to this email.",
-  ];
+  );
+
   return lines.filter((line) => line != null).join("\n");
 }
 

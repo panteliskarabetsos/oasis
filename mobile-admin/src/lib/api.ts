@@ -21,6 +21,7 @@ import type {
   PosCheckoutResult,
   PosExperience,
   PosItem,
+  PaymentRequestResult,
   PosPaymentLink,
   Profile,
   ReportKpis,
@@ -207,6 +208,19 @@ export const api = {
 
   /* ---------- Experiences ---------- */
   adminExperiences: () => request<AdminExperience[]>("/api/admin/experiences"),
+
+  /** Create a booking. It is held unpaid until the guest follows the link. */
+  createReservation: (body: unknown) =>
+    request<{ item?: { id: number } } & { id?: number }>("/api/admin/reservations", {
+      method: "POST",
+      body,
+    }),
+
+  /** Hold the seats and email the guest their payment link, in one call. */
+  requestPayment: (id: number) =>
+    request<PaymentRequestResult>(`/api/admin/reservations/${id}/request-payment`, {
+      method: "POST",
+    }),
 
   createExperience: (body: Partial<AdminExperience>) =>
     request<AdminExperience>(`/api/admin/experiences`, { method: "POST", body }),
