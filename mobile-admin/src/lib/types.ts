@@ -114,6 +114,32 @@ export type MeetupPoint = {
   time?: string;
   mapPin?: string;
   instructions?: string;
+  /** Set on a point arranged for one booking rather than published on the experience. */
+  exceptional?: boolean;
+  /** Charge added to the booking for an exceptional point. */
+  surcharge?: number;
+};
+
+/** One person on a booking, with anything the guide should know about them. */
+export type BookingAttendee = {
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  category?: "adult" | "child";
+  notes?: string;
+};
+
+/** What /api/admin/reservations/[id]/request-payment reports back. */
+export type PaymentRequestResult = {
+  ok?: boolean;
+  url?: string;
+  amountDue?: number;
+  sentTo?: string | null;
+  emailed?: boolean;
+  emailError?: string | null;
+  held?: boolean;
+  holdHours?: number;
+  holdExpiresAt?: string | null;
 };
 
 export type AdminExperience = {

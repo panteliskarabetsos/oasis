@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
@@ -80,9 +81,18 @@ function BookingsScreenContent() {
         eyebrow="Operations"
         title="Bookings"
         trailing={
-          <View style={styles.countPill}>
-            <Text style={styles.countValue}>{total}</Text>
-            <Text style={styles.countLabel}>results</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+            <View style={styles.countPill}>
+              <Text style={styles.countValue}>{total}</Text>
+              <Text style={styles.countLabel}>results</Text>
+            </View>
+            <PressableScale
+              style={styles.newBtn}
+              onPress={() => router.push("/bookings/new")}
+              accessibilityLabel="New booking"
+            >
+              <Ionicons name="add" size={22} color={colors.onGold} />
+            </PressableScale>
           </View>
         }
       />
@@ -201,6 +211,14 @@ function BookingRow({ booking: b }: { booking: Reservation }) {
 }
 
 const styles = StyleSheet.create({
+  newBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.brand,
+  },
   countPill: {
     alignItems: "center",
     paddingHorizontal: 12,

@@ -68,9 +68,12 @@ export async function POST(req, { params }) {
     } else {
       const result = await sendPaymentRequest({
         to,
+        // The row fetched for the link already carries attendees, the meeting
+        // point and the unit prices the email breaks down.
         booking,
         paymentLink: link.url,
         amountDue: link.amountDue,
+        holdHours: HOLD_HOURS,
       });
       emailed = Boolean(result?.sent);
       if (!emailed) emailError = result?.error || "The email could not be sent.";
