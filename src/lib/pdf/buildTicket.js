@@ -25,6 +25,7 @@ class TicketGenerator {
       pageBg: this.brand.pageBg || "#ffffff", // Pure white page
     };
 
+    this.overflowAttendees = [];
     this.statusStyle = this.resolveStatusStyle(args.status);
     this.headerH = args.headerH ?? 100;
     this.inset = args.inset ?? 40; // Increased inset for more breathing room
@@ -93,7 +94,9 @@ class TicketGenerator {
     const contentX = p.x + this.inset;
     const contentW = p.w - this.inset * 2;
     const gap = 40;
-    const stubW = 160;
+    // The QR is 120 wide, so 160 left the notes beside it wrapping every few
+    // words and breaking the portal address mid-word.
+    const stubW = 182;
     const mainW = contentW - stubW - gap;
     const stubX = contentX + mainW + gap;
 
@@ -181,12 +184,20 @@ class TicketGenerator {
       .restore();
 
     // 3. Brand Identity (Left-Aligned)
-    const logoMaxH = 26;
+    //
+    // The mark is a square badge with the olive branch and the OASIS wordmark
+    // inside it. At 26pt both were crushed into an illegible smudge, so it is
+    // set at a size where the wordmark can actually be read, and centred on
+    // the same optical line as the header text rather than hung off the rule.
+    const logoMaxH = 50;
     const metaY = lineY - 22; // Alignment baseline for all header text
+    // Clear of the rule, not sitting astride it — the badge is a circle and
+    // the line cutting through it read as a mistake.
+    const logoY = Math.max(10, lineY - logoMaxH - 14);
 
     try {
       if (args.logoUrl && fs.existsSync(args.logoUrl)) {
-        this.doc.image(args.logoUrl, contentX, lineY - 38, {
+        this.doc.image(args.logoUrl, contentX, logoY, {
           height: logoMaxH,
         });
       } else {
@@ -347,7 +358,7 @@ class TicketGenerator {
       .fillColor(theme.text)
       .text(text, mainX + 14, y, { width: mainW - 26, lineGap: 3 });
 
-    return y + height + 30;
+    return y + height + 24;
   }
 
   drawOrderSummary(startY) {
@@ -449,8 +460,10 @@ class TicketGenerator {
   drawAttendees(startY) {
     const { mainX, mainW } = this.layout;
     const { args, theme } = this;
-    const rowH = 30; // Taller rows for breathability
-    let aY = this.sectionTitle("Attendees", mainX, startY) + 12;
+    // 22pt around 12pt type still breathes, and it is what lets a party of
+    // eight — a common group booking — stay on the one sheet they hand over.
+    const rowH = 22;
+    let aY = this.sectionTitle("Attendees", mainX, startY) + 10;
 
     const attendees = args.attendees || [];
 
@@ -461,17 +474,16 @@ class TicketGenerator {
         .fillColor(theme.subtext)
         .text("No attendee names on file.", mainX, aY);
     } else {
-      // Only as many as the ticket can actually hold.
+      // Only as many as the ticket can hold, with the rest continued overleaf.
       //
       // The list used to run as long as the party did: fourteen guests pushed
       // it through the frame, onto a second page, and left the QR panel blank
-      // — a ticket that could not be scanned. The names are a courtesy here;
-      // the full roster lives in the admin console.
+      // — a ticket that could not be scanned.
       const { page, footerReserve } = this.layout;
-      const room = page.h - footerReserve - 76 - aY;
+      const room = page.h - footerReserve - 70 - aY;
       const fits = Math.max(1, Math.floor(room / rowH));
       const shown = attendees.slice(0, fits);
-      const hidden = attendees.length - shown.length;
+      this.overflowAttendees = attendees.slice(fits);
 
       shown.forEach((a, i) => {
         // No background striping, just a clean bottom border
@@ -491,18 +503,84 @@ class TicketGenerator {
         this.divider(mainX, mainX + mainW, aY);
       });
 
-      if (hidden > 0) {
+      if (this.overflowAttendees.length) {
+        const n = this.overflowAttendees.length;
         this.doc
           .font("Body")
           .fontSize(11)
           .fillColor(theme.subtext)
           .text(
-            `+ ${hidden} more guest${hidden === 1 ? "" : "s"} on this booking`,
+            `+ ${n} more guest${n === 1 ? "" : "s"} — continued overleaf`,
             mainX,
             aY + 8,
             { width: mainW },
           );
       }
+    }
+  }
+
+  /**
+   * The guests who did not fit, on as many further sheets as it takes.
+   *
+   * Each carries the same header and footer, so a page separated from the
+   * others still says which booking it belongs to. The QR is not repeated:
+   * one ticket, one barcode, and a second scannable copy of it circulating
+   * is the last thing a gate needs.
+   */
+  drawAttendeeOverflow() {
+    const rest = this.overflowAttendees || [];
+    if (!rest.length) return;
+
+    const { page, contentX, contentW, contentTop, footerReserve } = this.layout;
+    const { theme } = this;
+    const innerX = contentX + 30;
+    const innerW = contentW - 60;
+    const rowH = 30;
+    let offset = this.args.attendees.length - rest.length;
+
+    let remaining = rest.slice();
+    while (remaining.length) {
+      this.doc.addPage();
+      this.drawBackgroundAndHeader();
+
+      const ticketH = page.h - contentTop - footerReserve;
+      this.doc
+        .save()
+        .rect(contentX, contentTop, contentW, ticketH)
+        .strokeColor(theme.border)
+        .lineWidth(1)
+        .stroke()
+        .restore();
+
+      let y = this.sectionTitle("Guests (continued)", innerX, contentTop + 30) + 14;
+
+      const room = page.h - footerReserve - 40 - y;
+      const fits = Math.max(1, Math.floor(room / rowH));
+      const slice = remaining.slice(0, fits);
+      remaining = remaining.slice(fits);
+
+      slice.forEach((a, i) => {
+        this.doc
+          .font("Body")
+          .fontSize(12)
+          .fillColor(theme.subtext)
+          .text(String(offset + i + 1).padStart(2, "0"), innerX, y + 8, {
+            width: 30,
+          });
+        this.doc
+          .font("Body")
+          .fontSize(12)
+          .fillColor(theme.text)
+          .text(a?.name || "Guest", innerX + 40, y + 8, { width: innerW - 40 });
+        y += rowH;
+        this.divider(innerX, innerX + innerW, y);
+      });
+
+      offset += slice.length;
+      this.drawFooter();
+      // Last, as on the first sheet: the header paints a white background over
+      // the whole page, which would otherwise wipe it out.
+      this.drawWatermark();
     }
   }
 
@@ -539,7 +617,7 @@ class TicketGenerator {
         .font("Body")
         .fontSize(10)
         .fillColor(theme.subtext)
-        .text("Scan upon arrival", stubX, sY + this.qrSize + 12, {
+        .text("Show this at check-in", stubX, sY + this.qrSize + 12, {
           width: this.qrSize,
           align: "center",
           characterSpacing: 0.5,
@@ -548,12 +626,17 @@ class TicketGenerator {
       sY += this.qrSize + 50;
     }
 
-    sY = this.sectionTitle("Important info", stubX, sY) + 12;
-    const infoLines = [
-      "Arrive 10–15 mins early.",
-      "Bring a valid ID.",
-      "Reply to email for changes.",
-    ];
+    sY = this.sectionTitle("Before you come", stubX, sY) + 12;
+
+    // Three things the guest can act on. "Reply to email for changes" assumed
+    // they still had the email; the portal works from the reference alone.
+    const infoLines = Array.isArray(args.infoLines) && args.infoLines.length
+      ? args.infoLines
+      : [
+          "Arrive 10 minutes before the meeting time.",
+          "A screenshot of this QR works — no need to print.",
+          `Change or cancel at ${this.manageUrl()}`,
+        ];
 
     // The dash sits in its own gutter so a wrapped line lines up under the
     // text rather than sliding back under the dash — "Reply to email for" then
@@ -569,6 +652,17 @@ class TicketGenerator {
       });
       this.doc.y += 8;
     });
+  }
+
+  /** Where a guest manages their own booking, without the confirmation email. */
+  manageUrl() {
+    const raw = String(
+      this.args.manageUrl ||
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        "youroasis.gr",
+    ).trim();
+    const host = raw.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+    return `${host}/manage-booking`;
   }
 
   drawFooter() {
@@ -655,6 +749,8 @@ class TicketGenerator {
       this.drawRightRail();
       this.drawFooter();
       this.drawWatermark();
+      // Any guests the first sheet could not hold get their own.
+      this.drawAttendeeOverflow();
 
       this.doc.end();
     });
