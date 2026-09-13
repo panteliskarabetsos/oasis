@@ -23,6 +23,7 @@ import {
   PageHeader,
   Select,
   Skeleton,
+  controlClass,
   inputClass,
 } from "@/app/admin/_ui";
 
@@ -1335,7 +1336,7 @@ export default function ProductForm({ productId = null }) {
                   onChange={(e) => setLabelCount(e.target.value.replace(/[^0-9]/g, ""))}
                   inputMode="numeric"
                   aria-label="Number of labels"
-                  className={`${inputClass} w-20`}
+                  className={`${controlClass} w-20`}
                 />
                 <Button variant="secondary" className="flex-1" onClick={printLabels}>
                   <Icon name="file" size={14} /> Print labels
