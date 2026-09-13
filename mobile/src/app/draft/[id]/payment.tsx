@@ -177,6 +177,27 @@ export default function PaymentScreen() {
     throw new Error("Could not start the payment.");
   }
 
+  /**
+   * Apple Pay, through Stripe's hosted page in the in-app browser.
+   *
+   * Native Apple Pay inside the payment sheet needs an Apple Merchant ID and
+   * the In-App Payments entitlement, which require a paid Apple Developer
+   * Program membership this app is not on. Stripe's hosted checkout needs
+   * none of that — it runs on checkout.stripe.com, where Apple Pay and Google
+   * Pay are offered automatically to any device that has a card.
+   */
+  async function payWithWallet() {
+    setPaying(true);
+    try {
+      await payWithBrowser();
+    } catch (e) {
+      Alert.alert("Payment", e instanceof Error ? e.message : "Payment failed to start.");
+      refresh();
+    } finally {
+      setPaying(false);
+    }
+  }
+
   async function pay() {
     setPaying(true);
     try {
@@ -359,6 +380,15 @@ export default function PaymentScreen() {
             style={{ paddingHorizontal: 24 }}
           />
         </View>
+        {pricing.total > 0 ? (
+          <Pressable
+            onPress={payWithWallet}
+            disabled={!agreed || paying}
+            style={{ paddingTop: 10, alignItems: "center", opacity: agreed ? 1 : 0.4 }}
+          >
+            <Text style={styles.walletLink}>Pay with Apple Pay or another method</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -506,4 +536,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(253,250,245,0.75)",
   },
   stickyTotal: { fontFamily: fonts.serif, fontSize: 20, color: colors.brownDeep },
+  walletLink: {
+    fontFamily: fonts.sans,
+    fontSize: 13,
+    color: colors.brand,
+    textDecorationLine: "underline",
+  },
 });
