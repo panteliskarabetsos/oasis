@@ -587,8 +587,10 @@ export default function PaymentPage() {
                           Party Size
                         </span>
                         <span className="text-xs text-[#6b625a]">
-                          {counts.adults} Adults{" "}
-                          {counts.kids > 0 && `• ${counts.kids} Children`}
+                          {counts.adults} {counts.adults === 1 ? "Adult" : "Adults"}
+                          {counts.kids > 0
+                            ? ` • ${counts.kids} ${counts.kids === 1 ? "Child" : "Children"}`
+                            : ""}
                         </span>
                       </div>
                     </div>
@@ -868,9 +870,8 @@ export default function PaymentPage() {
                     </AnimatePresence>
                   </div>
                 )}
+                <TrustBadges />
               </div>
-
-              <TrustBadges />
             </section>
           </div>
         )}
@@ -985,17 +986,22 @@ function Stepper({ currentStep = 3 }) {
   );
 }
 
+/**
+ * Reassurance, directly under the pay button.
+ *
+ * These sat outside the card on the page background, with a top rule dividing
+ * nothing — and "Encrypted" repeated the card's own header line, lock icon and
+ * all. Inside the card the rule separates them from the promo row, and each
+ * badge now says something the header does not.
+ */
 function TrustBadges() {
   return (
-    <div className="flex flex-wrap items-center justify-center gap-6 pt-4 border-t border-[#e2d7c7] text-[10px] font-bold uppercase tracking-wider text-[#a7988a]">
+    <div className="mt-8 flex flex-wrap items-center justify-center gap-6 border-t border-[#e2d7c7] pt-5 text-[10px] font-bold uppercase tracking-wider text-[#a7988a]">
       <div className="flex items-center gap-1.5">
         <ShieldCheck size={14} className="text-[#8b6f47]" /> Secure
       </div>
       <div className="flex items-center gap-1.5">
-        <Lock size={14} className="text-[#8b6f47]" /> Encrypted
-      </div>
-      <div className="flex items-center gap-1.5">
-        <CheckCircle2 size={14} className="text-[#8b6f47]" /> Confirmed
+        <CheckCircle2 size={14} className="text-[#8b6f47]" /> Instant confirmation
       </div>
     </div>
   );
