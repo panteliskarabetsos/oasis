@@ -280,15 +280,8 @@ class TicketGenerator {
     const { args, theme } = this;
     let y = contentTop + 30;
 
-    // Reference ID above title
-    if (args.bookingRef) {
-      this.doc
-        .font("Body-Bold")
-        .fontSize(10)
-        .fillColor(theme.subtext)
-        .text(`REF: ${args.bookingRef}`, mainX, y, { characterSpacing: 1 });
-      y = this.doc.y + 8;
-    }
+    // The reference is set in the header; printing it again above the title
+    // said the same thing twice and pushed the title down for nothing.
 
     this.doc
       .font("Body-Bold")
@@ -312,7 +305,49 @@ class TicketGenerator {
     }
 
     y = this.drawOrderSummary(y);
+    y = this.drawMeetingPoint(y);
     this.drawAttendees(y);
+    this.drawTotal();
+  }
+
+  /**
+   * Where to be, and when.
+   *
+   * This is the one thing a guest looks up on the morning, and it used to be
+   * the last row of a table — the row that collided with its own label. Given
+   * its own block it reads at a glance and has room to wrap.
+   */
+  drawMeetingPoint(startY) {
+    const { mainX, mainW } = this.layout;
+    const { args, theme } = this;
+    if (!args.pickupPoint) return startY;
+
+    let y = this.sectionTitle("Where to meet", mainX, startY) + 14;
+
+    const text = String(args.pickupPoint).trim();
+    const height = this.doc
+      .font("Body")
+      .fontSize(12)
+      .heightOfString(text, { width: mainW - 26, lineGap: 3 });
+
+    // A hairline down the left edge, the same weight as the dividers — enough
+    // to mark the block as its own without introducing a new visual idea.
+    this.doc
+      .save()
+      .lineWidth(1)
+      .strokeColor(theme.text)
+      .moveTo(mainX, y - 2)
+      .lineTo(mainX, y + height + 2)
+      .stroke()
+      .restore();
+
+    this.doc
+      .font("Body")
+      .fontSize(12)
+      .fillColor(theme.text)
+      .text(text, mainX + 14, y, { width: mainW - 26, lineGap: 3 });
+
+    return y + height + 30;
   }
 
   drawOrderSummary(startY) {
@@ -334,38 +369,69 @@ class TicketGenerator {
       { label: "Date", value: whenStr || "-" },
     ];
 
-    if (args.pickupPoint) {
-      rows.push({ label: "Pickup", value: args.pickupPoint });
-    }
-
     // Top border of summary
     this.divider(mainX, mainX + mainW, sy);
     sy += rowPad;
 
-    // Draw rows with Right-Aligned Values
+    // Labels sit left, values right — each in its own column.
+    //
+    // Both used to be drawn across the full width, so a value long enough to
+    // wrap started its second line at the left margin and its first line ran
+    // back over the label: "Pickup" and the pickup point printed on top of
+    // each other. Giving the value its own box makes that impossible.
+    const labelW = Math.min(120, mainW * 0.32);
+    const valueX = mainX + labelW + 12;
+    const valueW = mainW - labelW - 12;
+
     rows.forEach((r) => {
       this.doc
         .font("Body")
         .fontSize(12)
         .fillColor(theme.subtext)
-        .text(r.label, mainX, sy, { width: mainW });
+        .text(r.label, mainX, sy, { width: labelW });
 
       this.doc
         .font("Body")
         .fontSize(12)
         .fillColor(theme.text)
-        .text(r.value, mainX, sy, { width: mainW, align: "right" });
+        .text(r.value, valueX, sy, { width: valueW, align: "right" });
 
       sy +=
-        Math.max(this.doc.heightOfString(r.value, { width: mainW / 1.5 }), 16) +
+        Math.max(this.doc.heightOfString(r.value, { width: valueW }), 16) +
         rowPad;
       this.divider(mainX, mainX + mainW, sy);
       sy += rowPad;
     });
 
-    // Draw Total Row
+    return sy;
+  }
+
+  /**
+   * The amount, pinned to the foot of the ticket.
+   *
+   * It used to sit between the date and the meeting point, which put the price
+   * in the middle of the things a guest reads on the morning. At the bottom it
+   * reads last — and it anchors the frame, which otherwise ended in a quarter
+   * page of nothing.
+   */
+  drawTotal() {
+    const { page, mainX, mainW, contentTop, footerReserve } = this.layout;
+    const { args, theme } = this;
+
+    const ticketBottom = page.h - footerReserve;
+    const sy = ticketBottom - 56;
+
+    this.divider(mainX, mainX + mainW, sy - 18);
+
     const totalLabel = "Total";
-    const totalValue = `${args.amountLabel || "-"}${args.currency ? ` (${args.currency})` : ""}`;
+    // amountLabel usually already carries the currency ("EUR 135.00"), which
+    // is how the total came out reading "EUR 135.00 (EUR)".
+    const amount = String(args.amountLabel || "-");
+    const ccy = String(args.currency || "");
+    const totalValue =
+      ccy && !amount.toUpperCase().includes(ccy.toUpperCase())
+        ? `${amount} (${ccy})`
+        : amount;
 
     this.doc
       .font("Body-Bold")
@@ -378,8 +444,6 @@ class TicketGenerator {
       .fontSize(14)
       .fillColor(theme.text)
       .text(totalValue, mainX, sy, { width: mainW, align: "right" });
-
-    return sy + 40;
   }
 
   drawAttendees(startY) {
@@ -397,7 +461,19 @@ class TicketGenerator {
         .fillColor(theme.subtext)
         .text("No attendee names on file.", mainX, aY);
     } else {
-      attendees.forEach((a, i) => {
+      // Only as many as the ticket can actually hold.
+      //
+      // The list used to run as long as the party did: fourteen guests pushed
+      // it through the frame, onto a second page, and left the QR panel blank
+      // — a ticket that could not be scanned. The names are a courtesy here;
+      // the full roster lives in the admin console.
+      const { page, footerReserve } = this.layout;
+      const room = page.h - footerReserve - 76 - aY;
+      const fits = Math.max(1, Math.floor(room / rowH));
+      const shown = attendees.slice(0, fits);
+      const hidden = attendees.length - shown.length;
+
+      shown.forEach((a, i) => {
         // No background striping, just a clean bottom border
         this.doc
           .font("Body")
@@ -414,6 +490,19 @@ class TicketGenerator {
         aY += rowH;
         this.divider(mainX, mainX + mainW, aY);
       });
+
+      if (hidden > 0) {
+        this.doc
+          .font("Body")
+          .fontSize(11)
+          .fillColor(theme.subtext)
+          .text(
+            `+ ${hidden} more guest${hidden === 1 ? "" : "s"} on this booking`,
+            mainX,
+            aY + 8,
+            { width: mainW },
+          );
+      }
     }
   }
 
@@ -466,12 +555,19 @@ class TicketGenerator {
       "Reply to email for changes.",
     ];
 
+    // The dash sits in its own gutter so a wrapped line lines up under the
+    // text rather than sliding back under the dash — "Reply to email for" then
+    // "changes." hard against the margin.
+    const dashW = 14;
     this.doc.font("Body").fontSize(11).fillColor(theme.text);
     infoLines.forEach((line) => {
-      this.doc.text(`—  ${line}`, stubX, this.doc.y, {
-        width: stubW,
-        lineGap: 6,
+      const top = this.doc.y;
+      this.doc.text("—", stubX, top, { width: dashW });
+      this.doc.text(line, stubX + dashW, top, {
+        width: stubW - dashW,
+        lineGap: 4,
       });
+      this.doc.y += 8;
     });
   }
 
