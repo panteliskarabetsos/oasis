@@ -189,6 +189,8 @@ export async function GET(req, ctx) {
           email: u?.email ?? pc?.email ?? null,
           phone: u?.phone ?? pc?.phone ?? null,
         },
+        // So the resend action can say whether the guest already has one.
+        confirmationEmailSentAt: b?.confirmationEmailSentAt ?? null,
         guestSnapshot: cleanEmpty(pc || null),
 
         ...promoPayload,

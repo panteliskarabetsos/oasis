@@ -296,7 +296,11 @@ export { sendConfirmationEmail };
  * A booking is not a draft, so the fields that function reads are mapped
  * across; everything it wants is on the booking row under one name or another.
  */
-async function sendGuestConfirmation(admin, bookingId, { sessionId, amountPaid }) {
+export async function sendGuestConfirmation(
+  admin,
+  bookingId,
+  { sessionId, amountPaid, to: overrideTo = null } = {},
+) {
   const { data: booking, error } = await admin
     .from("booking")
     .select("*")
@@ -304,7 +308,22 @@ async function sendGuestConfirmation(admin, bookingId, { sessionId, amountPaid }
     .single();
   if (error || !booking) return { sent: false, error: "booking-not-found" };
 
-  const to = booking.primary_contact?.email;
+  // An admin resending can direct the copy somewhere else — the guest reading
+  // it on a different address, a travel agent, the office.
+  let to = String(overrideTo || "").trim() || booking.primary_contact?.email;
+
+  // A booking made by a signed-in guest carries no primary_contact, so the
+  // address lives on the linked User. Reading only primary_contact meant those
+  // bookings reported "no guest email" while the admin screen showed one.
+  if (!to && booking.userId) {
+    const { data: user } = await admin
+      .from("User")
+      .select("email")
+      .eq("id", booking.userId)
+      .maybeSingle();
+    to = user?.email || null;
+  }
+
   if (!to) return { sent: false, error: "no-guest-email" };
 
   // Fetched separately rather than joined, so a missing relation cannot take

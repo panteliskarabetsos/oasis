@@ -222,6 +222,7 @@ function normalizeBooking(raw) {
     selected_meetup_point: raw.selected_meetup_point || null,
     guest,
     guestSnapshot: pc,
+    confirmationEmailSentAt: raw.confirmationEmailSentAt ?? null,
     counts,
     numberOfPeople: Number.isFinite(raw.numberOfPeople)
       ? raw.numberOfPeople
@@ -395,6 +396,11 @@ export default function ReservationDetailPage() {
   const [slotTo, setSlotTo] = useState(() => toDateInput(plusDays(new Date(), 60)));
   const [targetSlotId, setTargetSlotId] = useState("");
 
+  // resend confirmation
+  const [resendTo, setResendTo] = useState("guest"); // "guest" | "other"
+  const [resendEmail, setResendEmail] = useState("");
+  const [resendSentTo, setResendSentTo] = useState("");
+
   const [stripe, setStripe] = useState(null);
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeErr, setStripeErr] = useState("");
@@ -460,6 +466,46 @@ export default function ReservationDetailPage() {
       setModal(null);
     } catch (e) {
       setActionError(e?.message || "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Deliberately not run() — that closes the modal on success, and the one
+   * thing worth confirming here is which address it actually went to.
+   */
+  async function resendConfirmation() {
+    const custom = resendTo === "other" ? resendEmail.trim() : "";
+    const target = custom || item?.guest?.email;
+
+    setBusy(true);
+    setActionError("");
+    try {
+      const res = await fetch(
+        `/api/admin/reservations/${item.id}/resend-confirmation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(custom ? { email: custom } : {}),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "The email could not be sent.");
+
+      setResendSentTo(target);
+      toast.success(`Confirmation sent to ${target}`);
+      // Only a send to the guest updates "last sent"; a copy elsewhere leaves
+      // the guest's own record alone, and the server decides which it was.
+      if (data.confirmationEmailSentAt) {
+        setItem((c) => ({
+          ...c,
+          confirmationEmailSentAt: data.confirmationEmailSentAt,
+        }));
+      }
+    } catch (e) {
+      setActionError(e?.message || "The email could not be sent.");
     } finally {
       setBusy(false);
     }
@@ -618,6 +664,18 @@ export default function ReservationDetailPage() {
               }}
             >
               <Icon name="external" size={15} /> Copy link
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setActionError("");
+                setResendTo("guest");
+                setResendEmail("");
+                setResendSentTo("");
+                setModal("resend");
+              }}
+            >
+              <Icon name="mail" size={15} /> Resend confirmation
             </Button>
             {!isPrivate && !isCancelled ? (
               <Button
@@ -923,6 +981,121 @@ export default function ReservationDetailPage() {
       </div>
 
       {/* ------------------------------ modals ------------------------------ */}
+      <Modal
+        open={modal === "resend"}
+        onClose={() => setModal(null)}
+        title="Resend confirmation"
+        subtitle={`${item.code} · ${guestName || "Guest"}`}
+      >
+        {resendSentTo ? (
+          <div className="rounded-xl border border-[#cfe3d4] bg-[#f3f9f4] p-4">
+            <p className="text-[13px] font-semibold text-[#2f6b42]">
+              Sent to {resendSentTo}
+            </p>
+            <Muted className="mt-1 text-[12px]">
+              The booking confirmation and ticket PDF are on their way.
+            </Muted>
+          </div>
+        ) : (
+          <>
+            <Muted className="text-[12.5px]">
+              Sends the same confirmation the guest receives when they book
+              themselves, with the ticket PDF attached.
+            </Muted>
+
+            <div className="mt-4 space-y-2">
+              <label
+                className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
+                  resendTo === "guest"
+                    ? "border-[#8b6f47] bg-[#faf6ef]"
+                    : "border-[#e6e0d6] hover:bg-[#faf8f4]"
+                } ${item?.guest?.email ? "" : "cursor-not-allowed opacity-60"}`}
+              >
+                <input
+                  type="radio"
+                  name="resend-target"
+                  className="mt-0.5 accent-[#8b6f47]"
+                  checked={resendTo === "guest"}
+                  disabled={!item?.guest?.email}
+                  onChange={() => setResendTo("guest")}
+                />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-semibold text-[#2a211a]">
+                    The guest
+                  </span>
+                  <span className="block truncate text-[12px] text-[#7a6a5f]">
+                    {item?.guest?.email || "No email on file for this booking"}
+                  </span>
+                </span>
+              </label>
+
+              <label
+                className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
+                  resendTo === "other"
+                    ? "border-[#8b6f47] bg-[#faf6ef]"
+                    : "border-[#e6e0d6] hover:bg-[#faf8f4]"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="resend-target"
+                  className="mt-0.5 accent-[#8b6f47]"
+                  checked={resendTo === "other"}
+                  onChange={() => setResendTo("other")}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-semibold text-[#2a211a]">
+                    A different address
+                  </span>
+                  <span className="block text-[12px] text-[#7a6a5f]">
+                    A copy for someone else — the booking is not changed.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            {resendTo === "other" ? (
+              <Field label="Send to" className="mt-3">
+                <Input
+                  type="email"
+                  autoFocus
+                  value={resendEmail}
+                  onChange={(e) => setResendEmail(e.target.value)}
+                  placeholder="name@example.com"
+                />
+              </Field>
+            ) : null}
+
+            <Muted className="mt-3 text-[12px]">
+              {item.confirmationEmailSentAt
+                ? `Last sent to the guest on ${fmtDateLong(item.confirmationEmailSentAt)}.`
+                : "The guest has not been sent a confirmation yet."}
+            </Muted>
+
+            {actionError ? <ErrorNote className="mt-3">{actionError}</ErrorNote> : null}
+          </>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setModal(null)}>
+            {resendSentTo ? "Done" : "Cancel"}
+          </Button>
+          {resendSentTo ? null : (
+            <Button
+              variant="primary"
+              onClick={resendConfirmation}
+              disabled={
+                busy ||
+                (resendTo === "other" && !resendEmail.trim()) ||
+                (resendTo === "guest" && !item?.guest?.email)
+              }
+            >
+              {busy ? "Sending…" : "Send"}
+            </Button>
+          )}
+        </div>
+      </Modal>
+
       <Modal
         open={modal === "cancel"}
         onClose={() => setModal(null)}
