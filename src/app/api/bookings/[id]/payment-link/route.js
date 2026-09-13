@@ -1,6 +1,11 @@
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  PORTAL_DENIED,
+  portalTokenFrom,
+  verifyPortalToken,
+} from "@/lib/bookings/portalToken";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,6 +73,16 @@ export async function POST(req, { params }) {
     const body = await req.json().catch(() => ({}));
 
     if (!id) return bad("Missing booking id", 400);
+
+    // Same reasoning as request-change: a bare sequential id reached the
+    // service-role client with nothing proving the caller owns the booking, so
+    // anyone could open a Stripe session against someone else's and read back
+    // what they owe. The portal's lookup issues the proof.
+    const gate = verifyPortalToken(portalTokenFrom(req, body), Number(id));
+    if (!gate.ok) {
+      console.warn(`[payment-link] denied on #${id}: ${gate.reason}`);
+      return bad(PORTAL_DENIED, 401);
+    }
 
     const { data: booking, error } = await supabase
       .from("booking")

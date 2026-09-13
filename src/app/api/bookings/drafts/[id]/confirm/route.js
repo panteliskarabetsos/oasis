@@ -8,6 +8,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import Stripe from "stripe";
 import { format } from "date-fns";
 import sendBookingConfirmation from "@/lib/email/sendBookingConfirmation";
+import { issuePortalToken } from "@/lib/bookings/portalToken";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -614,7 +615,14 @@ export async function POST(req, ctx) {
     console.warn("[confirm] redeem promo failed:", e?.message || e);
   }
 
-  return ok({ converted: true, bookingId, bookingCode });
+  // Whoever just completed this checkout is entitled to the ticket, and may
+  // well not be signed in. The token is how the confirmation screen proves it.
+  return ok({
+    converted: true,
+    bookingId,
+    bookingCode,
+    ticketToken: issuePortalToken(bookingId),
+  });
 }
 
 /* ---------------------------- helpers ---------------------------- */

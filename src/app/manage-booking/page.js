@@ -33,39 +33,11 @@ import {
   Check,
 } from "lucide-react";
 import Link from "next/link";
-import { legacyBookingId, normalizeBookingCode } from "@/lib/bookingCode";
-
-/**
- * Tidy a reference as it is typed.
- *
- * Codes are Crockford base32 — BK-884Q-8FG6 — which has no O, I, L or U in it
- * precisely so a code read down the phone cannot be mistyped. Folding those
- * here means the field shows the guest exactly what will be searched for, and
- * the server's own normalizer agrees with it.
- *
- * Older bookings are still referred to by "BK-" plus their row id in
- * confirmation emails people already have, so a purely numeric body is left
- * alone rather than forced into the 4-4 shape.
- */
-const formatReferenceInput = (raw) => {
-  const cleaned = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (!cleaned) return "";
-
-  const body = cleaned.startsWith("BK") ? cleaned.slice(2) : cleaned;
-  if (!body) return "BK-";
-
-  if (/^\d+$/.test(body)) return `BK-${body.slice(0, 10)}`;
-
-  const folded = body
-    .replace(/[OQ]/g, "0")
-    .replace(/[IL]/g, "1")
-    .replace(/U/g, "V")
-    .slice(0, 8);
-
-  return folded.length <= 4
-    ? `BK-${folded}`
-    : `BK-${folded.slice(0, 4)}-${folded.slice(4)}`;
-};
+import {
+  formatBookingCodeInput,
+  legacyBookingId,
+  normalizeBookingCode,
+} from "@/lib/bookingCode";
 
 /** Will the server be able to resolve this, in either form? */
 const isResolvableReference = (raw) =>
@@ -255,7 +227,7 @@ export default function ManageBookingPage() {
     // with a flat "not found", which reads as "we lost your booking".
     if (!isResolvableReference(reference)) {
       toast.error(
-        "That reference looks incomplete — it should look like BK-884Q-8FG6.",
+        "That reference looks incomplete — it should be five characters, like 7Q2K9.",
       );
       return;
     }
@@ -295,7 +267,11 @@ export default function ManageBookingPage() {
     try {
       const res = await fetch(`/api/bookings/${booking.id}/payment-link`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // Proof from the lookup that this is the guest's own booking.
+          ...(booking.token ? { "x-booking-token": booking.token } : {}),
+        },
         body: JSON.stringify({
           reference: booking.reference,
           email: booking.email,
@@ -408,7 +384,10 @@ export default function ManageBookingPage() {
     try {
       const res = await fetch(`/api/bookings/${booking.id}/request-change`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(booking.token ? { "x-booking-token": booking.token } : {}),
+        },
         body: JSON.stringify({
           type: activeModal,
           reason: actionReason,
@@ -417,7 +396,10 @@ export default function ManageBookingPage() {
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to submit request.");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || "Failed to submit request.");
+      }
 
       toast.success("Your request has been submitted.");
       setActiveModal(null);
@@ -428,8 +410,8 @@ export default function ManageBookingPage() {
         hasRescheduled:
           activeModal === "reschedule" ? true : prev.hasRescheduled,
       }));
-    } catch {
-      toast.error("Could not submit your request.");
+    } catch (error) {
+      toast.error(error.message || "Could not submit your request.");
     } finally {
       setActionLoading(false);
     }
@@ -543,10 +525,10 @@ export default function ManageBookingPage() {
                       label="Booking Reference"
                       icon={<Ticket size={18} />}
                       value={reference}
-                      onChange={(v) => setReference(formatReferenceInput(v))}
-                      placeholder="BK-884Q-8FG6"
+                      onChange={(v) => setReference(formatBookingCodeInput(v))}
+                      placeholder="7Q2K9"
                       mono
-                      hint="At the top of your confirmation email. Older references like BK-000388 still work."
+                      hint="Five characters, at the top of your confirmation email. Older BK- references still work."
                     />
 
                     <InputField

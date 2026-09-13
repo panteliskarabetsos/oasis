@@ -43,6 +43,9 @@ export default function BookingConfirmationPage() {
   const [bookingCode, setBookingCode] = useState("");
   const [bookingDbStatus, setBookingDbStatus] = useState("");
   const [confirmedBookingId, setConfirmedBookingId] = useState(null);
+  // Entitles this browser to the ticket PDF. The buyer may have no account, so
+  // a session cookie cannot be what proves they just paid for this booking.
+  const [ticketToken, setTicketToken] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [printing, setPrinting] = useState(false);
 
@@ -133,6 +136,7 @@ export default function BookingConfirmationPage() {
         if (data?.converted && data?.bookingId) {
           setConfirmedBookingId(data.bookingId);
           if (data.bookingCode) setBookingCode(data.bookingCode);
+          if (data.ticketToken) setTicketToken(data.ticketToken);
         }
       } catch (e) {
         if (alive) setError(e.message || "Finalization failed");
@@ -226,6 +230,7 @@ export default function BookingConfirmationPage() {
 
         if (j?.bookingId && !confirmedBookingId)
           setConfirmedBookingId(j.bookingId);
+        if (j?.ticketToken) setTicketToken(String(j.ticketToken));
         if (j?.bookingCode) setBookingCode(String(j.bookingCode));
         else if (j?.bookingId && !bookingCode)
           setBookingCode(deriveFallbackCode(j.bookingId));
@@ -381,9 +386,12 @@ export default function BookingConfirmationPage() {
 
     try {
       setPrinting(true);
-      const res = await fetch(`/api/bookings/${idToUse}/invoice`, {
-        method: "GET",
-      });
+      const res = await fetch(
+        `/api/bookings/${idToUse}/invoice${
+          ticketToken ? `?token=${encodeURIComponent(ticketToken)}` : ""
+        }`,
+        { method: "GET" },
+      );
       if (!res.ok) throw new Error("Fetch failed");
 
       const blob = await res.blob();

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import Icon from "../_ui/Icon";
+import { legacyBookingId, normalizeBookingCode } from "@/lib/bookingCode";
 import {
   Button,
   Card,
@@ -675,7 +676,7 @@ function ManualFallback({ onDetected }) {
       <input
         value={val}
         onChange={(e) => setVal(e.target.value)}
-        placeholder="Or paste / type booking code or URL…"
+        placeholder="Or type a reference — 7Q2K9"
         className="flex-1 rounded-full border bg-white/80 px-4 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
         style={{ borderColor: colors.border }}
       />
@@ -961,15 +962,59 @@ export default function CheckinsPage() {
     }
   }
 
-  function extractBookingId(s) {
-    if (!s) return null;
-    const str = String(s);
+  /**
+   * Work out which booking was just scanned or typed.
+   *
+   * A ticket QR carries the booking's reference, not its row id. This used to
+   * scrape the first run of digits out of whatever it was handed, so scanning
+   * "BK-KZRW-6KV2" picked up the 6 and checked in booking 6 — a different
+   * guest — without anything looking wrong. The reference is matched against
+   * today's roster first, and digits are only read out of something that is
+   * actually a number.
+   *
+   * @returns {{id:number} | {code:string} | null}
+   *   an id to act on, a valid reference that is not on today's roster, or
+   *   nothing we could read.
+   */
+  function resolveScan(raw) {
+    const str = String(raw ?? "").trim();
+    if (!str) return null;
+
+    // A link to the booking names the row id outright.
     const mUrl = str.match(/\/(?:booking|bookings)\/(\d+)/i);
-    if (mUrl) return Number(mUrl[1]);
+    if (mUrl) return { id: Number(mUrl[1]) };
+
+    const code = normalizeBookingCode(str);
+    if (code) {
+      const hit = findBookingByCode(code);
+      if (hit) return { id: hit.booking.id };
+      // A real reference for some other day. Say so, rather than falling
+      // through and reading digits out of it.
+      if (/[A-Za-z]/.test(str)) return { code };
+    }
+
+    const legacy = legacyBookingId(str);
+    if (legacy) return { id: legacy };
+
+    if (/^\d{1,10}$/.test(str)) return { id: Number(str) };
+
     const mTag = str.match(/booking[:=\s]+(\d{1,10})/i);
-    if (mTag) return Number(mTag[1]);
-    const mNum = str.match(/(?:^|[^0-9])(\d{1,10})(?:[^0-9]|$)/);
-    return mNum ? Number(mNum[1]) : null;
+    if (mTag) return { id: Number(mTag[1]) };
+
+    return code ? { code } : null;
+  }
+
+  /** The roster row carrying this reference, if today has one. */
+  function findBookingByCode(code) {
+    const wanted = String(code).toUpperCase();
+    for (const slot of slots) {
+      for (const b of slot.bookings || []) {
+        if (String(b.code || "").toUpperCase() === wanted) {
+          return { booking: b, slot };
+        }
+      }
+    }
+    return null;
   }
 
   function findBookingInRoster(id) {
@@ -990,8 +1035,12 @@ export default function CheckinsPage() {
   }
 
   async function handleDetected(raw) {
-    const id = extractBookingId(raw);
-    if (!id) return toast.error("That code doesn't contain a booking reference.");
+    const hit = resolveScan(raw);
+    if (!hit) return toast.error("That code doesn't contain a booking reference.");
+    if (hit.code) {
+      return toast.error(`${hit.code} is a valid reference, but not on today's roster.`);
+    }
+    const { id } = hit;
 
     const found = findBookingInRoster(id);
     if (!found) {

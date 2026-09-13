@@ -42,28 +42,119 @@ export async function expireStaleHolds(admin) {
   try {
     const nowIso = new Date().toISOString();
 
-    const { data, error } = await admin
+    // Read the candidates before touching them. A blind bulk update cannot ask
+    // Stripe whether the money actually arrived, and cancelling a guest who
+    // paid is far worse than holding a seat an hour longer.
+    const { data: candidates, error } = await admin
       .from("booking")
-      .update({ status: "cancelled", holdExpiresAt: null })
+      .select(
+        'id, code, "stripeSessionId", "stripePaymentIntentId", "totalPaidAmount"',
+      )
       .eq("status", "pending")
       .not("holdExpiresAt", "is", null)
       .lt("holdExpiresAt", nowIso)
-      .select("id, code");
+      .limit(200);
 
     if (error) {
       if (isMissingColumn(error)) return { expired: 0, reason: "no-column" };
       throw error;
     }
+    if (!candidates?.length) return { expired: 0, reason: "swept" };
 
-    if (data?.length) {
-      console.info(
-        `[holds] released ${data.length} unpaid booking(s):`,
-        data.map((b) => b.code || b.id).join(", "),
-      );
+    const expired = [];
+    const rescued = [];
+    const spared = [];
+
+    for (const b of candidates) {
+      // Anything already bearing a payment is not ours to cancel.
+      if (b.stripePaymentIntentId || Number(b.totalPaidAmount) > 0) {
+        spared.push(b.code || b.id);
+        continue;
+      }
+
+      const paid = await settledWithStripe(admin, b);
+      if (paid === true) {
+        rescued.push(b.code || b.id);
+        continue;
+      }
+      // `null` means we could not reach Stripe. Leave the hold for the next
+      // sweep rather than guessing; an hour of held seats is recoverable, a
+      // wrongly cancelled booking is not.
+      if (paid === null) {
+        spared.push(b.code || b.id);
+        continue;
+      }
+
+      const { error: updErr } = await admin
+        .from("booking")
+        .update({ status: "cancelled", holdExpiresAt: null })
+        .eq("id", b.id)
+        .eq("status", "pending");
+      if (!updErr) expired.push(b.code || b.id);
     }
-    return { expired: data?.length || 0, reason: "swept" };
+
+    if (expired.length) {
+      console.info(`[holds] released ${expired.length} unpaid:`, expired.join(", "));
+    }
+    if (rescued.length) {
+      console.warn(`[holds] confirmed ${rescued.length} already paid:`, rescued.join(", "));
+    }
+    if (spared.length) {
+      console.info(`[holds] left ${spared.length} alone:`, spared.join(", "));
+    }
+
+    return {
+      expired: expired.length,
+      rescued: rescued.length,
+      spared: spared.length,
+      reason: "swept",
+    };
   } catch (e) {
     console.error("[holds] sweep failed", e?.message || e);
     return { expired: 0, reason: "error" };
+  }
+}
+
+/**
+ * Did this booking's Stripe session actually get paid?
+ *
+ * @returns {Promise<true|false|null>} true = paid (and now confirmed),
+ *   false = definitely not paid, null = could not tell.
+ */
+async function settledWithStripe(admin, booking) {
+  if (!booking.stripeSessionId) return false; // no link was ever opened
+  if (!process.env.STRIPE_SECRET_KEY) return null;
+
+  try {
+    const { default: Stripe } = await import("stripe");
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    const session = await stripe.checkout.sessions.retrieve(
+      booking.stripeSessionId,
+    );
+
+    if (session?.payment_status !== "paid") return false;
+
+    // Paid but still pending: nothing ever confirmed it — no webhook, or the
+    // guest closed the tab before the success page ran. Put that right here.
+    const { confirmPaidBooking } = await import("@/lib/email/bookingConfirmation");
+    await confirmPaidBooking(admin, booking.id, {
+      stripe,
+      sessionId: session.id,
+      piId:
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : (session.payment_intent?.id ?? null),
+      amountPaid:
+        typeof session.amount_total === "number"
+          ? session.amount_total / 100
+          : null,
+    });
+    return true;
+  } catch (e) {
+    console.error(
+      `[holds] could not check Stripe for booking ${booking.id}:`,
+      e?.message || e,
+    );
+    return null;
   }
 }

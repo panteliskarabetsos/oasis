@@ -123,12 +123,16 @@ export default function ManageBookingScreen() {
     }
     setSubmitting(true);
     try {
-      const res = await api.requestChange(booking.id, {
-        type: modal!,
-        reason: reason.trim() || undefined,
-        newSlotId: selectedSlotId ?? undefined,
-        newMeetupPoint: selectedMeetup ?? undefined,
-      });
+      const res = await api.requestChange(
+        booking.id,
+        {
+          type: modal!,
+          reason: reason.trim() || undefined,
+          newSlotId: selectedSlotId ?? undefined,
+          newMeetupPoint: selectedMeetup ?? undefined,
+        },
+        booking.token
+      );
       setBooking({ ...booking, updateRequested: true });
       setModal(null);
       Alert.alert(
@@ -147,7 +151,7 @@ export default function ManageBookingScreen() {
     if (!booking) return;
     setSubmitting(true);
     try {
-      const res = await api.paymentLink(booking.id, booking.email);
+      const res = await api.paymentLink(booking.id, booking.email, booking.token);
       const url = res.url ?? res.checkoutUrl;
       if (url) await WebBrowser.openBrowserAsync(url);
       // refresh the payment state afterwards

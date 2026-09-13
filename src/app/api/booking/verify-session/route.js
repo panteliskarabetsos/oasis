@@ -6,6 +6,7 @@ import { bookingRef as refFor } from "@/lib/bookingCode";
 import Stripe from "stripe";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { confirmPaidBooking } from "@/lib/email/bookingConfirmation";
+import { issuePortalToken } from "@/lib/bookings/portalToken";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -100,6 +101,9 @@ export async function GET(req) {
         "Oasis Experience",
       date: booking.startTime,
       bookingCode: derivedCode, // Send the derived code instead
+      // Stripe has just confirmed this caller paid for this booking, so they
+      // are entitled to its ticket even without an account.
+      ticketToken: issuePortalToken(booking.id),
       amount: session.amount_total / 100,
       currency: (session.currency || booking.currency || "EUR").toUpperCase(),
       status: session.payment_status,

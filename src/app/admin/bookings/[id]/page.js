@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
 
 import Icon from "../../_ui/Icon";
+import { bookingRef } from "@/lib/bookingCode";
 import {
   Badge,
   Button,
@@ -202,7 +203,7 @@ function normalizeBooking(raw) {
 
   return {
     id: raw.id,
-    code: raw.code || (raw.id ? `B-${String(raw.id).padStart(6, "0")}` : null),
+    code: raw.code || (raw.id ? bookingRef(raw) : null),
     status: raw.status || "confirmed",
     createdAt: raw.createdAt || raw.created_at || null,
     updatedAt: raw.updatedAt || raw.updated_at || null,
@@ -396,6 +397,9 @@ export default function ReservationDetailPage() {
   const [slotTo, setSlotTo] = useState(() => toDateInput(plusDays(new Date(), 60)));
   const [targetSlotId, setTargetSlotId] = useState("");
 
+  // the reference, copied for a phone call or an email
+  const [codeCopied, setCodeCopied] = useState(false);
+
   // resend confirmation
   const [resendTo, setResendTo] = useState("guest"); // "guest" | "other"
   const [resendEmail, setResendEmail] = useState("");
@@ -469,6 +473,32 @@ export default function ReservationDetailPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function copyCode() {
+    const code = item?.code;
+    if (!code) return;
+    let done = false;
+    try {
+      await navigator.clipboard.writeText(code);
+      done = true;
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = code;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        done = document.execCommand("copy");
+        ta.remove();
+      } catch {
+        done = false;
+      }
+    }
+    if (!done) return toast.error("Could not copy the reference");
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 1400);
   }
 
   /**
@@ -645,7 +675,25 @@ export default function ReservationDetailPage() {
       </div>
 
       <PageHeader
-        eyebrow={item.code}
+        eyebrow={
+          <button
+            type="button"
+            onClick={copyCode}
+            title="Copy reference"
+            className="group inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 -ml-1 font-mono text-[13px] font-bold tracking-tight text-[#8b6f47] normal-case hover:bg-[#f3ece1]"
+          >
+            {item.code}
+            <Icon
+              name={codeCopied ? "check" : "copy"}
+              size={12}
+              className={
+                codeCopied
+                  ? "text-[#3f7d52]"
+                  : "text-[#c3b6a6] opacity-0 transition-opacity group-hover:opacity-100"
+              }
+            />
+          </button>
+        }
         title={displayExperienceName}
         description={
           item.startTime

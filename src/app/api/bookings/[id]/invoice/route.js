@@ -3,10 +3,14 @@ import { NextResponse } from "next/server";
 import { bookingRef as refFor } from "@/lib/bookingCode";
 import buildTicketPdfBuffer from "@/lib/pdf/buildTicket"; // ⬅️ use your real PDF builder
 import { getBookingById } from "@/lib/bookings/getBookingById";
+import {
+  ACCESS_DENIED,
+  authorizeBookingAccess,
+} from "@/lib/bookings/bookingAccess";
 
 export const runtime = "nodejs";
 
-export async function GET(_req, ctx) {
+export async function GET(req, ctx) {
   // In new Next.js you must await params
   const { id } = await ctx.params;
 
@@ -17,6 +21,14 @@ export async function GET(_req, ctx) {
   const bookingId = Number(id);
   if (!Number.isFinite(bookingId)) {
     return NextResponse.json({ error: "Invalid booking id" }, { status: 400 });
+  }
+
+  // This PDF is the guest's ticket: its QR is the reference the check-in
+  // scanner reads. Anyone counting ids could download a working one.
+  const access = await authorizeBookingAccess(req, bookingId);
+  if (!access.ok) {
+    console.warn(`[invoice] denied ticket for booking ${bookingId}`);
+    return NextResponse.json({ error: ACCESS_DENIED }, { status: 401 });
   }
 
   let booking;

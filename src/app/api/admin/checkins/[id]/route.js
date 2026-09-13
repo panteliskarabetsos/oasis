@@ -96,19 +96,27 @@ async function getAuthedAdmin() {
  * which would silently admit a different guest.
  */
 async function resolveBookingId(admin, raw) {
-  const asId = legacyBookingId(raw) ?? (/^\d+$/.test(String(raw ?? "").trim()) ? Number(raw) : null);
-  if (asId) return asId;
-
+  // The code is tried first, and only a code that matches nothing falls back
+  // to being read as a row id.
+  //
+  // Codes are five characters now, and about one in three hundred comes out
+  // all digits — "03881". Reading that as an id first would scan one guest in
+  // and admit a different one, which is the failure this function exists to
+  // avoid.
   const code = normalizeBookingCode(raw);
-  if (!code) return null;
+  if (code) {
+    const { data } = await admin
+      .from("booking")
+      .select("id")
+      .eq("code", code)
+      .maybeSingle();
+    if (data?.id) return Number(data.id);
+  }
 
-  const { data, error } = await admin
-    .from("booking")
-    .select("id")
-    .eq("code", code)
-    .maybeSingle();
-  if (error || !data) return null;
-  return Number(data.id);
+  const asId =
+    legacyBookingId(raw) ??
+    (/^\d+$/.test(String(raw ?? "").trim()) ? Number(raw) : null);
+  return asId || null;
 }
 
 /* ---------------------------------------------

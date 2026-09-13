@@ -6,6 +6,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   ScrollView,
   Share,
@@ -20,6 +21,7 @@ import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import { bookingRef, formatDateTime, money } from "@/lib/format";
+import { openWithTicketToken } from "@/lib/ticketLinks";
 
 export default function BookingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -137,7 +139,7 @@ export default function BookingDetailScreen() {
       <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
         <Button
           title="Download Ticket (PDF)"
-          onPress={() => WebBrowser.openBrowserAsync(api.ticketPdfUrl(booking.id))}
+          onPress={() => openWithTicketToken(booking.id, (url) => WebBrowser.openBrowserAsync(url), api.ticketPdfUrl)}
         />
         {calendarUrl() ? (
           <Button title="Add to Calendar" variant="ghost" onPress={() => Linking.openURL(calendarUrl()!)} />
@@ -154,7 +156,23 @@ export default function BookingDetailScreen() {
         <Button
           title="Add to Apple Wallet"
           variant="ghost"
-          onPress={() => Linking.openURL(api.appleWalletUrl(booking.id))}
+          onPress={() => openWithTicketToken(booking.id, (url) => Linking.openURL(url), api.appleWalletUrl)}
+        />
+        <Button
+          title="Save to Google Wallet"
+          variant="ghost"
+          onPress={async () => {
+            try {
+              const token = await api.ticketToken(booking.id);
+              const { saveUrl } = await api.googleWallet(booking.id, token);
+              if (saveUrl) await Linking.openURL(saveUrl);
+            } catch (e) {
+              Alert.alert(
+                "Google Wallet",
+                e instanceof Error ? e.message : "Could not create the Wallet link."
+              );
+            }
+          }}
         />
         <Button
           title="Share"
