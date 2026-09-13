@@ -47,11 +47,26 @@ function extractBookingRef(raw: string): string | null {
   let s = String(raw ?? "").trim();
   if (!s) return null;
 
-  // Our own tickets wrap the reference; unwrap and read what is inside. This
-  // used to insist on digits after the colon, so a five character code sent by
-  // the guest app — BOOKING-CHECKIN:T8VQR — was refused outright.
+  // Our own tickets wrap the reference two different ways. Unwrap both before
+  // anything else, so every rule below works on the bare value.
+  //
+  //   guest app QR   BOOKING-CHECKIN:T8VQR
+  //   emailed ticket https://youroasis.gr/bookings/T8VQR
+  //
+  // The link form is why new codes would not scan: the URL rule matched only
+  // digits, while an old BK-XXXX-XXXX code happened to match the code pattern
+  // anywhere in the string and so came through regardless.
   const wrapped = s.match(/BOOKING-CHECKIN:\s*([0-9A-Z-]+)/i);
   if (wrapped) s = wrapped[1];
+
+  const link = s.match(/\/(?:booking|bookings)\/([0-9A-Za-z-]+)/i);
+  if (link) {
+    try {
+      s = decodeURIComponent(link[1]);
+    } catch {
+      s = link[1];
+    }
+  }
 
   // Previous random code, with or without a URL around it.
   const legacyCode = s.match(/BK[-\s]?([0-9A-Z]{4})[-\s]?([0-9A-Z]{4})\b/i);
@@ -69,10 +84,6 @@ function extractBookingRef(raw: string): string | null {
 
   // A bare number is a booking id — but only if that is all there is.
   if (/^\d{1,10}$/.test(s)) return s;
-
-  // A link to the booking names the row id outright.
-  const url = s.match(/\/(?:booking|bookings)\/(\d+)/i);
-  if (url) return url[1];
 
   return null;
 }
