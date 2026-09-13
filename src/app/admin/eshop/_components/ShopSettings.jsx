@@ -17,6 +17,7 @@ import {
   Muted,
   Select,
   Skeleton,
+  controlClass,
   inputClass,
 } from "@/app/admin/_ui";
 import { ScaledNumberInput } from "@/app/admin/_ui/client";
@@ -417,7 +418,7 @@ function DeliveryCard({ value, onChange, noWeight, weightsUnknown }) {
               value={previewKg}
               onChange={(e) => setPreviewKg(e.target.value.replace(/[^0-9.]/g, ""))}
               inputMode="decimal"
-              className={`${inputClass} w-24`}
+              className={`${controlClass} w-24`}
             />
           </label>
           <label className="block">
@@ -426,7 +427,7 @@ function DeliveryCard({ value, onChange, noWeight, weightsUnknown }) {
               value={previewBasket}
               onChange={(e) => setPreviewBasket(e.target.value.replace(/[^0-9.]/g, ""))}
               inputMode="decimal"
-              className={`${inputClass} w-24`}
+              className={`${controlClass} w-24`}
             />
           </label>
           <label className="block">
@@ -434,7 +435,7 @@ function DeliveryCard({ value, onChange, noWeight, weightsUnknown }) {
             <input
               value={previewCountry}
               onChange={(e) => setPreviewCountry(e.target.value.toUpperCase().slice(0, 2))}
-              className={`${inputClass} w-20 font-mono`}
+              className={`${controlClass} w-20 font-mono`}
             />
           </label>
           <div className="ml-auto text-right">

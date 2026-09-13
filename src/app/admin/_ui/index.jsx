@@ -173,9 +173,18 @@ export function Button({
   );
 }
 
-export const inputClass =
-  "h-10 w-full rounded-xl border border-[#e6e0d6] bg-white px-3 text-[13px] text-[#2a211a] " +
+/**
+ * Control styling without a width, for a field that sets its own.
+ *
+ * Layering `w-20` on top of a class that already carries `w-full` does not
+ * narrow anything: Tailwind emits `.w-full` last, so it wins whatever order
+ * the classes appear in. Compose from this instead.
+ */
+export const controlClass =
+  "h-10 rounded-xl border border-[#e6e0d6] bg-white px-3 text-[13px] text-[#2a211a] " +
   "placeholder:text-[#b0a294] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#c9b393]";
+
+export const inputClass = `w-full ${controlClass}`;
 
 export function Field({ label, hint, error, children, className = "" }) {
   return (

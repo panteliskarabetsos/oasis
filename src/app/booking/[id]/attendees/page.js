@@ -209,7 +209,14 @@ export default function AttendeesPage() {
           const parsedDietary = DIETARY_OPTIONS.filter((opt) =>
             rawAllergies.includes(opt.id),
           ).map((o) => o.id);
-          const parsedNotes = rawAllergies.replace(/Dietary:.*?\|/g, "").trim();
+          // Chips and free text share one `allergies` string: "Dietary: A, B |
+          // notes". The old pattern needed the trailing pipe, which is only
+          // written when notes exist — so a guest who picked chips and typed
+          // nothing found "Dietary: Vegan" sitting in their own notes box on
+          // the way back, as though they had written it.
+          const parsedNotes = rawAllergies
+            .replace(/^\s*Dietary:[^|]*(?:\|\s*)?/i, "")
+            .trim();
 
           return {
             firstName: existing[i]?.firstName || "",
@@ -351,7 +358,7 @@ export default function AttendeesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#fcf9f4] font-sans pb-32 sm:pb-16">
+    <div className="min-h-screen bg-[#fcf9f4] font-sans pb-32 lg:pb-16">
       {/* Top Nav */}
       <div className="bg-white border-b border-[#e5e0d8] sticky top-0 z-30 shadow-sm">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -506,7 +513,7 @@ export default function AttendeesPage() {
                         </Field>
                       </div>
 
-                      <div className="w-full sm:w-1/2">
+                      <div className="w-full max-w-[180px]">
                         <Field label="Age" hint={hintForCategory(a.category)}>
                           <input
                             type="number"
@@ -516,7 +523,7 @@ export default function AttendeesPage() {
                               onChangeAttendee(idx, "age", e.target.value)
                             }
                             className={inputCls}
-                            placeholder="Required for safety & groups"
+                            placeholder="e.g. 34"
                           />
                         </Field>
                       </div>
@@ -681,7 +688,7 @@ export default function AttendeesPage() {
                           value={pcCountry}
                           onChange={(e) => setPcCountry(e.target.value)}
                           aria-label="Country calling code"
-                          className={`${inputCls} w-[122px] shrink-0 pr-1`}
+                          className={`${controlCls} w-[112px] shrink-0 pr-2`}
                         >
                           {COUNTRY_CODES.map((c) => (
                             <option key={c.iso} value={c.iso}>
@@ -689,7 +696,7 @@ export default function AttendeesPage() {
                             </option>
                           ))}
                         </select>
-                        <div className="relative flex-1">
+                        <div className="relative min-w-0 flex-1">
                           <Phone className="w-4 h-4 text-[#a09084] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                           <input
                             type="tel"
@@ -840,8 +847,19 @@ function Field({ label, hint, children }) {
   );
 }
 
-const inputCls =
-  "w-full p-3 rounded-xl border border-[#e0dcd4] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 text-[#3a2f28] placeholder:text-[#a09084] shadow-sm transition-all";
+/**
+ * Control styling without a width.
+ *
+ * The width is kept separate on purpose. A control that sets its own width in
+ * a flex row must not also carry `w-full`: Tailwind emits `.w-full` after an
+ * arbitrary `.w-[122px]`, so `w-full` wins however the classes are ordered in
+ * the attribute. That is what left the country picker filling the whole row
+ * and the phone number itself 54px wide.
+ */
+const controlCls =
+  "p-3 rounded-xl border border-[#e0dcd4] bg-white focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 text-[#3a2f28] placeholder:text-[#a09084] shadow-sm transition-all";
+
+const inputCls = `w-full ${controlCls}`;
 
 function makeCategoryList(adults, kids) {
   const arr = [];
