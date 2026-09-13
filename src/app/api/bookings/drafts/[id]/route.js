@@ -78,6 +78,7 @@ export async function GET(req, ctx) {
       .select(
         `
         id,
+        code,
         status,
         "numberOfPeople",
         "totalPaidAmount",
@@ -101,6 +102,9 @@ export async function GET(req, ctx) {
 
   return ok({
     bookingId: draft.convertedBookingId ?? null,
+    // The reference the guest will see on their email and ticket, so a client
+    // polling this screen shows the same one rather than deriving "BK-000402".
+    bookingCode: booking?.code ?? null,
     booking,
     draft: {
       id: draft.id,

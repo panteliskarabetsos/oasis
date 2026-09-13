@@ -33,6 +33,9 @@ export default function ConfirmationScreen() {
   // Guest checkout has no account, so the confirm response is what entitles
   // this device to the ticket. Falls back to the authenticated endpoint.
   const [ticketToken, setTicketToken] = useState<string | null>(null);
+  // The booking's real reference. Deriving it from the row id instead showed
+  // "BK-000402" here while the guest's confirmation email said "T8VQR".
+  const [bookingCode, setBookingCode] = useState<string | null>(null);
   const confirmTried = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -45,6 +48,7 @@ export default function ConfirmationScreen() {
         draft?.status === "converted" || draft?.convertedBookingId || env.bookingId;
       if (converted) {
         setBookingId(env.bookingId ?? draft?.convertedBookingId ?? null);
+        if (env.bookingCode) setBookingCode(env.bookingCode);
         setPhase("success");
         if (pollRef.current) clearInterval(pollRef.current);
         return;
@@ -62,6 +66,7 @@ export default function ConfirmationScreen() {
           if (res.converted && res.bookingId) {
             setBookingId(res.bookingId);
             if (res.ticketToken) setTicketToken(res.ticketToken);
+            if (res.bookingCode) setBookingCode(res.bookingCode);
             setPhase("success");
             if (pollRef.current) clearInterval(pollRef.current);
           }
@@ -94,7 +99,9 @@ export default function ConfirmationScreen() {
   const exp = envelope?.experience;
   const slot = envelope?.slot;
   const draft = envelope?.draft;
-  const reference = bookingRef(bookingId ?? draft?.convertedBookingId ?? 0);
+  const reference = bookingRef(
+    bookingCode ?? { id: bookingId ?? draft?.convertedBookingId ?? 0 },
+  );
 
   function calendarUrl(): string | null {
     if (!slot || !exp) return null;

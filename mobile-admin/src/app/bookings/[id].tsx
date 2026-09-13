@@ -37,6 +37,8 @@ function ReservationDetailScreenContent() {
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState("");
   const [doRefund, setDoRefund] = useState(false);
+  // Staff read the reference out on the phone, so make it one tap to copy.
+  const [codeCopied, setCodeCopied] = useState(false);
   const [refundAmount, setRefundAmount] = useState("");
   const [payMethod, setPayMethod] = useState("cash");
   const [payAmount, setPayAmount] = useState("");
@@ -135,7 +137,19 @@ function ReservationDetailScreenContent() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={{ padding: spacing.md, paddingBottom: 64 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <Text style={styles.code}>{item.code}</Text>
+        <Text
+          style={styles.code}
+          onPress={async () => {
+            if (!item.code) return;
+            await Clipboard.setStringAsync(item.code);
+            setCodeCopied(true);
+            setTimeout(() => setCodeCopied(false), 1400);
+          }}
+          suppressHighlighting
+        >
+          {item.code}
+          {codeCopied ? "  ✓" : ""}
+        </Text>
         <Badge label={item.status ?? "—"} tone={statusTone(item.status)} />
       </View>
       <Serif style={{ fontSize: 22, marginTop: 4 }}>

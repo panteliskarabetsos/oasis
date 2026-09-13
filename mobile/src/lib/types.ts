@@ -84,6 +84,8 @@ export type Draft = {
 
 export type DraftEnvelope = {
   bookingId?: number | null;
+  /** The booking's real reference once the draft has converted. */
+  bookingCode?: string | null;
   booking?: {
     id: number;
     status?: string;
