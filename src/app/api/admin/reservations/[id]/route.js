@@ -2,6 +2,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { bookingRef } from "@/lib/bookingCode";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import Stripe from "stripe";
@@ -328,7 +329,7 @@ export async function GET(req, ctx) {
     const item = {
       id: d.id,
       source: "draft",
-      code: `D-${String(d.id).padStart(6, "0")}`,
+      code: `D-${String(d.id).padStart(6, "0")}`, // drafts are not bookings yet
       status: d.status,
       createdAt: d.createdAt ?? null,
       updatedAt: d.updatedAt ?? null,
@@ -599,6 +600,14 @@ function cleanEmpty(v) {
   }
   return any ? out : null;
 }
+/**
+ * The reference this booking is known by.
+ *
+ * The fallback used to be "B-000391", a shape that appears nowhere else and
+ * resolves in nothing — not the guest portal, not the check-in scanner. Where
+ * a booking has no code, bookingRef() gives the legacy "BK-" plus row id form,
+ * which both of those do accept.
+ */
 function deriveCode(row) {
   const cands = [
     row?.code,
@@ -609,8 +618,7 @@ function deriveCode(row) {
     row?.ref,
   ].filter(Boolean);
   if (cands.length) return String(cands[0]);
-  if (row?.id) return `B-${String(row.id).padStart(6, "0")}`;
-  return null;
+  return row?.id ? bookingRef(row) : null;
 }
 function parseJSON(v, fallback = null) {
   if (v == null) return fallback;

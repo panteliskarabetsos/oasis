@@ -83,6 +83,10 @@ function asReference(raw) {
   if (hash) return hash[1].trim();
   if (/^bk[\s-]?[0-9a-z]{4}[\s-]?[0-9a-z]{4}$/i.test(s)) return s;
   if (/^bk[\s-]?\d{1,6}$/i.test(s)) return s;
+  // Five characters with a digit in them is a current code. A digit has to be
+  // there: plenty of surnames are five letters, and searching for a guest by
+  // name must not be mistaken for a reference lookup.
+  if (/^[0-9a-z]{5}$/i.test(s) && /\d/.test(s)) return s;
   return null;
 }
 
@@ -517,7 +521,7 @@ export default function AdminBookingsPage() {
                 ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by guest, email, phone — or a reference like BK-884Q-8FG6"
+                placeholder="Search by guest, email, phone — or a reference like 7Q2K9"
                 className={`${inputClass} h-11 pl-9 ${query ? "pr-24" : "pr-16"}`}
               />
               <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">

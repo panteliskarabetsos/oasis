@@ -32,8 +32,10 @@ import {
   Printer,
   Navigation,
   Settings,
+  Wallet,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
+import { bookingRef } from "@/lib/bookingCode";
 import QRCode from "qrcode";
 
 export default function BookingDetailsPage({ params }) {
@@ -46,6 +48,7 @@ export default function BookingDetailsPage({ params }) {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [downloadingTicket, setDownloadingTicket] = useState(false);
+  const [savingWallet, setSavingWallet] = useState(false);
 
   // --- Auth & Fetch Logic ---
   useEffect(() => {
@@ -111,6 +114,32 @@ export default function BookingDetailsPage({ params }) {
       alert("Could not download ticket PDF.");
     } finally {
       setDownloadingTicket(false);
+    }
+  }
+
+  /**
+   * Hand the booking to Google Wallet.
+   *
+   * The pass is built server-side from the booking itself, so the barcode is
+   * the reference the check-in scanner reads.
+   */
+  async function handleGoogleWallet() {
+    if (!booking?.id) return;
+    try {
+      setSavingWallet(true);
+      const res = await fetch(`/api/wallet/google?bookingId=${booking.id}`, {
+        cache: "no-store",
+      });
+      const { saveUrl, error } = await res.json().catch(() => ({}));
+      if (!res.ok || !saveUrl) {
+        throw new Error(error || "Could not create the Wallet link.");
+      }
+      window.open(saveUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "Could not create the Wallet link.");
+    } finally {
+      setSavingWallet(false);
     }
   }
 
@@ -255,6 +284,18 @@ export default function BookingDetailsPage({ params }) {
                   className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2.5 text-[#5a4a3f] font-medium shadow-sm hover:bg-[#faf9f6] transition-all active:scale-95"
                 >
                   <Share2 className="w-4 h-4" /> Share
+                </button>
+                <button
+                  onClick={handleGoogleWallet}
+                  disabled={savingWallet}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#e8e2d9] bg-white px-5 py-2.5 text-[#5a4a3f] font-medium shadow-sm hover:bg-[#faf9f6] transition-all active:scale-95 disabled:opacity-60"
+                >
+                  {savingWallet ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Wallet className="w-4 h-4" />
+                  )}
+                  {savingWallet ? "Preparing..." : "Google Wallet"}
                 </button>
                 <button
                   onClick={handleDownloadTicket}
@@ -541,7 +582,7 @@ function TicketCard({
               <Copy className="w-3.5 h-3.5" />
             )}
             <span className={copied ? "text-emerald-700" : ""}>
-              {copied ? "Copied" : qrValue || "BK-######"}
+              {copied ? "Copied" : qrValue || "—"}
             </span>
           </div>
         )}
@@ -772,7 +813,7 @@ function getPublicBookingRef(b) {
     b?.bookingRef ||
     b?.bookingCode ||
     b?.code ||
-    (b?.id ? `BK-${b.id}` : "REF-???")
+    (b?.id ? bookingRef(b) : "—")
   );
 }
 

@@ -167,6 +167,8 @@ export const api = {
       converted?: boolean;
       bookingId?: number;
       bookingCode?: string;
+      /** Entitles this device to the ticket even with no account. */
+      ticketToken?: string;
       already?: boolean;
       status?: string;
     }>(`/api/bookings/drafts/${id}/confirm`, { method: "POST", body: ref }),
@@ -253,10 +255,21 @@ export const api = {
       `/api/bookings/lookup?ref=${encodeURIComponent(ref)}&lastName=${encodeURIComponent(lastName)}`
     ),
 
-  paymentLink: (bookingId: number | string, email?: string) =>
+  // `token` comes back from lookupBooking and proves this is the guest's own
+  // booking. Without it the server answers 401: these routes act on a bare
+  // sequential id, so the id alone is not evidence of anything.
+  paymentLink: (
+    bookingId: number | string,
+    email?: string,
+    token?: string
+  ) =>
     request<{ url?: string; checkoutUrl?: string; amountDue?: number }>(
       `/api/bookings/${bookingId}/payment-link`,
-      { method: "POST", body: email ? { email } : {} }
+      {
+        method: "POST",
+        body: email ? { email } : {},
+        headers: token ? { "x-booking-token": token } : undefined,
+      }
     ),
 
   requestChange: (
@@ -266,21 +279,46 @@ export const api = {
       reason?: string;
       newSlotId?: number;
       newMeetupPoint?: unknown;
-    }
+    },
+    token?: string
   ) =>
     request<{ success: boolean; message?: string }>(
       `/api/bookings/${bookingId}/request-change`,
-      { method: "POST", body }
+      {
+        method: "POST",
+        body,
+        headers: token ? { "x-booking-token": token } : undefined,
+      }
     ),
 
-  ticketPdfUrl: (bookingId: number | string) =>
-    `${config.apiUrl}/api/bookings/${bookingId}/invoice`,
+  /**
+   * A short-lived token for the ticket and wallet links.
+   *
+   * Those open in an external browser, which carries none of the app's
+   * session, so the id alone reaches the server as no proof at all. This call
+   * does carry the session, and trades it for something a URL can hold.
+   */
+  ticketToken: (bookingId: number | string) =>
+    request<{ token: string }>(`/api/bookings/${bookingId}/ticket-token`, {
+      auth: true,
+    }).then((r) => r.token),
 
-  appleWalletUrl: (bookingId: number | string) =>
-    `${config.apiUrl}/api/wallet/apple?bookingId=${bookingId}`,
+  ticketPdfUrl: (bookingId: number | string, token?: string) =>
+    `${config.apiUrl}/api/bookings/${bookingId}/invoice${
+      token ? `?token=${encodeURIComponent(token)}` : ""
+    }`,
 
-  googleWallet: (bookingId: number | string) =>
-    request<{ saveUrl: string }>(`/api/wallet/google?bookingId=${bookingId}`),
+  appleWalletUrl: (bookingId: number | string, token?: string) =>
+    `${config.apiUrl}/api/wallet/apple?bookingId=${bookingId}${
+      token ? `&token=${encodeURIComponent(token)}` : ""
+    }`,
+
+  googleWallet: (bookingId: number | string, token?: string) =>
+    request<{ saveUrl: string }>(
+      `/api/wallet/google?bookingId=${bookingId}${
+        token ? `&token=${encodeURIComponent(token)}` : ""
+      }`
+    ),
 
   /* ---------------- Account (session cookie required) ---------------- */
 

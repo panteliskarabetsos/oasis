@@ -2,6 +2,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import {
+  ACCESS_DENIED,
+  authorizeBookingAccess,
+} from "@/lib/bookings/bookingAccess";
 import { Template } from "passkit-generator";
 import { writeFile } from "node:fs/promises";
 
@@ -16,6 +20,14 @@ export async function GET(req) {
     const bookingId = searchParams.get("bookingId");
     if (!bookingId)
       return NextResponse.json({ error: "Missing bookingId" }, { status: 400 });
+
+    // A pass names a booking and carries its barcode, so it is only for
+    // someone entitled to that booking — not for whoever guesses the id.
+    const access = await authorizeBookingAccess(req, bookingId);
+    if (!access.ok) {
+      console.warn(`[wallet] denied pass for booking ${bookingId}`);
+      return NextResponse.json({ error: ACCESS_DENIED }, { status: 401 });
+    }
 
     // In production you’d load booking details from your DB.
     // Keep it simple: the client already has these; but we’ll show defaults if missing.

@@ -216,7 +216,7 @@ export default function AdminRequestsPage() {
             />
             <input
               type="text"
-              placeholder="Search by guest name or BK- reference..."
+              placeholder="Search by guest name or booking reference..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] transition-all"

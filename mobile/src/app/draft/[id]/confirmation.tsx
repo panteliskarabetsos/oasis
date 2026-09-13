@@ -16,6 +16,7 @@ import { Button, Card, Divider, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { api } from "@/lib/api";
 import { bookingRef, formatDateTime, money } from "@/lib/format";
+import { openWithTicketToken } from "@/lib/ticketLinks";
 import type { DraftEnvelope } from "@/lib/types";
 
 type Phase = "processing" | "success" | "failed";
@@ -29,6 +30,9 @@ export default function ConfirmationScreen() {
   const [phase, setPhase] = useState<Phase>("processing");
   const [envelope, setEnvelope] = useState<DraftEnvelope | null>(null);
   const [bookingId, setBookingId] = useState<number | null>(null);
+  // Guest checkout has no account, so the confirm response is what entitles
+  // this device to the ticket. Falls back to the authenticated endpoint.
+  const [ticketToken, setTicketToken] = useState<string | null>(null);
   const confirmTried = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -57,6 +61,7 @@ export default function ConfirmationScreen() {
           });
           if (res.converted && res.bookingId) {
             setBookingId(res.bookingId);
+            if (res.ticketToken) setTicketToken(res.ticketToken);
             setPhase("success");
             if (pollRef.current) clearInterval(pollRef.current);
           }
@@ -196,7 +201,11 @@ export default function ConfirmationScreen() {
         {bookingId ? (
           <Button
             title="Download Ticket (PDF)"
-            onPress={() => WebBrowser.openBrowserAsync(api.ticketPdfUrl(bookingId!))}
+            onPress={() =>
+              ticketToken
+                ? WebBrowser.openBrowserAsync(api.ticketPdfUrl(bookingId!, ticketToken))
+                : openWithTicketToken(bookingId!, (u) => WebBrowser.openBrowserAsync(u), api.ticketPdfUrl)
+            }
           />
         ) : null}
         {calendarUrl() ? (
@@ -210,7 +219,11 @@ export default function ConfirmationScreen() {
           <Button
             title="Add to Apple Wallet"
             variant="ghost"
-            onPress={() => Linking.openURL(api.appleWalletUrl(bookingId!))}
+            onPress={() =>
+              ticketToken
+                ? Linking.openURL(api.appleWalletUrl(bookingId!, ticketToken))
+                : openWithTicketToken(bookingId!, (u) => Linking.openURL(u), api.appleWalletUrl)
+            }
           />
         ) : null}
         <Button

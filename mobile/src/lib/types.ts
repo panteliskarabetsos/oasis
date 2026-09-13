@@ -141,6 +141,8 @@ export type BookingLookup = {
   id: number;
   experienceId?: number;
   reference: string;
+  /** Short-lived proof from the lookup; required by the actions that follow. */
+  token?: string;
   guestName?: string;
   email?: string;
   experienceName?: string;

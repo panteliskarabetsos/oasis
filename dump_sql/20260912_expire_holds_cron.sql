@@ -25,7 +25,16 @@ begin
          "updatedAt" = now()
    where status = 'pending'
      and "holdExpiresAt" is not null
-     and "holdExpiresAt" < now();
+     and "holdExpiresAt" < now()
+     -- Never cancel a booking that shows any sign of having been paid.
+     --
+     -- A guest can pay in the last minutes of the window and not make it back
+     -- to the success page, leaving the row pending until something confirms
+     -- it. Both of these are set the moment a payment is recognised, and are
+     -- null on every unpaid pending booking, so they are a safe floor: the
+     -- worst case becomes a seat held too long, never a paid guest cancelled.
+     and "stripePaymentIntentId" is null
+     and coalesce("totalPaidAmount", 0) = 0;
 
   get diagnostics released = row_count;
   return released;

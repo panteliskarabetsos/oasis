@@ -4,6 +4,11 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "../../../../../lib/supabase/admin";
+import {
+  PORTAL_DENIED,
+  portalTokenFrom,
+  verifyPortalToken,
+} from "@/lib/bookings/portalToken";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
 const bad = (msg, status = 400) =>
@@ -27,6 +32,17 @@ export async function POST(req, { params }) {
     const body = await req.json();
     const { type, reason, newSlotId, newMeetupPoint } = body;
 
+    // This route acts on a bare row id with the service-role client, and ids
+    // run in sequence — so without this anyone counting from 1 could change
+    // another guest's meeting point, write into staff notes, or file
+    // cancellations across every booking. The portal proves who it is at
+    // lookup; the token is that proof travelling here.
+    const gate = verifyPortalToken(portalTokenFrom(req, body), bookingId);
+    if (!gate.ok) {
+      console.warn(`[request-change] denied on #${bookingId}: ${gate.reason}`);
+      return bad(PORTAL_DENIED, 401);
+    }
+
     if (!["cancel", "reschedule", "meetup"].includes(type)) {
       return bad("Invalid request type", 400);
     }
@@ -34,7 +50,7 @@ export async function POST(req, { params }) {
     // 1. Fetch the existing booking
     const { data: booking, error: fetchError } = await admin
       .from("booking")
-      .select("id, status, notes")
+      .select("id, status, notes, \"experienceId\", \"scheduleSlotId\"")
       .eq("id", bookingId)
       .single();
 
@@ -108,6 +124,20 @@ export async function POST(req, { params }) {
 
     // 3. Handle Meetup Point Change -> Update the booking table directly
     if (type === "meetup" && newMeetupPoint) {
+      // Whatever arrived here used to be written to the booking verbatim, and
+      // its name interpolated into staff notes. Resolve it against the points
+      // the experience actually offers instead, and store that — a guest can
+      // only choose from the list the portal showed them, never invent one.
+      const offered = await offeredMeetupPoints(admin, booking);
+      const chosen = matchMeetupPoint(offered, newMeetupPoint);
+
+      if (!chosen) {
+        return bad(
+          "That meeting point is not available for this experience.",
+          400,
+        );
+      }
+
       const timestamp = new Date().toLocaleString("en-US", {
         timeZone: "UTC",
         dateStyle: "short",
@@ -117,13 +147,13 @@ export async function POST(req, { params }) {
       // Still appending a note for staff visibility/audit trail
       const updatedNotes =
         (booking.notes || "") +
-        `\n\n--- GUEST CHANGED MEETUP POINT @ ${timestamp} UTC ---\nNew Point: ${newMeetupPoint.name || newMeetupPoint}\n`;
+        `\n\n--- GUEST CHANGED MEETUP POINT @ ${timestamp} UTC ---\nNew Point: ${chosen.name}\n`;
 
       const { error: updateError } = await admin
         .from("booking")
         .update({
           notes: updatedNotes,
-          selected_meetup_point: newMeetupPoint,
+          selected_meetup_point: chosen,
         })
         .eq("id", bookingId);
 
@@ -141,4 +171,64 @@ export async function POST(req, { params }) {
     console.error("[request-change] unhandled error:", err);
     return bad("An internal server error occurred.", 500);
   }
+}
+
+/* --------------------------- meeting points --------------------------- */
+
+/** The meeting points this booking's experience offers, or [] if none. */
+async function offeredMeetupPoints(admin, booking) {
+  let experienceId = booking?.experienceId ?? null;
+
+  if (!experienceId && booking?.scheduleSlotId) {
+    const { data: slot } = await admin
+      .from("ScheduleSlot")
+      .select("experienceId")
+      .eq("id", booking.scheduleSlotId)
+      .maybeSingle();
+    experienceId = slot?.experienceId ?? null;
+  }
+  if (!experienceId) return [];
+
+  const { data: exp } = await admin
+    .from("Experience")
+    .select("meetupPoints")
+    .eq("id", experienceId)
+    .maybeSingle();
+
+  const raw = exp?.meetupPoints;
+  const list = typeof raw === "string" ? safeParse(raw) : raw;
+  return Array.isArray(list) ? list : [];
+}
+
+function safeParse(v) {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The offered point the request refers to, or null.
+ *
+ * Matched by name because that is what the portal sends back; the stored value
+ * is the one from the experience, so nothing the caller wrote is kept.
+ */
+function matchMeetupPoint(offered, requested) {
+  const wanted = String(
+    (requested && typeof requested === "object" ? requested.name : requested) ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  if (!wanted || !offered.length) return null;
+
+  return (
+    offered.find(
+      (p) =>
+        String(p?.name || "")
+          .trim()
+          .toLowerCase() === wanted,
+    ) || null
+  );
 }

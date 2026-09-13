@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { bookingRef } from "@/lib/bookingCode";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
@@ -182,7 +183,7 @@ function mapBookingRow(b) {
   return {
     id: b.id,
     source: "booking",
-    code: `B-${String(b.id).padStart(6, "0")}`,
+    code: bookingRef(b),
     scheduleSlotId: b?.scheduleSlotId ?? null,
     startTime: start,
     experienceId: exId,
