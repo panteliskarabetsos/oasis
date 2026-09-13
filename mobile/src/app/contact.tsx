@@ -151,7 +151,7 @@ export default function ContactScreen() {
           {contactType === "support" ? (
             <Field
               label="Booking reference"
-              placeholder="BK-000123"
+              placeholder="T8VQR"
               autoCapitalize="characters"
               value={bookingRef}
               onChangeText={setBookingRef}

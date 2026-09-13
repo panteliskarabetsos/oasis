@@ -60,6 +60,41 @@ export function bookingRef(
   return `BK-${String(Number(id ?? 0)).padStart(6, "0")}`;
 }
 
+/**
+ * Tidy a reference as it is typed.
+ *
+ * Mirrors formatBookingCodeInput in the website's @/lib/bookingCode — the
+ * server normalises the same way, so the guest sees exactly what will be
+ * searched for and a misread O or I is corrected in front of them.
+ *
+ * References are five characters (T8VQR). Older bookings carry BK-XXXX-XXXX
+ * or "BK-" plus the row id, and those still have to be typeable.
+ */
+export function formatBookingCodeInput(raw: string): string {
+  const cleaned = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!cleaned) return "";
+
+  // Short enough to still be the current format — including a code that
+  // happens to start with BK — so leave it whole.
+  if (cleaned.length <= 5) return fold(cleaned);
+
+  const body = cleaned.startsWith("BK") ? cleaned.slice(2) : cleaned;
+  if (/^\d+$/.test(body)) return `BK-${body.slice(0, 10)}`;
+
+  const folded = fold(body).slice(0, 8);
+  return folded.length <= 4
+    ? `BK-${folded}`
+    : `BK-${folded.slice(0, 4)}-${folded.slice(4)}`;
+}
+
+/**
+ * Only letters the alphabet leaves out may be folded. Q is in it — folding Q
+ * to 0 makes every code containing one impossible to look up.
+ */
+function fold(s: string): string {
+  return s.replace(/O/g, "0").replace(/[IL]/g, "1").replace(/U/g, "V");
+}
+
 /** yyyy-mm-dd in local time (for calendar keys). */
 export function dayKey(iso: string): string {
   const d = new Date(iso);

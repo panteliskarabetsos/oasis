@@ -35,30 +35,60 @@ function dayKey(d: Date): string {
 /**
  * Pull a booking reference out of whatever the QR contained.
  *
- * References are now random codes (BK-WD7A-FR1X), so this returns the reference
- * as a string and lets the server resolve it. It deliberately does NOT fall
- * back to "any digits anywhere": that rule turned BK-WD7A-FR1X into booking 7
- * and would have admitted a different guest.
+ * References are five characters now (T8VQR). Tickets already in guests'
+ * hands carry the previous random code (BK-WD7A-FR1X), and older ones still
+ * carry "BK-" plus the row id, so all three have to come back out of a scan.
+ *
+ * It deliberately does NOT fall back to "any digits anywhere": that rule turned
+ * BK-WD7A-FR1X into booking 7 and would have admitted a different guest. A bare
+ * reference is only accepted when it is the entire value.
  */
 function extractBookingRef(raw: string): string | null {
-  const s = String(raw ?? "").trim();
+  let s = String(raw ?? "").trim();
   if (!s) return null;
 
-  // Random code, with or without a URL around it.
-  const code = s.match(/BK[-\s]?([0-9A-Z]{4})[-\s]?([0-9A-Z]{4})\b/i);
-  if (code) return `BK-${code[1].toUpperCase()}-${code[2].toUpperCase()}`;
+  // Our own tickets wrap the reference; unwrap and read what is inside. This
+  // used to insist on digits after the colon, so a five character code sent by
+  // the guest app — BOOKING-CHECKIN:T8VQR — was refused outright.
+  const wrapped = s.match(/BOOKING-CHECKIN:\s*([0-9A-Z-]+)/i);
+  if (wrapped) s = wrapped[1];
+
+  // Previous random code, with or without a URL around it.
+  const legacyCode = s.match(/BK[-\s]?([0-9A-Z]{4})[-\s]?([0-9A-Z]{4})\b/i);
+  if (legacyCode) {
+    return `BK-${legacyCode[1].toUpperCase()}-${legacyCode[2].toUpperCase()}`;
+  }
+
+  // Current reference. Checked before the legacy-id rule below, because a code
+  // may legitimately read "BK123" and that rule would take it for booking 123.
+  if (/^[0-9A-Z]{5}$/i.test(s)) return foldReference(s);
 
   // Legacy "BK-000123" tickets, in a URL or on their own.
-  const legacy = s.match(/BK[-\s]?0*(\d{1,10})\b/i);
-  if (legacy) return legacy[1];
-
-  const explicit = s.match(/BOOKING-CHECKIN:0*(\d{1,10})/i);
-  if (explicit) return explicit[1];
+  const legacyId = s.match(/BK[-\s]?0*(\d{1,10})\b/i);
+  if (legacyId) return legacyId[1];
 
   // A bare number is a booking id — but only if that is all there is.
   if (/^\d{1,10}$/.test(s)) return s;
 
+  // A link to the booking names the row id outright.
+  const url = s.match(/\/(?:booking|bookings)\/(\d+)/i);
+  if (url) return url[1];
+
   return null;
+}
+
+/**
+ * Map the characters a camera or a person confuses onto the alphabet's own.
+ *
+ * References avoid I, L, O and U precisely so these substitutions are safe.
+ * Q is *in* the alphabet and must never be folded.
+ */
+function foldReference(s: string): string {
+  return s
+    .toUpperCase()
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1")
+    .replace(/U/g, "V");
 }
 
 /** Reject rather than leave an operator staring at a spinner on a dead signal. */

@@ -15,7 +15,14 @@ import {
 import { Badge, Button, Card, Divider, Eyebrow, Field, Muted, Serif } from "@/components/ui";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { api } from "@/lib/api";
-import { dayKey, formatDate, formatTime, money, POLICY_MAP } from "@/lib/format";
+import {
+  dayKey,
+  formatBookingCodeInput,
+  formatDate,
+  formatTime,
+  money,
+  POLICY_MAP,
+} from "@/lib/format";
 import type { BookingLookup, MeetupPoint, ScheduleSlot } from "@/lib/types";
 
 type ModalKind = "cancel" | "reschedule" | "meetup" | null;
@@ -45,7 +52,7 @@ export default function ManageBookingScreen() {
     } catch (e) {
       Alert.alert(
         "Booking not found",
-        e instanceof Error ? e.message : "Check the reference (e.g. BK-000123) and last name."
+        e instanceof Error ? e.message : "Check the reference (e.g. T8VQR) and last name."
       );
     } finally {
       setSearching(false);
@@ -185,10 +192,11 @@ export default function ManageBookingScreen() {
           <Card style={{ marginTop: spacing.lg }}>
             <Field
               label="Booking reference"
-              placeholder="BK-000123"
+              placeholder="T8VQR"
               autoCapitalize="characters"
+              autoCorrect={false}
               value={reference}
-              onChangeText={setReference}
+              onChangeText={(v) => setReference(formatBookingCodeInput(v))}
             />
             <Field
               label="Last name"
