@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReCAPTCHA from "react-google-recaptcha";
 import { useAuth } from "@/app/components/SessionWrapper";
@@ -216,8 +217,12 @@ export default function Register() {
 
             <div className="mt-10 rounded-2xl bg-[#fffdf9] border border-[#eee8df] p-6">
               <p className="text-xs text-[#7a6a5f]">
-                By creating an account you agree to our Terms and acknowledge
-                our Privacy Policy.
+                Already booked with us? You can find a reservation without an
+                account from the{" "}
+                <Link href="/manage-booking" className="text-[#8b6f47] underline">
+                  guest portal
+                </Link>{" "}
+                using your reference and last name.
               </p>
             </div>
           </div>
@@ -354,6 +359,29 @@ export default function Register() {
                 >
                   {isLoading ? "Creating Account…" : "Register"}
                 </button>
+
+                {/* Consent sits with the button that gives it.
+                    It used to live in the left-hand column, which is
+                    `hidden lg:flex` — so nobody registering on a phone ever
+                    saw it, and the two documents it named were plain text
+                    rather than links to the pages that exist. */}
+                <p className="text-center text-xs leading-relaxed text-[#7a6a5f]">
+                  By creating an account you agree to our{" "}
+                  <Link
+                    href="/terms-of-use"
+                    className="text-[#8b6f47] underline underline-offset-2"
+                  >
+                    Terms of Use
+                  </Link>{" "}
+                  and acknowledge our{" "}
+                  <Link
+                    href="/privacy-policy"
+                    className="text-[#8b6f47] underline underline-offset-2"
+                  >
+                    Privacy Policy
+                  </Link>
+                  .
+                </p>
 
                 <p className="text-center text-sm text-[#5a4a3f]">
                   Already have an account?{" "}
