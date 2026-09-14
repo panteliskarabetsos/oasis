@@ -38,6 +38,10 @@ import {
 import { useAuth } from "@/app/components/SessionWrapper";
 import { bookingRef } from "@/lib/bookingCode";
 import { isPaidStatus } from "@/lib/bookings/paymentStatus";
+import {
+  meetingPointMapHref,
+  normalizeMeetingPoint,
+} from "@/lib/bookings/meetingPoint";
 import QRCode from "qrcode";
 
 export default function BookingDetailsPage({ params }) {
@@ -178,9 +182,22 @@ export default function BookingDetailsPage({ params }) {
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startUtc}/${endUtc}&details=${details}&location=${location}`;
   }, [dateObj, durationMin, booking, exp]);
 
+  const meetingPoint = useMemo(
+    () => normalizeMeetingPoint(booking?.meetingPoint),
+    [booking],
+  );
+
+  /**
+   * Where "Get Directions" actually sends someone.
+   *
+   * It used to send them to the experience's location — a town, "Samonas,
+   * Chania" — which is not where anyone is standing. When the booking has a
+   * meeting point the stored pin wins, so the map opens on the corner the
+   * guide is waiting at rather than the village it is in.
+   */
   const mapHref = useMemo(
-    () => (exp?.location ? toMapHref(exp.location) : "#"),
-    [exp],
+    () => meetingPointMapHref(meetingPoint, exp?.location) || "#",
+    [meetingPoint, exp],
   );
 
   /**
@@ -348,11 +365,34 @@ export default function BookingDetailsPage({ params }) {
                       label="Location"
                       value={exp?.location}
                       action={
-                        exp?.location
+                        !meetingPoint && exp?.location
                           ? { label: "Get Directions", href: mapHref }
                           : null
                       }
                     />
+                    {/* The meeting point gets its own row and carries the map
+                        link, because it is the address that matters on the
+                        morning. The row above is the experience's town. */}
+                    {meetingPoint && (
+                      <DetailRow
+                        icon={Navigation}
+                        label="Where to meet"
+                        value={meetingPoint.name || meetingPoint.address}
+                        subValue={[
+                          meetingPoint.time
+                            ? `Meet at ${meetingPoint.time}`
+                            : "",
+                          meetingPoint.instructions,
+                        ]
+                          .filter(Boolean)
+                          .join(" — ")}
+                        action={
+                          mapHref !== "#"
+                            ? { label: "Open in Maps", href: mapHref }
+                            : null
+                        }
+                      />
+                    )}
                     <DetailRow
                       icon={Users}
                       label="Guests"
@@ -879,12 +919,6 @@ function getQrValue(b) {
   const ref = getPublicBookingRef(b);
   const base = process.env.NEXT_PUBLIC_SITE_URL || "https://yourapp.com";
   return `${base}/bookings/${ref}`;
-}
-
-function toMapHref(loc) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-    loc,
-  )}`;
 }
 
 function toCalStamp(date) {

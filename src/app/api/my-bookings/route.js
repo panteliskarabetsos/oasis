@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { normalizeMeetingPoint } from "@/lib/bookings/meetingPoint";
 
 export async function GET() {
   try {
@@ -55,6 +56,7 @@ export async function GET() {
       promoJson,
       customExperienceName,
       attendees,
+      selected_meetup_point,
       scheduleSlot:ScheduleSlot (
         id,
         date,
@@ -157,6 +159,10 @@ export async function GET() {
               isCancelled: b.scheduleSlot.isCancelled,
             }
           : null,
+        // Normalised here so every client — the bookings list, the booking
+        // page, both apps — reads one shape, and none of them has to know that
+        // older rows store this as a plain string.
+        meetingPoint: normalizeMeetingPoint(b.selected_meetup_point),
         appliedPromoCode: b.appliedPromoCode || null,
         discountAmount: b.discountAmount || 0,
         promoJson: b.promoJson || null,
