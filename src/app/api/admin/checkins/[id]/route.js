@@ -8,6 +8,11 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
 import { legacyBookingId, normalizeBookingCode } from "@/lib/bookingCode";
+import {
+  BALANCE_COLUMNS,
+  bookingBalance,
+  isPaidStatus,
+} from "@/lib/bookings/paymentStatus";
 
 const TBL_BOOKING = "booking";
 const TBL_EXPERIENCE = "Experience";
@@ -145,10 +150,11 @@ export async function GET(_req, ctx) {
         "startTime",
         "duration",
         "experienceId",
-        "adultsCount",
-        "kidsCount",
         "numberOfPeople",
         "primary_contact",
+        // The desk needs to know whether this guest has paid, and if not, what
+        // they owe — so it can warn before admitting them.
+        ...BALANCE_COLUMNS,
       ].join(",")
     )
     .eq("id", bookingId)
@@ -189,6 +195,11 @@ export async function GET(_req, ctx) {
         pc.name || [pc.firstName, pc.lastName].filter(Boolean).join(" ") || null,
       pax: partySize(b),
       primary_contact: b.primary_contact ?? null,
+      // Payment state, flattened for the scanner. An unpaid booking is still
+      // checked in on purpose — a guest may be paying cash at the door — but
+      // staff are shown the balance first and must confirm deliberately.
+      paid: isPaidStatus(b.status),
+      balance: bookingBalance(b),
       day: b.startTime
         ? formatDayTZ(new Date(b.startTime), "Europe/Athens")
         : null,
@@ -209,9 +220,14 @@ export async function PATCH(req, ctx) {
   const body = await req.json().catch(() => ({}));
   const action = String(body?.action || "").toLowerCase();
 
+  // Admitting a guest who has not paid is allowed — someone may be paying cash
+  // at the door — but never by accident. The desk has to ask for it explicitly,
+  // which it only does after showing staff the outstanding balance.
+  const force = body?.force === true || String(body?.force) === "true";
+
   let nextStatus = null;
   if (action === "checkin") nextStatus = "checked_in";
-  else if (action === "undo") nextStatus = "confirmed";
+  else if (action === "undo") nextStatus = "confirmed"; // revised below for unpaid bookings
   else if (action === "no_show" || action === "noshow") nextStatus = "no_show";
   else return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 
@@ -226,7 +242,7 @@ export async function PATCH(req, ctx) {
   // 1) Read current status + startTime first (idempotency + guard rails)
   const { data: current, error: curErr } = await admin
     .from(TBL_BOOKING)
-    .select("id,status,startTime")
+    .select(["id", "status", "startTime", ...BALANCE_COLUMNS].join(","))
     .eq("id", bookingId)
     .single();
 
@@ -235,6 +251,17 @@ export async function PATCH(req, ctx) {
   }
 
   const curr = String(current.status || "").toLowerCase();
+  const balance = bookingBalance(current);
+
+  // Undoing a check-in returns the booking to where it came from. Sending an
+  // unpaid guest to "confirmed" would be worse than the mistake being undone:
+  // "confirmed" is what the ticket, the wallet pass and the QR all read as
+  // proof of payment, so an accidental admission would quietly issue a real
+  // ticket. Nothing has been collected, so it goes back to pending.
+  if (action === "undo" && balance.paid <= 0 && balance.due > 0) {
+    nextStatus = "pending";
+  }
+
   const next = String(nextStatus);
 
   // --- Guard: check-in only for "today" (Europe/Athens) ---
@@ -269,6 +296,29 @@ export async function PATCH(req, ctx) {
       {
         error: `Cannot ${action.replace("_", "-")} a ${curr} booking.`,
         status: curr,
+      },
+      { status: 409 }
+    );
+  }
+
+  // Guard: an unpaid guest is admitted only on a deliberate second action.
+  //
+  // This is a warning, not a wall. The desk shows the balance and asks; if
+  // staff take the money in cash they confirm and the guest goes in. What it
+  // stops is a scan flashing green for someone who never paid, which is what
+  // happened before: the only refusals here were cancelled and completed.
+  if (action === "checkin" && !isPaidStatus(curr) && !force) {
+    return NextResponse.json(
+      {
+        error: "payment_required",
+        message:
+          balance.due > 0
+            ? `This booking is ${curr || "unpaid"} — ${balance.currency} ${balance.due.toFixed(2)} still due.`
+            : `This booking is ${curr || "unpaid"} and has no payment recorded.`,
+        status: curr,
+        balance,
+        // The desk re-sends the same request with this set once staff confirm.
+        canForce: true,
       },
       { status: 409 }
     );

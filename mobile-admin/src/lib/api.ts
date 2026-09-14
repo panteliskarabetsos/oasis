@@ -183,14 +183,25 @@ export const api = {
       experienceName?: string;
       startTime?: string;
       status?: string;
+      paid?: boolean;
+      balance?: { total: number; paid: number; due: number; currency: string };
     }>(`/api/admin/checkins/${encodeURIComponent(String(ref))}`),
 
-  checkinAction: (bookingId: number | string, action: "checkin" | "undo" | "no_show") =>
+  /**
+   * `force` admits a guest who has not paid. The server refuses an unpaid
+   * check-in with 409 `payment_required` unless it is set, so the desk can
+   * show the balance and ask before anyone is waved through.
+   */
+  checkinAction: (
+    bookingId: number | string,
+    action: "checkin" | "undo" | "no_show",
+    opts: { force?: boolean } = {},
+  ) =>
     request<{ already?: boolean; status?: string }>(
       `/api/admin/checkins/${encodeURIComponent(String(bookingId))}`,
       {
         method: "PATCH",
-        body: { action },
+        body: opts.force ? { action, force: true } : { action },
       },
     ),
 

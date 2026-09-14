@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 import { bookingRef } from "@/lib/bookingCode";
+import { isPaidStatus } from "@/lib/bookings/paymentStatus";
 import QRCode from "qrcode";
 
 export default function BookingDetailsPage({ params }) {
@@ -193,10 +194,7 @@ export default function BookingDetailsPage({ params }) {
    * checked_in counts: it can only follow a payment, and a guest who has
    * already been admitted should still be able to see their own ticket.
    */
-  const isPaidFor = useMemo(() => {
-    const s = String(booking?.status || "").toLowerCase();
-    return s === "confirmed" || s === "paid" || s === "checked_in";
-  }, [booking]);
+  const isPaidFor = useMemo(() => isPaidStatus(booking?.status), [booking]);
 
   // QR Logic
   const qrValue = useMemo(() => getQrValue(booking), [booking]);
