@@ -107,9 +107,11 @@ export async function GET(req, ctx) {
 
   const bookingRef = refFor(booking.code ? booking : { id: booking.id || bookingId });
 
-  // You can customize these or pull from env
-  const supportEmail = "info@example.com";
-  const supportPhone = undefined; // or "+30 210 0000000"
+  // These print in the ticket footer as the way to reach a human. It said
+  // "info@example.com", so every ticket downloaded from here gave the guest a
+  // placeholder address to write to.
+  const supportEmail = process.env.STORE_EMAIL || "info@youroasis.gr";
+  const supportPhone = process.env.STORE_PHONE || undefined;
 
   let pdfBuffer;
   try {
@@ -120,10 +122,21 @@ export async function GET(req, ctx) {
       dateLabel,
       timeLabel,
       attendees,
+      // Where to be on the morning. The booking has carried this all along and
+      // the ticket never received it, so the sheet a guest was told to present
+      // did not say where to present it.
+      pickupPoint: booking.selected_meetup_point || null,
+      guestCount:
+        Number(booking.numberOfPeople) ||
+        (Number(booking.adultsCount) || 0) + (Number(booking.kidsCount) || 0) ||
+        attendees.length,
       amountLabel,
       currency,
       bookingRef,
       qrValue: bookingRef,
+      // The real status, so a checked-in guest's re-download does not claim to
+      // be a fresh confirmation.
+      status: paidStatus === "checked_in" ? "CHECKED IN" : "CONFIRMED",
       receiptUrl: undefined, // or a URL to their booking page if you want
       supportEmail,
       supportPhone,

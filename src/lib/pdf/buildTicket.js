@@ -41,7 +41,9 @@ class TicketGenerator {
       CANCELLED: { bg: "#ffffff", fg: "#000000", border: "#000000" },
       REFUNDED: { bg: "#f9f9f9", fg: "#767676", border: "#eaeaea" },
     };
-    return styles[s] || { bg: "#000000", fg: "#ffffff", border: "#000000" };
+    // Falls back to the confirmed style rather than a black box, which read as
+    // an alert on a ticket that is in perfectly good order.
+    return styles[s] || styles.CONFIRMED;
   }
 
   async loadFonts() {
@@ -263,10 +265,29 @@ class TicketGenerator {
       .restore();
   }
 
+  /**
+   * The bottom edge of the ticket frame.
+   *
+   * The frame used to run to the footer whatever it held, so a booking for one
+   * guest printed a card with a hand's width of nothing between the last line
+   * and the total — a hole, not margin. It now ends below whichever column
+   * runs longer, leaving the page's own white space around it, and still
+   * reaches the footer when the content genuinely fills the sheet.
+   */
+  ticketBottomY() {
+    const { page, contentTop, footerReserve } = this.layout;
+    const maxBottom = page.h - footerReserve;
+    // Enough to keep the QR panel and its notes framed even when the left
+    // column is nearly empty.
+    const minBottom = contentTop + 420;
+    const content = Math.max(this.mainBottomY || 0, this.railBottomY || 0);
+    // Room beneath the content for the total block and its divider.
+    return Math.max(minBottom, Math.min(maxBottom, content + 92));
+  }
+
   drawTicketBody() {
-    const { page, contentX, contentW, contentTop, sepX, footerReserve } =
-      this.layout;
-    const ticketH = page.h - contentTop - footerReserve;
+    const { contentX, contentW, contentTop, sepX } = this.layout;
+    const ticketH = this.ticketBottomY() - contentTop;
 
     // Sleek, minimal main bounding box (sharp corners)
     this.doc
@@ -294,14 +315,26 @@ class TicketGenerator {
     // The reference is set in the header; printing it again above the title
     // said the same thing twice and pushed the title down for nothing.
 
+    // The title steps down a size rather than wrapping mid-phrase.
+    //
+    // "COOKING WITH YIAYIA" broke after "WITH" and read as two thoughts. Long
+    // names still wrap — there is a limit to what 24pt can do — but the common
+    // case now sits on one line.
+    const title = args.experienceName || "Reservation";
+    let titleSize = 24;
+    this.doc.font("Body-Bold");
+    while (
+      titleSize > 17 &&
+      this.doc.fontSize(titleSize).widthOfString(title) > mainW
+    ) {
+      titleSize -= 1;
+    }
+
     this.doc
       .font("Body-Bold")
-      .fontSize(24)
+      .fontSize(titleSize)
       .fillColor(theme.text)
-      .text(args.experienceName || "Reservation", mainX, y, {
-        width: mainW,
-        lineGap: 2,
-      });
+      .text(title, mainX, y, { width: mainW, lineGap: 2 });
     y = this.doc.y + 8;
 
     if (args.location) {
@@ -317,8 +350,9 @@ class TicketGenerator {
 
     y = this.drawOrderSummary(y);
     y = this.drawMeetingPoint(y);
-    this.drawAttendees(y);
-    this.drawTotal();
+    // Recorded so the frame can be sized to whichever column runs longer. The
+    // total is drawn afterwards, once that height is known.
+    this.mainBottomY = this.drawAttendees(y);
   }
 
   /**
@@ -328,18 +362,100 @@ class TicketGenerator {
    * the last row of a table — the row that collided with its own label. Given
    * its own block it reads at a glance and has room to wrap.
    */
+  /** "2 guests", from the explicit count or the names on file. */
+  guestCountLabel() {
+    const { args } = this;
+    const n =
+      Number(args.guestCount) ||
+      (Array.isArray(args.attendees) ? args.attendees.length : 0);
+    if (!n) return null;
+    return `${n} guest${n === 1 ? "" : "s"}`;
+  }
+
+  /**
+   * The meeting point, as it is actually stored.
+   *
+   * Bookings carry an object — name, time, map pin, instructions — and this
+   * block only ever accepted a string, so the one thing a guest needs on the
+   * morning was silently dropped from the ticket they were told to present.
+   * Both shapes are accepted now.
+   */
+  normalizePickup() {
+    const raw = this.args.pickupPoint ?? this.args.meetingPoint;
+    if (!raw) return null;
+    if (typeof raw === "string") {
+      const t = raw.trim();
+      return t ? { name: t } : null;
+    }
+    if (typeof raw !== "object") return null;
+
+    const name = String(raw.name || "").trim();
+    const time = String(raw.time || "").trim();
+    const instructions = String(raw.instructions || "").trim();
+    const address = String(raw.address || "").trim();
+    // A raw "35.512950, 23.967630" means nothing on paper, but it is what a
+    // guest pastes into a maps app, so it is kept and labelled.
+    const mapPin = String(raw.mapPin || "").trim();
+
+    if (!name && !address && !instructions && !mapPin) return null;
+    return { name, time, instructions, address, mapPin };
+  }
+
   drawMeetingPoint(startY) {
     const { mainX, mainW } = this.layout;
-    const { args, theme } = this;
-    if (!args.pickupPoint) return startY;
+    const { theme } = this;
+    const pickup = this.normalizePickup();
+    if (!pickup) return startY;
 
     let y = this.sectionTitle("Where to meet", mainX, startY) + 14;
+    const textX = mainX + 14;
+    const textW = mainW - 26;
+    const top = y;
 
-    const text = String(args.pickupPoint).trim();
-    const height = this.doc
-      .font("Body")
-      .fontSize(12)
-      .heightOfString(text, { width: mainW - 26, lineGap: 3 });
+    // The place, in the same weight as the title: it is the instruction, not
+    // a detail about one.
+    if (pickup.name) {
+      this.doc
+        .font("Body-Bold")
+        .fontSize(13)
+        .fillColor(theme.text)
+        .text(pickup.name, textX, y, { width: textW });
+      y = this.doc.y + 3;
+    }
+
+    // The meeting time is not always the start time — a pickup can run ahead
+    // of it — so when it differs it is stated here rather than inferred.
+    const secondary = [
+      pickup.time ? `Meet at ${pickup.time}` : null,
+      pickup.address || null,
+    ].filter(Boolean);
+
+    if (secondary.length) {
+      this.doc
+        .font("Body")
+        .fontSize(12)
+        .fillColor(theme.text)
+        .text(secondary.join(" · "), textX, y, { width: textW, lineGap: 3 });
+      y = this.doc.y + 3;
+    }
+
+    if (pickup.instructions) {
+      this.doc
+        .font("Body")
+        .fontSize(11)
+        .fillColor(theme.subtext)
+        .text(pickup.instructions, textX, y, { width: textW, lineGap: 3 });
+      y = this.doc.y + 3;
+    }
+
+    if (pickup.mapPin) {
+      this.doc
+        .font("Body")
+        .fontSize(10)
+        .fillColor(theme.subtext)
+        .text(pickup.mapPin, textX, y, { width: textW, characterSpacing: 0.3 });
+      y = this.doc.y;
+    }
 
     // A hairline down the left edge, the same weight as the dividers — enough
     // to mark the block as its own without introducing a new visual idea.
@@ -347,18 +463,12 @@ class TicketGenerator {
       .save()
       .lineWidth(1)
       .strokeColor(theme.text)
-      .moveTo(mainX, y - 2)
-      .lineTo(mainX, y + height + 2)
+      .moveTo(mainX, top - 2)
+      .lineTo(mainX, y + 2)
       .stroke()
       .restore();
 
-    this.doc
-      .font("Body")
-      .fontSize(12)
-      .fillColor(theme.text)
-      .text(text, mainX + 14, y, { width: mainW - 26, lineGap: 3 });
-
-    return y + height + 24;
+    return y + 24;
   }
 
   drawOrderSummary(startY) {
@@ -368,16 +478,19 @@ class TicketGenerator {
 
     let sy = this.sectionTitle("Order Summary", mainX, startY) + 16;
 
-    const whenStr = [
-      args.dateLabel,
-      args.timeLabel ? ` at ${args.timeLabel}` : "",
-    ]
-      .filter(Boolean)
-      .join("");
-
+    // The experience name is the title directly above this table, so listing
+    // it again as a row said the same thing twice and cost a line that the
+    // guest count now uses.
+    //
+    // Date and time are separate rows because joined they ran past the column
+    // and wrapped to "Friday, 9 October 2026 at" / "09:00" — the time, which
+    // is the part people check on the morning, orphaned on its own line.
     const rows = [
-      { label: "Experience", value: args.experienceName || "-" },
-      { label: "Date", value: whenStr || "-" },
+      { label: "Date", value: args.dateLabel || "-" },
+      ...(args.timeLabel ? [{ label: "Time", value: args.timeLabel }] : []),
+      ...(this.guestCountLabel()
+        ? [{ label: "Guests", value: this.guestCountLabel() }]
+        : []),
     ];
 
     // Top border of summary
@@ -426,10 +539,10 @@ class TicketGenerator {
    * page of nothing.
    */
   drawTotal() {
-    const { page, mainX, mainW, contentTop, footerReserve } = this.layout;
+    const { mainX, mainW } = this.layout;
     const { args, theme } = this;
 
-    const ticketBottom = page.h - footerReserve;
+    const ticketBottom = this.ticketBottomY();
     const sy = ticketBottom - 56;
 
     this.divider(mainX, mainX + mainW, sy - 18);
@@ -458,10 +571,8 @@ class TicketGenerator {
   }
 
   drawAttendees(startY) {
-    const { mainX, mainW } = this.layout;
+    const { mainX, mainW, page, footerReserve } = this.layout;
     const { args, theme } = this;
-    // 22pt around 12pt type still breathes, and it is what lets a party of
-    // eight — a common group booking — stay on the one sheet they hand over.
     const rowH = 22;
     let aY = this.sectionTitle("Attendees", mainX, startY) + 10;
 
@@ -473,50 +584,86 @@ class TicketGenerator {
         .fontSize(12)
         .fillColor(theme.subtext)
         .text("No attendee names on file.", mainX, aY);
-    } else {
-      // Only as many as the ticket can hold, with the rest continued overleaf.
-      //
-      // The list used to run as long as the party did: fourteen guests pushed
-      // it through the frame, onto a second page, and left the QR panel blank
-      // — a ticket that could not be scanned.
-      const { page, footerReserve } = this.layout;
-      const room = page.h - footerReserve - 70 - aY;
-      const fits = Math.max(1, Math.floor(room / rowH));
-      const shown = attendees.slice(0, fits);
-      this.overflowAttendees = attendees.slice(fits);
+      return this.doc.y;
+    }
 
-      shown.forEach((a, i) => {
-        // No background striping, just a clean bottom border
-        this.doc
-          .font("Body")
-          .fontSize(12)
-          .fillColor(theme.subtext)
-          .text(String(i + 1).padStart(2, "0"), mainX, aY + 8, { width: 30 });
+    // What is left of the sheet once the total block is accounted for.
+    //
+    // This used to reserve 70pt while the total needs 92, so the "continued
+    // overleaf" line printed straight through "Total".
+    const overflowNoteH = 20;
+    const room = page.h - footerReserve - 92 - aY;
 
-        this.doc
-          .font("Body")
-          .fontSize(12)
-          .fillColor(theme.text)
-          .text(a?.name || "Guest", mainX + 40, aY + 8, { width: mainW - 40 });
+    // A party of eight is a common group booking and should stay on the one
+    // sheet the group hands over. Now that the meeting point has taken its
+    // share of the column, eight no longer fit stacked — so past five names
+    // they pair up, which fits sixteen in the space eight used to need.
+    const perRow =
+      attendees.length > 5 && Math.floor(room / rowH) < attendees.length
+        ? 2
+        : 1;
+    const cellW = perRow === 2 ? (mainW - 12) / 2 : mainW;
+    const nameSize = perRow === 2 ? 11 : 12;
+    const numW = perRow === 2 ? 22 : 30;
+    const nameX = perRow === 2 ? 26 : 40;
 
+    const maxRows = Math.max(1, Math.floor(room / rowH));
+    const fits = maxRows * perRow;
+    const shown = attendees.slice(0, fits);
+    this.overflowAttendees = attendees.slice(fits);
+
+    // The note needs a line of its own below the list, so when there is an
+    // overflow one row is given back to it rather than overprinted.
+    if (this.overflowAttendees.length && maxRows > 1) {
+      const trimmed = (maxRows - 1) * perRow;
+      this.overflowAttendees = attendees.slice(trimmed);
+      shown.length = trimmed;
+    }
+
+    shown.forEach((a, i) => {
+      const col = i % perRow;
+      const x = mainX + col * (cellW + 12);
+
+      this.doc
+        .font("Body")
+        .fontSize(nameSize)
+        .fillColor(theme.subtext)
+        .text(String(i + 1).padStart(2, "0"), x, aY + 8, { width: numW });
+
+      this.doc
+        .font("Body")
+        .fontSize(nameSize)
+        .fillColor(theme.text)
+        .text(a?.name || "Guest", x + nameX, aY + 8, {
+          width: cellW - nameX,
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+      // The rule closes a whole row, so it is drawn once the row is complete
+      // — or on the last name, when an odd party leaves the pair half full.
+      if (col === perRow - 1 || i === shown.length - 1) {
         aY += rowH;
         this.divider(mainX, mainX + mainW, aY);
-      });
-
-      if (this.overflowAttendees.length) {
-        const n = this.overflowAttendees.length;
-        this.doc
-          .font("Body")
-          .fontSize(11)
-          .fillColor(theme.subtext)
-          .text(
-            `+ ${n} more guest${n === 1 ? "" : "s"} — continued overleaf`,
-            mainX,
-            aY + 8,
-            { width: mainW },
-          );
       }
+    });
+
+    if (this.overflowAttendees.length) {
+      const n = this.overflowAttendees.length;
+      this.doc
+        .font("Body")
+        .fontSize(11)
+        .fillColor(theme.subtext)
+        .text(
+          `+ ${n} more guest${n === 1 ? "" : "s"} — continued overleaf`,
+          mainX,
+          aY + 8,
+          { width: mainW },
+        );
+      aY = Math.max(this.doc.y, aY + overflowNoteH);
     }
+
+    return aY;
   }
 
   /**
@@ -590,8 +737,11 @@ class TicketGenerator {
 
     let sY = contentTop + 30;
 
-    // Status Chip (Sharp, bordered)
-    const statLabel = (args.status || "STATUS").toUpperCase();
+    // Status chip. A ticket only exists once a booking is paid for, so with no
+    // status passed the honest label is "CONFIRMED" — it used to print the
+    // literal word "STATUS" in a black box, which is what every ticket
+    // downloaded from the booking page showed.
+    const statLabel = String(args.status || "CONFIRMED").toUpperCase();
     this.chip(statLabel, stubX, sY, {
       bg: this.statusStyle.bg,
       fg: this.statusStyle.fg,
@@ -634,7 +784,10 @@ class TicketGenerator {
       ? args.infoLines
       : [
           "Arrive 10 minutes before the meeting time.",
-          "A screenshot of this QR works — no need to print.",
+          // No em-dash inside the line: the dashes in this list are the
+          // bullets, and one mid-sentence wrapped to the head of a line and
+          // read as a fourth item saying "no need to print."
+          "A screenshot of this QR is fine; printing is not needed.",
           `Change or cancel at ${this.manageUrl()}`,
         ];
 
@@ -652,6 +805,8 @@ class TicketGenerator {
       });
       this.doc.y += 8;
     });
+
+    this.railBottomY = this.doc.y;
   }
 
   /** Where a guest manages their own booking, without the confirmation email. */
@@ -744,9 +899,14 @@ class TicketGenerator {
       this.doc.font("Body");
 
       this.drawBackgroundAndHeader();
-      this.drawTicketBody();
+      // Content before the frame: the frame is sized to whichever column runs
+      // longer, so it cannot be drawn until both have been laid out. It is
+      // hairline strokes in the margins and the gutter, so nothing it draws
+      // lands on top of the text that is already there.
       this.drawMainContent();
       this.drawRightRail();
+      this.drawTicketBody();
+      this.drawTotal();
       this.drawFooter();
       this.drawWatermark();
       // Any guests the first sheet could not hold get their own.

@@ -10,7 +10,6 @@ import {
   Loader2,
   MapPin,
   Info,
-  Printer,
   ExternalLink,
   RefreshCw,
   Mail,
@@ -19,6 +18,7 @@ import {
   ArrowLeft,
   Ticket,
   FileText,
+  Navigation,
 } from "lucide-react";
 import { parseISO, format, addMinutes } from "date-fns";
 
@@ -53,37 +53,14 @@ export default function BookingConfirmationPage() {
 
   // ---------- Utils ----------
 
-  const deriveFallbackCode = (id) =>
-    id ? `BK-${String(id).padStart(6, "0")}` : "";
-
-  async function tryFetchBookingCode(id) {
-    const pi = qs?.get("payment_intent") || "";
-    const sid = qs?.get("session_id") || "";
-    const query = `?payment_intent=${pi}&session_id=${sid}`;
-
-    const endpoints = [
-      `/api/bookings/${id}${query}`,
-      `/api/bookings/${id}/public${query}`,
-    ];
-
-    for (const url of endpoints) {
-      try {
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) continue;
-        const b = await res.json().catch(() => ({}));
-        const code =
-          b?.code ||
-          b?.reference ||
-          b?.bookingCode ||
-          b?.shortCode ||
-          b?.refCode ||
-          b?.ref ||
-          "";
-        if (code) return String(code);
-      } catch {}
-    }
-    return deriveFallbackCode(id);
-  }
+  // The booking code is never invented here.
+  //
+  // This used to ask /api/bookings/:id and /api/bookings/:id/public — neither
+  // route exists, so both 404'd every time and the screen fell back to
+  // "BK-000400", built from the row id. Codes are five characters now
+  // ("F2QB3"), so the guest was told to keep a reference that appeared on
+  // neither their email nor their ticket. The confirm endpoint returns the
+  // real one, for an already-converted draft as well as a fresh one.
 
   async function confirmNow(dId, opts = {}) {
     try {
@@ -101,6 +78,7 @@ export default function BookingConfirmationPage() {
 
       if (j?.bookingId) setConfirmedBookingId(j.bookingId);
       if (j?.bookingCode) setBookingCode(String(j.bookingCode));
+      if (j?.ticketToken) setTicketToken(String(j.ticketToken));
       if (j?.status) setBookingDbStatus(String(j.status));
       if (!(j?.converted && j?.bookingId)) setTries((t) => t + 1);
 
@@ -182,10 +160,9 @@ export default function BookingConfirmationPage() {
         if (converted) {
           if (convertedId && !confirmedBookingId)
             setConfirmedBookingId(convertedId);
-          if (convertedId && !bookingCode) {
-            const code = await tryFetchBookingCode(convertedId);
-            if (alive && code) setBookingCode(code);
-          }
+          // Confirm is idempotent and short-circuits on an already-converted
+          // draft, handing back the real code and a ticket token.
+          if (convertedId && !bookingCode) await confirmNow(draftId);
           return;
         }
 
@@ -232,8 +209,6 @@ export default function BookingConfirmationPage() {
           setConfirmedBookingId(j.bookingId);
         if (j?.ticketToken) setTicketToken(String(j.ticketToken));
         if (j?.bookingCode) setBookingCode(String(j.bookingCode));
-        else if (j?.bookingId && !bookingCode)
-          setBookingCode(deriveFallbackCode(j.bookingId));
         if (j?.status) setBookingDbStatus(String(j.status));
 
         setTries((t) => t + 1);
@@ -297,9 +272,20 @@ export default function BookingConfirmationPage() {
   const finalTotal = Number(apiPricing?.total ?? subtotal - discountAmount);
   const durationMinutes = Number(draft?.durationMinutes || 90);
 
-  const referenceToShow = converted
-    ? bookingCode || deriveFallbackCode(bookingId)
-    : `DRAFT-${draftId}`;
+  const referenceToShow = converted ? bookingCode : `DRAFT-${draftId}`;
+
+  // Stored as JSON on the draft: name, time, map pin, instructions. A string
+  // is accepted too, since older drafts carry one.
+  const meetingPoint = useMemo(() => {
+    const raw = draft?.selected_meetup_point;
+    if (!raw) return null;
+    if (typeof raw === "string")
+      return raw.trim() ? { name: raw.trim() } : null;
+    if (typeof raw !== "object") return null;
+    const { name, time, instructions, mapPin } = raw;
+    if (!name && !instructions && !mapPin) return null;
+    return { name, time, instructions, mapPin };
+  }, [draft]);
 
   function eur(n) {
     return `€${(Number(n) || 0).toFixed(2)}`;
@@ -625,10 +611,57 @@ export default function BookingConfirmationPage() {
                       </p>
                       <p className="text-sm font-medium text-[#3a2f28] flex items-center gap-2">
                         <Users size={16} className="text-[#8b6f47]" />
-                        {A} Adults {K > 0 && `, ${K} Children`}
+                        {A} {A === 1 ? "Adult" : "Adults"}
+                        {K > 0 ? `, ${K} ${K === 1 ? "Child" : "Children"}` : ""}
                       </p>
                     </div>
                   </div>
+
+                  {/* Where to go on the morning. The booking has always carried
+                      this and the confirmation never showed it, so the guest
+                      was told the booking was complete without being told
+                      where to turn up. */}
+                  {meetingPoint && (
+                    <div className="pt-6 border-t border-[#e0dcd4]">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-2">
+                        Where to meet
+                      </p>
+                      <div className="flex items-start gap-2">
+                        <Navigation
+                          size={16}
+                          className="text-[#8b6f47] shrink-0 mt-0.5"
+                        />
+                        <div className="min-w-0">
+                          {meetingPoint.name && (
+                            <p className="text-sm font-semibold text-[#3a2f28]">
+                              {meetingPoint.name}
+                            </p>
+                          )}
+                          {meetingPoint.time && (
+                            <p className="text-sm text-[#3a2f28] mt-0.5">
+                              Meet at {meetingPoint.time}
+                            </p>
+                          )}
+                          {meetingPoint.instructions && (
+                            <p className="text-[13px] text-[#6b5d52] mt-1">
+                              {meetingPoint.instructions}
+                            </p>
+                          )}
+                          {meetingPoint.mapPin && (
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(meetingPoint.mapPin)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-bold uppercase tracking-wider text-[#8b6f47] hover:underline mt-2 inline-block"
+                            >
+                              Open in Maps{" "}
+                              <ExternalLink size={10} className="inline mb-0.5" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {Array.isArray(draft?.attendees) &&
                     draft.attendees.length > 0 && (
@@ -707,8 +740,9 @@ export default function BookingConfirmationPage() {
                   Next Steps
                 </h3>
                 <p className="text-xs text-[#7a6a5f] leading-relaxed mb-6">
-                  You will receive an email shortly with these details. You can
-                  also save them directly to your calendar or print an invoice.
+                  Your ticket is on its way by email. You can also save the date
+                  to your calendar, or open the ticket now — it carries the QR
+                  code we scan at check-in.
                 </p>
 
                 <div className="flex flex-col gap-3">
@@ -729,9 +763,9 @@ export default function BookingConfirmationPage() {
                     {printing ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <Printer className="h-4 w-4" />
+                      <Ticket className="h-4 w-4" />
                     )}
-                    Print Invoice
+                    Open Ticket
                   </button>
 
                   <div className="h-px w-full bg-[#e0dcd4] my-3" />

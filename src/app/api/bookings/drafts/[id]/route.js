@@ -45,7 +45,8 @@ export async function GET(req, ctx) {
       "updatedAt",
       "convertedBookingId",
       "stripeSessionId",
-      "stripePaymentIntentId"
+      "stripePaymentIntentId",
+      selected_meetup_point
     `,
     )
     .eq("id", draftId)

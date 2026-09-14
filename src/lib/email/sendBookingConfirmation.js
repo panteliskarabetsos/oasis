@@ -257,7 +257,10 @@ export default async function sendBookingConfirmation(opts = {}) {
       const ticketPdfBuffer = await buildTicketPdfBuffer({
         brand,
         experienceName: experience?.name || "Booking",
-        pickupPoint, // Updated to use the parsed string
+        // The raw meeting point where there is one: the PDF lays out the name,
+        // time, instructions and map pin itself, and the flattened string
+        // above drops the last two. The string stays for the HTML email.
+        pickupPoint: rawPickup || pickupPoint,
         location: experience?.location || "",
         dateLabel,
         timeLabel,
