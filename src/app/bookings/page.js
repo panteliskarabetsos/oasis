@@ -13,8 +13,6 @@ import {
   Search,
   ChevronRight,
   Clock,
-  CalendarCheck,
-  History,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 import { bookingRef } from "@/lib/bookingCode";
@@ -126,23 +124,10 @@ export default function MyBookingsPage() {
               </h1>
             </div>
 
-            {/* Stats Pills */}
-            <div className="flex gap-3">
-              <StatPill
-                icon={<CalendarCheck size={14} />}
-                label="Upcoming"
-                value={upcomingBookings.length}
-                active={tab === "upcoming"}
-                onClick={() => setTab("upcoming")}
-              />
-              <StatPill
-                icon={<History size={14} />}
-                label="History"
-                value={pastBookings.length}
-                active={tab === "past"}
-                onClick={() => setTab("past")}
-              />
-            </div>
+            {/* The segmented control beside the search field is the filter.
+                A second set of pills up here switched the same state from
+                fifteen pixels away, which reads as two controls that ought to
+                do different things. */}
           </div>
         </header>
 
@@ -262,15 +247,16 @@ function BookingCard({ booking, isUpcoming }) {
             </span>
           </div>
 
-          <span
-            className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-              isUpcoming
-                ? "bg-[#C8AA86]/10 text-[#C8AA86]"
-                : "bg-gray-100 text-gray-500"
-            }`}
-          >
-            {isUpcoming ? "Confirmed" : "Completed"}
-          </span>
+          {(() => {
+            const s = statusOf(booking, isUpcoming);
+            return (
+              <span
+                className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${s.className}`}
+              >
+                {s.label}
+              </span>
+            );
+          })()}
         </div>
 
         {/* Title */}
@@ -296,7 +282,9 @@ function BookingCard({ booking, isUpcoming }) {
 
           <div className="flex items-center gap-2.5">
             <Users size={16} className="text-[#b0a090]" />
-            <span>{peopleOf(booking)} guests</span>
+            <span>
+              {peopleOf(booking)} {peopleOf(booking) === 1 ? "guest" : "guests"}
+            </span>
           </div>
         </div>
 
@@ -314,28 +302,6 @@ function BookingCard({ booking, isUpcoming }) {
   );
 }
 
-function StatPill({ icon, label, value, active, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-full border text-xs font-bold uppercase tracking-wider transition-all ${
-        active
-          ? "bg-[#4d3e33] text-white border-[#4d3e33] shadow-lg"
-          : "bg-white border-[#e4ddd3] text-[#7a6a5f] hover:border-[#C8AA86]"
-      }`}
-    >
-      {icon}
-      <span>{label}</span>
-      <span
-        className={`ml-1 px-1.5 py-0.5 rounded-md text-[9px] ${
-          active ? "bg-white/20" : "bg-[#f4f1ec]"
-        }`}
-      >
-        {value}
-      </span>
-    </button>
-  );
-}
 
 function TabButton({ label, count, isActive, onClick }) {
   return (
@@ -454,6 +420,39 @@ function expOf(b) {
     b?.experience ||
     (b?.experienceName ? { name: b.experienceName, location: "" } : null)
   );
+}
+
+/**
+ * What the badge should say.
+ *
+ * It used to read purely off the date: anything in the future said "Confirmed"
+ * and anything past said "Completed". So an unpaid booking told the guest it
+ * was confirmed, and a cancelled one did too — the booking's own status was
+ * sitting right there, unused.
+ */
+function statusOf(b, isUpcoming) {
+  const s = String(b?.status || "").toLowerCase();
+
+  if (s === "cancelled" || s === "canceled")
+    return { label: "Cancelled", className: "bg-[#fbeae5] text-[#a33c22]" };
+  if (s === "no_show")
+    return { label: "Missed", className: "bg-[#fbeae5] text-[#a33c22]" };
+  if (s === "checked_in")
+    return { label: "Attended", className: "bg-[#e9f2e9] text-[#3f6b3f]" };
+  if (s === "pending")
+    return { label: "Awaiting payment", className: "bg-[#fbf1dc] text-[#8a6412]" };
+
+  if (s === "confirmed" || s === "paid") {
+    return isUpcoming
+      ? { label: "Confirmed", className: "bg-[#C8AA86]/10 text-[#C8AA86]" }
+      : { label: "Completed", className: "bg-gray-100 text-gray-500" };
+  }
+
+  // Unknown or missing status: fall back to what the date implies, which is
+  // what the card did for everything before.
+  return isUpcoming
+    ? { label: "Upcoming", className: "bg-[#C8AA86]/10 text-[#C8AA86]" }
+    : { label: "Completed", className: "bg-gray-100 text-gray-500" };
 }
 
 function peopleOf(b) {
