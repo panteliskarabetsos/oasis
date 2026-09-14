@@ -4,7 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ReCAPTCHA from "react-google-recaptcha";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
-import { Loader2, Mail, Lock, Eye, EyeOff, ShieldAlert } from "lucide-react";
+import {
+  Loader2,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  ShieldAlert,
+  CheckCircle2,
+  ArrowLeft,
+} from "lucide-react";
+import Link from "next/link";
 
 const FAIL_KEY = "login_fail_meta"; // { count: number, ts: number }
 const FAIL_WINDOW_HOURS = 12; // attempts window
@@ -170,18 +180,88 @@ export default function LoginPage() {
     (needCaptcha && !recaptchaToken);
 
   return (
-    {
-      /* outer container */
-    } && (
-      <div className="min-h-screen flex items-center justify-center bg-[#f4f1ec] px-4">
-        <div className="w-full max-w-md rounded-3xl border border-[#e0dcd4] bg-white/95 shadow-2xl p-8">
-          {/* Brand */}
-          <div className="text-center mb-6">
-            <h1 className="text-3xl font-serif text-[#5a4a3f]">Welcome back</h1>
-            <p className="text-sm text-[#7a6a5f] mt-1">
-              Sign in to continue your journey.
-            </p>
+    <div className="relative min-h-screen overflow-hidden bg-[#f4f1ec]">
+      {/* Ambient wash, matching the sign-up page */}
+      <div className="pointer-events-none absolute -top-32 -left-24 h-96 w-96 rounded-full bg-[#e9e4dc] opacity-60 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-32 -right-24 h-[28rem] w-[28rem] rounded-full bg-[#fff4e1] opacity-70 blur-3xl" />
+
+      <div className="mx-auto max-w-6xl px-6 py-10 md:py-16">
+        <Link
+          href="/"
+          className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#d8cfc3] px-4 py-2 text-sm text-[#8b6f47] shadow-sm transition-all hover:bg-[#f4f1ec] hover:text-[#5a4a3f]"
+        >
+          <ArrowLeft size={16} /> Back to home
+        </Link>
+
+        <div className="grid grid-cols-1 items-stretch gap-8 lg:grid-cols-2">
+          {/* Left: why you have an account at all */}
+          <div className="hidden flex-col justify-between rounded-3xl border border-[#e0dcd4] bg-gradient-to-b from-[#fdf9f3] to-[#f7f2ea] p-10 shadow-xl lg:flex">
+            <div>
+              <h1 className="font-serif text-4xl leading-tight text-[#5a4a3f]">
+                Welcome back to{" "}
+                <span className="bg-gradient-to-r from-[#8b6f47] to-[#a78b62] bg-clip-text text-transparent">
+                  Oasis
+                </span>
+              </h1>
+              <p className="mt-3 text-[#7a6a5f]">
+                Sign in to see your upcoming experiences, tickets and meeting
+                points — all in one place.
+              </p>
+            </div>
+
+            <ul className="mt-8 space-y-4 text-[#5a4a3f]">
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="mt-1" size={18} />
+                <div>
+                  <p className="font-medium">Your bookings</p>
+                  <p className="text-sm text-[#7a6a5f]">
+                    Dates, meeting points and tickets, ready when you need them.
+                  </p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="mt-1" size={18} />
+                <div>
+                  <p className="font-medium">Faster checkout</p>
+                  <p className="text-sm text-[#7a6a5f]">
+                    Your details are remembered, so booking takes a moment.
+                  </p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <CheckCircle2 className="mt-1" size={18} />
+                <div>
+                  <p className="font-medium">Changes and cancellations</p>
+                  <p className="text-sm text-[#7a6a5f]">
+                    Request a new date or update a meeting point yourself.
+                  </p>
+                </div>
+              </li>
+            </ul>
+
+            <div className="mt-10 rounded-2xl border border-[#eee8df] bg-[#fffdf9] p-6">
+              <p className="text-xs text-[#7a6a5f]">
+                Booked without an account? You can still find a reservation from
+                the{" "}
+                <Link href="/manage-booking" className="text-[#8b6f47] underline">
+                  guest portal
+                </Link>{" "}
+                using your reference and last name.
+              </p>
+            </div>
           </div>
+
+          {/* Right: the form */}
+          <div className="relative">
+            <div className="rounded-3xl border border-[#e0dcd4] bg-white/90 p-8 shadow-2xl backdrop-blur md:p-10">
+              <div className="mb-6 text-center">
+                <h2 className="font-serif text-2xl text-[#5a4a3f] md:text-3xl">
+                  Welcome back
+                </h2>
+                <p className="mt-1 text-sm text-[#7a6a5f]">
+                  Sign in to continue your journey.
+                </p>
+              </div>
 
           {/* “Captcha armed” hint */}
           {needCaptcha && (
@@ -297,8 +377,10 @@ export default function LoginPage() {
               Register
             </button>
           </div>
+            </div>
+          </div>
         </div>
       </div>
-    )
+    </div>
   );
 }
