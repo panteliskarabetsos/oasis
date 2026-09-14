@@ -826,6 +826,10 @@ export default function CheckinsPage() {
   const [scanResult, setScanResult] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  // Set when the desk tries to admit a guest who has not paid. Holds what the
+  // server told us is owed, so the confirmation can state the figure rather
+  // than ask a vague "are you sure?".
+  const [payWarn, setPayWarn] = useState(null);
 
   const searchRef = useRef(null);
   const rowRefs = useRef({});
@@ -926,16 +930,25 @@ export default function CheckinsPage() {
   const progress = totals.bookings ? Math.round((totals.arrived / totals.bookings) * 100) : 0;
 
   /* -------------------------------- actions ------------------------------- */
-  async function mutateBooking(bookingId, action) {
+  async function mutateBooking(bookingId, action, { force = false } = {}) {
     setBusyId(bookingId);
     try {
       const res = await fetch(`/api/admin/checkins/${bookingId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ action }),
+        body: JSON.stringify(force ? { action, force: true } : { action }),
       });
       const json = await res.json();
+
+      // The guest has not paid. This is not an error to shout about — it is a
+      // question for whoever is at the door, who may be about to take cash.
+      // The request is re-sent with `force` if they say yes.
+      if (res.status === 409 && json?.error === "payment_required") {
+        setPayWarn({ bookingId, action, message: json.message, balance: json.balance });
+        return null;
+      }
+
       if (!res.ok) throw new Error(json?.error || "Update failed");
 
       setRoster((prev) => {
@@ -1345,6 +1358,17 @@ export default function CheckinsPage() {
       </Muted>
 
       <ScanModal open={scanOpen} onClose={() => setScanOpen(false)} onDetected={handleDetected} />
+
+      <UnpaidModal
+        warn={payWarn}
+        busy={busyId != null}
+        onCancel={() => setPayWarn(null)}
+        onConfirm={() => {
+          const w = payWarn;
+          setPayWarn(null);
+          if (w) mutateBooking(w.bookingId, w.action, { force: true });
+        }}
+      />
       <ScanResultPopover
         result={scanResult}
         onClose={() => setScanResult(null)}
@@ -1366,5 +1390,74 @@ function StatBox({ label, value, accent }) {
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a8c7e]">{label}</p>
       <p className={`mt-1 font-serif text-[20px] ${color}`}>{value}</p>
     </Card>
+  );
+}
+
+/**
+ * Asks before admitting a guest who has not paid.
+ *
+ * Deliberately not a silent block: someone may well be paying cash at the
+ * desk, and refusing them outright would strand a real guest. What it prevents
+ * is the old behaviour, where an unpaid booking scanned green and nobody at
+ * the door had any reason to notice.
+ */
+function UnpaidModal({ warn, busy, onCancel, onConfirm }) {
+  return (
+    <AnimatePresence>
+      {warn ? (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onCancel}
+        >
+          <motion.div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="unpaid-title"
+          >
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                <AlertTriangle size={18} />
+              </span>
+              <div className="min-w-0">
+                <h2 id="unpaid-title" className="text-base font-semibold text-neutral-900">
+                  This guest has not paid
+                </h2>
+                <p className="mt-1 text-sm text-neutral-600">{warn.message}</p>
+              </div>
+            </div>
+
+            {warn.balance?.due > 0 ? (
+              <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-center">
+                <div className="text-xs uppercase tracking-wide text-amber-700">Balance due</div>
+                <div className="text-2xl font-semibold text-amber-900">
+                  {warn.balance.currency} {Number(warn.balance.due).toFixed(2)}
+                </div>
+              </div>
+            ) : null}
+
+            <p className="mt-3 text-xs text-neutral-500">
+              Only admit them if you have taken payment another way — cash at the desk, for example.
+            </p>
+
+            <div className="mt-4 flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={onCancel} disabled={busy}>
+                Cancel
+              </Button>
+              <Button className="flex-1" onClick={onConfirm} disabled={busy}>
+                {busy ? "…" : "Admit anyway"}
+              </Button>
+            </div>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }

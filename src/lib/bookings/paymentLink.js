@@ -1,5 +1,6 @@
 import "server-only";
 import Stripe from "stripe";
+import { bookingBalance } from "./paymentStatus";
 
 /**
  * The Stripe Checkout link a guest uses to pay for a booking.
@@ -47,21 +48,17 @@ export async function createBookingPaymentLink(admin, bookingId, { baseUrl } = {
     return { ok: false, error: "Booking not found", status: 404 };
   }
 
+  // Shared with the check-in desk, so the balance staff are shown at the door
+  // is the balance this link would charge. An exceptional meeting point can
+  // carry its own charge; it travels on the stored meeting point so there is
+  // one place it can come from.
+  const { due: balanceDue } = bookingBalance(booking);
+
+  // Still needed for the line-item description the guest reads at checkout.
   const adults = Number(booking.adultsCount ?? 1);
   const kids = Number(booking.kidsCount ?? 0);
-  const priceA = Number(booking.unitPriceAdult ?? 0);
-  const priceK = Number(booking.unitPriceKid ?? 0);
-  const discount = Number(booking.discountAmount ?? 0);
-  const alreadyPaid = Number(booking.totalPaidAmount ?? 0);
-
-  // An exceptional meeting point can carry its own charge; it travels on the
-  // stored meeting point so there is one place it can come from.
   const meetup = booking.selected_meetup_point || null;
   const meetupSurcharge = Math.max(0, Number(meetup?.surcharge) || 0);
-
-  const totalCost =
-    adults * priceA + kids * priceK + meetupSurcharge - discount;
-  const balanceDue = Math.max(0, totalCost - alreadyPaid);
 
   if (balanceDue <= 0) {
     return { ok: false, error: "This booking is already fully paid.", status: 400 };

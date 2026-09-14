@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { bookingRef as refFor } from "@/lib/bookingCode";
 import buildTicketPdfBuffer from "@/lib/pdf/buildTicket"; // ⬅️ use your real PDF builder
 import { getBookingById } from "@/lib/bookings/getBookingById";
+import { isPaidStatus } from "@/lib/bookings/paymentStatus";
 import {
   ACCESS_DENIED,
   authorizeBookingAccess,
@@ -53,7 +54,7 @@ export async function GET(req, ctx) {
   // inside the PDF is the reference the check-in scanner admits people on, so
   // it must not exist before the money does.
   const paidStatus = String(booking.status || "").toLowerCase();
-  if (!["confirmed", "paid", "checked_in"].includes(paidStatus)) {
+  if (!isPaidStatus(paidStatus)) {
     return NextResponse.json(
       {
         error:

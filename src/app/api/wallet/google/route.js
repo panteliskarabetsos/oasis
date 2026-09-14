@@ -10,6 +10,7 @@ import {
   authorizeBookingAccess,
 } from "@/lib/bookings/bookingAccess";
 import { getBookingById } from "@/lib/bookings/getBookingById";
+import { isPaidStatus } from "@/lib/bookings/paymentStatus";
 
 /**
  * A Google Wallet event ticket for a booking.
@@ -52,7 +53,7 @@ export async function GET(req) {
     // The pass carries the same check-in barcode as the ticket, so it waits
     // for payment too.
     const paidStatus = String(booking.status || "").toLowerCase();
-    if (!["confirmed", "paid", "checked_in"].includes(paidStatus)) {
+    if (!isPaidStatus(paidStatus)) {
       return NextResponse.json(
         {
           error:

@@ -7,6 +7,7 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -21,7 +22,7 @@ import { PressableScale } from "@/components/premium";
 import { Badge, EmptyState, ErrorState, Muted } from "@/components/ui";
 import { colors, fonts, radii, shadows, spacing } from "@/constants/theme";
 import { useApi } from "@/hooks/useApi";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { CheckinBooking } from "@/lib/types";
 import { PermissionGate } from "@/components/access";
 import { Screen, ScreenHeader, useTabBarPadding } from "@/components/screen";
@@ -120,7 +121,8 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 }
 
 type ScanCard = {
-  kind: "pending" | "success" | "already" | "error";
+  /** `unpaid` means the server refused: the guest owes money and staff must decide. */
+  kind: "pending" | "success" | "already" | "error" | "unpaid";
   /** The scanned reference — a code like BK-WD7A-FR1X, or a legacy numeric id. */
   id?: string;
   guestName?: string;
@@ -130,6 +132,7 @@ type ScanCard = {
   time?: string;
   message?: string;
   offManifest?: boolean;
+  balance?: { total: number; paid: number; due: number; currency: string };
 };
 
 function initials(name?: string): string {
@@ -237,15 +240,40 @@ function CheckinsScreenContent() {
   const noShows = allBookings.filter((b) => b.status === "no_show").length;
   const progress = allBookings.length ? (checkedIn + noShows) / allBookings.length : 0;
 
-  async function action(bookingId: number, kind: "checkin" | "undo" | "no_show") {
+  async function action(
+    bookingId: number,
+    kind: "checkin" | "undo" | "no_show",
+    opts: { force?: boolean } = {},
+  ) {
     setBusyId(bookingId);
     try {
-      await api.checkinAction(bookingId, kind);
+      await api.checkinAction(bookingId, kind, opts);
       if (kind === "checkin") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
       refresh();
     } catch (e) {
+      // Tapping a guest on the manifest reaches the same guard as scanning
+      // them, so it asks the same question rather than reporting a failure.
+      const balance = unpaidRefusal(e);
+      if (balance) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        Alert.alert(
+          "This guest has not paid",
+          balance.due > 0
+            ? `${balance.currency} ${balance.due.toFixed(2)} is still due.\n\nOnly admit them if you have taken payment another way.`
+            : "No payment has been recorded for this booking.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Admit anyway",
+              style: "destructive",
+              onPress: () => action(bookingId, kind, { force: true }),
+            },
+          ],
+        );
+        return;
+      }
       setScanResult({ text: e instanceof Error ? e.message : "Action failed.", ok: false });
     } finally {
       setBusyId(null);
@@ -317,6 +345,20 @@ function CheckinsScreenContent() {
     }
   }
 
+  /**
+   * The server's "this guest has not paid" refusal, if that is what happened.
+   *
+   * Returned as the balance so the card can state the figure. Anything else —
+   * a cancelled booking, the wrong day, a dead connection — is a real error and
+   * falls through to the error card.
+   */
+  function unpaidRefusal(e: unknown): ScanCard["balance"] | null {
+    if (!(e instanceof ApiError) || e.status !== 409) return null;
+    const body = e.body as { error?: string; balance?: ScanCard["balance"] } | null;
+    if (body?.error !== "payment_required") return null;
+    return body.balance ?? { total: 0, paid: 0, due: 0, currency: "EUR" };
+  }
+
   function showCard(card: ScanCard) {
     setScanCard(card);
     setScanPaused(true);
@@ -325,6 +367,16 @@ function CheckinsScreenContent() {
     // not time out before the server has answered.
     if (card.kind === "pending") {
       if (resumeTimer.current) clearTimeout(resumeTimer.current);
+      return;
+    }
+
+    // An unpaid card is a question put to the operator. It waits for an answer
+    // instead of clearing itself after seven seconds, which would leave the
+    // guest standing there with nothing decided.
+    if (card.kind === "unpaid") {
+      if (resumeTimer.current) clearTimeout(resumeTimer.current);
+      setFlash("bad");
+      setTimeout(() => setFlash(null), 350);
       return;
     }
 
@@ -382,13 +434,53 @@ function CheckinsScreenContent() {
       }
       refresh();
     } catch (e) {
+      const balance = unpaidRefusal(e);
+      const details = local ?? (await lookupBooking(ref));
+      if (balance) {
+        // Not an error — the guest exists and is expected, they just have not
+        // paid. The operator decides, having been shown what is owed.
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        playTone("error");
+        showCard({
+          kind: "unpaid",
+          id: ref,
+          ...details,
+          balance,
+          message: e instanceof Error ? e.message : undefined,
+        });
+        return;
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
       playTone("error");
-      const details = local ?? (await lookupBooking(ref));
       showCard({
         kind: "error",
         id: ref,
         ...details,
+        message: e instanceof Error ? e.message : "Check-in failed.",
+      });
+    }
+  }
+
+  /** Admit the guest on the current unpaid card, after the operator confirms. */
+  async function admitUnpaid() {
+    const card = scanCard;
+    if (!card?.id) return;
+    try {
+      await withTimeout(
+        api.checkinAction(card.id, "checkin", { force: true }),
+        8000,
+        "No answer from the server. Check the signal and scan again.",
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      playTone("success");
+      showCard({ ...card, kind: "success", balance: undefined, message: undefined });
+      refresh();
+    } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      playTone("error");
+      showCard({
+        ...card,
+        kind: "error",
         message: e instanceof Error ? e.message : "Check-in failed.",
       });
     }
@@ -631,6 +723,7 @@ function CheckinsScreenContent() {
                   scanCard.kind === "success" && { backgroundColor: colors.success },
                   scanCard.kind === "already" && { backgroundColor: colors.warning },
                   scanCard.kind === "error" && { backgroundColor: colors.danger },
+                  scanCard.kind === "unpaid" && { backgroundColor: colors.warning },
                 ]}
               >
                 {scanCard.kind === "pending" ? (
@@ -642,7 +735,9 @@ function CheckinsScreenContent() {
                         ? "checkmark-circle"
                         : scanCard.kind === "already"
                           ? "alert-circle"
-                          : "close-circle"
+                          : scanCard.kind === "unpaid"
+                            ? "cash-outline"
+                            : "close-circle"
                     }
                     size={20}
                     color="#17120d"
@@ -660,7 +755,9 @@ function CheckinsScreenContent() {
                       ? "Checked in"
                       : scanCard.kind === "already"
                         ? "Already checked in"
-                        : "Not admitted"}
+                        : scanCard.kind === "unpaid"
+                          ? "Payment due"
+                          : "Not admitted"}
                 </Text>
                 {scanCard.code ? <Text style={styles.resultCode}>{scanCard.code}</Text> : null}
               </View>
@@ -685,7 +782,14 @@ function CheckinsScreenContent() {
                   {scanCard.offManifest ? (
                     <Text style={styles.resultWarn}>Not on this day's manifest</Text>
                   ) : null}
-                  {scanCard.message && scanCard.kind !== "error" ? (
+                  {scanCard.kind === "unpaid" ? (
+                    <Text style={styles.resultDue}>
+                      {scanCard.balance && scanCard.balance.due > 0
+                        ? `${scanCard.balance.currency} ${scanCard.balance.due.toFixed(2)} still due`
+                        : "No payment recorded"}
+                    </Text>
+                  ) : null}
+                  {scanCard.message && scanCard.kind !== "error" && scanCard.kind !== "unpaid" ? (
                     <Text style={styles.resultWarn}>{scanCard.message}</Text>
                   ) : null}
                   {scanCard.kind === "error" && scanCard.message ? (
@@ -701,9 +805,28 @@ function CheckinsScreenContent() {
                     <Text style={styles.resultGhostText}>Undo</Text>
                   </Pressable>
                 ) : null}
-                <Pressable style={styles.resultPrimaryBtn} onPress={resumeScanning}>
-                  <Ionicons name="qr-code-outline" size={15} color="#1d160f" />
-                  <Text style={styles.resultPrimaryText}>Scan next</Text>
+                {scanCard.kind === "unpaid" ? (
+                  <Pressable style={styles.resultPrimaryBtn} onPress={admitUnpaid}>
+                    <Ionicons name="log-in-outline" size={15} color="#1d160f" />
+                    <Text style={styles.resultPrimaryText}>Admit anyway</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  style={scanCard.kind === "unpaid" ? styles.resultGhostBtn : styles.resultPrimaryBtn}
+                  onPress={resumeScanning}
+                >
+                  <Ionicons
+                    name="qr-code-outline"
+                    size={15}
+                    color={scanCard.kind === "unpaid" ? colors.gold : "#1d160f"}
+                  />
+                  <Text
+                    style={
+                      scanCard.kind === "unpaid" ? styles.resultGhostText : styles.resultPrimaryText
+                    }
+                  >
+                    {scanCard.kind === "unpaid" ? "Skip" : "Scan next"}
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -1009,6 +1132,9 @@ const styles = StyleSheet.create({
   resultGuest: { fontFamily: fonts.serif, fontSize: 20, color: colors.text },
   resultMeta: { fontFamily: fonts.sansMedium, fontSize: 12.5, color: colors.muted, marginTop: 3 },
   resultWarn: { fontFamily: fonts.sansSemiBold, fontSize: 12, color: colors.warning, marginTop: 4 },
+  // The outstanding balance, set larger than resultWarn: it is the one number
+  // the operator has to read correctly before deciding to let someone in.
+  resultDue: { fontFamily: fonts.sansSemiBold, fontSize: 15, color: colors.warning, marginTop: 6 },
   resultActions: {
     flexDirection: "row",
     gap: spacing.sm,
