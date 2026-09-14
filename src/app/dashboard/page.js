@@ -1,6 +1,7 @@
 // src/app/dashboard/page.js
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -26,6 +27,10 @@ export default function Dashboard() {
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
   const [hasActiveReservations, setHasActiveReservations] = useState(false);
+  // The page already fetches every booking to work out whether the account can
+  // be deleted, then threw them away. They are the most useful thing a guest
+  // opens this page for, so keep them.
+  const [bookings, setBookings] = useState([]);
 
   // ---- Build a base profile from Supabase metadata (fallbacks only)
   const supaProfile = useMemo(() => {
@@ -130,9 +135,11 @@ export default function Dashboard() {
           : false;
 
         setHasActiveReservations(active);
+        setBookings(Array.isArray(bookings) ? bookings : []);
       } catch (e) {
         console.error("Error checking active reservations via my-bookings:", e);
         setHasActiveReservations(false);
+        setBookings([]);
       }
     };
 
@@ -301,7 +308,7 @@ export default function Dashboard() {
                   label="Member since"
                   value={
                     finalProfile.createdAt
-                      ? new Date(finalProfile.createdAt).toLocaleDateString()
+                      ? new Date(finalProfile.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
                       : "—"
                   }
                 />
@@ -316,6 +323,8 @@ export default function Dashboard() {
         <div className="grid gap-8 lg:grid-cols-3 lg:items-start">
           {/* Left: details + actions */}
           <div className="space-y-6 lg:col-span-2">
+            <NextExperience bookings={bookings} />
+
             {/* Info Card */}
             <div className="rounded-3xl border border-[#e0dcd4] bg-white/90 p-6 shadow-[0_18px_45px_rgba(93,71,43,0.06)] backdrop-blur">
               <div className="flex items-center justify-between gap-3">
@@ -360,7 +369,7 @@ export default function Dashboard() {
                   label="Date of birth"
                   value={
                     finalProfile.dateOfBirth
-                      ? new Date(finalProfile.dateOfBirth).toLocaleDateString()
+                      ? new Date(finalProfile.dateOfBirth).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
                       : "Not provided"
                   }
                   mono
@@ -369,7 +378,7 @@ export default function Dashboard() {
                   label="Member since"
                   value={
                     finalProfile.createdAt
-                      ? new Date(finalProfile.createdAt).toLocaleDateString()
+                      ? new Date(finalProfile.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
                       : "Not provided"
                   }
                   mono
@@ -557,6 +566,110 @@ function ActionCard({ icon, label, description, onClick }) {
         )}
       </div>
     </button>
+  );
+}
+
+/**
+ * The next trip, front and centre.
+ *
+ * This page fetched every booking and used them only to decide whether the
+ * delete button should be enabled — so a guest arriving to check when their
+ * experience is, or where to meet, found an account form instead. The data was
+ * already in hand.
+ */
+function NextExperience({ bookings }) {
+  const now = Date.now();
+
+  const upcoming = (Array.isArray(bookings) ? bookings : [])
+    .filter((b) => {
+      const status = String(b?.status || "").toLowerCase();
+      if (!["confirmed", "pending", "paid", "checked_in"].includes(status)) return false;
+      const t = b?.startTime ? new Date(b.startTime).getTime() : 0;
+      return t && t >= now;
+    })
+    .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+  const next = upcoming[0];
+
+  if (!next) {
+    return (
+      <div className="rounded-3xl border border-[#e0dcd4] bg-white/90 p-6 shadow-[0_18px_45px_rgba(93,71,43,0.06)] backdrop-blur">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#a99883]">
+          Your next experience
+        </p>
+        <p className="mt-3 font-serif text-lg text-[#5a4a3f]">
+          Nothing booked yet.
+        </p>
+        <p className="mt-1 text-sm text-[#8b7a6b]">
+          When you book, the date and meeting point will appear here.
+        </p>
+        <Link
+          href="/experiences"
+          className="mt-4 inline-flex items-center gap-2 rounded-full bg-[#8b6f47] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#7a6039]"
+        >
+          Browse experiences
+        </Link>
+      </div>
+    );
+  }
+
+  const when = new Date(next.startTime);
+  const name =
+    next.Experience?.name || next.customExperienceName || "Your experience";
+  const place = next.Experience?.location || null;
+  const days = Math.ceil((when.getTime() - now) / 86400000);
+
+  return (
+    <div className="rounded-3xl border border-[#e0dcd4] bg-white/90 p-6 shadow-[0_18px_45px_rgba(93,71,43,0.06)] backdrop-blur">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#a99883]">
+          Your next experience
+        </p>
+        <span className="rounded-full bg-[#f3ece1] px-3 py-1 text-[11px] font-semibold text-[#8b6f47]">
+          {days <= 0 ? "Today" : days === 1 ? "Tomorrow" : `In ${days} days`}
+        </span>
+      </div>
+
+      <h2 className="mt-3 font-serif text-2xl leading-snug text-[#3a2f28]">
+        {name}
+      </h2>
+
+      <div className="mt-3 space-y-1.5 text-sm text-[#6b5c4d]">
+        <p>
+          {when.toLocaleDateString("en-GB", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })}
+          {" at "}
+          {when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+        </p>
+        {place ? <p>{place}</p> : null}
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <Link
+          href={`/bookings/${next.id}`}
+          className="inline-flex items-center gap-2 rounded-full bg-[#8b6f47] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#7a6039]"
+        >
+          View booking
+        </Link>
+        {next.code ? (
+          <span className="font-mono text-xs font-bold tracking-tight text-[#8b6f47]">
+            {next.code}
+          </span>
+        ) : null}
+        {upcoming.length > 1 ? (
+          <Link
+            href="/my-bookings"
+            className="text-sm font-medium text-[#8b7a6b] underline-offset-2 hover:text-[#5a4a3f] hover:underline"
+          >
+            +{upcoming.length - 1} more upcoming
+          </Link>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
