@@ -192,7 +192,12 @@ class ReceiptGenerator {
         characterSpacing: 2,
       });
 
-    const receiptNum = String(receipt.id || "0").padStart(6, "0");
+    // The fiscal number, not the row id. `series`/`number` come from the
+    // database trigger and are what the customer quotes and what myDATA is
+    // given; the row id is an internal detail that happens to look similar.
+    const receiptNum = receipt.number
+      ? `${receipt.series || "B"}-${String(receipt.number).padStart(6, "0")}`
+      : String(receipt.id || "0").padStart(6, "0");
 
     const dateStr = receipt.created_at
       ? new Date(receipt.created_at).toLocaleDateString("en-US", {
@@ -491,7 +496,13 @@ class ReceiptGenerator {
       .font("Body")
       .fontSize(8)
       .fillColor(theme.subtext)
-      .text(`Receipt ID: ${receipt.id || "-"}`, x + 15, y + 62);
+      .text(
+        receipt.number
+          ? `Doc: ${receipt.series || "B"}-${String(receipt.number).padStart(6, "0")}`
+          : `Receipt ID: ${receipt.id || "-"}`,
+        x + 15,
+        y + 62,
+      );
 
     this.doc
       .font("Body")
@@ -520,7 +531,10 @@ class ReceiptGenerator {
 
     this.setupLayout();
 
-    this.doc.info.Title = `Receipt ${this.receipt.id || ""}`;
+    const r = this.receipt;
+    this.doc.info.Title = r.number
+      ? `Receipt ${r.series || "B"}-${String(r.number).padStart(6, "0")}`
+      : `Receipt ${r.id || ""}`;
     this.doc.info.Author = String(this.store.name || "");
     this.doc.info.Subject = "Customer Receipt";
 

@@ -54,6 +54,7 @@ export default async function sendBookingConfirmation(opts = {}) {
     slot = null,
     bookingCode,
     bookingId,
+    extraAttachments = [],
     subject: customSubject,
     bcc = [],
     locale = "en-GB",
@@ -341,6 +342,11 @@ export default async function sendBookingConfirmation(opts = {}) {
     hasInvoicePdf,
     manageUrl, // Passed down to text renderer!
   });
+
+  // Anything the caller built for us — the fiscal receipt, above all.
+  for (const a of extraAttachments) {
+    if (a?.filename && a?.content != null) attachments.push(a);
+  }
 
   /* ------------------------------ send ------------------------------- */
 

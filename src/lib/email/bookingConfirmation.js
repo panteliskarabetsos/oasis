@@ -1,6 +1,12 @@
 import "server-only";
 
 import sendBookingConfirmation from "@/lib/email/sendBookingConfirmation";
+import buildReceiptPdfBuffer from "@/lib/pdf/buildReceipt";
+import { storeIdentity } from "@/lib/storeIdentity";
+import {
+  issueReceiptForBooking,
+  receiptNumber,
+} from "@/lib/receipts/issueReceipt";
 
 /**
  * The "booking confirmed" email.
@@ -370,8 +376,35 @@ export async function sendGuestConfirmation(
     slot,
   };
 
+  // The fiscal receipt travels with the confirmation. Issuing is idempotent,
+  // so the webhook and the guest's own return cannot produce two documents.
+  let extraAttachments = [];
+  try {
+    const issued = await issueReceiptForBooking(admin, booking, {
+      experienceName: experience?.name,
+    });
+    if (issued.ok && issued.receipt) {
+      const pdf = await buildReceiptPdfBuffer({
+        receipt: issued.receipt,
+        store: storeIdentity(),
+      });
+      extraAttachments = [
+        {
+          filename: `Receipt-${receiptNumber(issued.receipt)}.pdf`,
+          content: pdf,
+          contentType: "application/pdf",
+        },
+      ];
+    }
+  } catch (e) {
+    // A receipt that will not render must not hold up the confirmation; the
+    // row is already issued and can be re-sent from the admin.
+    console.error("[receipt] could not attach to confirmation:", e?.message || e);
+  }
+
   const result = await sendBookingConfirmation({
     to,
+    extraAttachments,
     draft: draftLike,
     session: {
       amount_total: Math.round(paid * 100),
