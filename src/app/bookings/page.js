@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO, isAfter, isBefore } from "date-fns";
 import {
+  meetingPointMapHref,
+  normalizeMeetingPoint,
+} from "@/lib/bookings/meetingPoint";
+import {
   CalendarDays,
   MapPin,
   Users,
@@ -13,6 +17,7 @@ import {
   Search,
   ChevronRight,
   Clock,
+  Navigation,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 import { bookingRef } from "@/lib/bookingCode";
@@ -215,6 +220,8 @@ export default function MyBookingsPage() {
 function BookingCard({ booking, isUpcoming }) {
   const router = useRouter();
   const exp = expOf(booking);
+  const meetingPoint = normalizeMeetingPoint(booking?.meetingPoint);
+  const meetingMapHref = meetingPointMapHref(meetingPoint, exp?.location);
   const when = whenISO(booking);
 
   const dateObj = when ? parseISO(when) : null;
@@ -277,6 +284,31 @@ function BookingCard({ booking, isUpcoming }) {
             <div className="flex items-center gap-2.5">
               <MapPin size={16} className="text-[#b0a090]" />
               <span className="line-clamp-1">{exp.location}</span>
+            </div>
+          )}
+
+          {/* The meeting point, with the pin that opens it on a map.
+              The row above is the experience's town, which is not the spot
+              anyone is standing on. The link stops the card click-through so
+              tapping the pin opens Maps rather than the booking. */}
+          {meetingPoint && (
+            <div className="flex items-center gap-2.5">
+              <Navigation size={16} className="text-[#b0a090] shrink-0" />
+              <span className="line-clamp-1">
+                {meetingPoint.name || meetingPoint.address}
+                {meetingPoint.time ? ` · ${meetingPoint.time}` : ""}
+              </span>
+              {meetingMapHref && (
+                <a
+                  href={meetingMapHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-[#8b6f47] hover:underline"
+                >
+                  Map
+                </a>
+              )}
             </div>
           )}
 

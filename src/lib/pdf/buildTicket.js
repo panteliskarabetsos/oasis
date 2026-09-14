@@ -2,6 +2,7 @@
 import "server-only";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
+import { normalizeMeetingPoint } from "@/lib/bookings/meetingPoint";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -378,27 +379,11 @@ class TicketGenerator {
    * Bookings carry an object — name, time, map pin, instructions — and this
    * block only ever accepted a string, so the one thing a guest needs on the
    * morning was silently dropped from the ticket they were told to present.
-   * Both shapes are accepted now.
+   * Both shapes are accepted now, through the same helper the booking pages
+   * and the confirmation screen read it with.
    */
   normalizePickup() {
-    const raw = this.args.pickupPoint ?? this.args.meetingPoint;
-    if (!raw) return null;
-    if (typeof raw === "string") {
-      const t = raw.trim();
-      return t ? { name: t } : null;
-    }
-    if (typeof raw !== "object") return null;
-
-    const name = String(raw.name || "").trim();
-    const time = String(raw.time || "").trim();
-    const instructions = String(raw.instructions || "").trim();
-    const address = String(raw.address || "").trim();
-    // A raw "35.512950, 23.967630" means nothing on paper, but it is what a
-    // guest pastes into a maps app, so it is kept and labelled.
-    const mapPin = String(raw.mapPin || "").trim();
-
-    if (!name && !address && !instructions && !mapPin) return null;
-    return { name, time, instructions, address, mapPin };
+    return normalizeMeetingPoint(this.args.pickupPoint ?? this.args.meetingPoint);
   }
 
   drawMeetingPoint(startY) {

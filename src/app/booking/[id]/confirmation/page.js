@@ -22,6 +22,7 @@ import {
   Copy,
 } from "lucide-react";
 import { parseISO, format, addMinutes } from "date-fns";
+import { normalizeMeetingPoint } from "@/lib/bookings/meetingPoint";
 
 export default function BookingConfirmationPage() {
   const { id } = useParams();
@@ -349,18 +350,10 @@ export default function BookingConfirmationPage() {
     };
   }, [converted, bookingCode]);
 
-  // Stored as JSON on the draft: name, time, map pin, instructions. A string
-  // is accepted too, since older drafts carry one.
-  const meetingPoint = useMemo(() => {
-    const raw = draft?.selected_meetup_point;
-    if (!raw) return null;
-    if (typeof raw === "string")
-      return raw.trim() ? { name: raw.trim() } : null;
-    if (typeof raw !== "object") return null;
-    const { name, time, instructions, mapPin } = raw;
-    if (!name && !instructions && !mapPin) return null;
-    return { name, time, instructions, mapPin };
-  }, [draft]);
+  const meetingPoint = useMemo(
+    () => normalizeMeetingPoint(draft?.selected_meetup_point),
+    [draft],
+  );
 
   function eur(n) {
     return `€${(Number(n) || 0).toFixed(2)}`;
