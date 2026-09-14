@@ -51,12 +51,24 @@ export async function POST(req, ctx) {
     return bad("Draft not found", 404);
   }
 
-  // If we already converted, short-circuit
+  // If we already converted, short-circuit.
+  //
+  // This path is the common one, not the exception: the webhook usually
+  // converts the booking before the guest's browser gets here, and any reload
+  // of the confirmation screen lands here too. It used to return the id alone,
+  // so the screen had no code to show and invented "BK-000400" from the row id
+  // — a reference that matched neither the confirmation email nor the ticket.
+  // The real code and a ticket token are returned so the screen can show what
+  // the guest will actually be asked for.
   if (draft.convertedBookingId) {
+    const existingRow = await getBookingRow(admin, draft.convertedBookingId);
     return ok({
       converted: true,
       bookingId: draft.convertedBookingId,
       already: true,
+      bookingCode: deriveBookingCode(existingRow),
+      status: existingRow?.status ?? undefined,
+      ticketToken: issuePortalToken(draft.convertedBookingId),
     });
   }
 
