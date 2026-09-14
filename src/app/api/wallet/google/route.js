@@ -49,6 +49,19 @@ export async function GET(req) {
       return NextResponse.json({ error: "Booking not found" }, { status: 404 });
     }
 
+    // The pass carries the same check-in barcode as the ticket, so it waits
+    // for payment too.
+    const paidStatus = String(booking.status || "").toLowerCase();
+    if (!["confirmed", "paid", "checked_in"].includes(paidStatus)) {
+      return NextResponse.json(
+        {
+          error:
+            "This booking has no pass yet. It is issued once payment is complete.",
+        },
+        { status: 409 },
+      );
+    }
+
     const serviceAccount = JSON.parse(
       Buffer.from(saBase64, "base64").toString("utf8"),
     );
