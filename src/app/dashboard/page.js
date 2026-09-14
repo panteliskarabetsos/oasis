@@ -662,7 +662,7 @@ function NextExperience({ bookings }) {
         ) : null}
         {upcoming.length > 1 ? (
           <Link
-            href="/my-bookings"
+            href="/bookings"
             className="text-sm font-medium text-[#8b7a6b] underline-offset-2 hover:text-[#5a4a3f] hover:underline"
           >
             +{upcoming.length - 1} more upcoming

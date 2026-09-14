@@ -327,7 +327,7 @@ export default function BookingConfirmedPage() {
           {/* Secondary nav */}
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3 print:hidden">
             <button
-              onClick={() => router.push("/my-bookings")}
+              onClick={() => router.push("/bookings")}
               className="rounded-full border border-[#d8cfc3] bg-white px-5 py-2.5 text-[#5a4a3f] hover:bg-[#faf7f1]"
             >
               View My Bookings
