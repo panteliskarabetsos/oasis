@@ -7,10 +7,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { markOrderPaid } from "@/lib/shop/server";
-import {
-  confirmPaidBooking,
-  sendConfirmationEmail,
-} from "@/lib/email/bookingConfirmation";
+import { confirmPaidBooking } from "@/lib/email/bookingConfirmation";
 import { settleLinkPayment } from "@/lib/pos/settleLink";
 
 // --- email/stripe helpers ---------------------------------------------------
@@ -300,13 +297,24 @@ export async function POST(req) {
           currency: s.currency,
         });
 
-        await sendConfirmationEmail({
+        // Same guarded path as every other confirmation. This used to call
+        // sendConfirmationEmail(), a second implementation that goes out over
+        // Resend — and with EMAIL_FROM unset it falls back to Resend's test
+        // sender, which delivers to nobody. Worse, it stamped
+        // confirmationEmailSentAt on the way out, so the real ticket email the
+        // confirmation page sends was then skipped as "already sent".
+        const confirmed = await confirmPaidBooking(admin, bookingId, {
           stripe,
-          admin,
-          bookingId,
           sessionId: s.id,
+          amountPaid: s.amount_total != null ? s.amount_total / 100 : null,
         });
-        return ok({ received: true, bookingId, action: "converted_draft" });
+        return ok({
+          received: true,
+          bookingId,
+          action: "converted_draft",
+          emailed: confirmed.sent,
+          reason: confirmed.reason,
+        });
       }
 
       case "payment_intent.succeeded": {
@@ -357,13 +365,18 @@ export async function POST(req) {
             finalTotalCents: pi.amount_received,
             currency: pi.currency,
           });
-          await sendConfirmationEmail({
+          const confirmed = await confirmPaidBooking(admin, bookingId, {
             stripe,
-            admin,
-            bookingId,
             piId: pi.id,
+            amountPaid:
+              pi.amount_received != null ? pi.amount_received / 100 : null,
           });
-          return ok({ received: true, action: "converted_draft_pi" });
+          return ok({
+            received: true,
+            action: "converted_draft_pi",
+            emailed: confirmed.sent,
+            reason: confirmed.reason,
+          });
         }
 
         return ok({ received: true });

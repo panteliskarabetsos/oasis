@@ -364,7 +364,7 @@ export default async function sendBookingConfirmation(opts = {}) {
 
     return { sent: true, id: info?.messageId };
   } catch (e) {
-    console.error("[email] Gmail send error:", e?.message || e);
+    console.error("[email] confirmation send failed:", e?.message || e);
     return { sent: false, error: e?.message || "send-failed" };
   }
 }
