@@ -19,6 +19,7 @@ import {
   Ticket,
   FileText,
   Navigation,
+  Copy,
 } from "lucide-react";
 import { parseISO, format, addMinutes } from "date-fns";
 
@@ -48,6 +49,8 @@ export default function BookingConfirmationPage() {
   const [ticketToken, setTicketToken] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const freeConfirmTriedRef = useRef(false);
 
@@ -61,6 +64,48 @@ export default function BookingConfirmationPage() {
   // ("F2QB3"), so the guest was told to keep a reference that appeared on
   // neither their email nor their ticket. The confirm endpoint returns the
   // real one, for an already-converted draft as well as a fresh one.
+
+  // Reading a five-character code off a screen and typing it into a support
+  // email is exactly where a guest transposes two characters.
+  async function handleCopyCode() {
+    if (!bookingCode) return;
+
+    // navigator.clipboard needs a secure context and the user's permission,
+    // and it throws NotAllowedError where either is missing — which left the
+    // button doing nothing at all, silently. The textarea fallback is the old
+    // approach and needs neither.
+    const viaClipboardApi = async () => {
+      if (!navigator.clipboard?.writeText) return false;
+      try {
+        await navigator.clipboard.writeText(bookingCode);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const viaSelection = () => {
+      try {
+        const el = document.createElement("textarea");
+        el.value = bookingCode;
+        el.setAttribute("readonly", "");
+        el.style.position = "fixed";
+        el.style.opacity = "0";
+        document.body.appendChild(el);
+        el.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(el);
+        return ok;
+      } catch {
+        return false;
+      }
+    };
+
+    if ((await viaClipboardApi()) || viaSelection()) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
 
   async function confirmNow(dId, opts = {}) {
     try {
@@ -274,6 +319,36 @@ export default function BookingConfirmationPage() {
 
   const referenceToShow = converted ? bookingCode : `DRAFT-${draftId}`;
 
+  // The check-in QR, drawn as soon as the real code is known.
+  //
+  // It encodes the bare booking code, which is exactly what the ticket PDF
+  // encodes — so this screen and the emailed ticket present the same thing to
+  // the same scanner, and a guest who never opens the email can still be
+  // admitted from their phone.
+  useEffect(() => {
+    let alive = true;
+    if (!converted || !bookingCode) {
+      setQrDataUrl("");
+      return;
+    }
+    (async () => {
+      try {
+        const QRCode = (await import("qrcode")).default;
+        const url = await QRCode.toDataURL(bookingCode, {
+          margin: 1,
+          width: 320,
+          color: { dark: "#3a2f28", light: "#ffffff" },
+        });
+        if (alive) setQrDataUrl(url);
+      } catch {
+        if (alive) setQrDataUrl("");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [converted, bookingCode]);
+
   // Stored as JSON on the draft: name, time, map pin, instructions. A string
   // is accepted too, since older drafts carry one.
   const meetingPoint = useMemo(() => {
@@ -296,8 +371,10 @@ export default function BookingConfirmationPage() {
       return {
         tone: "success",
         title: "You're all set! 🎉",
+        // "Keep your booking code handy" was advice the page could not act on,
+        // because the code was all it showed. The ticket is on the page now.
         subtitle:
-          "Your booking is confirmed. We've emailed you the details. Keep your booking code handy.",
+          "Your ticket is below and a copy is on its way to your inbox.",
         chipLabel: "Confirmed",
       };
     }
@@ -480,21 +557,26 @@ export default function BookingConfirmationPage() {
 
       <div className="relative z-10 mx-auto max-w-5xl px-4 sm:px-6 pt-10 sm:pt-16">
         {/* Top Hero */}
-        <section className="text-center mb-10 sm:mb-14">
-          <div className="mx-auto h-20 w-20 sm:h-24 sm:w-24 rounded-full flex items-center justify-center mb-6 shadow-sm border-[3px] border-white relative">
+        {/* The hero is smaller on a phone than it was.
+            A 96px badge over a 5xl serif line and a three-line subtitle filled
+            the whole first screen, so a guest who had just paid had to scroll
+            past a tick mark to reach their booking code. It still reads as a
+            celebration; it just no longer occupies the fold on its own. */}
+        <section className="text-center mb-8 sm:mb-14">
+          <div className="mx-auto h-14 w-14 sm:h-24 sm:w-24 rounded-full flex items-center justify-center mb-4 sm:mb-6 shadow-sm border-[3px] border-white relative">
             <div className="absolute inset-0 rounded-full bg-white opacity-50 blur-md -z-10" />
             {converted ? (
               <div className="w-full h-full rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
-                <CheckCircle2 size={40} />
+                <CheckCircle2 className="h-7 w-7 sm:h-10 sm:w-10" />
               </div>
             ) : (
               <div className="w-full h-full rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
-                <Loader2 size={40} className="animate-spin" />
+                <Loader2 className="h-7 w-7 sm:h-10 sm:w-10 animate-spin" />
               </div>
             )}
           </div>
 
-          <h1 className="text-3xl sm:text-5xl font-serif text-[#3a2f28] mb-4">
+          <h1 className="text-[28px] leading-tight sm:text-5xl font-serif text-[#3a2f28] mb-3 sm:mb-4">
             {uiState.title}
           </h1>
           <p className="text-[#7a6a5f] max-w-lg mx-auto text-sm sm:text-base leading-relaxed">
@@ -552,14 +634,51 @@ export default function BookingConfirmationPage() {
                 </div>
 
                 <div className="p-6 sm:p-8 pl-8">
-                  {/* Reference Code Prominent */}
-                  <div className="mb-8 pb-8 border-b border-[#e0dcd4] text-center sm:text-left">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-2">
-                      {converted ? "Booking Reference" : "Draft Reference"}
-                    </p>
-                    <p className="text-4xl font-mono text-[#3a2f28] tracking-tight bg-[#fdfaf5] border border-[#e0dcd4] inline-block px-4 py-2 rounded-xl shadow-inner select-all">
-                      {referenceToShow}
-                    </p>
+                  {/* The code and the QR sit together, because together they
+                      are the ticket. The code used to sit alone on a wide row
+                      with nothing beside it, and the QR — the thing actually
+                      scanned at the door — existed only inside the emailed
+                      PDF, so a guest who had just paid had nothing on screen
+                      that would get them in. */}
+                  <div className="mb-8 pb-8 border-b border-[#e0dcd4] flex flex-col sm:flex-row sm:items-center gap-6 sm:gap-8">
+                    <div className="text-center sm:text-left flex-1 min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-[#a09084] mb-2">
+                        {converted ? "Booking Reference" : "Draft Reference"}
+                      </p>
+                      <p className="text-4xl font-mono text-[#3a2f28] tracking-tight bg-[#fdfaf5] border border-[#e0dcd4] inline-block px-4 py-2 rounded-xl shadow-inner select-all">
+                        {referenceToShow}
+                      </p>
+                      {converted && bookingCode && (
+                        <button
+                          type="button"
+                          onClick={handleCopyCode}
+                          className="mt-3 flex items-center gap-1.5 mx-auto sm:mx-0 text-[10px] font-bold uppercase tracking-wider text-[#8b6f47] hover:text-[#3a2f28] transition-colors"
+                        >
+                          {copied ? (
+                            <>
+                              <CheckCircle2 size={12} /> Copied
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={12} /> Copy code
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+
+                    {qrDataUrl && (
+                      <div className="flex flex-col items-center shrink-0">
+                        <img
+                          src={qrDataUrl}
+                          alt={`Check-in code for booking ${bookingCode}`}
+                          className="h-32 w-32 rounded-xl border border-[#e0dcd4] bg-white p-1.5"
+                        />
+                        <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-[#a09084]">
+                          Show this at check-in
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   <h2 className="text-2xl font-serif text-[#3a2f28] leading-tight mb-6">
