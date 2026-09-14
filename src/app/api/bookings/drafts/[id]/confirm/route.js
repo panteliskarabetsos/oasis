@@ -544,13 +544,26 @@ export async function POST(req, ctx) {
 
   // Send confirmation email (idempotent)
   try {
-    const { data: b } = await admin
+    // Claim the send rather than just checking it.
+    //
+    // The webhook confirms the same booking, and a read-then-write leaves a
+    // window where both see null and both send. This conditional update means
+    // exactly one caller flips it from null, and only that one mails; the
+    // claim is released again below if the send fails.
+    const { data: claimed, error: claimErr } = await admin
       .from("booking")
-      .select('id, "confirmationEmailSentAt"')
+      .update({ confirmationEmailSentAt: new Date().toISOString() })
       .eq("id", bookingId)
-      .maybeSingle();
+      .is("confirmationEmailSentAt", null)
+      .select("id");
 
-    if (!b?.confirmationEmailSentAt) {
+    // Without the column there is nothing to dedupe on; send anyway rather
+    // than stay silent, which is the safer failure for a guest waiting on it.
+    const columnMissing =
+      claimErr &&
+      (claimErr.code === "42703" || claimErr.code === "PGRST204");
+
+    if (claimed?.length || columnMissing) {
       const toEmail =
         emailForReceipt ||
         checkoutSession?.customer_details?.email ||
@@ -579,17 +592,13 @@ export async function POST(req, ctx) {
       });
       console.log("[confirm] email result:", sendRes);
 
-      if (sendRes?.sent) {
-        const stamp = await admin
+      // The claim above already recorded it as sent. If it did not go out,
+      // hand the claim back so the webhook — or a later attempt — can retry.
+      if (!sendRes?.sent && !columnMissing) {
+        await admin
           .from("booking")
-          .update({ confirmationEmailSentAt: new Date().toISOString() })
+          .update({ confirmationEmailSentAt: null })
           .eq("id", bookingId);
-
-        if (stamp.error && String(stamp.error.code) === "42703") {
-          console.warn(
-            "[confirm] confirmationEmailSentAt column missing; skipping timestamp",
-          );
-        }
       }
     }
   } catch (e) {
