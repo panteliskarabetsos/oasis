@@ -46,6 +46,24 @@ export async function GET(req, ctx) {
     return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   }
 
+  // A ticket is only for a booking that has been paid for.
+  //
+  // Hiding the download button is not enough on its own: the guest owns this
+  // booking, so their session opens this route perfectly well by URL. The QR
+  // inside the PDF is the reference the check-in scanner admits people on, so
+  // it must not exist before the money does.
+  const paidStatus = String(booking.status || "").toLowerCase();
+  if (!["confirmed", "paid", "checked_in"].includes(paidStatus)) {
+    return NextResponse.json(
+      {
+        error:
+          "This booking has no ticket yet. It is issued once payment is complete.",
+        status: paidStatus || "unknown",
+      },
+      { status: 409 },
+    );
+  }
+
   // -------- Map booking → buildTicketPdfBuffer args --------
   const start = booking.startTime ? new Date(booking.startTime) : null;
 

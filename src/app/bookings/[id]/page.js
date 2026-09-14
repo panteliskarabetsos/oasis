@@ -33,6 +33,7 @@ import {
   Navigation,
   Settings,
   Wallet,
+  Lock,
 } from "lucide-react";
 import { useAuth } from "@/app/components/SessionWrapper";
 import { bookingRef } from "@/lib/bookingCode";
@@ -181,9 +182,26 @@ export default function BookingDetailsPage({ params }) {
     [exp],
   );
 
+  /**
+   * Has this booking actually been paid for?
+   *
+   * `status` above is derived from the date alone — upcoming, ongoing, past —
+   * so it said nothing about payment, and a pending booking was handed a QR
+   * and a ticket PDF like any other. The check-in code in that QR is the thing
+   * the scanner admits people on.
+   *
+   * checked_in counts: it can only follow a payment, and a guest who has
+   * already been admitted should still be able to see their own ticket.
+   */
+  const isPaidFor = useMemo(() => {
+    const s = String(booking?.status || "").toLowerCase();
+    return s === "confirmed" || s === "paid" || s === "checked_in";
+  }, [booking]);
+
   // QR Logic
   const qrValue = useMemo(() => getQrValue(booking), [booking]);
   const shouldShowQr =
+    isPaidFor &&
     !!dateObj &&
     isValid(dateObj) &&
     !!qrValue &&
@@ -285,6 +303,8 @@ export default function BookingDetailsPage({ params }) {
                 >
                   <Share2 className="w-4 h-4" /> Share
                 </button>
+                {isPaidFor ? (
+                  <>
                 <button
                   onClick={handleGoogleWallet}
                   disabled={savingWallet}
@@ -309,6 +329,8 @@ export default function BookingDetailsPage({ params }) {
                   )}
                   {downloadingTicket ? "Generating..." : "Download PDF"}
                 </button>
+                </>
+                ) : null}
               </div>
             </div>
 
@@ -400,6 +422,7 @@ export default function BookingDetailsPage({ params }) {
                     qrValue={qrValue}
                     dateObj={dateObj}
                     status={status}
+                    isPaidFor={isPaidFor}
                     copied={copied}
                     onCopy={() => setCopied(true)}
                   />
@@ -456,12 +479,48 @@ function TicketCard({
   qrValue,
   dateObj,
   status,
+  isPaidFor,
   copied,
   onCopy,
 }) {
   const isGenerating = qrLoading || (qrValue && !qrDataUrl && !qrError);
 
   const isExpired = status.past;
+
+  // Nothing has been paid yet, so there is no ticket to show. Saying so beats
+  // rendering a ticket stub marked "Valid" with an empty space where the code
+  // belongs — which is what an unpaid booking used to get.
+  if (!isPaidFor) {
+    const cancelled = ["cancelled", "canceled", "no_show"].includes(
+      String(booking?.status || "").toLowerCase(),
+    );
+    return (
+      <div className="rounded-2xl border border-[#e8e2d9] bg-white p-8 text-center shadow-sm">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#f6f1e9]">
+          <Lock className="h-5 w-5 text-[#8b6f47]" />
+        </div>
+        <p className="font-serif text-lg text-[#3d2f26]">
+          {cancelled ? "This booking is no longer active" : "Ticket not issued yet"}
+        </p>
+        <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-[#7a6a5f]">
+          {cancelled
+            ? "No ticket is available for a booking that has been cancelled."
+            : "Your entry ticket and QR code appear here once payment is complete."}
+        </p>
+        {!cancelled ? (
+          <Link
+            href="/manage-booking"
+            className="mt-5 inline-flex items-center justify-center rounded-full bg-[#8b6f47] px-6 py-2.5 font-medium text-white shadow-md transition-all hover:bg-[#6b5436]"
+          >
+            Complete payment
+          </Link>
+        ) : null}
+        <p className="mt-4 font-mono text-xs text-[#a89b8e]">
+          {getPublicBookingRef(booking)}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="relative group filter drop-shadow-xl transition-transform duration-300 hover:scale-[1.01]">

@@ -60,6 +60,10 @@ export default function BookingDetailScreen() {
   // Encode the same reference the ticket displays. A numeric id still scans,
   // but the two should not drift — and the id form is the one we would retire.
   const qrValue = booking.qrValue ?? `BOOKING-CHECKIN:${reference}`;
+  // checked_in counts — it can only follow a payment.
+  const isPaidFor = ["confirmed", "paid", "checked_in"].includes(
+    String(booking.status ?? "").toLowerCase(),
+  );
   const guests = (booking.counts?.adults ?? 0) + (booking.counts?.kids ?? 0);
   const location = booking.experience?.location ?? "Chania, Crete";
 
@@ -101,16 +105,31 @@ export default function BookingDetailScreen() {
         } />
       </View>
 
-      {/* Ticket card with QR */}
-      <Card style={styles.ticket}>
-        <View style={{ alignItems: "center", gap: spacing.sm }}>
-          <QRCode value={qrValue} size={160} color={colors.brownDeeper} backgroundColor="transparent" />
-          <Text style={styles.reference} onPress={copyRef}>
-            {reference} {copied ? "✓" : ""}
-          </Text>
-          <Muted style={{ fontSize: 11 }}>Tap the reference to copy · show the QR at check-in</Muted>
-        </View>
-      </Card>
+      {/* Ticket card with QR — only once the booking is actually paid for.
+          The QR carries the reference the check-in scanner admits people on,
+          so it must not exist before the money does. */}
+      {isPaidFor ? (
+        <Card style={styles.ticket}>
+          <View style={{ alignItems: "center", gap: spacing.sm }}>
+            <QRCode value={qrValue} size={160} color={colors.brownDeeper} backgroundColor="transparent" />
+            <Text style={styles.reference} onPress={copyRef}>
+              {reference} {copied ? "✓" : ""}
+            </Text>
+            <Muted style={{ fontSize: 11 }}>Tap the reference to copy · show the QR at check-in</Muted>
+          </View>
+        </Card>
+      ) : (
+        <Card style={styles.ticket}>
+          <View style={{ alignItems: "center", gap: spacing.sm }}>
+            <Ionicons name="lock-closed-outline" size={22} color={colors.brand} />
+            <Serif style={{ fontSize: 16 }}>Ticket not issued yet</Serif>
+            <Muted style={{ fontSize: 12, textAlign: "center" }}>
+              Your QR code appears here once payment is complete.
+            </Muted>
+            <Text style={styles.reference}>{reference}</Text>
+          </View>
+        </Card>
+      )}
 
       <Card style={{ marginTop: spacing.md }}>
         <DetailRow icon="calendar-outline" label="When" value={formatDateTime(when)} />
@@ -137,10 +156,14 @@ export default function BookingDetailScreen() {
       </Card>
 
       <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
-        <Button
-          title="Download Ticket (PDF)"
-          onPress={() => openWithTicketToken(booking.id, (url) => WebBrowser.openBrowserAsync(url), api.ticketPdfUrl)}
-        />
+        {/* Ticket and wallet passes wait for payment. Calendar and directions
+            do not — they are useful whatever the booking's state. */}
+        {isPaidFor ? (
+          <Button
+            title="Download Ticket (PDF)"
+            onPress={() => openWithTicketToken(booking.id, (url) => WebBrowser.openBrowserAsync(url), api.ticketPdfUrl)}
+          />
+        ) : null}
         {calendarUrl() ? (
           <Button title="Add to Calendar" variant="ghost" onPress={() => Linking.openURL(calendarUrl()!)} />
         ) : null}
@@ -153,27 +176,31 @@ export default function BookingDetailScreen() {
             )
           }
         />
-        <Button
-          title="Add to Apple Wallet"
-          variant="ghost"
-          onPress={() => openWithTicketToken(booking.id, (url) => Linking.openURL(url), api.appleWalletUrl)}
-        />
-        <Button
-          title="Save to Google Wallet"
-          variant="ghost"
-          onPress={async () => {
-            try {
-              const token = await api.ticketToken(booking.id);
-              const { saveUrl } = await api.googleWallet(booking.id, token);
-              if (saveUrl) await Linking.openURL(saveUrl);
-            } catch (e) {
-              Alert.alert(
-                "Google Wallet",
-                e instanceof Error ? e.message : "Could not create the Wallet link."
-              );
-            }
-          }}
-        />
+        {isPaidFor ? (
+          <Button
+            title="Add to Apple Wallet"
+            variant="ghost"
+            onPress={() => openWithTicketToken(booking.id, (url) => Linking.openURL(url), api.appleWalletUrl)}
+          />
+        ) : null}
+        {isPaidFor ? (
+          <Button
+            title="Save to Google Wallet"
+            variant="ghost"
+            onPress={async () => {
+              try {
+                const token = await api.ticketToken(booking.id);
+                const { saveUrl } = await api.googleWallet(booking.id, token);
+                if (saveUrl) await Linking.openURL(saveUrl);
+              } catch (e) {
+                Alert.alert(
+                  "Google Wallet",
+                  e instanceof Error ? e.message : "Could not create the Wallet link."
+                );
+              }
+            }}
+          />
+        ) : null}
         <Button
           title="Share"
           variant="ghost"
