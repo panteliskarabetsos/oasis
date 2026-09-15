@@ -739,8 +739,13 @@ export default function PaymentPage() {
                   <span className="text-[10px] font-bold uppercase tracking-widest text-[#a7988a]">
                     Total
                   </span>
+                  {/* breakdown.finalTotal, not amountLabel: the latter comes
+                      from the PaymentIntent, which does not exist yet while
+                      the gateway is being prepared or at all once the hold has
+                      expired — so this strip announced a total of €0.00. It is
+                      the same figure the full summary shows. */}
                   <span className="font-serif text-xl text-[#8b6f47]">
-                    {amountLabel}
+                    {breakdown.finalTotal}
                   </span>
                 </div>
               </div>
