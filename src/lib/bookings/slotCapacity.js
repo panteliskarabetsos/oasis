@@ -16,7 +16,10 @@ export const COUNT_STATUSES = Object.freeze(
 
 /** The default life of a hold, and the longest one can ever be stretched to. */
 export const HOLD_MINUTES = 15;
-export const MAX_HOLD_MINUTES = 60;
+// Half an hour from when the draft was created. Renewals top the hold back up
+// to HOLD_MINUTES until this is reached, so a checkout can run a little long
+// without a seat being held all afternoon.
+export const MAX_HOLD_MINUTES = 30;
 
 /**
  * Read a timestamp as the database means it.
