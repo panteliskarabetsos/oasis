@@ -134,13 +134,35 @@ export default function PaymentPage() {
       try {
         setLoading(true);
 
+        // Top up the hold before reading the draft, so the countdown below
+        // reflects the renewed expiry rather than the old one.
+        //
+        // The response used to be discarded. fetch only rejects on network
+        // failure, so while this route did not exist the 404 sailed past the
+        // catch and nothing — not even a console line — said the hold was
+        // never being extended. A refusal now gets looked at.
         try {
-          // 🔑 SECURITY: Pass token to the extend route
-          await fetch(`/api/bookings/drafts/${draftId}/extend?token=${token}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ minutes: 10 }),
-          });
+          const extRes = await fetch(
+            `/api/bookings/drafts/${draftId}/extend?token=${token}`,
+            { method: "POST", headers: { "Content-Type": "application/json" } },
+          );
+          if (!extRes.ok) {
+            const info = await extRes.json().catch(() => ({}));
+            // Someone took the last places while this checkout sat open.
+            // Paying would be paying for a seat that is gone.
+            if (info?.reason === "capacity") {
+              setError(
+                info.error || "These places have just been taken.",
+              );
+              setLoading(false);
+              return;
+            }
+            // "expired" needs no handling here: the draft fetch below reports
+            // it, and the page already has a state for it.
+            if (info?.reason !== "expired") {
+              console.warn("Could not extend booking hold:", info);
+            }
+          }
         } catch (extendErr) {
           console.warn("Could not extend booking hold:", extendErr);
         }
