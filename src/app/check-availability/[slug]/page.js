@@ -3,9 +3,15 @@
 import { enGB } from "date-fns/locale";
 import { useEffect, useMemo, useRef, useState, useId } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { format, isSameDay, parseISO } from "date-fns";
+import {
+  addMonths,
+  format,
+  isSameDay,
+  parseISO,
+  startOfMonth,
+} from "date-fns";
 import { DayPicker } from "react-day-picker";
-import "react-day-picker/dist/style.css";
+import "react-day-picker/style.css";
 import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -66,6 +72,13 @@ export default function CheckAvailabilityPage() {
   const [experience, setExperience] = useState(null);
   const [availableSlots, setAvailableSlots] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
+  // The month the calendar is showing.
+  //
+  // It used to be uncontrolled, so the grid always opened on the current month
+  // while the page auto-selected the first bookable day — often months out.
+  // A guest landing here saw a full month of greyed-out dates, a selection
+  // they could not see, and no reason to think anything was bookable at all.
+  const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(new Date()));
   const [selectedSlotId, setSelectedSlotId] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
 
@@ -194,7 +207,11 @@ export default function CheckAvailabilityPage() {
         setAvailableSlots(futureOnly);
 
         const firstDay = earliestDayWithAvailability(futureOnly);
-        if (firstDay) setSelectedDate(firstDay);
+        if (firstDay) {
+          setSelectedDate(firstDay);
+          // Open the grid where the availability actually is.
+          setVisibleMonth(startOfMonth(firstDay));
+        }
       } catch (e) {
         console.error(e);
         toast.error("Failed to load experience or availability.");
@@ -204,17 +221,32 @@ export default function CheckAvailabilityPage() {
     })();
   }, [slug]);
 
+  // Jumping to the times is a response to the guest picking a date, not
+  // something to do to them on arrival. The page auto-selects the first
+  // bookable day as it loads, and that counted as a pick — so landing here
+  // scrolled you past the experience name and the price before you had read
+  // either. Only a deliberate choice scrolls now.
+  const userPickedDateRef = useRef(false);
+
   useEffect(() => {
     setSelectedSlotId(null);
+    if (!userPickedDateRef.current) return;
     if (selectedDate && slotsContainerRef.current) {
       setTimeout(() => {
-        slotsContainerRef.current.scrollIntoView({
+        slotsContainerRef.current?.scrollIntoView({
           behavior: "smooth",
           block: "start",
         });
       }, 50);
     }
   }, [selectedDate]);
+
+  /** Every date change the guest makes goes through here. */
+  const pickDate = (d) => {
+    userPickedDateRef.current = true;
+    setSelectedDate(d);
+    if (d) setVisibleMonth(startOfMonth(d));
+  };
 
   const meetupPointsList = Array.isArray(experience?.meetupPoints)
     ? experience.meetupPoints
@@ -240,6 +272,30 @@ export default function CheckAvailabilityPage() {
   const availableDates = useMemo(
     () => availableSlots.map((s) => parseISO(s.date)),
     [availableSlots],
+  );
+
+  /**
+   * How far the calendar lets you navigate.
+   *
+   * The old bounds were a fixed six months, set through v8 props this version
+   * ignores anyway. A slot further out than that was unreachable: it existed,
+   * the page knew about it, and no amount of clicking the arrow would show it.
+   * The window now reaches the furthest day that is actually bookable.
+   */
+  const calendarBounds = useMemo(() => {
+    const now = new Date();
+    const sixMonthsOut = addMonths(now, 6);
+    const furthest = availableDates.reduce(
+      (max, d) => (d > max ? d : max),
+      sixMonthsOut,
+    );
+    return { start: startOfMonth(now), end: startOfMonth(furthest) };
+  }, [availableDates]);
+
+  // "Today" is only an offer when something is actually running today.
+  const todayHasAvailability = useMemo(
+    () => availableDates.some((d) => isSameDay(d, new Date())),
+    [availableDates],
   );
 
   const slotsOnSelectedDay = useMemo(() => {
@@ -344,12 +400,6 @@ export default function CheckAvailabilityPage() {
       ? experience.images[0]
       : null;
   const step = !selectedDate ? 1 : !selectedSlotId ? 2 : 3;
-
-  const DayContent = (props) => (
-    <span className="relative inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 rounded-full text-[13px]">
-      {props.children}
-    </span>
-  );
 
   const tz = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -520,7 +570,10 @@ export default function CheckAvailabilityPage() {
 
           {/* Content */}
           <main className="mx-auto max-w-6xl px-4 sm:px-8 pt-6 md:pt-8">
-            <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-8 md:gap-10">
+            {/* items-start: the columns are independent, not a matched pair.
+                Stretching left the date card with a near-300px well of empty
+                white below the legend whenever the right column ran longer. */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-8 md:gap-10 items-start">
               {/* Left: Calendar */}
               <section
                 className={`relative rounded-[2rem] border border-[#e2d7c7] bg-white p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ${
@@ -535,7 +588,7 @@ export default function CheckAvailabilityPage() {
                     {selectedDate ? (
                       <SelectedDatePill
                         date={selectedDate}
-                        onClear={() => setSelectedDate(null)}
+                        onClear={() => pickDate(null)}
                       />
                     ) : (
                       <span className="text-sm text-[#8b7a6b]">
@@ -547,8 +600,14 @@ export default function CheckAvailabilityPage() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setSelectedDate(new Date())}
-                      className="rounded-full border border-[#d3c2aa] px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-[#5a4a3f] bg-white hover:bg-[#f4ede4] transition-colors"
+                      onClick={() => pickDate(new Date())}
+                      disabled={!todayHasAvailability}
+                      title={
+                        todayHasAvailability
+                          ? undefined
+                          : "Nothing runs today"
+                      }
+                      className="rounded-full border border-[#d3c2aa] px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-[#5a4a3f] bg-white hover:bg-[#f4ede4] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
                     >
                       Today
                     </button>
@@ -556,7 +615,7 @@ export default function CheckAvailabilityPage() {
                       type="button"
                       onClick={() => {
                         const d = earliestDayWithAvailability(availableSlots);
-                        if (d && !pausedNow) setSelectedDate(d);
+                        if (d && !pausedNow) pickDate(d);
                       }}
                       className="rounded-full bg-[#1A1A1A] px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-white hover:bg-[#8b6f47] transition-all disabled:opacity-50 disabled:bg-[#d3c2aa]"
                       disabled={!hasAnySlots}
@@ -584,22 +643,24 @@ export default function CheckAvailabilityPage() {
                   <>
                     <div className="flex justify-center border border-[#f4ede4] rounded-[1.5rem] p-4 sm:p-6 bg-[#fcfbf9]">
                       <DayPicker
+                        /* react-day-picker v9.
+                           This block was written against v8: fromMonth /
+                           toMonth / fromYear / toYear / captionLayout
+                           "buttons", a DayContent slot, and class names like
+                           rdp-caption and rdp-day_today. v9 renamed all of it,
+                           so every one of those was silently ignored — the
+                           navigation limits did nothing and the calendar was
+                           rendering in default library styling rather than the
+                           theme below. */
                         mode="single"
                         selected={selectedDate}
-                        onSelect={(d) =>
-                          !pausedNow && setSelectedDate(d || null)
-                        }
+                        onSelect={(d) => !pausedNow && pickDate(d || null)}
+                        month={visibleMonth}
+                        onMonthChange={setVisibleMonth}
                         showOutsideDays
                         fixedWeeks
-                        captionLayout="buttons"
-                        fromMonth={new Date()}
-                        toMonth={
-                          new Date(
-                            new Date().setMonth(new Date().getMonth() + 6),
-                          )
-                        }
-                        fromYear={new Date().getFullYear()}
-                        toYear={new Date().getFullYear() + 1}
+                        startMonth={calendarBounds.start}
+                        endMonth={calendarBounds.end}
                         locale={enGB}
                         modifiers={{
                           plenty: availabilityBuckets.plenty,
@@ -613,39 +674,52 @@ export default function CheckAvailabilityPage() {
                             !availableDates.some((d) => isSameDay(d, date)),
                         ]}
                         className="inline-block"
+                        /* These have to live on the root element, not a
+                           wrapper: v9 declares its own defaults on .rdp-root,
+                           and a declaration there beats anything inherited
+                           from a parent. Left alone they paint the chevrons
+                           and the ring around the selected day pure blue. */
+                        style={{
+                          "--rdp-accent-color": "#8b6f47",
+                          "--rdp-accent-background-color": "#f4ede4",
+                          "--rdp-selected-border": "2px solid #8b6f47",
+                          "--rdp-today-color": "#8b6f47",
+                        }}
+                        /* v9 puts the day's classes on the cell and renders a
+                           button inside it, so the round pill everything is
+                           drawn on has to be targeted through that button. */
                         classNames={{
                           root: "rdp-root",
-                          caption:
-                            "rdp-caption mb-6 flex items-center justify-between text-[#3a2f28]",
+                          month_caption:
+                            "rdp-month_caption mb-6 flex items-center text-[#3a2f28]",
                           caption_label:
-                            "text-xl font-serif font-semibold tracking-tight",
+                            "rdp-caption_label text-xl font-serif font-semibold tracking-tight",
                           nav: "rdp-nav flex items-center gap-2",
-                          nav_button:
-                            "rdp-nav_button h-9 w-9 grid place-items-center rounded-full border border-[#e2d7c7] hover:border-[#8b6f47] hover:text-[#8b6f47] bg-white text-[#6b625a] transition-all",
-                          table:
-                            "rdp-table border-separate border-spacing-y-2 border-spacing-x-2",
-                          head_row: "rdp-head_row",
-                          head_cell:
-                            "rdp-head_cell text-[10px] font-bold text-[#a7988a] pb-3 uppercase tracking-[0.2em]",
-                          row: "rdp-row",
-                          cell: "rdp-cell text-center align-middle h-10 w-10 sm:h-11 sm:w-11 [&_.rdp-day_selected]:!bg-[#8b6f47] [&_.rdp-day_selected]:!text-white",
-                          day: "rdp-day !rounded-full focus:outline-none focus:ring-2 focus:ring-[#8b6f47] transition-all duration-200 text-sm font-medium text-[#5a4a3f]",
-                          day_selected:
-                            "rdp-day_selected !bg-[#8b6f47] !text-white !rounded-full shadow-md font-bold",
-                          day_today:
-                            "rdp-day_today border-2 border-[#8b6f47] text-[#8b6f47] font-bold bg-white",
-                          day_outside:
-                            "rdp-day_outside text-[#d3c2aa] font-normal",
-                          day_disabled:
-                            "rdp-day_disabled text-[#d3c2aa] opacity-50",
+                          button_previous:
+                            "rdp-button_previous h-9 w-9 grid place-items-center rounded-full border border-[#e2d7c7] hover:border-[#8b6f47] hover:text-[#8b6f47] bg-white text-[#6b625a] transition-all disabled:opacity-30 disabled:hover:border-[#e2d7c7]",
+                          button_next:
+                            "rdp-button_next h-9 w-9 grid place-items-center rounded-full border border-[#e2d7c7] hover:border-[#8b6f47] hover:text-[#8b6f47] bg-white text-[#6b625a] transition-all disabled:opacity-30 disabled:hover:border-[#e2d7c7]",
+                          month_grid:
+                            "rdp-month_grid border-separate border-spacing-y-2 border-spacing-x-2",
+                          weekday:
+                            "rdp-weekday text-[10px] font-bold text-[#a7988a] pb-3 uppercase tracking-[0.2em]",
+                          day: "rdp-day text-center align-middle p-0",
+                          day_button:
+                            "rdp-day_button h-9 w-9 sm:h-10 sm:w-10 rounded-full text-[13px] font-medium text-[#5a4a3f] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#8b6f47] focus:ring-offset-1",
+                          selected:
+                            "rdp-selected [&>button]:!bg-[#8b6f47] [&>button]:!text-white [&>button]:font-bold [&>button]:shadow-md",
+                          today:
+                            "rdp-today [&>button]:border-2 [&>button]:border-[#8b6f47] [&>button]:text-[#8b6f47] [&>button]:font-bold",
+                          outside: "rdp-outside [&>button]:text-[#d3c2aa] [&>button]:font-normal",
+                          disabled:
+                            "rdp-disabled [&>button]:text-[#d3c2aa] [&>button]:opacity-50 [&>button]:cursor-not-allowed",
                         }}
                         modifiersClassNames={{
                           plenty:
-                            "bg-[#eaf0ea] hover:bg-[#d8e6d8] text-[#3e5c46]",
-                          some: "bg-[#f4efe8] hover:bg-[#ebdccc] text-[#5a4a3f]",
-                          few: "bg-[#fdf3e1] hover:bg-[#fae2b8] text-[#8b6324]",
+                            "[&>button]:bg-[#eaf0ea] [&>button]:hover:bg-[#d8e6d8] [&>button]:text-[#3e5c46]",
+                          some: "[&>button]:bg-[#f4efe8] [&>button]:hover:bg-[#ebdccc] [&>button]:text-[#5a4a3f]",
+                          few: "[&>button]:bg-[#fdf3e1] [&>button]:hover:bg-[#fae2b8] [&>button]:text-[#8b6324]",
                         }}
-                        components={{ DayContent }}
                       />
                     </div>
 
@@ -1314,16 +1388,22 @@ function earliestDayWithAvailability(slots = []) {
 }
 
 function SelectedDatePill({ date, onClear }) {
+  // The year is shown when it is not this one. The first bookable date is
+  // often in the next year, and "Thursday, January 7" alone does not say so.
+  const sameYear = date.getFullYear() === new Date().getFullYear();
   return (
     <div className="inline-flex items-center gap-2 mt-2">
-      <span className="text-sm sm:text-base font-bold text-[#8b6f47] bg-[#f4ede4] px-3 sm:px-4 py-1.5 rounded-full flex items-center gap-2">
-        {format(date, "EEEE, MMMM d")}
+      <span className="text-sm sm:text-base font-bold text-[#8b6f47] bg-[#f4ede4] px-3 sm:px-4 py-1.5 rounded-full inline-flex items-center gap-2 whitespace-nowrap">
+        {format(date, sameYear ? "EEEE, MMMM d" : "EEE, d MMM yyyy")}
         <button
           type="button"
           onClick={onClear}
+          aria-label="Clear the selected date"
+          title="Clear date"
           className="bg-white/50 hover:bg-white text-[#5a4a3f] rounded-full p-0.5 transition-colors"
         >
-          <Minus size={14} />
+          {/* A minus read as "one fewer"; this clears the selection. */}
+          <X size={14} />
         </button>
       </span>
     </div>
@@ -1333,9 +1413,14 @@ function SelectedDatePill({ date, onClear }) {
 function Legend() {
   return (
     <div className="mt-6 flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-[10px] font-bold uppercase tracking-wider text-[#a7988a] border-t border-[#f4ede4] pt-5">
+      {/* One chip per colour the grid actually paints. There are three
+          availability buckets — 6+, 4-5 and 1-3 places left — and the legend
+          listed two, with the "few" colour labelled as "Limited", so the
+          middle shade appeared on days the key did not explain. */}
       <LegendChip label="Plenty" swatchClass="bg-[#eaf0ea] border-[#d8e6d8]" />
-      <LegendChip label="Limited" swatchClass="bg-[#fdf3e1] border-[#fae2b8]" />
-      <LegendChip label="Selected" swatchClass="bg-[#8b6f47]" />
+      <LegendChip label="Limited" swatchClass="bg-[#f4efe8] border-[#ebdccc]" />
+      <LegendChip label="Almost full" swatchClass="bg-[#fdf3e1] border-[#fae2b8]" />
+      <LegendChip label="Selected" swatchClass="bg-[#8b6f47] border-[#8b6f47]" />
     </div>
   );
 }
