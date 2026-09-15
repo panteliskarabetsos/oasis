@@ -487,13 +487,16 @@ export default function PaymentPage() {
                     <Clock className="h-5 w-5 text-[#8b6f47] shrink-0" />
                   )}
                   <span className="text-sm font-medium leading-tight">
+                    {/* "Hurry!" belongs to a flash-sale, not a retreat in
+                        Crete, and the guest can already see a clock counting
+                        down beside it. Saying what happens is enough. */}
                     {isUrgent
-                      ? "Hurry! Your reservation hold is about to expire."
+                      ? "Your hold expires shortly — your seats will be released."
                       : "We're holding your seats. Please complete payment to confirm."}
                   </span>
                 </div>
                 <div
-                  className={`text-xl font-serif font-bold tracking-tight shrink-0 ${isUrgent ? "text-[#9a3b3b] animate-pulse" : "text-[#8b6f47]"}`}
+                  className={`text-xl font-serif font-bold tracking-tight shrink-0 tabular-nums ${isUrgent ? "text-[#9a3b3b]" : "text-[#8b6f47]"}`}
                 >
                   {timeLeft}
                 </div>
@@ -713,6 +716,35 @@ export default function PaymentPage() {
 
             {/* Right Column: Payment (5 cols) */}
             <section className="lg:col-span-5 space-y-6 lg:sticky lg:top-28 order-1 lg:order-2">
+              {/* What is being paid for, on a phone.
+                  The checkout card comes first on mobile so the guest reaches
+                  the form quickly, but that put the card fields 800px above the
+                  booking summary and the total below even those — so they were
+                  typing card details two screens before the page said what
+                  they were buying or what it cost. On desktop the full summary
+                  sits alongside, so this is mobile-only. */}
+              <div className="lg:hidden rounded-[1.75rem] border border-[#e2d7c7] bg-white/70 px-5 py-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#a7988a]">
+                  You are paying for
+                </p>
+                <p className="mt-1.5 font-serif text-lg leading-snug text-[#3a2f28]">
+                  {experience?.name}
+                </p>
+                {when && (
+                  <p className="mt-0.5 text-sm text-[#7a6a5f]">
+                    {when.dateLabel} · {when.timeLabel}
+                  </p>
+                )}
+                <div className="mt-3 flex items-baseline justify-between border-t border-[#f4ede4] pt-3">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#a7988a]">
+                    Total
+                  </span>
+                  <span className="font-serif text-xl text-[#8b6f47]">
+                    {amountLabel}
+                  </span>
+                </div>
+              </div>
+
               <div className="rounded-[2.5rem] border border-[#e2d7c7] bg-white p-8 shadow-[0_12px_40px_rgb(0,0,0,0.06)]">
                 <div className="mb-8">
                   <h3 className="text-2xl font-serif text-[#3a2f28] flex items-center gap-2 mb-2">
