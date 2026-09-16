@@ -9,6 +9,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { markOrderPaid } from "@/lib/shop/server";
 import { confirmPaidBooking } from "@/lib/email/bookingConfirmation";
 import { settleLinkPayment } from "@/lib/pos/settleLink";
+import { issueGiftCardFromSession } from "@/lib/giftcards/issueFromSession";
 
 // --- email/stripe helpers ---------------------------------------------------
 // --- helpers ---------------------------------------------------------------
@@ -183,6 +184,37 @@ export async function POST(req) {
     switch (event.type) {
       case "checkout.session.completed": {
         const s = event.data.object;
+
+        // A gift card bought through Checkout.
+        //
+        // The card used to be created only when the admin's browser came back
+        // to /admin/giftcards afterwards. Close the tab and the money was
+        // taken with nothing issued — five paid sessions on this account had
+        // no card against them. It is also the only way a payment link sent
+        // to a customer can ever finish: they never see an admin page.
+        if (s.metadata?.app === "giftcard") {
+          if (s.payment_status !== "paid") {
+            return ok({
+              received: true,
+              action: "giftcard_unpaid",
+              paymentStatus: s.payment_status,
+            });
+          }
+          const full = await stripe.checkout.sessions.retrieve(s.id, {
+            expand: ["payment_intent"],
+          });
+          const issued = await issueGiftCardFromSession(admin, full);
+          return ok({
+            received: true,
+            action: issued.ok
+              ? issued.already
+                ? "giftcard_already_issued"
+                : "giftcard_issued"
+              : "giftcard_failed",
+            code: issued.ok ? issued.card.code : undefined,
+            error: issued.ok ? undefined : issued.error,
+          });
+        }
 
         // A till QR payment. The app polls for this too and usually wins the
         // race; this is the safety net for when it cannot — the app was killed,
