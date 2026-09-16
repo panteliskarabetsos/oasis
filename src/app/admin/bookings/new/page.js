@@ -4,6 +4,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import {
+  describeDiscount,
+  discountAmountFor,
+} from "@/lib/promotions/applyDiscount";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -98,6 +102,22 @@ export default function NewBookingPage() {
     note: "",
   });
 
+  /**
+   * Money off this booking.
+   *
+   * Either a code the guest was given — checked against the same codes and
+   * vouchers the website honours — or an amount the admin decides on the
+   * phone. Only one applies at a time: two discounts on one booking is a
+   * conversation, not a form field.
+   */
+  const [discount, setDiscount] = useState(null); // {source,code,discountType,discountValue,reason}
+  const [codeInput, setCodeInput] = useState("");
+  const [codeChecking, setCodeChecking] = useState(false);
+  const [codeError, setCodeError] = useState("");
+  const [manualMode, setManualMode] = useState("amount"); // "amount" | "percent"
+  const [manualValue, setManualValue] = useState("");
+  const [manualReason, setManualReason] = useState("");
+
   const [submitting, setSubmitting] = useState(false);
   /** Which part of saving is running, shown on the buttons. */
   const [stage, setStage] = useState("");
@@ -182,12 +202,77 @@ export default function NewBookingPage() {
     return points.find((x) => String(x.id) === String(meetup.pointId)) || null;
   }, [meetup, experience, meetupSurcharge]);
 
+  /**
+   * Check a code against the same list the website checks.
+   *
+   * Gift cards come back from this endpoint too, but they carry a balance that
+   * has to be drawn down rather than a percentage to take off, and nothing
+   * here does that yet — so one is refused by name instead of being quietly
+   * treated as a discount and leaving the card's balance untouched.
+   */
+  async function applyCode() {
+    const code = codeInput.trim().toUpperCase();
+    if (!code) return;
+    setCodeChecking(true);
+    setCodeError("");
+    try {
+      const res = await fetch(
+        `/api/promotions/validate?code=${encodeURIComponent(code)}`,
+        { cache: "no-store", credentials: "include" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "That code is not valid.");
+      if (data?.source === "giftcard") {
+        throw new Error(
+          "Gift cards cannot be redeemed here yet — take the payment and record the card against it.",
+        );
+      }
+      setDiscount({
+        source: data.source,
+        code: data.code,
+        discountType: data.discountType,
+        discountValue: data.discountValue,
+      });
+      setCodeInput("");
+    } catch (e) {
+      setCodeError(e?.message || "That code is not valid.");
+    } finally {
+      setCodeChecking(false);
+    }
+  }
+
+  function applyManualDiscount() {
+    const value = Number(manualValue);
+    if (!Number.isFinite(value) || value <= 0) {
+      setCodeError("Enter an amount greater than zero.");
+      return;
+    }
+    setCodeError("");
+    setDiscount({
+      source: "manual",
+      code: null,
+      discountType: manualMode,
+      discountValue: value,
+      reason: manualReason.trim() || null,
+    });
+  }
+
   const estimate = useMemo(
     () =>
       (parseInt(form.adultsCount) || 0) * priceAdult +
       (parseInt(form.kidsCount) || 0) * priceKid +
       meetupSurcharge,
     [form.adultsCount, form.kidsCount, priceAdult, priceKid, meetupSurcharge],
+  );
+
+  const discountValueApplied = useMemo(
+    () => discountAmountFor(discount, estimate),
+    [discount, estimate],
+  );
+  /** What the guest actually owes once the discount is taken off. */
+  const totalDue = useMemo(
+    () => Math.max(0, +(estimate - discountValueApplied).toFixed(2)),
+    [estimate, discountValueApplied],
   );
 
   const selectedSlot = useMemo(
@@ -524,6 +609,10 @@ export default function NewBookingPage() {
         selected_meetup_point: selectedMeetupPoint,
         stripeSessionId: form.stripeSessionId?.trim() || null,
         stripePaymentIntentId: form.stripePaymentIntentId?.trim() || null,
+        // The server works the amount out again from these and clamps it; what
+        // is sent here is the intent, not the arithmetic.
+        appliedPromoCode: discount?.source === "manual" ? null : discount?.code || null,
+        promoJson: discount || null,
       };
 
       const isPrivate = !!privateBooking;
@@ -1173,6 +1262,121 @@ export default function NewBookingPage() {
                               />
                             </div>
 
+                            {/* Discount — a code the guest was given, or an
+                                amount agreed on the phone. */}
+                            <div className="border-t border-black/5 pt-8">
+                              <p className="mb-3 text-xs font-semibold uppercase tracking-wider opacity-60">
+                                Discount
+                              </p>
+
+                              {discount ? (
+                                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#a3845b]/30 bg-[#a3845b]/5 p-4">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-[13px] font-semibold text-black/80">
+                                      {discount.source === "manual"
+                                        ? "Manual adjustment"
+                                        : `${discount.code} · ${discount.source}`}
+                                      <span className="ml-2 font-normal opacity-70">
+                                        {describeDiscount(discount, form.currency)}
+                                      </span>
+                                    </p>
+                                    <p className="mt-0.5 text-xs opacity-70">
+                                      −{discountValueApplied.toFixed(2)} {form.currency}
+                                      {discount.reason ? ` · ${discount.reason}` : ""}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDiscount(null);
+                                      setCodeError("");
+                                      setManualValue("");
+                                      setManualReason("");
+                                    }}
+                                    className="rounded-full border border-black/15 px-3 py-1.5 text-xs font-medium hover:bg-black/5"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                  <div>
+                                    <label className="mb-1.5 block text-[11px] font-medium opacity-70">
+                                      Discount or voucher code
+                                    </label>
+                                    <div className="flex gap-2">
+                                      <input
+                                        value={codeInput}
+                                        onChange={(e) => setCodeInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            applyCode();
+                                          }
+                                        }}
+                                        placeholder="SUMMER25"
+                                        className={inputStyles}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={applyCode}
+                                        disabled={codeChecking || !codeInput.trim()}
+                                        className="shrink-0 rounded-xl border border-black/15 px-4 text-sm font-medium hover:bg-black/5 disabled:opacity-40"
+                                      >
+                                        {codeChecking ? "…" : "Apply"}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-1.5 block text-[11px] font-medium opacity-70">
+                                      Or adjust manually
+                                    </label>
+                                    <div className="flex gap-2">
+                                      <select
+                                        value={manualMode}
+                                        onChange={(e) => setManualMode(e.target.value)}
+                                        className={`${inputStyles} w-28 shrink-0`}
+                                      >
+                                        <option value="amount">{form.currency}</option>
+                                        <option value="percent">%</option>
+                                      </select>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={manualValue}
+                                        onChange={(e) => setManualValue(e.target.value)}
+                                        aria-label="Discount amount"
+                                        placeholder={
+                                          manualMode === "percent" ? "10" : "10.00"
+                                        }
+                                        className={inputStyles}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={applyManualDiscount}
+                                        disabled={!manualValue}
+                                        className="shrink-0 rounded-xl border border-black/15 px-4 text-sm font-medium hover:bg-black/5 disabled:opacity-40"
+                                      >
+                                        Apply
+                                      </button>
+                                    </div>
+                                    <input
+                                      value={manualReason}
+                                      onChange={(e) => setManualReason(e.target.value)}
+                                      placeholder="Reason (shown on the booking)"
+                                      className={`${inputStyles} mt-2`}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              {codeError ? (
+                                <p className="mt-2 text-xs text-red-600">{codeError}</p>
+                              ) : null}
+                            </div>
+
                             <div className="border-t border-black/5 pt-8">
                               <div className="rounded-xl border border-[#a3845b]/25 bg-[#a3845b]/5 p-4">
                                 <div className="flex items-start gap-3">
@@ -1188,7 +1392,7 @@ export default function NewBookingPage() {
                                       </strong>{" "}
                                       a secure payment link for{" "}
                                       <strong className="font-medium text-black/80">
-                                        {estimate.toFixed(2)} {form.currency}
+                                        {totalDue.toFixed(2)} {form.currency}
                                       </strong>
                                       . The seats are held for {HOLD_HOURS} hours: paying
                                       confirms the booking, and if the window closes the
@@ -1365,16 +1569,33 @@ export default function NewBookingPage() {
 
                   <div className="border-t border-black/10 pt-4 dark:border-white/10 mt-4">
                     <Row label="Total Estimate">
-                      <span className="font-semibold text-lg">
+                      <span
+                        className={`font-semibold text-lg ${
+                          discountValueApplied > 0 ? "line-through opacity-50" : ""
+                        }`}
+                      >
                         {estimate.toFixed(2)} {form.currency}
                       </span>
                     </Row>
+                    {discountValueApplied > 0 ? (
+                      <Row
+                        label={
+                          discount?.source === "manual"
+                            ? "Discount"
+                            : `Discount (${discount?.code})`
+                        }
+                      >
+                        <span className="font-semibold text-emerald-700">
+                          −{discountValueApplied.toFixed(2)} {form.currency}
+                        </span>
+                      </Row>
+                    ) : null}
                     {/* What the guest will be asked to pay online */}
                     <div className="mt-4 rounded-xl bg-black/5 p-3">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">To pay by link</span>
                         <span className="font-bold text-amber-600">
-                          {estimate.toFixed(2)} {form.currency}
+                          {totalDue.toFixed(2)} {form.currency}
                         </span>
                       </div>
                       <p className="mt-1.5 text-[11px] leading-relaxed text-black/50">
@@ -1650,6 +1871,9 @@ function Stepper({ step, onStep, canEnterStep2 = true, canEnterStep3 = true }) {
           return (
             <button
               key={s.id}
+              // Without this a button inside a <form> is type="submit", so
+              // moving between steps submitted the booking.
+              type="button"
               onClick={() => enabled && onStep(s.id)}
               disabled={!enabled}
               className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
@@ -1743,6 +1967,11 @@ function ComboBox({
                 options.map((o) => (
                   <button
                     key={o.value}
+                    // Same again, and worse here: picking an experience from
+                    // the list submitted the form. On a form filled in enough
+                    // to pass validation that would have created the booking
+                    // on the spot, from a click meant only to choose one.
+                    type="button"
                     onClick={() => {
                       onChange(o.value);
                       setOpen(false);

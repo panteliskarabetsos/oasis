@@ -12,6 +12,7 @@ import {
   legacyBookingId,
   normalizeBookingCode,
 } from "@/lib/bookingCode";
+import { discountAmountFor } from "@/lib/promotions/applyDiscount";
 import { isMissingSchema } from "@/lib/shop/schema";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
@@ -365,6 +366,30 @@ export async function POST(req) {
     const status = String(body.status || "confirmed").toLowerCase();
     const finalStatus = allowedStatus.has(status) ? status : "confirmed";
 
+    /* ---- discount ----------------------------------------------------
+     * The form works the figure out as you type; it is worked out again here
+     * rather than taken on trust, and clamped to the subtotal. A discount
+     * larger than the booking would leave a negative total and a payment link
+     * Stripe will not create.
+     *
+     * A manual adjustment carries no code — an admin writing off 10 EUR for a
+     * late start is not redeeming anything — so `appliedPromoCode` stays null
+     * and the reason travels in promoJson for the ledger to explain itself.
+     */
+    const subtotalForDiscount =
+      (isNum(adultsCount) ? adultsCount : 0) * (numOrNull(body.unitPriceAdult) || 0) +
+      (isNum(kidsCount) ? kidsCount : 0) * (numOrNull(body.unitPriceKid) || 0) +
+      Math.max(0, Number(body.selected_meetup_point?.surcharge) || 0);
+
+    const promoIn = isPlainObject(body.promoJson) ? body.promoJson : null;
+    const discountAmount = promoIn
+      ? discountAmountFor(promoIn, subtotalForDiscount)
+      : 0;
+    const appliedPromoCode =
+      discountAmount > 0 && promoIn?.source !== "manual"
+        ? String(body.appliedPromoCode || promoIn?.code || "").trim().toUpperCase() || null
+        : null;
+
     const row = {
       userId: intOrNull(body.userId) ?? null,
       scheduleSlotId,
@@ -394,6 +419,12 @@ export async function POST(req) {
         : null,
       stripeSessionId: body.stripeSessionId ?? null,
       stripePaymentIntentId: body.stripePaymentIntentId ?? null,
+      appliedPromoCode,
+      discountAmount: discountAmount > 0 ? discountAmount : null,
+      promoJson:
+        discountAmount > 0
+          ? { ...promoIn, appliedAmount: discountAmount, appliedAt: new Date().toISOString() }
+          : null,
     };
 
     // ---- insert Booking ----
@@ -411,6 +442,37 @@ export async function POST(req) {
       .single();
 
     if (insErr) throw insErr;
+
+    // A code used on an admin booking counts like any other use.
+    //
+    // Without this an admin could put SUMMER25 on thirty bookings and its
+    // "max 20 redemptions" would still read 0 used — the limit the code was
+    // created with would simply not apply to bookings taken over the phone.
+    // Tolerated if it fails: the booking is made and the seats are taken, and
+    // losing a counter is not worth unwinding that.
+    if (appliedPromoCode) {
+      try {
+        for (const table of ["DiscountCode", "Voucher"]) {
+          const { data: found } = await supa
+            .from(table)
+            .select("id, redemptionCount")
+            .ilike("code", appliedPromoCode)
+            .maybeSingle();
+          if (!found) continue;
+          await supa
+            .from(table)
+            .update({ redemptionCount: (Number(found.redemptionCount) || 0) + 1 })
+            .eq("id", found.id);
+          break;
+        }
+      } catch (e) {
+        console.error(
+          "[reservations] could not count the redemption of",
+          appliedPromoCode,
+          e?.message || e,
+        );
+      }
+    }
 
     return ok({ item: mapBookingRow(booking) }, 201);
   } catch (e) {
