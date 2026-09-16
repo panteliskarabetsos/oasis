@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { sumBookingDiscounts } from "@/lib/promotions/splitDiscount";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { accessCan, resolveStaffAccess } from "@/lib/auth/requireAdmin";
@@ -101,6 +102,7 @@ export async function GET(req) {
   //   Booking_scheduleSlotId_fkey, ScheduleSlot_experienceId_fkey
   const bookingSelect = `
     id, status, createdAt, totalPaidAmount, numberOfPeople, adultsCount, kidsCount, userId, scheduleSlotId,
+    "discountAmount", "appliedPromoCode", "promoJson",
     ScheduleSlot:ScheduleSlot!Booking_scheduleSlotId_fkey (
       id, date, totalSlots, experienceId,
       Experience:Experience!ScheduleSlot_experienceId_fkey ( id, name )
@@ -263,6 +265,20 @@ export async function GET(req) {
   const convertedDrafts = drafts.filter((d) => !!d.convertedBookingId).length;
   const conversionRate = totalDrafts > 0 ? convertedDrafts / totalDrafts : 0;
 
+  /**
+   * What came off the price, and why.
+   *
+   * A gift card and a discount code both reduce what a guest pays, and the
+   * booking records both in one figure. They are not the same thing: a code
+   * is revenue given away, a card is revenue banked when the card was sold.
+   * Reported together they overstate discounting, so they are reported apart.
+   *
+   * Counted over bookings that were actually paid for — an abandoned booking
+   * with a code on it gave nothing away.
+   */
+  const paidBookings = bookings.filter((b) => isPaidLike(b.status));
+  const reductions = sumBookingDiscounts(paidBookings);
+
   const statusBreakdown = Object.entries(byStatus)
     .map(([status, count]) => ({ status, count }))
     .sort((a, b) => b.count - a.count);
@@ -278,6 +294,13 @@ export async function GET(req) {
       conversionRate,
       newCustomers,
       returningCustomers,
+    },
+    reductions: {
+      // revenue given away
+      discounts: reductions.discount,
+      // revenue already banked when the card was sold
+      giftCards: reductions.giftCard,
+      total: reductions.total,
     },
     statusBreakdown,
     topExperiences,
