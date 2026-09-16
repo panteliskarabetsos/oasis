@@ -345,8 +345,25 @@ export default function GiftCardDetailsPage() {
           </Card>
         )}
 
-        {/* Redeem */}
+        {/* Redeem.
+            A spent or voided card had the whole form on show — a live amount
+            field, a live notes field, and a Redeem button that could never
+            enable. Nothing said why. Where there is nothing to take, the panel
+            says so instead of inviting input it will refuse. */}
         <Card className="mt-4">
+          {card.status !== "active" || (card.remainingAmountCents ?? 0) <= 0 ? (
+            <div className="flex items-start gap-3 text-sm text-[#7a6a5f]">
+              <Gift className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                {card.status === "void"
+                  ? "This card was voided, so nothing can be redeemed against it."
+                  : card.status !== "active"
+                    ? `This card is ${card.status} — nothing can be redeemed against it.`
+                    : "This card has no balance left. Its full value has been redeemed."}
+              </p>
+            </div>
+          ) : (
+          <>
           <div className="flex items-center justify-between">
             <div className="text-sm text-[#7a6a5f]">Redeem value</div>
             <div className="text-xs text-[#7a6a5f]">
@@ -412,6 +429,8 @@ export default function GiftCardDetailsPage() {
             Enter the amount to deduct from this card. A redemption record will
             be created.
           </p>
+          </>
+          )}
         </Card>
 
         {/* Actions */}
@@ -481,6 +500,18 @@ export default function GiftCardDetailsPage() {
               No redemptions yet.
             </div>
           ) : (
+            <>
+              {/* Column headings for the wide layout.
+                  Each cell carries its own label for the stacked mobile view,
+                  hidden from sm up — and nothing replaced them there, so the
+                  desktop table read "Nov 02, 2025  EUR10.00  —  —" with no way
+                  to tell which column was the booking and which the note. */}
+              <div className="hidden sm:grid sm:grid-cols-12 gap-2 px-4 py-2 border-b border-[#eee5da] text-[11px] uppercase tracking-wider text-[#7a6a5f]">
+                <div className="sm:col-span-3">Date</div>
+                <div className="sm:col-span-3">Amount</div>
+                <div className="sm:col-span-3">Booking</div>
+                <div className="sm:col-span-3">Notes</div>
+              </div>
             <ul className="divide-y divide-[#eee5da]">
               {redemptionRows.map((r) => (
                 <li
@@ -530,6 +561,7 @@ export default function GiftCardDetailsPage() {
                 </li>
               ))}
             </ul>
+            </>
           )}
         </Card>
       </div>
