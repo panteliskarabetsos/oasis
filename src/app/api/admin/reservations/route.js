@@ -13,6 +13,7 @@ import {
   normalizeBookingCode,
 } from "@/lib/bookingCode";
 import { discountAmountFor } from "@/lib/promotions/applyDiscount";
+import { redeemGiftCardOnce } from "@/lib/promotions/redeemGiftCard";
 import { isMissingSchema } from "@/lib/shop/schema";
 
 const ok = (data, status = 200) => NextResponse.json(data, { status });
@@ -382,7 +383,14 @@ export async function POST(req) {
       Math.max(0, Number(body.selected_meetup_point?.surcharge) || 0);
 
     const promoIn = isPlainObject(body.promoJson) ? body.promoJson : null;
-    const discountAmount = promoIn
+    const isGiftCard = String(promoIn?.source || "").toLowerCase() === "giftcard";
+
+    // A gift card is settled after the booking exists, because drawing the
+    // balance down is recorded against a booking id and is what makes the
+    // redemption idempotent. Its value is whatever the card actually gave up
+    // — the balance may have moved since the form checked it — so nothing is
+    // written here on the strength of what the form believed.
+    const discountAmount = promoIn && !isGiftCard
       ? discountAmountFor(promoIn, subtotalForDiscount)
       : 0;
     const appliedPromoCode =
@@ -442,6 +450,55 @@ export async function POST(req) {
       .single();
 
     if (insErr) throw insErr;
+
+    // Spend the gift card now that there is a booking to spend it against.
+    //
+    // The amount is capped at this booking's subtotal, and the card decides
+    // the rest: if the balance has been spent elsewhere since the form checked
+    // it, this takes what is left and the booking records that, rather than
+    // the figure the admin was shown a minute ago.
+    if (isGiftCard && booking?.id) {
+      const wantCents = Math.round(
+        discountAmountFor(
+          { discountType: "amount", discountValue: promoIn?.discountValue },
+          subtotalForDiscount,
+        ) * 100,
+      );
+      let tookCents = 0;
+      try {
+        tookCents = await redeemGiftCardOnce({
+          admin: supa,
+          bookingId: booking.id,
+          cardId: promoIn?.giftcard?.id ?? null,
+          code: promoIn?.code || null,
+          amountCents: wantCents,
+          currency: String(body.currency || "EUR").toUpperCase(),
+          notes: `Redeemed on admin booking ${booking.id}`,
+        });
+      } catch (e) {
+        console.error("[reservations] gift card redemption failed", e?.message || e);
+      }
+
+      if (tookCents > 0) {
+        const took = tookCents / 100;
+        const { error: gcErr } = await supa
+          .from("booking")
+          .update({
+            discountAmount: took,
+            appliedPromoCode: `GIFT:${promoIn?.code || ""}`.replace(/:$/, ""),
+            promoJson: {
+              ...promoIn,
+              appliedAmount: took,
+              appliedAt: new Date().toISOString(),
+              giftcard: { ...(promoIn?.giftcard || {}), appliedCents: tookCents },
+            },
+          })
+          .eq("id", booking.id);
+        if (gcErr) {
+          console.error("[reservations] could not record the redemption", gcErr.message);
+        }
+      }
+    }
 
     // A code used on an admin booking counts like any other use.
     //
