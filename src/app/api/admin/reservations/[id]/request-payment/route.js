@@ -7,7 +7,11 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { HOLD_HOURS, holdExpiryFrom } from "@/lib/bookings/holds";
 import { createBookingPaymentLink } from "@/lib/bookings/paymentLink";
+import { isPaidStatus } from "@/lib/bookings/paymentStatus";
 import sendPaymentRequest from "@/lib/email/sendPaymentRequest";
+
+/** Deliberately loose — the mail server is the real judge of an address. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 /**
  * Put a booking on hold and ask the guest to pay.
@@ -18,12 +22,25 @@ import sendPaymentRequest from "@/lib/email/sendPaymentRequest";
  *
  * Paying confirms the booking (the Stripe webhook); the hold lapsing cancels
  * it and returns the seats to availability.
+ *
+ * Safe to call again. The body may carry { email } to send the link somewhere
+ * other than the guest's own address — a corrected typo, or whoever is
+ * actually paying — which is how the booking page resends it.
  */
 export async function POST(req, { params }) {
   const auth = await requireAdmin("bookings");
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
+
+  const body = await req.json().catch(() => ({}));
+  const override = String(body?.email || "").trim();
+  if (override && !EMAIL_RE.test(override)) {
+    return NextResponse.json(
+      { error: "That does not look like an email address." },
+      { status: 400 },
+    );
+  }
 
   try {
     const link = await createBookingPaymentLink(auth.admin, id, {
@@ -34,18 +51,27 @@ export async function POST(req, { params }) {
     }
 
     const booking = link.booking;
-    const to =
+    const guestEmail =
       booking.primary_contact?.email ||
       booking.guest?.email ||
       booking.User?.email ||
       null;
+    const to = override || guestEmail;
+
+    // A booking that has already been paid for keeps its status.
+    //
+    // This route flips a booking to "pending" and starts the hold clock, which
+    // is the point when the booking is first made. Resending the link for an
+    // outstanding balance on a *confirmed* booking — a part payment, say —
+    // must not knock it back to pending and put its seats on a countdown.
+    const alreadyPaidFor = isPaidStatus(booking.status);
 
     // The hold is what makes the link meaningful, so it is stamped whether or
     // not the email lands — the seats are held either way and the admin can
     // resend. Tolerates the column not existing yet.
     const expiresAt = holdExpiryFrom();
     let held = false;
-    try {
+    if (!alreadyPaidFor) try {
       const { error } = await auth.admin
         .from("booking")
         .update({ status: "pending", holdExpiresAt: expiresAt.toISOString() })
@@ -64,7 +90,8 @@ export async function POST(req, { params }) {
     let emailed = false;
     let emailError = null;
     if (!to) {
-      emailError = "This booking has no guest email address.";
+      emailError =
+        "This booking has no guest email on file. Send it to a specific address instead.";
     } else {
       const result = await sendPaymentRequest({
         to,
@@ -84,6 +111,7 @@ export async function POST(req, { params }) {
       url: link.url,
       amountDue: link.amountDue,
       sentTo: emailed ? to : null,
+      sentToGuest: emailed && !override,
       emailed,
       emailError,
       held,

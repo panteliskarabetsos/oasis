@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
@@ -400,21 +400,33 @@ export default function ReservationDetailPage() {
   // the reference, copied for a phone call or an email
   const [codeCopied, setCodeCopied] = useState(false);
 
-  // resend confirmation
+  // resend confirmation / payment link
+  const [resendMode, setResendMode] = useState("confirmation"); // | "payment"
   const [resendTo, setResendTo] = useState("guest"); // "guest" | "other"
   const [resendEmail, setResendEmail] = useState("");
   const [resendSentTo, setResendSentTo] = useState("");
+  // What the server reported back, so the confirmation panel states the hold
+  // it really applied rather than one hardcoded here — and says nothing about
+  // a hold when the booking was already paid for and none was set.
+  const [resendInfo, setResendInfo] = useState(null);
 
   const [stripe, setStripe] = useState(null);
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeErr, setStripeErr] = useState("");
 
   /* -------------------------- data fetching -------------------------- */
-  useEffect(() => {
-    if (!id) return;
-    (async () => {
-      setLoading(true);
-      setError("");
+  /**
+   * Pull the booking again.
+   *
+   * Asking for payment can change the booking underneath the page — it moves
+   * an unpaid one to "pending" and starts the hold clock — so the actions that
+   * do that re-read it rather than leaving stale badges on screen.
+   */
+  const loadBooking = useCallback(
+    async ({ quiet = false } = {}) => {
+      if (!id) return;
+      if (!quiet) setLoading(true);
+      if (!quiet) setError("");
       try {
         const res = await fetch(`/api/admin/reservations/${id}`, {
           cache: "no-store",
@@ -425,12 +437,17 @@ export default function ReservationDetailPage() {
         const { item: raw } = await res.json();
         setItem(normalizeBooking(raw));
       } catch (e) {
-        setError(e.message || "Failed to load");
+        if (!quiet) setError(e.message || "Failed to load");
       } finally {
-        setLoading(false);
+        if (!quiet) setLoading(false);
       }
-    })();
-  }, [id]);
+    },
+    [id],
+  );
+
+  useEffect(() => {
+    loadBooking();
+  }, [loadBooking]);
 
   useEffect(() => {
     if (!piId) return;
@@ -505,15 +522,18 @@ export default function ReservationDetailPage() {
    * Deliberately not run() — that closes the modal on success, and the one
    * thing worth confirming here is which address it actually went to.
    */
-  async function resendConfirmation() {
+  async function sendResend() {
     const custom = resendTo === "other" ? resendEmail.trim() : "";
     const target = custom || item?.guest?.email;
+    const payment = resendMode === "payment";
 
     setBusy(true);
     setActionError("");
     try {
       const res = await fetch(
-        `/api/admin/reservations/${item.id}/resend-confirmation`,
+        `/api/admin/reservations/${item.id}/${
+          payment ? "request-payment" : "resend-confirmation"
+        }`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -524,8 +544,19 @@ export default function ReservationDetailPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "The email could not be sent.");
 
-      setResendSentTo(target);
-      toast.success(`Confirmation sent to ${target}`);
+      // request-payment answers 200 even when the link was made but the email
+      // was not — the hold still happened, and saying "sent" would be a lie.
+      if (payment && data.emailed === false) {
+        throw new Error(data.emailError || "The email could not be sent.");
+      }
+
+      const sentTo = data.sentTo || target;
+      setResendSentTo(sentTo);
+      setResendInfo(payment ? { held: !!data.held, holdHours: data.holdHours } : null);
+      toast.success(
+        payment ? `Payment link sent to ${sentTo}` : `Confirmation sent to ${sentTo}`,
+      );
+
       // Only a send to the guest updates "last sent"; a copy elsewhere leaves
       // the guest's own record alone, and the server decides which it was.
       if (data.confirmationEmailSentAt) {
@@ -534,6 +565,10 @@ export default function ReservationDetailPage() {
           confirmationEmailSentAt: data.confirmationEmailSentAt,
         }));
       }
+
+      // A payment request can move the booking to "pending" and start the
+      // hold, so the badges above are re-read rather than left stale.
+      if (payment) loadBooking({ quiet: true });
     } catch (e) {
       setActionError(e?.message || "The email could not be sent.");
     } finally {
@@ -614,6 +649,9 @@ export default function ReservationDetailPage() {
   const discountValue = Number(item?.promo?.discountAmount || 0);
   const grandTotal = Math.max(0, +(estimate - discountValue).toFixed(2));
   const balance = +(grandTotal - (Number.isFinite(paidTotal) ? paidTotal : 0)).toFixed(2);
+  // Money is owed and the booking is still live, so a payment link is the
+  // email worth sending.
+  const paymentDue = balance > 0 && !isCancelled;
 
   const stripeSummary = useMemo(
     () => normalizeStripeSummary(stripe, moneyCurrency),
@@ -713,17 +751,23 @@ export default function ReservationDetailPage() {
             >
               <Icon name="external" size={15} /> Copy link
             </Button>
+            {/* With money outstanding, the useful email is the one that gets
+                the guest to pay — not another copy of a confirmation for a
+                booking that is not confirmed yet. */}
             <Button
               variant="secondary"
               onClick={() => {
                 setActionError("");
+                setResendMode(paymentDue ? "payment" : "confirmation");
                 setResendTo("guest");
                 setResendEmail("");
                 setResendSentTo("");
+                setResendInfo(null);
                 setModal("resend");
               }}
             >
-              <Icon name="mail" size={15} /> Resend confirmation
+              <Icon name={paymentDue ? "card" : "mail"} size={15} />{" "}
+              {paymentDue ? "Resend payment link" : "Resend confirmation"}
             </Button>
             {!isPrivate && !isCancelled ? (
               <Button
@@ -1032,7 +1076,7 @@ export default function ReservationDetailPage() {
       <Modal
         open={modal === "resend"}
         onClose={() => setModal(null)}
-        title="Resend confirmation"
+        title={resendMode === "payment" ? "Resend payment link" : "Resend confirmation"}
         subtitle={`${item.code} · ${guestName || "Guest"}`}
       >
         {resendSentTo ? (
@@ -1041,14 +1085,19 @@ export default function ReservationDetailPage() {
               Sent to {resendSentTo}
             </p>
             <Muted className="mt-1 text-[12px]">
-              The booking confirmation and ticket PDF are on their way.
+              {resendMode === "payment"
+                ? resendInfo?.held
+                  ? `A fresh payment link is on its way. The seats are held for ${resendInfo.holdHours} hours.`
+                  : "A fresh payment link is on its way."
+                : "The booking confirmation and ticket PDF are on their way."}
             </Muted>
           </div>
         ) : (
           <>
             <Muted className="text-[12.5px]">
-              Sends the same confirmation the guest receives when they book
-              themselves, with the ticket PDF attached.
+              {resendMode === "payment"
+                ? `Creates a new payment link for the ${fmtMoney(balance, moneyCurrency)} outstanding and emails it.`
+                : "Sends the same confirmation the guest receives when they book themselves, with the ticket PDF attached."}
             </Muted>
 
             <div className="mt-4 space-y-2">
@@ -1096,7 +1145,9 @@ export default function ReservationDetailPage() {
                     A different address
                   </span>
                   <span className="block text-[12px] text-[#7a6a5f]">
-                    A copy for someone else — the booking is not changed.
+                    {resendMode === "payment"
+                      ? "Send the link to whoever is paying — a corrected address, or someone else."
+                      : "A copy for someone else — the booking is not changed."}
                   </span>
                 </span>
               </label>
@@ -1115,9 +1166,11 @@ export default function ReservationDetailPage() {
             ) : null}
 
             <Muted className="mt-3 text-[12px]">
-              {item.confirmationEmailSentAt
-                ? `Last sent to the guest on ${fmtDateLong(item.confirmationEmailSentAt)}.`
-                : "The guest has not been sent a confirmation yet."}
+              {resendMode === "payment"
+                ? `${fmtMoney(balance, moneyCurrency)} outstanding on this booking.`
+                : item.confirmationEmailSentAt
+                  ? `Last sent to the guest on ${fmtDateLong(item.confirmationEmailSentAt)}.`
+                  : "The guest has not been sent a confirmation yet."}
             </Muted>
 
             {actionError ? <ErrorNote className="mt-3">{actionError}</ErrorNote> : null}
@@ -1131,7 +1184,7 @@ export default function ReservationDetailPage() {
           {resendSentTo ? null : (
             <Button
               variant="primary"
-              onClick={resendConfirmation}
+              onClick={sendResend}
               disabled={
                 busy ||
                 (resendTo === "other" && !resendEmail.trim()) ||
