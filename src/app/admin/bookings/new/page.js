@@ -102,6 +102,8 @@ export default function NewBookingPage() {
   /** Which part of saving is running, shown on the buttons. */
   const [stage, setStage] = useState("");
   const [error, setError] = useState("");
+  /** Whether `error` came from validate() rather than from a failed save. */
+  const [errorIsValidation, setErrorIsValidation] = useState(false);
   const [success, setSuccess] = useState("");
 
   const [selectedDate, setSelectedDate] = useState("");
@@ -457,14 +459,35 @@ export default function NewBookingPage() {
     return "";
   }
 
+  /**
+   * Clear the complaint once it stops being true.
+   *
+   * The banner was only ever reset at the top of a submit, so an admin who
+   * saved with a field missing, then filled it in, kept being told to select
+   * an experience they had just selected — until they pressed Save again to
+   * find out. It now goes as soon as the form is valid.
+   */
+  const pendingValidation = validate();
+  useEffect(() => {
+    // Only the form's own complaints clear themselves. A failure that came
+    // back from the server shares this banner, and dismissing that the instant
+    // the form looks valid would hide the very thing the admin needs to read.
+    if (errorIsValidation && error && !pendingValidation) {
+      setError("");
+      setErrorIsValidation(false);
+    }
+  }, [error, errorIsValidation, pendingValidation]);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setErrorIsValidation(false);
     setSuccess("");
 
     const v = validate();
     if (v) {
       setError(v);
+      setErrorIsValidation(true);
       return;
     }
 
@@ -584,6 +607,7 @@ export default function NewBookingPage() {
       }
     } catch (err) {
       setError(err?.message || "Something went wrong");
+      setErrorIsValidation(false);
       setSubmitting(false);
       setStage("");
     }
@@ -817,7 +841,8 @@ export default function NewBookingPage() {
                                           }}
                                           className={`rounded-full border px-4 py-1.5 text-xs font-medium transition-all ${isActive ? "border-[#a3845b] bg-[#a3845b] text-white shadow-md" : "border-black/10 bg-white hover:border-[#a3845b]/50 dark:border-white/10 dark:bg-black"}`}
                                         >
-                                          {fmtDMY(d.date)} • {d.slots} slots
+                                          {fmtDMY(d.date)} • {d.slots}{" "}
+                                          {d.slots === 1 ? "slot" : "slots"}
                                         </button>
                                       );
                                     })}
@@ -1044,26 +1069,39 @@ export default function NewBookingPage() {
                               />
 
                               <div className="rounded-xl border border-black/10 bg-black/[0.02] p-4 dark:border-white/10 dark:bg-white/5">
+                                {/* Counted against what is left, not the size
+                                    of the room. "2 / 10" on a slot with eight
+                                    already booked read as eight free, and the
+                                    + button then stopped at two with nothing
+                                    to say why. */}
                                 <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wider opacity-60">
                                   <span>
-                                    {privateBooking
-                                      ? "Group Size"
-                                      : "Slot Capacity"}
+                                    {privateBooking ? "Group Size" : "Places left"}
                                   </span>
                                   <span>
                                     {numberOfPeople}
-                                    {!privateBooking && ` / ${totalCap}`}
+                                    {!privateBooking && ` / ${remaining}`}
                                   </span>
                                 </div>
                                 {!privateBooking && (
-                                  <div className="h-2 w-full rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                                    <div
-                                      className="h-full bg-[#a3845b]"
-                                      style={{
-                                        width: `${Math.min(100, Math.round(((bookedBefore + numberOfPeople) / totalCap) * 100))}%`,
-                                      }}
-                                    />
-                                  </div>
+                                  <>
+                                    <div className="h-2 w-full rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                                      <div
+                                        className="h-full bg-[#a3845b]"
+                                        style={{
+                                          width: `${Math.min(100, Math.round(((bookedBefore + numberOfPeople) / (totalCap || 1)) * 100))}%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <p className="mt-2 text-[11px] leading-snug opacity-60">
+                                      {bookedBefore > 0
+                                        ? `${bookedBefore} of ${totalCap} already booked.`
+                                        : `${totalCap} places on this slot.`}
+                                      {numberOfPeople >= remaining && remaining > 0
+                                        ? " This booking takes the rest."
+                                        : ""}
+                                    </p>
+                                  </>
                                 )}
                               </div>
                             </div>
@@ -1649,6 +1687,10 @@ function ComboBox({
   loading,
 }) {
   const [open, setOpen] = useState(false);
+  // Held so the empty state can tell "nothing typed yet" apart from "nothing
+  // matched", which read the same before and made an untouched box look like
+  // a failed search.
+  const [query, setQuery] = useState("");
   const ref = useRef(null);
 
   useEffect(() => {
@@ -1685,7 +1727,11 @@ function ComboBox({
             <div className="sticky top-0 flex items-center gap-2 border-b border-black/5 bg-white/90 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-[#1a1a1a]/90">
               <Search className="h-4 w-4 opacity-60" />
               <input
-                onChange={(e) => onQuery(e.target.value)}
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  onQuery(e.target.value);
+                }}
                 placeholder="Type to search…"
                 className="w-full bg-transparent text-sm outline-none"
               />
@@ -1710,7 +1756,11 @@ function ComboBox({
                   </button>
                 ))
               ) : (
-                <div className="p-3 text-sm opacity-70">No results found</div>
+                <div className="p-3 text-sm opacity-70">
+                  {query?.trim()
+                    ? "No results found"
+                    : "Start typing to search experiences"}
+                </div>
               )}
             </div>
           </motion.div>
@@ -1969,6 +2019,36 @@ function AvailabilityCalendar({
     d.setHours(0, 0, 0, 0);
     return d;
   });
+
+  /**
+   * Show the month the booking is actually in.
+   *
+   * The grid opened on the current month and stayed there. Picking an
+   * experience auto-selects its first free date, which is often months out —
+   * so the summary read "09/10/2026" while the calendar showed a September
+   * with every day greyed out, and the date being booked was nowhere on
+   * screen. It follows the selection, and failing that the first day with
+   * availability, while leaving the arrows free to browse from there.
+   */
+  const jumpKey =
+    selectedDate || (days || []).find((d) => d?.date && d?.slots > 0)?.date || "";
+  React.useEffect(() => {
+    if (!jumpKey) return;
+    const target = new Date(`${jumpKey}T00:00:00`);
+    if (Number.isNaN(target.getTime())) return;
+    setViewDate((current) => {
+      if (
+        current.getFullYear() === target.getFullYear() &&
+        current.getMonth() === target.getMonth()
+      ) {
+        return current;
+      }
+      const d = new Date(target);
+      d.setDate(1);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    });
+  }, [jumpKey]);
 
   const viewMonthFirst = useMemo(() => {
     const d = new Date(viewDate);
