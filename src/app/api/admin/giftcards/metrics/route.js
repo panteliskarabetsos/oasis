@@ -1,8 +1,10 @@
 // =============================================
 // API: src/app/api/admin/giftcards/metrics/route.js
 // =============================================
-export const runtime_m = "nodejs";
-export const dynamic_m = "force-dynamic";
+// These were named runtime_m / dynamic_m, which Next does not read, so the
+// route took whatever defaults it was given rather than the ones intended.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 import { NextResponse as NR } from "next/server";
 import { requireAdmin as reqAdmin } from "@/lib/auth/requireAdmin";
 
@@ -30,9 +32,24 @@ export async function GET() {
       .gte("issued_at", dt30),
   ]);
 
-  let outstandingCents = 0;
-  if (!outRes?.data && !outRes?.error) {
-    // fallback aggregate
+  /**
+   * What the business still owes on unspent cards.
+   *
+   * This read 0.00 on every deployment without the optional
+   * giftcard_outstanding_cents function. The fallback that adds the balances
+   * up was guarded by "no data AND no error" — and a missing function is an
+   * error, so the one case the fallback exists for was the one case it did
+   * not run. Live, that hid 210.00 EUR of outstanding liability behind a
+   * confident zero.
+   *
+   * The RPC is used when it returns a number, and the balances are added up
+   * when it does not, whatever the reason.
+   */
+  const rpcCents = Number(outRes?.data);
+  let outstandingCents;
+  if (!outRes?.error && Number.isFinite(rpcCents)) {
+    outstandingCents = rpcCents;
+  } else {
     const { data } = await admin
       .from("GiftCard")
       .select("remaining_amount_cents, status, expires_at");
@@ -41,8 +58,6 @@ export async function GET() {
         (x) => x.status === "active" && (!x.expires_at || x.expires_at > nowIso)
       )
       .reduce((acc, x) => acc + (x.remaining_amount_cents || 0), 0);
-  } else if (outRes?.data) {
-    outstandingCents = outRes.data; // if RPC provided
   }
 
   const sold30d = soldRes?.count || 0;

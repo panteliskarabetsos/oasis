@@ -365,7 +365,11 @@ export default function GiftCardsPage() {
         />
 
         {/* KPI row */}
-        <section className="mb-4 sm:mb-6 hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Shown on a phone too. These were hidden below sm, which took the
+            outstanding balance off the screen entirely — and that figure is
+            money owed to customers, the one number on this page worth seeing
+            before anything else. Two across fits 375px. */}
+        <section className="mb-4 sm:mb-6 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <KPI
             label="Outstanding balance"
             value={fmtMoney(
@@ -487,10 +491,15 @@ export default function GiftCardsPage() {
               />
               <span>Code</span>
             </div>
+            {/* Twelve columns, and the spans used to add up to thirteen:
+                3 + 1 + 1 + 1 + 1 + 2 + 1 + 1 + 2. The last one wrapped, which
+                is why "Actions" sat under "Code" and every row's buttons hung
+                below the code instead of lining up on the right. Currency was
+                the column to lose — fmtMoney already prints the symbol, so it
+                said "EUR" beside "EUR50.00". */}
             <div>Status</div>
             <div>Initial</div>
             <div>Remaining</div>
-            <div>Currency</div>
             <div className="col-span-2">Recipient</div>
             <div>Issued</div>
             <div>Expires</div>
@@ -627,7 +636,6 @@ export default function GiftCardsPage() {
                     <div>{badge(g.status)}</div>
                     <div>{fmtMoney(g.initialAmountCents, g.currency)}</div>
                     <div>{fmtMoney(g.remainingAmountCents, g.currency)}</div>
-                    <div>{g.currency}</div>
                     <div
                       className="col-span-2 truncate"
                       title={g.recipientEmail || g.recipientName || ""}
@@ -825,9 +833,22 @@ function SkeletonRows({ rows = 6 }) {
             </div>
           </div>
           {/* desktop skeleton */}
+          {/* Mirrors the real row: eight columns adding to twelve. The array
+              still said thirteen, so the skeleton wrapped exactly as the rows
+              did. Written out rather than built with `col-span-${n}`, which
+              Tailwind cannot see when it scans the source for class names. */}
           <div className="hidden sm:grid sm:grid-cols-12 sm:items-center gap-2">
-            {[3, 1, 1, 1, 1, 2, 1, 1, 2].map((c, idx) => (
-              <div key={idx} className={`col-span-${c}`}>
+            {[
+              "col-span-3",
+              "col-span-1",
+              "col-span-1",
+              "col-span-1",
+              "col-span-2",
+              "col-span-1",
+              "col-span-1",
+              "col-span-2",
+            ].map((cls, idx) => (
+              <div key={idx} className={cls}>
                 <div className="h-4 bg-[#eee5da] rounded" />
               </div>
             ))}
