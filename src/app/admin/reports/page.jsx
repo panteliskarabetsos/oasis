@@ -243,6 +243,7 @@ export default function AdminReportsPage() {
   });
 
   const k = data?.kpis || {};
+  const reductions = data?.reductions || { discounts: 0, giftCards: 0, total: 0 };
   const statusBreakdown = data?.statusBreakdown || [];
   const series = data?.series || [];
   const occupancySeries = data?.occupancySeries || [];
@@ -275,6 +276,8 @@ export default function AdminReportsPage() {
     lines.push(`Avg Party Size,${k.avgPartySize ?? 0}`);
     lines.push(`Occupancy Rate,${k.occupancyRate ?? 0}`);
     lines.push(`Conversion Rate,${k.conversionRate ?? 0}`);
+    lines.push(`Discounts Given,${reductions.discounts ?? 0}`);
+    lines.push(`Gift Cards Redeemed,${reductions.giftCards ?? 0}`);
     lines.push("");
 
     lines.push("Bookings & Revenue by Day");
@@ -572,6 +575,27 @@ export default function AdminReportsPage() {
             loading={loading}
           />
         </div>
+
+        {/* What came off the price.
+            Shown apart because they are different things: a code is revenue
+            given away, a gift card is revenue banked when the card was sold.
+            Hidden entirely when neither happened in the window. */}
+        {reductions.total > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
+            <KPI
+              title="Discounts given"
+              value={fmtCurrency(reductions.discounts || 0)}
+              icon={<Percent className="h-4 w-4" />}
+              loading={loading}
+            />
+            <KPI
+              title="Gift cards redeemed"
+              value={fmtCurrency(reductions.giftCards || 0)}
+              icon={<Sparkles className="h-4 w-4" />}
+              loading={loading}
+            />
+          </div>
+        ) : null}
 
         {/* Quick Insights */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
