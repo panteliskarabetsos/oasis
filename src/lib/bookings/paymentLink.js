@@ -61,7 +61,15 @@ export async function createBookingPaymentLink(admin, bookingId, { baseUrl } = {
   const meetupSurcharge = Math.max(0, Number(meetup?.surcharge) || 0);
 
   if (balanceDue <= 0) {
-    return { ok: false, error: "This booking is already fully paid.", status: 400 };
+    // Not really a failure: a gift card can cover a booking outright, and
+    // there is then nothing to send a link for. Flagged so the caller can
+    // tell "nothing to collect" from "something went wrong".
+    return {
+      ok: false,
+      reason: "nothing-to-collect",
+      error: "There is nothing left to pay on this booking.",
+      status: 400,
+    };
   }
 
   const session = await stripe.checkout.sessions.create({

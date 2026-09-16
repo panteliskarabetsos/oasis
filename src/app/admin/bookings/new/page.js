@@ -223,9 +223,26 @@ export default function NewBookingPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "That code is not valid.");
       if (data?.source === "giftcard") {
-        throw new Error(
-          "Gift cards cannot be redeemed here yet — take the payment and record the card against it.",
-        );
+        // The endpoint works out how much of a card applies from the draft's
+        // total, and an admin booking has no draft — so it answers 0. The
+        // card's balance is what it can tell us without one, and the clamp
+        // against this booking's subtotal happens where every other discount
+        // is clamped.
+        const balance = Number(data?.giftcard?.remainingAmountCents || 0) / 100;
+        if (balance <= 0) throw new Error("That gift card has no balance left.");
+        setDiscount({
+          source: "giftcard",
+          code: data.code,
+          discountType: "amount",
+          discountValue: balance,
+          giftcard: {
+            id: data.giftcard?.id ?? null,
+            currency: data.currency,
+            remainingAmountCents: data.giftcard?.remainingAmountCents ?? 0,
+          },
+        });
+        setCodeInput("");
+        return;
       }
       setDiscount({
         source: data.source,
@@ -663,7 +680,10 @@ export default function NewBookingPage() {
           const pay = await payRes.json().catch(() => ({}));
           if (!payRes.ok) throw new Error(pay?.error || "Could not send the payment link");
 
-          if (pay.emailed) {
+          if (pay.nothingToCollect) {
+            note =
+              "Booking confirmed — nothing left to pay, so no payment link was sent.";
+          } else if (pay.emailed) {
             note = `Booking held for ${pay.holdHours}h — payment link sent to ${pay.sentTo}.`;
           } else {
             emailFailed = true;
@@ -1277,12 +1297,26 @@ export default function NewBookingPage() {
                                         ? "Manual adjustment"
                                         : `${discount.code} · ${discount.source}`}
                                       <span className="ml-2 font-normal opacity-70">
-                                        {describeDiscount(discount, form.currency)}
+                                        {discount.source === "giftcard"
+                                          ? `${(discount.giftcard.remainingAmountCents / 100).toFixed(2)} ${discount.giftcard.currency} on the card`
+                                          : describeDiscount(discount, form.currency)}
                                       </span>
                                     </p>
                                     <p className="mt-0.5 text-xs opacity-70">
                                       −{discountValueApplied.toFixed(2)} {form.currency}
-                                      {discount.reason ? ` · ${discount.reason}` : ""}
+                                      {discount.source === "giftcard"
+                                        ? ` spent from the card${
+                                            discountValueApplied <
+                                            discount.giftcard.remainingAmountCents / 100
+                                              ? ` · ${(
+                                                  discount.giftcard.remainingAmountCents / 100 -
+                                                  discountValueApplied
+                                                ).toFixed(2)} left after this`
+                                              : " · nothing left after this"
+                                          }`
+                                        : discount.reason
+                                          ? ` · ${discount.reason}`
+                                          : ""}
                                     </p>
                                   </div>
                                   <button
@@ -1305,6 +1339,7 @@ export default function NewBookingPage() {
                                       Discount or voucher code
                                     </label>
                                     <div className="flex gap-2">
+                                      <div className="min-w-0 flex-1">
                                       <input
                                         value={codeInput}
                                         onChange={(e) => setCodeInput(e.target.value)}
@@ -1317,6 +1352,7 @@ export default function NewBookingPage() {
                                         placeholder="SUMMER25"
                                         className={inputStyles}
                                       />
+                                      </div>
                                       <button
                                         type="button"
                                         onClick={applyCode}
@@ -1332,27 +1368,37 @@ export default function NewBookingPage() {
                                     <label className="mb-1.5 block text-[11px] font-medium opacity-70">
                                       Or adjust manually
                                     </label>
+                                    {/* Each control gets its own box to size.
+                                        inputStyles carries w-full, which beats
+                                        a width class appended after it, so the
+                                        select took the whole row and pushed the
+                                        amount and the button off the edge. */}
                                     <div className="flex gap-2">
-                                      <select
-                                        value={manualMode}
-                                        onChange={(e) => setManualMode(e.target.value)}
-                                        className={`${inputStyles} w-28 shrink-0`}
-                                      >
-                                        <option value="amount">{form.currency}</option>
-                                        <option value="percent">%</option>
-                                      </select>
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={manualValue}
-                                        onChange={(e) => setManualValue(e.target.value)}
-                                        aria-label="Discount amount"
-                                        placeholder={
-                                          manualMode === "percent" ? "10" : "10.00"
-                                        }
-                                        className={inputStyles}
-                                      />
+                                      <div className="w-20 shrink-0">
+                                        <select
+                                          value={manualMode}
+                                          onChange={(e) => setManualMode(e.target.value)}
+                                          aria-label="Discount kind"
+                                          className={`${inputStyles} px-2`}
+                                        >
+                                          <option value="amount">{form.currency}</option>
+                                          <option value="percent">%</option>
+                                        </select>
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={manualValue}
+                                          onChange={(e) => setManualValue(e.target.value)}
+                                          aria-label="Discount amount"
+                                          placeholder={
+                                            manualMode === "percent" ? "10" : "10.00"
+                                          }
+                                          className={inputStyles}
+                                        />
+                                      </div>
                                       <button
                                         type="button"
                                         onClick={applyManualDiscount}

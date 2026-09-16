@@ -47,6 +47,24 @@ export async function POST(req, { params }) {
       baseUrl: new URL(req.url).origin,
     });
     if (!link.ok) {
+      // A booking with nothing owed — a gift card covering it in full, say —
+      // has no link to send. That is a finished booking, not a failed one, so
+      // it is confirmed rather than left pending against a payment that will
+      // never arrive.
+      if (link.reason === "nothing-to-collect") {
+        await auth.admin
+          .from("booking")
+          .update({ status: "confirmed" })
+          .eq("id", id)
+          .in("status", ["pending", "draft"]);
+        return NextResponse.json({
+          ok: true,
+          nothingToCollect: true,
+          emailed: false,
+          held: false,
+          holdHours: HOLD_HOURS,
+        });
+      }
       return NextResponse.json({ error: link.error }, { status: link.status });
     }
 
