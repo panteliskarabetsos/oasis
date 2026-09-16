@@ -6,6 +6,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
+import { sendGiftcardPaymentLink } from "@/lib/email/sendGiftcardPaymentLink";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -46,6 +47,8 @@ export async function POST(req) {
     expiresAt, // string (YYYY-MM-DD or ISO) – stored as-is in metadata
     successUrl,
     cancelUrl,
+    /** "desk" (the admin pays now) or "email" (the buyer is sent the link). */
+    deliver,
   } = body || {};
 
   // ---- Validate amount (25–400 EUR, step 5) ----
@@ -77,13 +80,30 @@ export async function POST(req) {
   const note = sanitizeStr(message, 500);
   const exp = sanitizeStr(expiresAt, 64);
 
-  // ---- Success/Cancel URLs ----
+  /* ---- Who is paying, and so where Stripe sends them afterwards ----
+   *
+   * "desk" is the original behaviour: the admin is handed the Checkout URL and
+   * pays there and then, so Stripe returns them to the admin list.
+   *
+   * "email" sends the link to the buyer instead. They must not be dropped on
+   * an admin page afterwards, so they land on a public one — and the card is
+   * issued by the webhook either way, which is what makes this possible.
+   */
+  const emailTheLink = String(deliver || "desk").toLowerCase() === "email";
+
   const reqOrigin = new URL(req.url).origin; // robust on local & previews
   const appOrigin = process.env.APP_URL?.replace(/\/$/, "") || reqOrigin;
-  const success =
-    successUrl ||
-    `${appOrigin}/admin/giftcards?paid=1&session_id={CHECKOUT_SESSION_ID}`;
-  const cancel = cancelUrl || `${appOrigin}/admin/giftcards?cancel=1`;
+  const success = emailTheLink
+    ? `${appOrigin}/giftcards/thank-you`
+    : successUrl ||
+      `${appOrigin}/admin/giftcards?paid=1&session_id={CHECKOUT_SESSION_ID}`;
+  const cancel = emailTheLink
+    ? `${appOrigin}/giftcards/thank-you?cancelled=1`
+    : cancelUrl || `${appOrigin}/admin/giftcards?cancel=1`;
+
+  if (emailTheLink && !email) {
+    return bad("A recipient email is needed to send a payment link.", 422);
+  }
 
   // ---- Product name ----
   const nameLine = `Gift Card${normCode ? ` • ${normCode}` : ""}`;
@@ -95,6 +115,11 @@ export async function POST(req) {
     normCode || "no-code",
     amt,
     currUpper,
+    // How it is being paid for is part of the request: the two modes send the
+    // buyer to different places afterwards. Without this, asking for a link
+    // after charging at the desk for the same card reuses the key with
+    // different parameters, and Stripe refuses the second one outright.
+    emailTheLink ? "email" : "desk",
   ].join(":");
 
   try {
@@ -136,7 +161,34 @@ export async function POST(req) {
       { idempotencyKey }
     );
 
-    return ok({ id: session.id, url: session.url }, 201);
+    if (!emailTheLink) return ok({ id: session.id, url: session.url }, 201);
+
+    // The link is the product of this call, so a send that fails is a failure
+    // worth reporting — the admin would otherwise think the buyer had been
+    // asked to pay. The session survives and the link is returned either way.
+    try {
+      await sendGiftcardPaymentLink({
+        to: email,
+        url: session.url,
+        amountCents: amt,
+        currency: currUpper,
+        recipientName: name,
+        message: note,
+        expiresAt: exp || null,
+      });
+    } catch (e) {
+      return ok(
+        {
+          id: session.id,
+          url: session.url,
+          emailed: false,
+          emailError: e?.message || "The email could not be sent.",
+        },
+        201,
+      );
+    }
+
+    return ok({ id: session.id, url: session.url, emailed: true, sentTo: email }, 201);
   } catch (e) {
     return bad(e?.message || "Failed to create Stripe Checkout session", 500);
   }

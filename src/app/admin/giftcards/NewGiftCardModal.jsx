@@ -52,7 +52,10 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
   const inRange =
     Number.isFinite(amountNum) && amountNum >= MIN_EUR && amountNum <= MAX_EUR;
   const stepOk = Number.isFinite(amountNum) && amountNum % STEP_EUR === 0;
-  const isValid = inRange && stepOk;
+  // A payment link has nowhere to go without an address, and the server
+  // refuses one — so the button does not offer to send it.
+  const isValid =
+    inRange && stepOk && (paymentMethod !== "link" || Boolean(recipientEmail));
 
   useEffect(() => {
     if (!open) return;
@@ -118,6 +121,30 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
         onCreated?.(id, recipientEmail);
         onClose?.();
         setSaving(false);
+        return;
+      }
+
+      // ---------- Email a payment link to the buyer ----------
+      if (paymentMethod === "link") {
+        const res = await fetch("/api/admin/giftcards/checkout", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, deliver: "email" }),
+        });
+        const j = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(j?.error || "Could not send the payment link");
+        if (j?.emailed === false) {
+          throw new Error(
+            j?.emailError ||
+              "The link was created but could not be emailed. Copy it from Stripe.",
+          );
+        }
+        setSaving(false);
+        onClose?.();
+        alert(
+          `Payment link sent to ${j?.sentTo || recipientEmail}. The gift card is issued automatically once they pay.`,
+        );
         return;
       }
 
@@ -253,9 +280,42 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
             }
           >
             <CreditCard className="h-4 w-4" />
-            Charge via Stripe
+            Charge now
+          </button>
+          {/* The third way to be paid, and the one that was missing: the buyer
+              pays in their own time. The card is issued by the Stripe webhook
+              when they do, so nobody has to be at a screen for it to work. */}
+          <button
+            type="button"
+            onClick={() => setPaymentMethod("link")}
+            className={
+              "px-3 py-1.5 text-sm rounded-full transition inline-flex items-center gap-1 " +
+              (paymentMethod === "link"
+                ? "bg-[#8b6f47] text-white"
+                : "text-[#5a4a3f] hover:bg-[#f1ede7]")
+            }
+          >
+            <Mail className="h-4 w-4" />
+            Email a payment link
           </button>
         </div>
+
+        {paymentMethod === "link" ? (
+          <p className="mb-3 text-xs leading-relaxed text-[#7a6a5f]">
+            {recipientEmail ? (
+              <>
+                A link to pay will be emailed to{" "}
+                <strong className="font-medium text-[#3a2f28]">
+                  {recipientEmail}
+                </strong>
+                . The gift card is created and sent automatically once they pay
+                — nothing is issued before then.
+              </>
+            ) : (
+              "Enter the buyer's email below: that is where the payment link goes."
+            )}
+          </p>
+        ) : null}
 
         {/* Quick presets */}
         <div className="mb-3 flex flex-wrap gap-2 text-xs">
@@ -408,11 +468,12 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
               type="checkbox"
               checked={sendEmail}
               onChange={(e) => setSendEmail(e.target.checked)}
-              disabled={!recipientEmail || paymentMethod === "stripe"}
+              disabled={!recipientEmail || paymentMethod !== "offline"}
             />
             <span className="text-sm text-[#5a4a3f]">
-              Email recipient after{" "}
-              {paymentMethod === "stripe" ? "payment" : "creation"}
+              {paymentMethod === "offline"
+                ? "Email recipient after creation"
+                : "The card is emailed automatically once it is paid for"}
             </span>
           </label>
         </div>
@@ -432,10 +493,14 @@ export default function NewGiftCardModal({ open, onClose, onCreated }) {
             aria-busy={saving ? "true" : "false"}
           >
             {saving ? (
-              "Preparing…"
+              paymentMethod === "link" ? "Sending…" : "Preparing…"
             ) : paymentMethod === "stripe" ? (
               <>
                 <CreditCard className="h-4 w-4" /> Pay with Stripe
+              </>
+            ) : paymentMethod === "link" ? (
+              <>
+                <Mail className="h-4 w-4" /> Send payment link
               </>
             ) : (
               "Create"
