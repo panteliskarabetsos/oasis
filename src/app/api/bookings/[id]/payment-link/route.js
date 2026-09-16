@@ -173,7 +173,11 @@ export async function POST(req, { params }) {
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      payment_method_types: ["card"],
+      // No payment_method_types: Stripe then offers everything enabled in the
+      // dashboard, which is what the website's own checkout already does.
+      // Pinning this to "card" meant a guest sent a payment link could not use
+      // Apple Pay, Google Pay or Revolut Pay — all of which they would have
+      // been offered had they paid on the site instead.
       customer_email: customerEmail,
       line_items: [
         {
