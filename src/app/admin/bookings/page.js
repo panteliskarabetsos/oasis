@@ -99,12 +99,31 @@ const QUICK_RANGES = [
 
 /* --------------------------------- page ---------------------------------- */
 
+/** The `q` this page was linked with, or "" when it was opened directly. */
+function linkedQuery() {
+  try {
+    return new URL(window.location.href).searchParams.get("q") || "";
+  } catch {
+    return "";
+  }
+}
+
 export default function AdminBookingsPage() {
   const router = useRouter();
 
   // filters
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  // `?q=` lets another page link into a filtered list; Corporate uses it to
+  // find an account's bookings. Applied after mount, so the server render and
+  // the first client render still agree.
+  useEffect(() => {
+    const q = linkedQuery();
+    if (!q) return;
+    setQuery(q);
+    setDebouncedQuery(q);
+  }, []);
   const [status, setStatus] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");

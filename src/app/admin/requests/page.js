@@ -34,12 +34,28 @@ const getPolicyDescription = (policy) => {
   return "Full refund up to 7 days before, 50% refund up to 48 hours before.";
 };
 
+/** The `q` this page was linked with, or "" when it was opened directly. */
+function linkedQuery() {
+  try {
+    return new URL(window.location.href).searchParams.get("q") || "";
+  } catch {
+    return "";
+  }
+}
+
 export default function AdminRequestsPage() {
   const [requests, setRequests] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Search, Filter & Sort State
   const [searchQuery, setSearchQuery] = useState("");
+
+  // `?q=` lets another page link straight into a filtered board; Corporate uses
+  // it to find an account's enquiries. Applied after mount so hydration matches.
+  useEffect(() => {
+    const linked = linkedQuery();
+    if (linked) setSearchQuery(linked);
+  }, []);
   const [filterType, setFilterType] = useState("all");
   const [sortBy, setSortBy] = useState("requested_desc");
 
@@ -72,9 +88,12 @@ export default function AdminRequestsPage() {
 
   const filteredAndSortedRequests = useMemo(() => {
     let result = requests.filter((req) => {
+      const needle = searchQuery.trim().toLowerCase();
       const matchesSearch =
-        req.guestName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        req.reference.toLowerCase().includes(searchQuery.toLowerCase());
+        !needle ||
+        [req.guestName, req.guestEmail, req.reference]
+          .filter(Boolean)
+          .some((field) => String(field).toLowerCase().includes(needle));
       const matchesType = filterType === "all" || req.type === filterType;
       return matchesSearch && matchesType;
     });
@@ -216,7 +235,7 @@ export default function AdminRequestsPage() {
             />
             <input
               type="text"
-              placeholder="Search by guest name or booking reference..."
+              placeholder="Search by guest name, email or booking reference..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/30 focus:border-[#8b6f47] transition-all"

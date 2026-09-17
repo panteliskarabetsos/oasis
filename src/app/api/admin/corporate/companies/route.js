@@ -4,37 +4,31 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
+import { toCompany, toColumns, withoutMissingColumn } from "@/lib/corporate/company";
 
 const ok = (d, s = 200) => NextResponse.json(d, { status: s });
-const bad = (m, s = 400) => NextResponse.json({ error: m }, { status: s });
+const bad = (m, s = 400, extra) => NextResponse.json({ error: m, ...extra }, { status: s });
 
 export async function GET() {
   const r = await requireAdmin("corporate");
   if (!r.ok) return r.response;
 
-  const { admin } = r;
-  const { data, error } = await admin
+  // `select("*")` rather than a column list on purpose: the billing columns
+  // only exist once 20260917_corporate_accounts.sql has been run, and naming
+  // them would fail the whole request until then.
+  const { data, error } = await r.admin
     .from("corporate_companies")
-    .select(
-      "id,name,vat,email,phone,contact_name,is_active,credit_cents,notes,created_at"
-    )
+    .select("*")
     .order("created_at", { ascending: false });
 
   if (error) return bad(error.message, 500);
-  return ok(
-    (data || []).map((x) => ({
-      id: x.id,
-      name: x.name,
-      vat: x.vat,
-      email: x.email,
-      phone: x.phone,
-      contactName: x.contact_name,
-      isActive: x.is_active,
-      creditCents: x.credit_cents,
-      notes: x.notes,
-      createdAt: x.created_at,
-    }))
-  );
+
+  // Tell the page whether the billing columns are there, so it can offer the
+  // migration rather than silently showing every account as prepaid.
+  const probe = await r.admin.from("corporate_companies").select("payment_terms").limit(1);
+  const billingColumns = !probe.error;
+
+  return ok({ companies: (data || []).map(toCompany), billingColumns });
 }
 
 export async function POST(req) {
@@ -42,43 +36,31 @@ export async function POST(req) {
   if (!r.ok) return r.response;
 
   const body = await req.json().catch(() => ({}));
-  const name = (body.name || "").trim();
-  if (!name) return bad("'name' is required", 422);
+  const name = String(body.name || "").trim();
+  if (!name) return bad("A company name is required.", 422);
 
-  const payload = {
-    name,
-    vat: body.vat || null,
-    email: body.email || null,
-    phone: body.phone || null,
-    contact_name: body.contactName || null,
-    is_active: true,
-    credit_cents: 0,
-    notes: body.notes || null,
-  };
+  let payload = { ...toColumns(body), is_active: true };
+  if (!("credit_cents" in payload)) payload.credit_cents = 0;
 
-  const { data, error } = await r.admin
-    .from("corporate_companies")
-    .insert(payload)
-    .select(
-      "id,name,vat,email,phone,contact_name,is_active,credit_cents,notes,created_at"
-    )
-    .single();
+  // Retry without whichever billing column the database has not got yet, so a
+  // console running ahead of its migration still creates accounts.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data, error } = await r.admin
+      .from("corporate_companies")
+      .insert(payload)
+      .select("*")
+      .single();
 
-  if (error) return bad(error.message, 500);
+    if (!error) return ok(toCompany(data), 201);
 
-  return ok(
-    {
-      id: data.id,
-      name: data.name,
-      vat: data.vat,
-      email: data.email,
-      phone: data.phone,
-      contactName: data.contact_name,
-      isActive: data.is_active,
-      creditCents: data.credit_cents,
-      notes: data.notes,
-      createdAt: data.created_at,
-    },
-    201
-  );
+    if (error.code === "23505") {
+      return bad("Another account already uses that tax id.", 409, { field: "vat" });
+    }
+
+    const reduced = withoutMissingColumn(payload, error);
+    if (!reduced) return bad(error.message, 500);
+    payload = reduced;
+  }
+
+  return bad("Could not create the account.", 500);
 }

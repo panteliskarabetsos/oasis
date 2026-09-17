@@ -109,6 +109,9 @@ export async function GET(req) {
         b?.primary_contact?.firstName || b?.User?.name || "";
       const guestName =
         `${contactFirstName} ${contactLastName}`.trim() || "Unknown Guest";
+      // Carried so the board can be searched by email — which is how a
+      // corporate account links through to its enquiries.
+      const guestEmail = b?.primary_contact?.email || b?.User?.email || "";
 
       const nDirect = Number(b?.numberOfPeople);
       const nAdults = Number(b?.adultsCount);
@@ -157,6 +160,7 @@ export async function GET(req) {
         createdAt: req.created_at, // When the request was made
         eventDate: bookingDateObj ? bookingDateObj.toISOString() : null, // When the event starts
         guestName,
+        guestEmail,
         experienceName: b?.Experience?.name || "Unknown Experience",
         cancellationPolicy: b?.Experience?.cancellationPolicy || "moderate",
         meetupPoint: b?.selected_meetup_point || null,
