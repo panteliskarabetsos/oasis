@@ -171,6 +171,14 @@ function buildQuery({ q, status, from, to, p, per, expand, overdue, includeStrip
   return s.toString();
 }
 
+/** The `q` this page was linked with, or "" when it was opened directly. */
+function linkedQuery() {
+  try {
+    return new URL(window.location.href).searchParams.get("q") || "";
+  } catch {
+    return "";
+  }
+}
 /* --------------------------------- page ---------------------------------- */
 
 export default function AdminInvoicesPage() {
@@ -181,6 +189,16 @@ export default function AdminInvoicesPage() {
 
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
+
+  // `?q=` lets other pages link straight into a filtered view — a corporate
+  // account links here by its billing email, which is what the API searches on.
+  // Applied after mount so hydration still matches the server render.
+  useEffect(() => {
+    const linked = linkedQuery();
+    if (!linked) return;
+    setSearchInput(linked);
+    setQ(linked);
+  }, []);
   const [status, setStatus] = useState("all");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [dateFrom, setDateFrom] = useState("");

@@ -1,1018 +1,418 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/app/components/SessionWrapper";
-import {
-  Building2,
-  FileText,
-  ArrowLeft,
-  Plus,
-  Search,
-  Check,
-  X,
-  Mail,
-  Phone,
-  CreditCard,
-  CalendarDays,
-  Download,
-  ArrowUpRight,
-} from "lucide-react";
+/**
+ * Corporate — company accounts.
+ *
+ * This page used to carry its own Requests and Invoices tabs on tables of the
+ * same name. Both were empty, nothing ever wrote a corporate invoice, and the
+ * rest of admin was already handling requests on booking_request and invoices
+ * on invoice. So Corporate now holds the one thing nothing else does — who the
+ * company is and how they are allowed to pay — and links out for the rest.
+ */
 
-/* -------------------------------------------------------------------------- */
-/*                             Admin Corporate Page                           */
-/* -------------------------------------------------------------------------- */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Building2, ChevronRight, Download, Plus, Search } from "lucide-react";
+
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorNote,
+  Muted,
+  Page,
+  PageHeader,
+  Skeleton,
+  StatCard,
+  Table,
+  Td,
+  Th,
+  Tr,
+  controlClass,
+} from "@/app/admin/_ui";
+import Modal from "./_components/Modal";
+import CompanyForm, { BLANK_COMPANY } from "./_components/CompanyForm";
+import { hasCredit, netDays, termsLabel } from "@/lib/corporate/company";
+
 export default function CorporatePage() {
   const router = useRouter();
-  const { user, loading } = useAuth();
 
-  const [booted, setBooted] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(null); // null | boolean
-
-  // tabs: companies | requests | invoices | settings
-  const [tab, setTab] = useState("requests");
-
-  // data
   const [companies, setCompanies] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [invoices, setInvoices] = useState([]);
+  const [billingColumns, setBillingColumns] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  // ui state
-  const [qCompany, setQCompany] = useState("");
-  const [qRequest, setQRequest] = useState("");
-  const [qInvoice, setQInvoice] = useState("");
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
 
-  const [creatingCompany, setCreatingCompany] = useState(false);
-  const [creatingRequest, setCreatingRequest] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState(BLANK_COMPANY);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
 
-  const seqRef = useRef("");
-
-  /* ------------------------------- auth/role ------------------------------- */
-  useEffect(() => {
-    let cancel = false;
-    async function resolveRole() {
-      if (!user) {
-        setIsAdmin(false);
-        setBooted(true);
-        return;
-      }
-      try {
-        const res = await fetch("/api/me", {
-          cache: "no-store",
-          credentials: "include",
-        });
-        const data = res.ok ? await res.json() : null;
-        const role =
-          data?.role ||
-          user?.app_metadata?.role ||
-          user?.user_metadata?.role ||
-          "user";
-        if (!cancel) {
-          setIsAdmin(role === "admin");
-          setBooted(true);
-        }
-      } catch (e) {
-        if (!cancel) {
-          const fallback =
-            user?.app_metadata?.role || user?.user_metadata?.role || "user";
-          setIsAdmin(fallback === "admin");
-          setBooted(true);
-        }
-      }
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/corporate/companies", { cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `Could not load accounts (${res.status})`);
+      setCompanies(Array.isArray(data?.companies) ? data.companies : []);
+      setBillingColumns(data?.billingColumns !== false);
+      setLoadError("");
+    } catch (err) {
+      // The old page swallowed this and showed an empty table, which reads as
+      // "no accounts" rather than "the request failed".
+      setLoadError(String(err?.message || err));
+    } finally {
+      setLoading(false);
     }
-    if (!loading) resolveRole();
-    return () => {
-      cancel = true;
-    };
-  }, [user, loading]);
+  }, []);
 
   useEffect(() => {
-    if (!booted || isAdmin !== true) return;
-    (async () => {
-      try {
-        const [c, r, i] = await Promise.all([
-          safeJson(
-            fetch("/api/admin/corporate/companies", { cache: "no-store" })
-          ),
-          safeJson(
-            fetch("/api/admin/corporate/requests?status=any", {
-              cache: "no-store",
-            })
-          ),
-          safeJson(
-            fetch("/api/admin/corporate/invoices", { cache: "no-store" })
-          ),
-        ]);
-        setCompanies(Array.isArray(c) ? c : []);
-        setRequests(Array.isArray(r) ? r : []);
-        setInvoices(Array.isArray(i) ? i : []);
-      } catch (e) {
-        // show empty; UI stays interactive
-      }
-    })();
-  }, [booted, isAdmin]);
+    load();
+  }, [load]);
 
-  /* ------------------------------ kb shortcuts ----------------------------- */
+  // "/" jumps to search — but not while you are typing into something, which
+  // is how the previous shortcut handler made the search box refuse slashes
+  // and opened a modal at every "nc" in a company name.
   useEffect(() => {
     function onKeyDown(e) {
-      if (e.key === "/") {
-        const el = document.getElementById("corp-search");
-        if (el) {
-          e.preventDefault();
-          el.focus();
-        }
-        return;
-      }
-      if (e.key && e.key.length === 1) {
-        seqRef.current = (seqRef.current + e.key).slice(-2).toLowerCase();
-        if (seqRef.current === "nc") setCreatingCompany(true); // new company
-        if (seqRef.current === "nr") setCreatingRequest(true); // new request
-      }
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target;
+      const tag = el?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || el?.isContentEditable) return;
+      const search = document.getElementById("corporate-search");
+      if (!search) return;
+      e.preventDefault();
+      search.focus();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  /* --------------------------------- guard -------------------------------- */
-  if (loading || !booted || isAdmin === null) return <Skeleton />;
-  if (!isAdmin) return null;
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return companies.filter((c) => {
+      if (status === "active" && !c.isActive) return false;
+      if (status === "disabled" && c.isActive) return false;
+      if (status === "credit" && !hasCredit(c)) return false;
+      if (!q) return true;
+      return [c.name, c.vat, c.email, c.phone, c.contactName]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [companies, query, status]);
 
-  /* --------------------------------- render -------------------------------- */
+  const stats = useMemo(() => {
+    const active = companies.filter((c) => c.isActive);
+    return {
+      total: companies.length,
+      active: active.length,
+      onCredit: active.filter(hasCredit).length,
+      creditCents: active.reduce((sum, c) => sum + Number(c.creditCents || 0), 0),
+    };
+  }, [companies]);
+
+  async function createCompany() {
+    const name = draft.name.trim();
+    if (!name) {
+      setFieldErrors({ name: "Required." });
+      return;
+    }
+    setSaving(true);
+    setSaveError("");
+    setFieldErrors({});
+    try {
+      const res = await fetch("/api/admin/corporate/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        if (data?.field) setFieldErrors({ [data.field]: data.error });
+        throw new Error(data?.error || `Could not create the account (${res.status})`);
+      }
+      setCreating(false);
+      setDraft(BLANK_COMPANY);
+      router.push(`/admin/corporate/${data.id}`);
+    } catch (err) {
+      setSaveError(String(err?.message || err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="relative min-h-screen bg-[#f4f1ec] text-[#5a4a3f]">
-      {/* Ambient blobs */}
-      <div className="pointer-events-none absolute -top-40 -left-24 h-[28rem] w-[28rem] rounded-full bg-[#e9e4dc] blur-3xl opacity-70" />
-      <div className="pointer-events-none absolute -bottom-40 -right-24 h-[32rem] w-[32rem] rounded-full bg-[#fff4e1] blur-3xl opacity-80" />
+    <Page className="pb-10">
+      <PageHeader
+        eyebrow="Revenue"
+        title="Corporate"
+        description="Company accounts, what they may be billed and how long they have to pay."
+        actions={
+          <Button
+            variant="primary"
+            onClick={() => {
+              setDraft(BLANK_COMPANY);
+              setFieldErrors({});
+              setSaveError("");
+              setCreating(true);
+            }}
+          >
+            <Plus className="h-4 w-4" /> New account
+          </Button>
+        }
+      />
 
-      <div className="relative mx-auto px-6 pt-4 pb-12 max-w-6xl xl:max-w-7xl 2xl:max-w-[88rem]">
-        {/* Header */}
-        <div className="-mx-6 mb-4 sticky top-[env(safe-area-inset-top)] z-10 bg-gradient-to-b from-[#f4f1ec]/90 to-[#f4f1ec]/40 backdrop-blur border-b border-[#e8e2d9] px-6 py-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-serif tracking-tight flex items-center gap-2">
-                <Building2 className="h-6 w-6" /> Corporate
-              </h1>
-              <p className="text-sm text-[#7a6a5f]">
-                Companies, requests, invoices & terms.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => router.replace("/admin")}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-[#fcf9f5] text-black text-xs shadow-sm hover:brightness-110"
-                aria-label="Back to dashboard"
-              >
-                <ArrowLeft className="h-4 w-4" /> Back
-              </button>
-              <button
-                onClick={() => setCreatingCompany(true)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-[#8b6f47] text-white text-xs shadow-sm hover:brightness-110"
-              >
-                <Plus className="h-4 w-4" /> New Company (n c)
-              </button>
-              <button
-                onClick={() => setCreatingRequest(true)}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-[#d8cfc3] bg-white/70 text-xs hover:bg-[#f1ede7]"
-              >
-                <CalendarDays className="h-4 w-4" /> New Request (n r)
-              </button>
-            </div>
-          </div>
-        </div>
+      {!billingColumns && !loading ? (
+        <Card className="mb-5 border-[#f0e0bb] bg-[#fbf1dc]">
+          <h2 className="font-serif text-[16px] text-[#2a211a]">Billing terms are not stored yet</h2>
+          <Muted className="mt-1">
+            Payment terms, standing discounts and PO rules need{" "}
+            <code className="rounded bg-white/70 px-1 py-0.5 text-[12px]">
+              dump_sql/20260917_corporate_accounts.sql
+            </code>{" "}
+            to be run. Until then every account reads as prepaid, and those fields
+            will not save.
+          </Muted>
+        </Card>
+      ) : null}
 
-        {/* Tabs */}
-        <div className="mb-4 flex items-center gap-2 overflow-x-auto">
-          <TabBtn
-            active={tab === "requests"}
-            onClick={() => setTab("requests")}
-          >
-            Requests
-          </TabBtn>
-          <TabBtn
-            active={tab === "companies"}
-            onClick={() => setTab("companies")}
-          >
-            Companies
-          </TabBtn>
-          <TabBtn
-            active={tab === "invoices"}
-            onClick={() => setTab("invoices")}
-          >
-            Invoices
-          </TabBtn>
-          <TabBtn
-            active={tab === "settings"}
-            onClick={() => setTab("settings")}
-          >
-            Settings
-          </TabBtn>
-        </div>
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {loading ? (
+          [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)
+        ) : (
+          <>
+            <StatCard label="Accounts" value={stats.total} hint={`${stats.active} active`} />
+            <StatCard label="On credit terms" value={stats.onCredit} accent="info" hint="Billed after the day" />
+            <StatCard label="Credit extended" value={euros(stats.creditCents)} accent="warning" hint="Combined ceiling" />
+            <StatCard label="Prepaid" value={stats.active - stats.onCredit} accent="success" hint="Pay before arrival" />
+          </>
+        )}
+      </div>
 
-        {/* Search bar */}
-        <div className="mb-4">
-          <div className="relative w-full sm:max-w-sm">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-[#7a6a5f]" />
+      {loadError ? (
+        <ErrorNote className="mb-5">
+          {loadError}{" "}
+          <button type="button" onClick={load} className="font-semibold underline underline-offset-2">
+            Try again
+          </button>
+        </ErrorNote>
+      ) : null}
+
+      <Card padded={false}>
+        <div className="flex flex-col gap-2 border-b border-[#f0ebe2] px-4 py-3 sm:flex-row sm:items-center">
+          {/* Search gets its own row on a phone; sharing one with the filter and
+              the export button squeezed it down to the magnifier. */}
+          <div className="relative w-full sm:min-w-0 sm:flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#b0a294]" />
             <input
-              id="corp-search"
-              value={
-                tab === "companies"
-                  ? qCompany
-                  : tab === "invoices"
-                  ? qInvoice
-                  : qRequest
-              }
-              onChange={(e) => {
-                const v = e.target.value;
-                if (tab === "companies") setQCompany(v);
-                else if (tab === "invoices") setQInvoice(v);
-                else setQRequest(v);
-              }}
-              placeholder={`Search ${tab}… (/)`}
-              className="w-full rounded-full border border-[#d8cfc3] bg-white/80 backdrop-blur px-9 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40"
+              id="corporate-search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, tax id, contact…"
+              className={`w-full pl-9 ${controlClass}`}
             />
           </div>
-        </div>
 
-        {/* Panels */}
-        {tab === "requests" && (
-          <RequestsPanel
-            data={filterRequests(requests, qRequest)}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            onConvert={handleConvert}
-            onExport={() =>
-              exportCsv(
-                filterRequests(requests, qRequest),
-                "corporate-requests.csv"
-              )
-            }
-          />
-        )}
-
-        {tab === "companies" && (
-          <CompaniesPanel
-            data={filterCompanies(companies, qCompany)}
-            onToggleActive={handleToggleCompany}
-            onExport={() =>
-              exportCsv(
-                filterCompanies(companies, qCompany),
-                "corporate-companies.csv"
-              )
-            }
-          />
-        )}
-
-        {tab === "invoices" && (
-          <InvoicesPanel
-            data={filterInvoices(invoices, qInvoice)}
-            onMarkPaid={handleMarkPaid}
-            onExport={() =>
-              exportCsv(
-                filterInvoices(invoices, qInvoice),
-                "corporate-invoices.csv"
-              )
-            }
-          />
-        )}
-
-        {tab === "settings" && <SettingsPanel />}
-
-        {/* Modals */}
-        {creatingCompany && (
-          <CompanyModal
-            onClose={() => setCreatingCompany(false)}
-            onCreate={async (payload) => {
-              const ok = await postJson(
-                "/api/admin/corporate/companies",
-                payload
-              );
-              if (ok) {
-                setCreatingCompany(false);
-                // refresh
-                const c = await safeJson(
-                  fetch("/api/admin/corporate/companies", { cache: "no-store" })
-                );
-                setCompanies(Array.isArray(c) ? c : []);
-              }
-            }}
-          />
-        )}
-
-        {creatingRequest && (
-          <RequestModal
-            companies={companies}
-            onClose={() => setCreatingRequest(false)}
-            onCreate={async (payload) => {
-              const ok = await postJson(
-                "/api/admin/corporate/requests",
-                payload
-              );
-              if (ok) {
-                setCreatingRequest(false);
-                const r = await safeJson(
-                  fetch("/api/admin/corporate/requests?status=any", {
-                    cache: "no-store",
-                  })
-                );
-                setRequests(Array.isArray(r) ? r : []);
-              }
-            }}
-          />
-        )}
-      </div>
-    </div>
-  );
-
-  /* ------------------------------- handlers ------------------------------- */
-  async function handleApprove(req) {
-    await postJson(`/api/admin/corporate/requests/${req.id}/approve`, {});
-    setRequests((xs) =>
-      xs.map((x) => (x.id === req.id ? { ...x, status: "approved" } : x))
-    );
-  }
-  async function handleReject(req) {
-    await postJson(`/api/admin/corporate/requests/${req.id}/reject`, {});
-    setRequests((xs) =>
-      xs.map((x) => (x.id === req.id ? { ...x, status: "rejected" } : x))
-    );
-  }
-  async function handleConvert(req) {
-    // navigate to booking creation with prefill
-    const params = new URLSearchParams({
-      companyId: String(req.companyId),
-      experienceId: String(req.experienceId || ""),
-      startTime: req.startTime || "",
-      adults: String(req.adults || 0),
-      kids: String(req.kids || 0),
-      note: `[Corporate] ${req.notes || ""}`,
-    });
-    router.push(`/admin/bookings/new?${params.toString()}`);
-  }
-  async function handleToggleCompany(c) {
-    const next = !c.isActive;
-    await postJson(`/api/admin/corporate/companies/${c.id}/toggle`, {
-      isActive: next,
-    });
-    setCompanies((xs) =>
-      xs.map((x) => (x.id === c.id ? { ...x, isActive: next } : x))
-    );
-  }
-  async function handleMarkPaid(inv) {
-    await postJson(`/api/admin/corporate/invoices/${inv.id}/pay`, {});
-    setInvoices((xs) =>
-      xs.map((x) => (x.id === inv.id ? { ...x, status: "paid" } : x))
-    );
-  }
-}
-
-/* --------------------------------- Panels -------------------------------- */
-function RequestsPanel({ data, onApprove, onReject, onConvert, onExport }) {
-  return (
-    <Card>
-      <HeaderRow title="Requests" right={<ExportBtn onClick={onExport} />} />
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-[#7a6a5f]">
-            <Th>Company</Th>
-            <Th>Experience</Th>
-            <Th>Date</Th>
-            <Th>Pax</Th>
-            <Th>Budget</Th>
-            <Th>Status</Th>
-            <Th className="text-right">Actions</Th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[#eee5da]">
-          {data.map((r) => (
-            <tr key={r.id}>
-              <Td>{r.companyName}</Td>
-              <Td
-                className="truncate max-w-[14ch]"
-                title={r.experienceName || "—"}
-              >
-                {r.experienceName || "—"}
-              </Td>
-              <Td>{fmtDate(r.startTime)}</Td>
-              <Td>{(r.adults || 0) + (r.kids || 0)}</Td>
-              <Td>{formatCurrency((r.budgetCents || 0) / 100)}</Td>
-              <Td>
-                <Badge
-                  tone={
-                    r.status === "approved"
-                      ? "green"
-                      : r.status === "rejected"
-                      ? "red"
-                      : "amber"
-                  }
-                >
-                  {capitalize(r.status || "pending")}
-                </Badge>
-              </Td>
-              <Td className="text-right">
-                <div className="inline-flex gap-1">
-                  <SmallBtn
-                    onClick={() => onApprove(r)}
-                    disabled={r.status !== "pending"}
-                  >
-                    <Check className="h-3.5 w-3.5" /> Approve
-                  </SmallBtn>
-                  <SmallBtn
-                    onClick={() => onReject(r)}
-                    disabled={r.status !== "pending"}
-                  >
-                    <X className="h-3.5 w-3.5" /> Reject
-                  </SmallBtn>
-                  <SmallBtn
-                    onClick={() => onConvert(r)}
-                    disabled={r.status !== "approved"}
-                  >
-                    <ArrowUpRight className="h-3.5 w-3.5" /> Convert
-                  </SmallBtn>
-                </div>
-              </Td>
-            </tr>
-          ))}
-          {data.length === 0 && (
-            <tr>
-              <Td colSpan={7} className="py-8 text-center text-[#7a6a5f]">
-                No requests.
-              </Td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </Card>
-  );
-}
-
-function CompaniesPanel({ data, onToggleActive, onExport }) {
-  return (
-    <Card>
-      <HeaderRow title="Companies" right={<ExportBtn onClick={onExport} />} />
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-[#7a6a5f]">
-            <Th>Company</Th>
-            <Th>VAT</Th>
-            <Th>Contact</Th>
-            <Th>Email</Th>
-            <Th>Phone</Th>
-            <Th>Credit</Th>
-            <Th>Status</Th>
-            <Th className="text-right">Actions</Th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[#eee5da]">
-          {data.map((c) => (
-            <tr key={c.id}>
-              <Td>{c.name}</Td>
-              <Td>{c.vat || "—"}</Td>
-              <Td>{c.contactName || "—"}</Td>
-              <Td className="flex items-center gap-1">
-                <Mail className="h-3.5 w-3.5" /> {c.email || "—"}
-              </Td>
-              <Td className="flex items-center gap-1">
-                <Phone className="h-3.5 w-3.5" /> {c.phone || "—"}
-              </Td>
-              <Td>{formatCurrency((c.creditCents || 0) / 100)}</Td>
-              <Td>
-                <Badge tone={c.isActive ? "green" : "red"}>
-                  {c.isActive ? "Active" : "Disabled"}
-                </Badge>
-              </Td>
-              <Td className="text-right">
-                <div className="inline-flex gap-1">
-                  <SmallBtn onClick={() => onToggleActive(c)}>
-                    {c.isActive ? "Disable" : "Enable"}
-                  </SmallBtn>
-                </div>
-              </Td>
-            </tr>
-          ))}
-          {data.length === 0 && (
-            <tr>
-              <Td colSpan={8} className="py-8 text-center text-[#7a6a5f]">
-                No companies.
-              </Td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </Card>
-  );
-}
-
-function InvoicesPanel({ data, onMarkPaid, onExport }) {
-  return (
-    <Card>
-      <HeaderRow title="Invoices" right={<ExportBtn onClick={onExport} />} />
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-[#7a6a5f]">
-            <Th>#</Th>
-            <Th>Company</Th>
-            <Th>Issued</Th>
-            <Th>Due</Th>
-            <Th>Amount</Th>
-            <Th>Status</Th>
-            <Th className="text-right">Actions</Th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[#eee5da]">
-          {data.map((inv) => (
-            <tr key={inv.id}>
-              <Td>{inv.number}</Td>
-              <Td>{inv.companyName}</Td>
-              <Td>{fmtDate(inv.issuedAt)}</Td>
-              <Td>{fmtDate(inv.dueAt)}</Td>
-              <Td>{formatCurrency((inv.amountCents || 0) / 100)}</Td>
-              <Td>
-                <Badge
-                  tone={
-                    inv.status === "paid"
-                      ? "green"
-                      : inv.status === "void"
-                      ? "red"
-                      : "amber"
-                  }
-                >
-                  {capitalize(inv.status)}
-                </Badge>
-              </Td>
-              <Td className="text-right">
-                <div className="inline-flex gap-1">
-                  <SmallBtn as="a" href={inv.pdfUrl || "#"} target="_blank">
-                    <FileText className="h-3.5 w-3.5" /> PDF
-                  </SmallBtn>
-                  <SmallBtn
-                    onClick={() => onMarkPaid(inv)}
-                    disabled={inv.status !== "issued"}
-                  >
-                    <CreditCard className="h-3.5 w-3.5" /> Mark paid
-                  </SmallBtn>
-                </div>
-              </Td>
-            </tr>
-          ))}
-          {data.length === 0 && (
-            <tr>
-              <Td colSpan={7} className="py-8 text-center text-[#7a6a5f]">
-                No invoices.
-              </Td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </Card>
-  );
-}
-
-function SettingsPanel() {
-  return (
-    <Card>
-      <HeaderRow title="Settings" />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Default corporate discount (%)">
-          <input
-            type="number"
-            min={0}
-            max={100}
-            defaultValue={10}
-            className="input"
-          />
-        </Field>
-        <Field label="Payment terms">
-          <select defaultValue="net30" className="input">
-            <option value="prepaid">Prepaid</option>
-            <option value="net15">Net 15</option>
-            <option value="net30">Net 30</option>
-            <option value="net45">Net 45</option>
-          </select>
-        </Field>
-        <Field label="Invoice series prefix">
-          <input type="text" defaultValue="CORP" className="input" />
-        </Field>
-        <Field label="Require PO number on requests">
-          <input type="checkbox" defaultChecked className="h-4 w-4" />
-        </Field>
-      </div>
-      <div className="mt-4">
-        <button className="btn-primary">Save settings</button>
-      </div>
-    </Card>
-  );
-}
-
-/* -------------------------------- Modals --------------------------------- */
-function CompanyModal({ onClose, onCreate }) {
-  const [form, setForm] = useState({
-    name: "",
-    vat: "",
-    email: "",
-    phone: "",
-    contactName: "",
-  });
-  return (
-    <Modal title="New Company" onClose={onClose}>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Company name">
-          <input
-            className="input"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-        </Field>
-        <Field label="VAT / Tax ID">
-          <input
-            className="input"
-            value={form.vat}
-            onChange={(e) => setForm({ ...form, vat: e.target.value })}
-          />
-        </Field>
-        <Field label="Contact name">
-          <input
-            className="input"
-            value={form.contactName}
-            onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-          />
-        </Field>
-        <Field label="Email">
-          <input
-            className="input"
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-          />
-        </Field>
-        <Field label="Phone">
-          <input
-            className="input"
-            value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: e.target.value })}
-          />
-        </Field>
-      </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <button className="btn" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="btn-primary" onClick={() => onCreate(form)}>
-          <Plus className="h-4 w-4" /> Create
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-function RequestModal({ onClose, onCreate, companies }) {
-  const [form, setForm] = useState({
-    companyId: "",
-    experienceId: "",
-    startTime: "",
-    adults: 10,
-    kids: 0,
-    budgetCents: 0,
-    poNumber: "",
-    notes: "",
-  });
-  return (
-    <Modal title="New Corporate Request" onClose={onClose}>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Company">
+          <div className="flex items-center gap-2">
           <select
-            className="input"
-            value={form.companyId}
-            onChange={(e) => setForm({ ...form, companyId: e.target.value })}
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className={`${controlClass} pr-8`}
+            aria-label="Filter accounts"
           >
-            <option value="">Select company…</option>
-            {companies.map((c) => (
-              <option value={c.id} key={c.id}>
-                {c.name}
-              </option>
-            ))}
+            <option value="all">All accounts</option>
+            <option value="active">Active</option>
+            <option value="disabled">Disabled</option>
+            <option value="credit">On credit terms</option>
           </select>
-        </Field>
-        <Field label="Experience ID">
-          <input
-            className="input"
-            value={form.experienceId}
-            onChange={(e) => setForm({ ...form, experienceId: e.target.value })}
-            placeholder="e.g. 17"
+
+          <div className="ml-auto flex items-center gap-2">
+            <Muted className="whitespace-nowrap text-[12px]">
+              {visible.length === companies.length
+                ? `${companies.length} ${companies.length === 1 ? "account" : "accounts"}`
+                : `${visible.length} of ${companies.length}`}
+            </Muted>
+            <Button size="sm" onClick={() => exportCsv(visible)} disabled={!visible.length}>
+              <Download className="h-3.5 w-3.5" /> Export
+            </Button>
+          </div>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="space-y-2 p-4">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-12" />
+            ))}
+          </div>
+        ) : loadError && companies.length === 0 ? (
+          // Not "no accounts yet" — the list never arrived, and saying otherwise
+          // reads as an answer about the data.
+          <EmptyState
+            icon={<Building2 className="h-5 w-5" />}
+            title="Accounts could not be loaded"
+            description="The list above failed to load, so there is nothing to show here yet."
+            action={<Button onClick={load}>Try again</Button>}
           />
-        </Field>
-        <Field label="Start time">
-          <input
-            className="input"
-            type="datetime-local"
-            value={form.startTime}
-            onChange={(e) => setForm({ ...form, startTime: e.target.value })}
-          />
-        </Field>
-        <Field label="Adults">
-          <input
-            className="input"
-            type="number"
-            min={0}
-            value={form.adults}
-            onChange={(e) =>
-              setForm({ ...form, adults: Number(e.target.value) })
+        ) : visible.length === 0 ? (
+          <EmptyState
+            icon={<Building2 className="h-5 w-5" />}
+            title={companies.length ? "Nothing matches" : "No corporate accounts yet"}
+            description={
+              companies.length
+                ? "Try a different search, or clear the filter."
+                : "Add the companies you invoice directly, so their bookings can be billed to an account instead of a card."
+            }
+            action={
+              companies.length ? (
+                <Button
+                  onClick={() => {
+                    setQuery("");
+                    setStatus("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : (
+                <Button variant="primary" onClick={() => setCreating(true)}>
+                  <Plus className="h-4 w-4" /> New account
+                </Button>
+              )
             }
           />
-        </Field>
-        <Field label="Kids">
-          <input
-            className="input"
-            type="number"
-            min={0}
-            value={form.kids}
-            onChange={(e) => setForm({ ...form, kids: Number(e.target.value) })}
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Account</Th>
+                <Th className="hidden md:table-cell">Contact</Th>
+                <Th>Terms</Th>
+                <Th className="hidden sm:table-cell text-right">Credit</Th>
+                <Th className="hidden lg:table-cell text-right">Discount</Th>
+                <Th>Status</Th>
+                <Th className="w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((c) => (
+                <Tr key={c.id} onClick={() => router.push(`/admin/corporate/${c.id}`)}>
+                  <Td>
+                    <div className="font-semibold text-[#2a211a]">{c.name}</div>
+                    <div className="text-[11px] text-[#9a8c7e]">{c.vat || "No tax id"}</div>
+                  </Td>
+                  <Td className="hidden md:table-cell">
+                    <div>{c.contactName || "—"}</div>
+                    <div className="text-[11px] text-[#9a8c7e]">{c.email || c.phone || ""}</div>
+                  </Td>
+                  <Td>
+                    <Badge variant={netDays(c.paymentTerms) > 0 ? "info" : "neutral"}>
+                      {termsLabel(c.paymentTerms)}
+                    </Badge>
+                  </Td>
+                  <Td className="hidden sm:table-cell text-right tabular-nums">
+                    {c.creditCents > 0 ? euros(c.creditCents) : "—"}
+                  </Td>
+                  <Td className="hidden lg:table-cell text-right tabular-nums">
+                    {Number(c.discountPct) > 0 ? `${trimPct(c.discountPct)}%` : "—"}
+                  </Td>
+                  <Td>
+                    <Badge variant={c.isActive ? "success" : "danger"}>
+                      {c.isActive ? "Active" : "Disabled"}
+                    </Badge>
+                  </Td>
+                  <Td className="text-right text-[#c9b393]">
+                    <ChevronRight className="h-4 w-4" />
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+
+      {creating ? (
+        <Modal
+          title="New corporate account"
+          description="Who they are, and how they are allowed to pay."
+          onClose={() => (saving ? null : setCreating(false))}
+          wide
+          footer={
+            <>
+              <Button onClick={() => setCreating(false)} disabled={saving}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={createCompany} disabled={saving || !draft.name.trim()}>
+                {saving ? "Creating…" : "Create account"}
+              </Button>
+            </>
+          }
+        >
+          {saveError ? <ErrorNote className="mb-4">{saveError}</ErrorNote> : null}
+          <CompanyForm
+            value={draft}
+            onChange={setDraft}
+            errors={fieldErrors}
+            billingColumns={billingColumns}
           />
-        </Field>
-        <Field label="Budget (EUR)">
-          <input
-            className="input"
-            type="number"
-            min={0}
-            value={form.budgetCents / 100}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                budgetCents: Math.round(Number(e.target.value) * 100),
-              })
-            }
-          />
-        </Field>
-        <Field label="PO number (optional)">
-          <input
-            className="input"
-            value={form.poNumber}
-            onChange={(e) => setForm({ ...form, poNumber: e.target.value })}
-          />
-        </Field>
-        <Field label="Notes" className="sm:col-span-2">
-          <textarea
-            className="input h-24"
-            value={form.notes}
-            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          />
-        </Field>
-      </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <button className="btn" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="btn-primary" onClick={() => onCreate(form)}>
-          <Plus className="h-4 w-4" /> Create
-        </button>
-      </div>
-    </Modal>
+        </Modal>
+      ) : null}
+    </Page>
   );
 }
 
-/* ------------------------------ UI primitives ----------------------------- */
-function Card({ children }) {
-  return (
-    <div className="rounded-2xl bg-white/80 backdrop-blur border border-[#e0dcd4] shadow-xl p-5">
-      {children}
-    </div>
-  );
-}
-function HeaderRow({ title, right }) {
-  return (
-    <div className="mb-3 flex items-center justify-between">
-      <h2 className="text-base font-semibold">{title}</h2>
-      <div className="flex items-center gap-2">{right}</div>
-    </div>
-  );
-}
-function Th({ children, className = "" }) {
-  return (
-    <th className={`py-2 text-xs uppercase tracking-wide ${className}`}>
-      {children}
-    </th>
-  );
-}
-function Td({ children, className = "", colSpan }) {
-  return (
-    <td className={`py-2 align-middle ${className}`} colSpan={colSpan}>
-      {children}
-    </td>
-  );
-}
-function Badge({ children, tone = "amber" }) {
-  const map = {
-    green: "bg-green-50 text-green-700 border-green-200",
-    red: "bg-rose-50 text-rose-700 border-rose-200",
-    amber: "bg-amber-50 text-amber-700 border-amber-200",
-  };
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] border ${map[tone]}`}
-    >
-      {children}
-    </span>
-  );
-}
-function SmallBtn({ children, onClick, disabled, as, href, target }) {
-  const Comp = as || "button";
-  const props = as ? { href, target } : { onClick };
-  return (
-    <Comp
-      {...props}
-      onClick={
-        disabled
-          ? (e) => (e.preventDefault(), e.stopPropagation())
-          : props.onClick
-      }
-      className={`inline-flex items-center gap-1 rounded-full border border-[#d8cfc3] px-2.5 py-1 text-xs ${
-        disabled
-          ? "opacity-50 cursor-not-allowed pointer-events-none"
-          : "hover:bg-[#f1ede7]"
-      }`}
-    >
-      {children}
-    </Comp>
-  );
-}
-function ExportBtn({ onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className="inline-flex items-center gap-1 rounded-full border border-[#d8cfc3] px-2.5 py-1 text-xs hover:bg-[#f1ede7]"
-    >
-      <Download className="h-3.5 w-3.5" /> Export CSV
-    </button>
-  );
-}
-function Field({ label, children, className = "" }) {
-  return (
-    <label className={`block ${className}`}>
-      <span className="block text-xs text-[#7a6a5f] mb-1">{label}</span>
-      {children}
-    </label>
-  );
-}
-function Modal({ title, children, onClose }) {
-  useEffect(() => {
-    function esc(e) {
-      if (e.key === "Escape") onClose?.();
-    }
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
-  return (
-    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-4 bg-black/20">
-      <div className="w-full sm:max-w-2xl rounded-2xl bg-white border border-[#e0dcd4] shadow-2xl p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <button className="btn" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-function Skeleton() {
-  return (
-    <div className="min-h-screen bg-[#f4f1ec] animate-pulse" aria-busy>
-      <div className="mx-auto px-6 py-10 max-w-6xl">
-        <div className="h-6 w-40 bg-[#e8e2d9] rounded mb-4" />
-        <div className="h-10 w-72 bg-[#e8e2d9] rounded mb-6" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-32 bg-[#e8e2d9] rounded-2xl" />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+/* --------------------------------- utils --------------------------------- */
 
-/* --------------------------------- utils ---------------------------------- */
-async function safeJson(p) {
-  const res = await p;
-  if (!res.ok) return null;
-  return res.json();
-}
-async function postJson(url, body) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
-  return res.ok;
-}
-function formatCurrency(n) {
+function euros(cents) {
+  const v = Number(cents || 0) / 100;
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: "EUR",
-      maximumFractionDigits: 0,
-    }).format(n);
+      maximumFractionDigits: v % 1 === 0 ? 0 : 2,
+    }).format(v);
   } catch {
-    return "€" + Math.round(n).toLocaleString();
+    return `€${v.toFixed(0)}`;
   }
 }
-function fmtDate(isoLike) {
-  if (!isoLike) return "—";
-  const d = new Date(isoLike);
-  return d.toLocaleString(undefined, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-function capitalize(s) {
-  return (s || "").charAt(0).toUpperCase() + (s || "").slice(1);
+
+function trimPct(n) {
+  const v = Number(n || 0);
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
-function filterCompanies(xs, q) {
-  const qq = q.toLowerCase();
-  return xs.filter((x) =>
-    (x.name + " " + (x.vat || "") + " " + (x.email || ""))
-      .toLowerCase()
-      .includes(qq)
-  );
-}
-function filterRequests(xs, q) {
-  const qq = q.toLowerCase();
-  return xs.filter((x) =>
-    (x.companyName + " " + (x.experienceName || "") + " " + (x.status || ""))
-      .toLowerCase()
-      .includes(qq)
-  );
-}
-function filterInvoices(xs, q) {
-  const qq = q.toLowerCase();
-  return xs.filter((x) =>
-    (String(x.number) + " " + (x.companyName || "") + " " + (x.status || ""))
-      .toLowerCase()
-      .includes(qq)
-  );
-}
-
-function exportCsv(rows, filename) {
+function exportCsv(rows) {
   if (!rows?.length) return;
-  const headers = Object.keys(rows[0]);
+  const columns = [
+    ["Name", (c) => c.name],
+    ["Tax ID", (c) => c.vat],
+    ["Contact", (c) => c.contactName],
+    ["Email", (c) => c.email],
+    ["Phone", (c) => c.phone],
+    ["Terms", (c) => termsLabel(c.paymentTerms)],
+    ["Credit (EUR)", (c) => (Number(c.creditCents || 0) / 100).toFixed(2)],
+    ["Discount (%)", (c) => String(c.discountPct ?? 0)],
+    ["PO required", (c) => (c.poRequired ? "yes" : "no")],
+    ["Status", (c) => (c.isActive ? "active" : "disabled")],
+  ];
   const esc = (v) => {
-    if (v == null) return "";
-    const s = String(v).replaceAll('"', '""');
-    return /[",\n]/.test(s) ? `"${s}"` : s;
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
   };
   const csv = [
-    headers.join(","),
-    ...rows.map((r) => headers.map((h) => esc(r[h])).join(",")),
+    columns.map(([h]) => h).join(","),
+    ...rows.map((c) => columns.map(([, get]) => esc(get(c))).join(",")),
   ].join("\n");
+
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = filename;
+  a.download = "corporate-accounts.csv";
   a.click();
   URL.revokeObjectURL(a.href);
-}
-
-function TabBtn({ active = false, onClick, children, disabled = false }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      aria-disabled={disabled}
-      onClick={disabled ? undefined : onClick}
-      tabIndex={disabled ? -1 : 0}
-      className={
-        "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm border transition " +
-        (disabled
-          ? "opacity-50 cursor-not-allowed border-[#e5ddd2] bg-white/70 text-[#9a8d82]"
-          : active
-          ? "bg-[#8b6f47] text-white border-[#8b6f47] shadow-sm"
-          : "bg-white/70 text-[#5a4a3f] border-[#d8cfc3] hover:bg-[#f1ede7] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40")
-      }
-    >
-      {children}
-    </button>
-  );
-}
-
-/* -------------------------------- tailwind -------------------------------- */
-// Reusable Tailwind utility classes
-const inputBase =
-  "w-full rounded-xl border border-[#d8cfc3] bg-white/80 backdrop-blur px-3 py-2 text-sm placeholder:text-[#a09084] focus:outline-none focus:ring-2 focus:ring-[#8b6f47]/40";
-// Attach on window so class short-hands can be used in JSX (optional)
-if (typeof window !== "undefined") {
-  const style = document.createElement("style");
-  style.innerHTML = `
-    .input { ${twCss(inputBase)} }
-    .btn { @apply inline-flex items-center gap-1.5 rounded-full border border-[#d8cfc3] px-3 py-1.5 text-sm hover:bg-[#f1ede7]; }
-    .btn-primary { @apply inline-flex items-center gap-1.5 rounded-full border border-[#d8cfc3] bg-[#8b6f47] text-white px-3 py-1.5 text-sm shadow-sm hover:brightness-110; }
-  `;
-  document.head.appendChild(style);
-}
-function twCss(s) {
-  return s.replaceAll("\n", " ");
 }
